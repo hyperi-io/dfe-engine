@@ -1,0 +1,7 @@
+iteration_group,field_name
+receiver,keywords
+receiver,host.ip
+receiver,host.mac
+receiver,observer.ip
+receiver,observer.mac
+receiver,state.flap_history

@@ -1,0 +1,7 @@
+name: "win_alert_hacktool_ruler test"
+cron: "* * * * *"
+customers:
+  - detectionlab
+
+rules:
+  - win_alert_hacktool_ruler

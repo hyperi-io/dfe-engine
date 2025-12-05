@@ -1,0 +1,12 @@
+﻿field,datatype
+event_id,string
+ip_address,string
+ip_port,string
+src_ip_addr,string
+severity_value,string
+provider_guid,uuid
+sysmon_logon_guid,uuid
+sysmon_parent_process_guid,uuid
+sysmon_process_guid,uuid
+target_process_uuid,uuid
+user_linked_logon_uuid,uuid

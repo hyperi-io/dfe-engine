@@ -1,0 +1,3 @@
+﻿category,field,value,subschema
+logs-beats-filebeat,example_field,,logs_example_field_type
+logs-beats-filebeat,example2_field,example2_value,logs_example2_field_type

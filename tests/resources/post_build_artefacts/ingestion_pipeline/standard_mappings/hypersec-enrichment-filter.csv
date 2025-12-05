@@ -1,0 +1,4 @@
+iterator,match_column,match_value,action
+finalise,category.event,never match,never_match
+finalise,category.event,must match,must_match
+finalise,category.event.always_override,always override,always_override

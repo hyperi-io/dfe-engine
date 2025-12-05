@@ -1,0 +1,4 @@
+iterator,match_column,type,action
+finalise,audit.auid,integer,
+finalise,audit_json.auid,integer,
+finalise,winlog.event_data.param1,string,

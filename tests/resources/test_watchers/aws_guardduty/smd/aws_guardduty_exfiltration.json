@@ -1,0 +1,104 @@
+{
+  "trigger": {
+    "schedule": {
+      "hourly": {
+        "minute": [
+          8,
+          18,
+          28,
+          38,
+          48,
+          58
+        ]
+      }
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "wise-aws_guardduty-parsed-*",
+          "bentleys-aws_guardduty-parsed*"
+        ],
+        "rest_total_hits_as_int": true,
+        "body": {
+          "size": 50,
+          "_source": {
+            "excludes": [
+              "service.id",
+              "source.host.id"
+            ]
+          },
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-15m/m",
+                      "lt": "now-5m/m"
+                    }
+                  }
+                }
+              ],
+              "must": [
+                {
+                  "regexp": {
+                    "event.record_type": {
+                      "value": "Exfiltration.*"
+                    }
+                  }
+                },
+                {
+                  "terms": {
+                    "event.severity": [
+                      "1",
+                      "2",
+                      "3"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "not_eq": 0
+      }
+    }
+  },
+  "actions": {
+    "index_payload": {
+      "transform": {
+        "script": {
+          "source": "return ['_doc': ctx.payload.hits.hits.stream().map(\n        v -> {v.get('_source').put('index', v.get('_index'));\n        v.remove('_index');\n        v.remove('_type');\n        v.get('_source').put('threat.detection', ctx.watch_id);\n        v.get('_source').put('threat.framework', 'MITRE ATT&CK');\n        v.get('_source').put('threat.technique.id', 'T1567');\n        v.get('_source').put('threat.technique.name', 'Exfiltration Over Web Service');\n        v.get('_source').put('threat.technique.reference', 'https://attack.mitre.org/techniques/T1567');\n        v.get('_source').put('threat.tactic.id', 'TA0010, TA0011');\n        v.get('_source').put('threat.tactic.name', 'Exfiltration, Command and Control');\n        v.get('_source').put('threat.tactic.reference', 'https://attack.mitre.org/tactics/TA0010, https://attack.mitre.org/tactics/TA0011');\n        v.get('_source').put('event.timestamp_detected', ctx.trigger.triggered_time);\n        v.get('_source').put('threat.is_alert', true);\n        v.get('_source').put('threat.alert_type', 'Detection of Exfiltration Attack');\n        v.get('_source').put('threat.detection_description', 'AWS Guardduty detects any exfiltration related attacks such as IAM entity invoked an S3 API in a suspicious way.');\n        v.get('_source').put('threat.severity', 'medium');\n        v.get('_source').put('threat.triage_score', 40);\n        v.get('_source').put('threat.ratingtime_sla_applies', 'true');\n        v.get('_source').put('id', v.get('_id'));\n        return v.get('_source')}).collect(Collectors.toList())]",
+          "lang": "painless"
+        }
+      },
+      "index": {
+        "index": "<alert-{now/M{YYYY.MM}}>"
+      }
+    }
+  },
+  "metadata": {
+    "description": "AWS Guardduty detects any exfiltration related attacks such as IAM entity invoked an S3 API in a suspicious way.",
+    "title": "Detection of Exfiltration Attack",
+    "tags": [
+      "attack.t1567",
+      "attack.ta0010",
+      "attack.ta0011",
+      "attack.exfiltration_over_web_service",
+      "attack.exfiltration",
+      "attack.command_and_control"
+    ],
+    "watcher_id": "aws_guardduty_exfiltration",
+    "name": "aws_guardduty_exfiltration",
+    "schedule_group": "8"
+  }
+}

@@ -1,0 +1,3 @@
+iteration_group,match_field,match_field_value,timezone,offset
+receiver,tags.event.category,logs_beats_winlogbeat,utc,
+

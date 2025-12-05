@@ -1,0 +1,19 @@
+# 
+# HyperSec DFE Vector Component Template
+# Purpose: Transform file that parses message field as JSON
+# Deployment Types: AWS, SaaS
+# Version: v001.000.000
+# Release Date: 2024-03-27
+# CT Build: © HyperSec 2024
+# 
+# Required environment variables:
+# - _101_TRANSFORM_FLATTEN_MESSAGE_INPUT: Dynamic input set in the container as an env variable;
+
+transforms:
+  101_transform_flatten_message:
+    type: remap
+    inputs:
+      - ${_101_TRANSFORM_FLATTEN_MESSAGE_INPUT:?err}
+    source:  |
+
+      . = parse_json(.message) ?? {}

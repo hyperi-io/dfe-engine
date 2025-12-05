@@ -1,0 +1,5 @@
+﻿column,type,index_order,os_order,comment
+file,string_fast_lowcardinality,2,2,
+host,string_fast_lowcardinality,1,1,
+message,string,,,
+source_type,string_fast_lowcardinality,3,3,

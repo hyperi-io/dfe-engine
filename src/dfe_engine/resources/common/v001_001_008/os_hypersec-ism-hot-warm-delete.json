@@ -1,0 +1,124 @@
+{
+  "id": "hypersec-ism-hot-warm-delete",
+  "policy": {
+    "policy_id": "hypersec-ism-hot-warm-delete",
+    "description": "HyperSec XDR streaming hot-warm-delete ISM streaming policy v3.2.9. External source support merge. 45GB shard size -> Warm 14day -> delete",
+    "default_state": "hot",
+    "states": [
+      {
+        "name": "hot",
+        "actions": [
+          {
+            "retry": {
+              "count": 10,
+              "backoff": "exponential",
+              "delay": "1h"
+            },
+            "allocation": {
+              "require": {
+                "box_type": "hot"
+              },
+              "include": {},
+              "exclude": {},
+              "wait_for": false
+            }
+          },
+          {
+            "retry": {
+              "count": 3,
+              "backoff": "exponential",
+              "delay": "1m"
+            },
+            "rollover": {
+              "min_primary_shard_size": "45gb",
+              "copy_alias": false
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "state_name": "warm",
+            "conditions": {
+              "min_rollover_age": "1m"
+            }
+          }
+        ]
+      },
+      {
+        "name": "warm",
+        "actions": [
+          {
+            "timeout": "1h",
+            "retry": {
+              "count": 10,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "read_only": {}
+          },
+          {
+            "timeout": "12h",
+            "retry": {
+              "count": 10,
+              "backoff": "exponential",
+              "delay": "1h"
+            },
+            "force_merge": {
+              "max_num_segments": 2
+            }
+          },
+          {
+            "timeout": "1h",
+            "retry": {
+              "count": 10,
+              "backoff": "exponential",
+              "delay": "1h"
+            },
+            "allocation": {
+              "require": {
+                "box_type": "warm"
+              },
+              "include": {},
+              "exclude": {},
+              "wait_for": false
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "state_name": "delete",
+            "conditions": {
+              "min_index_age": "14d"
+            }
+          }
+        ]
+      },
+      {
+        "name": "delete",
+        "actions": [
+          {
+            "timeout": "1h",
+            "retry": {
+              "count": 10,
+              "backoff": "exponential",
+              "delay": "10m"
+            },
+            "delete": {}
+          }
+        ],
+        "transitions": []
+      }
+    ],
+    "ism_template": [
+      {
+        "index_patterns": [
+          "logs-*",
+          "ref-*",
+          ".ds-logs-*",
+          ".ds-ref-*"
+        ],
+        "priority": 100
+      }
+    ]
+  }
+}

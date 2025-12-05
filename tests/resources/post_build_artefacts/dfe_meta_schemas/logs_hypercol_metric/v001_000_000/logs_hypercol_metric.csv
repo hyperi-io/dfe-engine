@@ -1,0 +1,11 @@
+﻿column,type,index_order,os_order,comment
+kind,string_fast_lowcardinality,,,
+name,string_fast_lowcardinality,1,1,
+namespace,string_fast_lowcardinality,,,
+source_type,string_fast_lowcardinality,,,
+counter.value,float64,,,
+gauge.value,float64,,,
+interval_ms,int64,,,
+aggregated_summary,json,,,
+aggregated_histogram,json,,,
+distribution,json,,,

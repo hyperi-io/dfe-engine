@@ -1,0 +1,268 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: $data
+  namespace: argo-cd
+spec:
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: false
+    syncOptions:
+      - CreateNamespace=true
+  destination:
+    namespace: '$data'
+    server: 'https://kubernetes.default.svc'
+  sources:
+    - repoURL: 'https://helm.vector.dev'
+      chart: vector
+      targetRevision: 0.39.0    ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+      helm:
+        valueFiles:
+          - "\$values/pipelines/$1/hypersec/helm/$2"  ### DFE 2.2 - the using ArgoCD to provide the environment (dev,prod) separator will probably change. TO DISCUSS
+    - repoURL: 'git@gitlab.com:hypersec-repo/ghostburner-saas/dfe-config.git'  ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+      targetRevision: $GIT_BRANCH
+      ref: values
+  project: 'vector'
+### DFE 2.2 - not sure of embedding the values file here, whether this would be nested more
+### DFE 2.2 - we will need to patch the vector helm post-clone when we need to auto scale based on p
+commonLabels:
+  app.kubernetes.io/component: vector-aggregator-{{ pipeline_name }}-{{ pipeline_step }} ### DFE 2.2 - from a variable or generated from DFECLI
+autoscaling:
+  enabled: true
+  minReplicas: {{ stage_config["container_config"]["min_replicas"] }} ### DFE 2.2 - from a global variable default or generated from DFECLI
+  maxReplicas: {{ stage_config["container_config"]["max_replicas"] }} ### DFE 2.2 - from a global variable default or generated from DFECLI
+  targetMemoryUtilizationPercentage: {{ stage_config["container_config"]["target_memory_util_percentage"] }} ### DFE 2.2 - from a global variable default or generated from DFECLI
+  targetCPUUtilizationPercentage: {{ stage_config["container_config"]["targetCPUUtilizationPercentage"] }} ### DFE 2.2 - from a global variable default or generated from DFECLI
+replicas: 1 ### DFE 2.2 - from a global variable default or generated from DFECLI
+image:
+  repository: timberio/vector
+  pullPolicy: IfNotPresent
+  version: "0.39.0" ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+  base: "debian" ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach. Note if we swap to ARM/Graviton what else do we change here?
+# Use Liveness Probe (The Probe is using API endpoint which is disabled by default.
+# You have to enable the API in the Config to expose the endpoint.)
+livenessProbe:
+  httpGet:
+    path: /health
+    port: {{ stage_config["container_config"]["container_ports"][0] }}
+  initialDelaySeconds: {{ stage_config["container_config"]["liveness_probe_initial_delay"] }}
+  periodSeconds: {{ stage_config["container_config"]["liveness_probe_period"] }}
+  timeoutSeconds: {{ stage_config["container_config"]["liveness_probe_timeout"] }}
+  failureThreshold: {{ stage_config["container_config"]["liveness_probe_threshold"] }}
+# Use Readyness Probe (The Probe is using API endpoint which is disabled by default.
+# You have to enable the API in the Config to expose the endpoint.)
+readinessProbe:
+  httpGet:
+    path: /health
+    port: {{ stage_config["container_config"]["container_ports"][0] }}
+  initialDelaySeconds: {{ stage_config["container_config"]["readiness_probe_initial_delay"] }}
+  periodSeconds: {{ stage_config["container_config"]["readiness_probe_period"] }}
+  timeoutSeconds: {{ stage_config["container_config"]["readiness_probe_timeout"] }}
+  failureThreshold: {{ stage_config["container_config"]["readiness_probe_threshold"] }}
+# Deploy a service resource to use Topology-aware traffic routing with topology keys.
+service:
+  # Whether to create service resource or not.
+  enabled: false
+  annotations: 
+    service.beta.kubernetes.io/aws-load-balancer-type: nlb
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    service.beta.kubernetes.io/aws-load-balancer-ip-address-type: ipv4
+    service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+  type: LoadBalancer
+  ports:
+    - name: api
+      port: {{ stage_config["container_config"]["container_ports"][0] }}
+      protocol: TCP
+      targetPort: {{ stage_config["container_config"]["container_ports"][0] }}
+serviceAccount:
+  # Specifies whether a service account should be created.
+  create: true
+  # Annotations to add to the service account.
+  annotations: 
+    eks.amazonaws.com/role-arn: "arn:aws:iam::{{ stage_config["aws_account_id"] }}:role/vector"  ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+  # The name of the service account to use.
+  # If not set and `create` is true, a name is generated using the `fullname`
+  # template.
+  name: "vector-sa"
+  # Automount API credentials for a service account.
+  automountServiceAccountToken: true
+# Extra env vars to pass to the `vector` container.
+env:
+  - name: VECTOR_OPENSSL_LEGACY_PROVIDER
+    value: "false"
+  {% for env_var in config_map_envs %}
+  - name: {{ env_var.name }}
+    valueFrom:
+      configMapKeyRef:
+        name: {{ env_var.valueFrom.configMapKeyRef.name }}
+        key: {{ env_var.valueFrom.configMapKeyRef.key }}
+  {% endfor %}
+  
+### ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### DFE 2.2 - Between thes two comments these are generated by DFECLI or manually
+### DFE 2.2 - Between thes two comments these are generated by DFECLI or manually
+### The order here is not relevant, only the ENV settings are
+### vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+args:
+  {% for arg in args %}
+  - {{ arg }}
+  {% endfor %}
+### ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+### DFE 2.2 - Between thes two comments these are generated by DFECLI or manually
+# Tolerations to set for the `Pod`s managed by `DaemonSet`.
+tolerations:
+  # This toleration is to have the `DaemonSet` runnable on master nodes.
+  # Remove it if your masters can't run pods.
+  - key: dedicated
+    effect: NoSchedule
+    operator: Equal
+    value: "vector"
+resources: 
+  requests:
+    cpu: 512m ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+    memory: 512Mi ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+  limits:
+    cpu: 4 ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+    memory: 4Gi ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach
+affinity:
+  nodeAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: role
+          operator: In
+          values:
+            - vector_node
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/component
+            operator: In
+            values:
+              - vector-aggregator-{{ pipeline_name }}-{{ pipeline_step }}
+        topologyKey: topology.kubernetes.io/zone
+# Additional container ports to pass to the `vector` container of the `Pod`s
+# managed by `DaemonSet`.
+extraContainersPorts:
+  - name: api
+    port: {{ stage_config["container_config"]["container_ports"][0] }}
+    protocol: TCP
+    targetPort: {{ stage_config["container_config"]["container_ports"][0] }}
+  - name: metrics
+    port: {{ stage_config["container_config"]["container_ports"][1] }}
+    protocol: TCP
+    targetPort: {{ stage_config["container_config"]["container_ports"][1] }}
+# Additional volumes to pass to the `Pod`s managed by `DaemonSet`.
+extraVolumes:
+  - name: msk-mtls 
+    secret: 
+      secretName: vector-msk-mtls
+  - name: s3-config
+    persistentVolumeClaim:
+      claimName: s3-config-pvc
+# Additional volume mounts to pass to the `vector` container of the `Pod`s
+# managed by `DaemonSet`.
+extraVolumeMounts:
+  - name: msk-mtls
+    mountPath: "/etc/vector_mtls"
+    readOnly: true
+  - name: s3-config
+    mountPath: /etc/vector
+persistence:
+  enabled: true
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: "vector-data"
+  size: {{stage_config["container_config"]["persistence_size"]}}  ### DFE 2.2 - from a global variable and merged by DFE-CLI or other approach BUT AWARNING in DFECLI if this is changed
+rbac:
+  # Whether to create rbac resources or not. Disable for non-rbac clusters.
+  enabled: true
+psp:
+  # Whether to create `PodSecurityPolicy` or not.
+  enabled: false
+podMonitor:
+  # Whether to add the `PodMonitor` resource or not.
+  # `prometheus-operator` CRDs are necessary, otherwise you'll get an error.
+  enabled: true
+  # Additional labels for PodMonitor
+  additionalLabels: 
+    release: prometheus
+extraObjects:
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: vector-msk-mtls
+      namespace: vector-{{ pipeline_name }}-{{ pipeline_step }} ### DFE 2.2 - from a variable or generated from DFECLI
+    spec:
+      # Secret names are always required.
+      secretName: vector-msk-mtls
+      duration: 38640h0m0s # 90d
+      renewBefore: 360h0m0s # 15d
+      commonName: vector
+      privateKey:
+        algorithm: RSA
+        size: 2048
+      usages:
+        - server auth
+        - client auth
+      # At least one of a DNS Name, URI, or IP address is required.
+      dnsNames:
+        - vector
+      issuerRef:
+        name: ghostburner-cluster-issuer
+        # We can reference ClusterIssuers by changing the kind here.
+        # The default value is Issuer (i.e. a locally namespaced Issuer)
+        kind: AWSPCAClusterIssuer
+        # This is optional since cert-manager will default to this value however
+        # if you are using an external issuer, change this to that issuer group.
+        group: awspca.cert-manager.io
+  - apiVersion: v1
+    kind: ConfigMap
+    metadata:
+      name: vector-worker-default ### DFE 2.2 - from a variable or generated from DFECLI
+      namespace: {{namespace}} ### DFE 2.2 - from a variable or generated from DFECLI
+    {% for key, value in config_map.items() %}
+      {{ key }}:
+        {% if value is mapping %}
+        {% for sub_key, sub_value in value.items() %}
+        {{ sub_key }}: {{ sub_value}}
+        {% endfor %}
+        {% else %}
+        {{ value }}
+        {% endif %}
+      {% endfor %}
+
+      ### Must marry up with the ENV section
+  - apiVersion: v1
+    kind: PersistentVolume
+    metadata:
+      name: s3-config-pv-vector-{{ pipeline_name }}-{{ pipeline_step }}
+      namespace: vector-{{ pipeline_name }}-{{ pipeline_step }}
+    spec:
+      capacity:
+        storage: 1200Gi # ignored, required
+      accessModes:
+        - ReadOnlyMany # supported options: ReadWriteMany / ReadOnlyMany
+      mountOptions:
+        - region {{config_bucket_region}}
+      csi:
+        driver: s3.csi.aws.com # required
+        volumeHandle: s3-csi-driver-volume
+        volumeAttributes:
+          bucketName: {{config_bucket_name}}
+  - apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: s3-config-pvc
+    spec:
+      accessModes:
+        - ReadOnlyMany # supported options: ReadWriteMany / ReadOnlyMany
+      storageClassName: "" # required for static provisioning
+      resources:
+        requests:
+          storage: 1200Gi # ignored, required
+      volumeName: s3-config-pv-vector-{{ pipeline_name }}-{{ pipeline_step }}

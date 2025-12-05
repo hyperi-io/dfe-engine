@@ -1,0 +1,24 @@
+﻿type,clickhouse_type,clickhouse_type_index,opensearch_type,comment
+string,String CODEC(ZSTD(1)),String CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":1024,""normalizer"": ""lowercase_normalizer""}",
+string_fast,String CODEC(LZ4),String CODEC(LZ4),"{""type"":""keyword"",""ignore_above"":1024,""normalizer"": ""lowercase_normalizer""}",Heavily queried strings that can accept greater disk storage consumption
+string_lowcardinality,LowCardinality(String) CODEC(ZSTD(1)),LowCardinality(String) CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":1024,""normalizer"": ""lowercase_normalizer""}",Low cardinality strings
+string_fast_lowcardinality,LowCardinality(String) CODEC(LZ4),LowCardinality(String) CODEC(LZ4),"{""type"":""keyword"",""ignore_above"":1024,""normalizer"": ""lowercase_normalizer""}",Heavily queried low cardinality strings that can accept greater disk storage consumption
+text,String CODEC(ZSTD(1)),String CODEC(ZSTD(1)),"{""type"":""text"",""norms"":false}",Larger strings and text fields
+json,String CODEC(ZSTD(1)),String CODEC(ZSTD(1)),"{""type"": ""object""}",Move to native JSON type once it is GA in ClickHouse
+int8,Nullable(Int8) CODEC(ZSTD(1)),Int8 CODEC(ZSTD(1)),"{""type"": ""integer""}",
+int16,Nullable(Int16) CODEC(ZSTD(1)),Int16 CODEC(ZSTD(1)),"{""type"": ""integer""}",
+int32,Nullable(Int32) CODEC(ZSTD(1)),Int32 CODEC(ZSTD(1)),"{""type"": ""integer""}",
+int64,Nullable(Int64) CODEC(ZSTD(1)),Int64 CODEC(ZSTD(1)),"{""type"": ""long""}",
+int128,Nullable(Int128) CODEC(ZSTD(1)),Int128 CODEC(ZSTD(1)),"{""type"": ""long""}",
+int256,Nullable(Int256) CODEC(ZSTD(1)),Int256 CODEC(ZSTD(1)),"{""type"": ""long""}",
+float32,Nullable(Float32) CODEC(ZSTD(1)),Float32 CODEC(ZSTD(1)),"{""type"": ""float""}",
+float64,Nullable(Float64) CODEC(ZSTD(1)),Float64 CODEC(ZSTD(1)),"{""type"": ""double""}",
+boolean,Nullable(Boolean) CODEC(LZ4),Boolean CODEC(LZ4),"{""type"": ""boolean""}",
+timestamp,"DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)","DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)","{""type"": ""date""}","Timeseries increasing timestamp (timestamp, timestamp_load) REQUIRED NOT NULLABLE"
+datetime,"Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))","DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))","{""type"": ""date""}",All other dates and timestamps nullable
+ipv4,"Nullable(IPv4) CODEC(T64, LZ4)",IPv4 CODEC(LZ4),"{""type"": ""ip""}",
+ipv6,Nullable(IPv6) CODEC(LZ4),IPv6 CODEC(LZ4),"{""type"": ""ip""}",
+geo_point,Nullable(Point) CODEC(ZSTD(1)),Point CODEC(ZSTD(1)),"{""type"": ""geo_point""}",
+tuple,Nullable(Tuple) CODEC(ZSTD(1)),Tuple CODEC(ZSTD(1)),"{""type"": ""object""}",
+map,Nullable(Map) CODEC(ZSTD(1)),Map CODEC(ZSTD(1)),"{""type"": ""object""}",
+uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch

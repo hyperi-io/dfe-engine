@@ -1,0 +1,20 @@
+# 
+# HyperSec DFE Vector Component Template
+# Purpose: Source file that fetchs data from source file
+# Deployment Types: ALL
+# Version: v001.000.000
+# Release Date: 2023-10-16
+# CT Build: (c) HyperSec 2023
+# 
+# Required environment variables:
+# - _001_SOURCE_FILE:       Path to source vector vector component (file or directory) 
+
+sources:
+  000_source_file:
+    type: file
+    include:
+      - "${_001_SOURCE_FILE:?err}"
+    ignore_checkpoints: true
+    max_read_bytes: 1024
+    offset_key: offset
+    read_from: beginning

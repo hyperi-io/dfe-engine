@@ -1,0 +1,11 @@
+iterator,field
+finalise,source.ip
+finalise,destination.ip
+finalise,relayip
+finalise,DstAddr
+finalise,SrcAddr
+finalise,audit.addr
+finalise,IpAddress
+finalise,SourceIp
+finalise,ParsedPacketData.dns-answer.dns-answer-data
+finalise,dns-answer-data

@@ -1,0 +1,7 @@
+﻿column,type,index_order,os_order,comment
+timestamp,timestamp,0,,Time the event occurred REQUIRED
+timestamp_load,timestamp,1,,Time the event was loaded into the engine or store REQUIRED
+event_hash,string_fast,,0,Unique hash of this event for reference and alerting REQUIRED
+logoriginal,text,,1,
+org_id,string_lowcardinality,,,
+tags,json,,,
