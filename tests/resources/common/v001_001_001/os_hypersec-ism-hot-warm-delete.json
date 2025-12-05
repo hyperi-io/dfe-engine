@@ -1,0 +1,165 @@
+{
+  "policy": {
+    "policy_id": "hypersec-ism-hot-warm-delete",
+    "description": "HyperSec DFE default hot-warm-delete ISM streaming policy v3.1. Hot 1d -> Warm 14d -> delete",
+    "default_state": "hot",
+    "states": [
+      {
+        "name": "hot",
+        "actions": [
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "allocation": {
+              "require": {
+                "box_type": "hot"
+              },
+              "include": {},
+              "exclude": {},
+              "wait_for": false
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "rollover": {
+              "min_size": "50gb",
+              "min_index_age": "1d",
+              "copy_alias": false
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "replica_count": {
+              "number_of_replicas": 1
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "index_priority": {
+              "priority": 100
+            }
+          }
+        ],
+        "transitions": [
+          {
+            "state_name": "warm",
+            "conditions": {
+              "min_size": "50gb"
+            }
+          },
+          {
+            "state_name": "warm",
+            "conditions": {
+              "min_index_age": "1d"
+            }
+          }
+        ]
+      },
+      {
+        "name": "warm",
+        "actions": [
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "allocation": {
+              "require": {
+                "temp": "warm"
+              },
+              "include": {},
+              "exclude": {},
+              "wait_for": true
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "force_merge": {
+              "max_num_segments": 1
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "replica_count": {
+              "number_of_replicas": 1
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "index_priority": {
+              "priority": 50
+            }
+          },
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "warm_migration": {}
+          }
+        ],
+        "transitions": [
+          {
+            "state_name": "delete",
+            "conditions": {
+              "min_index_age": "14d"
+            }
+          }
+        ]
+      },
+      {
+        "name": "delete",
+        "actions": [
+          {
+            "retry": {
+              "count": 5,
+              "backoff": "exponential",
+              "delay": "5m"
+            },
+            "delete": {}
+          }
+        ],
+        "transitions": []
+      }
+    ],
+    "ism_template": [
+      {
+        "index_patterns": [
+          "log*",
+          ".ds-log*",
+          "ref*"
+        ],
+        "priority": 99
+      }
+    ]
+  }
+}

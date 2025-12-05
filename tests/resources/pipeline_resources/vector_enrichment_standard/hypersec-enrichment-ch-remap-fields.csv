@@ -1,0 +1,7 @@
+﻿old_field_name,new_field_name
+SysUpTimeMSecs,sys_up_time_m_secs
+Tos,tos_flags
+TCPFlags,tcp_flags
+UNIXNSecs,unixn_secs
+UNIXSecs,unix_secs
+AUID,auid

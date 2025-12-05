@@ -1,0 +1,1619 @@
+global_settings:
+  ingestion_template_s3_bucket: build-config-bucket
+  schema_common_version: v001.001.003
+  derived_schema_paths: ../_sample_xdr_config/sample_schemas/stable_schemas_testing
+  schema_output_path: ../.xdr_schema_output/
+  hunt_checkpoint_path: ../.xdr_hunt_checkpoint/
+  output: ../.xdr_ingestion_pipelines_output
+  schema_versioning_output_path: ../.migrations/xdr_schema_versioning
+  default_target: ghostburner
+  target_path: ~/.xdr/xdr_targets.yaml
+
+build_schemas:
+  no_cluster_declarations_needed: true
+  use_replicated_merge_tree: false
+  use_shared_merge_tree: false
+
+apply_schemas:
+  do_add_roles: false
+  do_add_columns: true
+
+schemas:
+  logs_alerts:
+    name: logs_alerts
+    meta_schema: logs_alerts.csv
+    meta_schema_version: v100.000.000
+  nx_log_windows_sub_ce:
+    name: nx_log_windows_sub_ce
+    meta_schema: logs_nxlog_windows.csv
+    meta_schema_version: v100.000.000
+    derived_schema_file_path: nx_log_windows_sub_ce/nx_log_windows_sub_ce.csv
+    additional_fields_config: nx_log_windows_sub_ce/nx_log_windows_ce_add_fields.csv
+    unified_schema_mapping: nx_log_windows_sub_ce/unified_schema_mapping.csv
+    derived_schema_ttl: 90
+  logs_nxlog_windows:
+    name: logs_nxlog_windows
+    meta_schema: logs_nxlog_windows.csv
+    meta_schema_version: v100.000.002
+    derived_schema_file_path: logs_nxlog_windows/logs_nxlog_windows_sub.csv
+    additional_fields_config: logs_nxlog_windows/logs_nxlog_windows_add.csv
+    derived_schema_ttl: 90
+  
+schema_versioning:
+  - schema_name: logs_alerts
+    database_name: org321
+    unified_view: windows_audit
+    actions:
+      add_columns:
+        - column_name: testing99
+          alias: testing99_alias
+          data_type: String CODEC(ZSTD(1))
+      remove_columns:
+        - column_name: rule_id
+      modify_indexes:
+        indexes: 
+          - source_table
+          - detection_time
+          - timestamp
+          - timestamp_load
+      modify_ttl:
+        ttl: 200 
+        
+hunt_scheduler:
+  hunt_dir: ../.xdr_hunt_config/single_smd_rule/hunts/
+  rule_repo_dir: ../.xdr_hunt_config/single_smd_rule/rules/
+  checkpoint_destination: file  # file or clickhouse
+  checkpoint_timestamp_field: timestamp_load
+  num_threads: 2
+
+ip_config_standard_enrichment:
+- name: hypersec-enrichment-ch-array-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-ch-event-subschema-map.csv
+  version: v100.000.000
+- name: hypersec-enrichment-ch-fields-with-invalid-char.csv
+  version: v100.000.000
+- name: hypersec-enrichment-ch-remap-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-domain-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-extract-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-filter-whitelist.csv
+  version: v100.000.000
+- name: hypersec-enrichment-ip-fields.csv
+  version: v100.000.000 
+- name: hypersec-enrichment-json-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-logs-syslog-remap-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-maxmind-list.csv
+  version: v100.000.000
+- name: hypersec-enrichment-public-suffix-list.csv
+  version: v100.000.000
+- name: hypersec-enrichment-time-fields.csv
+  version: v100.000.000
+- name: hypersec-enrichment-ts-match-tz.csv
+  version: v100.000.000
+- name: hypersec-enrichment-tz-offset-mapping.csv
+  version: v100.000.000
+- name: hypersec-enrichment-update-datatype.csv
+  version: v100.000.000
+
+ip_config_receiver:
+- name: hypersec-receiver-event-category-map.csv
+  version: v100.000.000
+
+
+
+vector_enrichment_maxmind_geoip:
+- name: GeoLite2-Country.mmdb
+  version: 100.000.000
+- name: GeoLite2-City.mmdb
+  version: 100.000.000
+- name: GeoLite2-ASN.mmdb
+  version: 100.000.000
+
+vector_templates:
+  core:
+  - name: 000-source-file.yml
+    version: 100.000.000
+  - name: 000-source-test-file-with-receiver-emulation.yml
+    version: 100.000.000
+  - name: 001-source-kafka-aws-saas.yml
+    version: 100.000.000
+  - name: 101-transform-flatten-message.yml
+    version: 100.000.000
+  - name: 102-transform-remap-fields.yml
+    version: 100.000.000
+  - name: 103-transform-enrich-maxmind.yml
+    version: 100.000.000
+  - name: 104-transform-extract-fields.yml
+    version: 100.000.000
+  - name: 105-transform-junk-filter.yml
+    version: 100.000.000
+  - name: 106-transform-netflow-timestamp-mapping.yml
+    version: 100.000.000
+  - name: 107-transform-ch-control-fields.yml
+    version: 100.000.000
+  - name: 108-transform-ch-json-remap.yml
+    version: 100.000.000
+  - name: 109-transform-ch-custom-transformations.yml
+    version: 100.000.000
+  - name: 110-transform-netflow-flatten.yml
+    version: 100.000.000
+  - name: 111-transform-os-set-data-stream-fields.yml
+    version: 100.000.000
+  - name: 112-transform-remove-flows-prefix.yml
+    version: 100.000.000
+  - name: 114-transform-ch-custom-values.yml
+    version: 100.000.000
+  - name: 115-transform-timestamp-load-field.yml
+    version: 100.000.000
+  - name: 116-transform-fields-to-camel-case.yml
+    version: 100.000.000
+  - name: 117-transform-ch-change-field-datatype.yml
+    version: 100.000.000
+  - name: 118-transform-ch-subschema-mapping.yml
+    version: 100.000.000
+  - name: 119-transform-split-ip-field.yml
+    version: 100.000.000
+  - name: 120-transform-generic-whitelist-filter.yml
+    version: 100.000.000
+  - name: 121-transform-filebeat-dns.yml
+    version: 100.000.000
+  - name: 122-transform-domain.yml
+    version: 100.000.000
+  - name: 123-transform-extract-cef.yml
+    version: 100.000.000
+  - name: 124-transform-hypercol-metric.yml
+    version: 100.000.000
+  - name: 199-transform-passthrough.yml
+    version: 100.000.000
+  - name: 200-test-file-sink.yml
+    version: 100.000.000
+  - name: 201-sink-clickhouse-saas.yml
+    version: 100.000.000
+  - name: 202-sink-kafka-aws-saas.yml
+    version: 100.000.000
+  - name: 203-sink-opensearch-aws-saas-index.yml
+    version: 100.000.000
+  - name: 204-sink-opensearch-aws-saas-stream-test.yml
+    version: 100.000.000
+  - name: 204-sink-opensearch-aws-saas-stream.yml
+    version: 100.000.000
+  - name: 205-sink-opensearch-index.yml
+    version: 100.000.000
+  - name: 206-sink-opensearch-stream.yml
+    version: 100.000.000
+  - name: 207-sink-aws-s3.yml
+    version: 100.000.000
+  - name: 208-sink-custom-prometheus.yml
+    version: 100.000.000
+  - name: hs-xdr-vector-ct-all-main.yml
+    version: 100.000.000
+  - name: hs-xdr-vector-ct-all-prometheus.yml
+    version: 100.000.000
+  - name: hypersec-receiver-sink-notest.yml
+    version: 100.000.000
+  - name: hypersec-receiver-sink.yml
+    version: 100.000.000
+  - name: hypersec-receiver-source.yml
+    version: 100.000.000
+  - name: hypersec-receiver-transform-event-category.yml
+    version: 100.000.000
+  - name: hypersec-receiver-transform-timestamp.yml
+    version: 100.000.000
+  - name: hypersec-receiver.yml
+    version: 100.000.000
+  custom: null
+
+# Anything releative to the ingestion pipeline settings can stay here, target environment variables will live in the `xdr_targets.yaml` file
+ingestion_pipeline_globals: 
+  ingestion_data_dir: "/vector-data-dir"    # This points vector pods where to save the checkpointing and state.
+  ingestion_mtls_path: "/etc/vector_tls"
+  kafka_mtls_path: "/etc/vector_mtls"
+  kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+
+ingestion_pipelines:
+  - name: logs_nxlog_windows
+    stages:
+      - name: finalise
+        description: "Finalization stage for processing Windows NXLog data"
+        config:
+          kafka_source_topic: "logs_nxlog_windows"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_nxlog_windows_load"
+          kafka_consumer_group: "vector-logs-nxlog-windows-finalize"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            target_CPU_utilization_percentage:  125
+            persistence_size: 1Gi
+          config_files:
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'                  # 
+            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'    # 
+            field_setter_iteration_group: 'finalise'                                                   # 
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 104-transform-extract-fields
+              type: transform
+            - id: 105-transform-junk-filter
+              type: filter
+            - id: 115-transform-timestamp-load-field
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog_windows"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector_logs_nxlog_windows-load-ch-1"
+          container_config:
+            min_replicas: 1
+            max_replicas: 1
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog_windows"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-nxlog-windows-load-os-1"
+          container_config:
+            min_replicas: 1
+            max_replicas: 1
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog_windows_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-nxlog-windows-load-s3"
+          container_config:
+            min_replicas: 1
+            max_replicas: 1
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config:
+            sink_aws_s3_bucket_name.: 'ghostburner-archive'
+            sink_aws_s3_region: 'ap-southeast-2'
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs_nxlog
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs NXLog data"
+        config: 
+          kafka_source_topic: "logs_nxlog_land"
+          kafka_source_topic_suffix: ""
+          kafka_sink_topic: "logs_nxlog_load"
+          kafka_consumer_group: "vector-logs-nxlog-finalize"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 105-transform-junk-filter
+              type: filter
+            - id: 115-transform-timestamp-load-field
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-nxlog-load-ch"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+              min_replicas: 1
+              max_replicas: 9
+              target_memory_util_percentage: 125
+              targetCPUUtilizationPercentage:  125
+              persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-nxlog-load-os"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name:   load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_nxlog_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-nxlog-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+  
+  - name: beats_winlogbeat
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing beats winlog beat data"
+        config:
+          kafka_source_topic: "logs_beats_winlogbeat"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_beats_winlogbeat_load"
+          kafka_consumer_group: "vector-logs-beats-winlogbeat-finalize"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+            field_setter_iteration_group: 'finalise'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 104-transform-extract-fields
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 105-transform-junk-filter
+              type: filter
+            - id: 115-transform-timestamp-load-field
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_beats_winlogbeat"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-beats-winlogbeat-load-ch-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094" 
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_beats_winlogbeat"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "logs_beats_winlogbeat_load-os-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_beats_winlogbeat_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-beats-winlogbeat-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+ 
+  - name: beats_filebeat
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing beats file-beat data"
+        config:
+          kafka_source_topic: "logs_beats_filebeat"
+          kafka_source_topic_suffix: "_land"
+          kafka_consumer_group: "vector-logs-beats-filebeat-finalise-0"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            field_setter_iteration_group: 'finalise'
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+            domain_fields_csv: '/standard_enrichment_files/hypersec-enrichment-domain-fields.csv'
+            public_suffix_list_csv: '/standard_enrichment_files/hypersec-enrichment-public-suffix-list.csv'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 121-transform-filebeat-dns
+              type: transform
+            - id: 122-transform-domain
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_beats_filebeat"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-beats-filebeat-load-ch"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            event_subschema_csv: '/standard_enrichment_files/hypersec-enrichment-ch-event-subschema-map.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 118-transform-ch-subschema-mapping
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_beats_filebeat"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-beats-filebeat-load-os"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_beats_filebeat"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-beats-filebeat-load-s3-0"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs-cef
+    stages: 
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_cef_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-cef-load-ch-0"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_cef_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-cef-load-os-0"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_role_arn: 'arn:aws:iam::239230600602:role/vector'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+
+  - name: logs-syslog-linux
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-syslog-linux data"
+        config:
+          kafka_source_topic: "logs_syslog_linux_land"
+          kafka_source_topic_suffix: ""
+          kafka_sink_topic: "logs_syslog_linux_load"
+          kafka_consumer_group: "vector-logs-syslog-linux-finalize-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            field_setter_iteration_group: 'finalise'
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-linux-load-ch"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-linux-load-os"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-linux-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs-syslog-linux-audit
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-syslog-linux-audit data"
+        config:
+          kafka_source_topic: "logs_syslog_linux_audit"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_syslog_linux_audit_load"
+          kafka_consumer_group: "vector-logs-syslog-linux-audit-finalize-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            field_setter_iteration_group: 'finalise'
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 104-transform-extract-fields
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_audit_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-linux-audit-load-ch"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_audit_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-linux-load-os"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_linux_audit"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-syslog-linux-audit-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+ 
+  - name: logs-syslog
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-syslog data"
+        config:
+          kafka_source_topic: "logs_syslog_land"
+          kafka_source_topic_suffix: ""
+          kafka_sink_topic: "logs_syslog_load"
+          kafka_consumer_group: "vector-logs-syslog-finalize"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            field_setter_iteration_group: 'finalise'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 104-transform-extract-fields
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 123-transform-extract-cef
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-load-ch-4"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "logs-syslog-load-os-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_role_arn: 'arn:aws:iam::239230600602:role/vector'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_syslog_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-syslog-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs-hypercol-internal
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-hypercol-internal data"
+        config:
+          kafka_source_topic: "logs_hypercol_internal"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_hypercol_internal_load"
+          kafka_consumer_group: "vector-logs-hypercol-internal-finalize"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi 
+          config_files:
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            field_setter_iteration_group: 'finalise'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_internal"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-hypercol-internal-load-ch"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_internal"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "logs-hypercol-internal-load-os-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            opensearch_role_arn: 'arn:aws:iam::239230600602:role/vector'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_internal_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-hypercol-internal-laod-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs-hypercol-metric
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-hypercol-metric data"
+        config:
+          kafka_source_topic: "logs_hypercol_metric"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_hypercol_metric_load"
+          kafka_consumer_group: "vector-logs-hypersec-logs-hypersec-hypercollector-metric-finalize"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi 
+          config_files:
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            field_setter_iteration_group: 'finalise'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_metric"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-hypercol-metric-load-ch-3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            json_fields:  '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_metric"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "logs-hypercol-metric-load-os-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_prometheus
+        description: "Load Prometheus stage"
+        config:
+          kafka_source_topic: "logs_hypercol_metric"
+          kafka_source_topic_suffix: "_land"
+          kafka_consumer_group: "vector-logs-hypercol-metric-load-prometheus-2"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            source_decoding_codec: native_json
+            sink_custom_prometheus_endpoint: "https://aps-workspaces.ap-southeast-2.amazonaws.com/workspaces/ws-fb9afd5c-334e-4c0f-b14a-24cfefb6cd09/api/v1/remote_write"
+            sink_custom_prometheus_auth_iam_role: "arn:aws:iam::239230600602:role/vector"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 124-transform-hypercol-metric
+              type: sink
+      - name: load_s3
+        description: "S3 loading stage"
+        config:
+          kafka_source_topic: "logs_hypercol_metric_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-hypersec-logs-hypersec-hypercollector-metric-load-s3"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink
+
+  - name: logs-netflow
+    stages: 
+      - name: finalise
+        description: "Finalization stage for processing logs-netflow data"
+        config:
+          kafka_source_topic: "logs_netflow"
+          kafka_source_topic_suffix: "_land"
+          kafka_sink_topic: "logs_netflow_load"
+          kafka_consumer_group: "vector-logs-netflow-finalise-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi 
+          config_files:
+            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
+            time_fields: "/standard_enrichment_files/hypersec-enrichment-time-fields.csv"
+            geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
+            geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
+            field_setter_iteration_group: 'finalise'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 110-transform-netflow-flatten
+              type: transform
+            - id: 112-transform-remove-flows-prefix
+              type: transform
+            - id: 103-transform-enrich-maxmind
+              type: transform
+            - id: 105-transform-junk-filter
+              type: transform
+            - id: 115-transform-timestamp-load
+              type: transform
+            - id: 119-transform-split-ip-field
+              type: transform
+            - id: 106-transform-timestamp-mapping
+              type: transform
+            - id: 129-transform-event-hash-field
+              type: transform
+            - id: 202-sink-kafka-aws-saas
+              type: sink
+      - name: load_ch
+        description: "ClickHouse loading stage"
+        config:
+          kafka_source_topic: "logs_netflow"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-netflow-load-ch-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: "/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv"
+            json_fields: "/standard_enrichment_files/hypersec-enrichment-json-fields.csv"
+            supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 108-transform-ch-json-remap
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 109-transform-ch-custom-transformations
+              type: transform
+            - id: 201-sink-clickhouse-saas
+              type: sink
+      - name: load_os
+        description: "OpenSearch loading stage"
+        config:
+          kafka_source_topic: "logs_netflow"
+          kafka_source_topic_suffix: "_load"
+          kafka_consumer_group: "vector-logs-netflow-load-os"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config:
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          config_files:
+            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 111-transform-os-set-data-stream-fields
+              type: transform
+            - id: 102-transform-remap-fields
+              type: transform
+            - id: 116-transform-fields-to-camel-case
+              type: transform
+            - id: 204-sink-opensearch-aws-saas-stream
+              type: sink
+      - name: load_s3
+        description: "Load Prometheus stage"
+        config:
+          kafka_source_topic: "logs_netflow_load"
+          kafka_source_topic_suffix: ""
+          kafka_consumer_group: "vector-logs-netflow-load-s3-1"
+          kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
+          container_config: 
+            min_replicas: 1
+            max_replicas: 9
+            target_memory_util_percentage: 125
+            targetCPUUtilizationPercentage:  125
+            persistence_size: 1Gi
+          sink_config: 
+            sink_aws_s3_bucket_name.: ghostburner-archive
+            sink_aws_s3_region: ap-southeast-2
+            sink_aws_s3_batch_max_bytes: "21474836480"
+            sink_aws_s3_batch_timeout_secs: "3600"
+          steps:
+            - id: hs-xdr-vector-ct-all-main
+              type: base
+            - id: 001-source-kafka-aws-saas
+              type: source
+            - id: 101-transform-flatten-message
+              type: transform
+            - id: 207-sink-aws-s3
+              type: sink

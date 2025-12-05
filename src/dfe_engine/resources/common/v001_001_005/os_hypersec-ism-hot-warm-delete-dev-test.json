@@ -1,0 +1,74 @@
+{
+    "policy": {
+        "policy_id": "hypersec-ism-hot-warm-delete",
+        "description": "HyperSec XDR streaming hot-warm-delete-dev-test ISM streaming policy v3.2.6. External source support merge. Hot 7day OR 45GB -> retain 1 day -> delete",
+        "default_state": "hot",
+        "states": [
+            {
+                "name": "hot",
+                "actions": [
+                    {
+                        "retry": {
+                            "count": 24,
+                            "backoff": "exponential",
+                            "delay": "1h"
+                        },
+                        "allocation": {
+                            "require": {
+                                "box_type": "hot"
+                            },
+                            "include": {},
+                            "exclude": {},
+                            "wait_for": false
+                        }
+                    },
+                    {
+                        "retry": {
+                            "count": 24,
+                            "backoff": "exponential",
+                            "delay": "1h"
+                        },
+                        "rollover": {
+                            "min_size": "45gb",
+                            "min_index_age": "7d",
+                            "copy_alias": false
+                        }
+                    }
+                ],
+                "transitions": [
+                    {
+                        "state_name": "delete",
+                        "conditions": {
+                            "min_rollover_age": "1d"
+                        }
+                    }
+                ]
+            },
+            {
+                "name": "delete",
+                "actions": [
+                    {
+                        "timeout": "1d",
+                        "retry": {
+                            "count": 24,
+                            "backoff": "exponential",
+                            "delay": "1h"
+                        },
+                        "delete": {}
+                    }
+                ],
+                "transitions": []
+            }
+        ],
+        "ism_template": [
+            {
+                "index_patterns": [
+                    "logs-*",
+                    "ref-*",
+                    ".ds-logs-*",
+                    ".ds-ref-*"
+                ]
+            }
+        ]
+    }
+}

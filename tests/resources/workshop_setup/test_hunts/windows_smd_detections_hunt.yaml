@@ -1,0 +1,19 @@
+name: "Windows SMD Detections"
+cron:
+  - "* * * * *"
+  - "*/2 * * * *"
+log_buffer: 60 
+global_target_table_name: logs_alerts
+global_source_table_name: logs_nxlog_windows
+customers:
+  - detectionlab
+
+rules:
+  - rule_name: win_account_a_common_activities
+    target_table_name: logs_alerts
+
+customer_filters:
+  detectionlab:
+    rules:
+      - name: win_account_a_common_activities.jinja2
+        filter_clause: ""

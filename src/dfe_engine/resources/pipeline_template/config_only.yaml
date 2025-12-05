@@ -1,0 +1,28 @@
+env: 
+  {% for env_var in env_vars %}- name: {{ env_var }}
+    valueFrom:
+      configMapKeyRef:
+        name: vector-worker-default
+        key: {{ env_var }}
+  {% endfor %}
+
+
+args:
+  - --watch-config
+  - --verbose
+  - --no-graceful-shutdown-limit
+  {% for step in steps %}- --config
+  - {{ step }}
+  {% endfor %}
+
+
+extraObjects:
+ - apiVersion: v1
+   kind: ConfigMap
+   metadata:
+    name: vector-worker-default
+    namespace: {{NAME}}
+   data:
+    {% for key, value in config_maps.items() %}{{ key }}: {% if not value is mapping %}{{ value }}
+    {% else %}{% for sub_key, sub_value in value.items() %}{{ sub_key }}: {{ sub_value}}{% endfor %}
+    {% endif %}{% endfor %}

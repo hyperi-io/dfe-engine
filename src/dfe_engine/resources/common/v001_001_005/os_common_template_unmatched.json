@@ -1,0 +1,17 @@
+{
+  "_meta": {
+    "description": "DEFAULT HyperSec OpenSearch unmatched catchall component streaming index template v3.2.6.  External source support merge. Requires OpenSearch v2.8 and above."
+  },
+  "composed_of": [
+    "hypersec-log-component-template"
+  ],
+  "priority": "1",
+  "data_stream": {
+    "timestamp_field": {
+      "name": "@timestamp"
+    }
+  },
+  "index_patterns": [
+    "logs-*"
+  ]
+}

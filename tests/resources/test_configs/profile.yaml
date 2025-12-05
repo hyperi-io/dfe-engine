@@ -1,0 +1,6 @@
+profiles:
+  development:
+    ch_host: test.ap-southeast-2.aws.clickhouse.cloud
+    ch_password: test_password
+    ch_port: 8443
+    ch_username: default

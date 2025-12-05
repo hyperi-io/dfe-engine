@@ -1,0 +1,54 @@
+column,type,index_order,os_order,comment
+kind,string_fast_lowcardinality,,,
+name,string_fast_lowcardinality,,,
+namespace,string_fast_lowcardinality,,,
+source_type,string_fast_lowcardinality,,,
+counter.value,float64,,,
+gauge.value,float64,,,
+interval_ms,int64,,,
+aggregated_summary,json,,,
+aggregated_histogram,json,,,
+distribution,json,,,
+filesystem,string_lowcardinality,,,Remapped during ingestion from under tags
+host,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+mountpoint,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+cpu,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+mode,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+device,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+component_id,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+component_kind,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+component_type,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+buckets_count,int64,,,Remapped during ingestion from under buckets
+buckets_sum,float64,,,Remapped during ingestion from under buckets
+stage,string_fast_lowcardinality,,,Remapped during ingestion from under tags
+quantiles_sum,float64,,,Remapped during ingestion from under quantiles
+origin,string_fast_lowcardinality,,,
+port,int64,,,
+processed,int64,,,
+resumed,int64,,,
+source,string_fast_lowcardinality,,,
+suspended,int64,,,
+suspended_duration,int64,,,
+failed,int64,,,
+inblock,int64,,,
+majflt,int64,,,
+maxrss,int64,,,
+minflt,int64,,,
+nvcsw,int64,,,
+openfiles,int64,,,
+oublock,int64,,,
+stime,int64,,,
+utime,int64,,,
+ratelimit_discarded,int64,,,
+ratelimit_numratelimiters,int64,,,
+submitted,int64,,,
+disallowed,int64,,,
+bytes.decompressed,int64,,,
+bytes.received,int64,,,
+sessions.closed,int64,,,
+sessions.opened,int64,,,
+sessions.openfailed,int64,,,
+submitted,int64,,,
+aggregated_histogram_sum,int64,,,Remapped during ingestion from under aggregated_histogram
+aggregated_summary_count,int64,,,Remapped during ingestion from under aggregated_summary
+aggregated_summary_sum,int64,,,Remapped during ingestion from under aggregated_summary

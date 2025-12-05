@@ -1,0 +1,3 @@
+﻿category,field,value,subschema
+logs-beats-filebeat,container,,logs_beats_filebeat_container
+logs-beats-filebeat,awscloudwatch.log_group,test log group,logs_beats_filebeat_awscloudwatch_testloggroup

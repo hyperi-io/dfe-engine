@@ -1,0 +1,151 @@
+source_device_schema,source_field_name,target_device_schema,target_field_name,description
+nx_log_windows_sub_ce,access_list,windows_audit,,"No sample log found in Kafka UI. This could be Accesses: in raw log in OMSS"
+nx_log_windows_sub_ce,access_mask,windows_audit,object.access_list,"AccessMask in raw log in OMSS. No sample log found in kafka UI"
+nx_log_windows_sub_ce,access_reason,windows_audit,,"AccessReason in raw log in OMSS and not currently extracted in OMSS. No sample log found in Kafka UI"
+nx_log_windows_sub_ce,account_name,windows_audit,source.user.name,
+nx_log_windows_sub_ce,account_type,windows_audit,source.user.type,
+nx_log_windows_sub_ce,activity_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,acting_username,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,actor_username,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,authentication_package_name,windows_audit,,"Not currently extracted in OMSS ( Authentication Package: OR PackageName in wiki )"
+nx_log_windows_sub_ce,category,windows_audit,event.category,
+nx_log_windows_sub_ce,channel,windows_audit,source.user.group.name,
+nx_log_windows_sub_ce,description,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,domain,windows_audit,client.user.domain,
+nx_log_windows_sub_ce,elevated_token,windows_audit,process.elevation_type1,
+nx_log_windows_sub_ce,event_id,windows_audit,event.record_type,
+nx_log_windows_sub_ce,event_creation_time,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,event_received_time,windows_audit,event.created,
+nx_log_windows_sub_ce,event_time,windows_audit,event.start,
+nx_log_windows_sub_ce,event_type,windows_audit,event.record_subtype,
+nx_log_windows_sub_ce,file_version,windows_audit,process.version,
+nx_log_windows_sub_ce,hashes,windows_audit,file.md5,
+nx_log_windows_sub_ce,hostname,windows_audit,device.hostname,
+nx_log_windows_sub_ce,impersonation_level,windows_audit,,"Not currently extracted in OMSS ( ImpersonationLevel in wiki )"
+nx_log_windows_sub_ce,integrity_level,windows_audit,process.elevation_type2,
+nx_log_windows_sub_ce,ip_address,windows_audit,client.ip,"This can be both client.address and client.ip ( see event ID = 4769 in wiki - IpAddress fieldname )"
+nx_log_windows_sub_ce,ip_address_v4,windows_audit,,"In OMSS, it will be parsed into client.ip only."
+nx_log_windows_sub_ce,ip_address_v6,windows_audit,,"In OMSS, both IPv4 and IPv6 are parsed into client.ip fieldname."
+nx_log_windows_sub_ce,ip_port,windows_audit,client.port,
+nx_log_windows_sub_ce,key_length,windows_audit,service.key_length,
+nx_log_windows_sub_ce,keywords,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,logon_process_name,windows_audit,process.logon_process,
+nx_log_windows_sub_ce,logon_type,windows_audit,event.logon_type,
+nx_log_windows_sub_ce,mandatory_level,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,message,windows_audit,event.info,
+nx_log_windows_sub_ce,new_process_id,windows_audit,process.pid,
+nx_log_windows_sub_ce,new_process_name,windows_audit,process.executable,
+nx_log_windows_sub_ce,object_server,windows_audit,server.hostname,
+nx_log_windows_sub_ce,object_type,windows_audit,object.class,
+nx_log_windows_sub_ce,opcode,windows_audit,,"event.outcome in WinEventLog:Directory-Service . threat.severity in Microsoft-Windows-AppLocker."
+nx_log_windows_sub_ce,opcode_value,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,port,windows_audit,,"This field is not present in raw log, it's an addition as part of log ingestion."
+nx_log_windows_sub_ce,previous_time,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,privilege_list,windows_audit,object.access_list  ???,"PrivilegeList in Event specific mapping table in wiki"
+nx_log_windows_sub_ce,provider_uuid,windows_audit,process.guid,
+nx_log_windows_sub_ce,product,windows_audit,client.host.vendor,
+nx_log_windows_sub_ce,query_name,windows_audit,dns.question.name,
+nx_log_windows_sub_ce,query_results,windows_audit,dns.answers.data,
+nx_log_windows_sub_ce,query_status,windows_audit,dns.response_code,
+nx_log_windows_sub_ce,record_number,windows_audit,event.id,"event.correlation_id in Microsoft-Windows-AppLocker, event.id in Windows Parent Page"
+nx_log_windows_sub_ce,resource_attributes,windows_audit,,"Not currently extracted in OMSS. Object:Resource Attributes in EventSpecificMapping Table"
+nx_log_windows_sub_ce,restricted_sid_count,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,registry_event_type,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,registry_key_path,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,registry_value_data,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,service,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,service_state,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,severity,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,severity_value,windows_audit,event.severity,
+nx_log_windows_sub_ce,share_local_path,windows_audit,,"No sample log found in Kafka UI. Unable to determine. Could be service.share_path OR file.path - Unsure for now."
+nx_log_windows_sub_ce,share_name,windows_audit,,"No sample log found in Kafka UI. service.share_name might be the one, but not 100% sure"
+nx_log_windows_sub_ce,source_module_name,windows_audit,event.module,
+nx_log_windows_sub_ce,source_module_type,windows_audit,event.module_type,
+nx_log_windows_sub_ce,source_name,windows_audit,device.application,
+nx_log_windows_sub_ce,source_user,windows_audit,,"Not yet mapped in OMSS. Will need to map. It's EventID = 8 , SourceUser . . Sysmon Log"
+nx_log_windows_sub_ce,source_type,windows_audit,,"This is not part of raw log . Output value seen in nx_log_windows_sub_ce_load is - vector ."
+nx_log_windows_sub_ce,status,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,subject_domain_name,windows_audit,server.user.domain,
+nx_log_windows_sub_ce,subject_logon_id,windows_audit,server.user.id,
+nx_log_windows_sub_ce,subject_user_name,windows_audit,server.user.name,
+nx_log_windows_sub_ce,subject_user_sid,windows_audit,server.user.uuid,
+nx_log_windows_sub_ce,src_dvchostname,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,src_hostname,windows_audit,source.hostname,
+nx_log_windows_sub_ce,src_ip_addr,windows_audit,source.ip,
+nx_log_windows_sub_ce,src_ip_addr_v4,windows_audit,,"In OMSS, it will be parsed into source.ip only."
+nx_log_windows_sub_ce,src_ip_addr_v6,windows_audit,,"In OMSS, it will be parsed into source.ip only."
+nx_log_windows_sub_ce,src_port,windows_audit,source.port,
+nx_log_windows_sub_ce,src_port_name,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,src_port_number,windows_audit,,"Not currently extracted in OMSS"
+nx_log_windows_sub_ce,sysmon_schema_version,windows_audit,,"Not currently extracted in OMSS (SchemaVersion - in Sysmon Log)"
+nx_log_windows_sub_ce,sysmon_command_line,windows_audit,process.commandline,
+nx_log_windows_sub_ce,sysmon_company,windows_audit,organization.name,
+nx_log_windows_sub_ce,sysmon_current_directory,windows_audit,process.working_directory,
+nx_log_windows_sub_ce,sysmon_description,windows_audit,process.title,
+nx_log_windows_sub_ce,sysmon_file_version,windows_audit,process.version,
+nx_log_windows_sub_ce,sysmon_hash_imphash,windows_audit,,"Not yet mapped in OMSS. Will need to map. It's Sysmon Log, fieldname is Hashes. IMPHASH is one of them."
+nx_log_windows_sub_ce,sysmon_hash_md5,windows_audit,file.md5,
+nx_log_windows_sub_ce,sysmon_hash_sha256,windows_audit,file.sha256,
+nx_log_windows_sub_ce,sysmon_hashes,windows_audit,,"Not yet mapped in OMSS. Will need to map. It's Sysmon Log, fieldname is Hashes"
+nx_log_windows_sub_ce,sysmon_image,windows_audit,process.executable,"In OMSS, we also extract process.name from process.executable name."
+nx_log_windows_sub_ce,sysmon_integrity_level,windows_audit,process.elevation_type3,
+nx_log_windows_sub_ce,sysmon_logon_guid,windows_audit,client.user.uuid,
+nx_log_windows_sub_ce,sysmon_logon_id,windows_audit,client.user.id,
+nx_log_windows_sub_ce,sysmon_original_file_name,windows_audit,file.name,
+nx_log_windows_sub_ce,sysmon_parent_command_line,windows_audit,process.parent_commandline,
+nx_log_windows_sub_ce,sysmon_parent_image,windows_audit,process.parent_name,
+nx_log_windows_sub_ce,sysmon_parent_process_guid,windows_audit,process.pguid,
+nx_log_windows_sub_ce,sysmon_parent_process_id,windows_audit,process.ppid,
+nx_log_windows_sub_ce,sysmon_parent_user,windows_audit,server.user.name,
+nx_log_windows_sub_ce,sysmon_process_guid,windows_audit,process.guid,
+nx_log_windows_sub_ce,sysmon_process_id,windows_audit,process.pid,
+nx_log_windows_sub_ce,sysmon_product,windows_audit,client.host.vendor,
+nx_log_windows_sub_ce,sysmon_rule_name,windows_audit,event.signature,
+nx_log_windows_sub_ce,sysmon_terminal_session_id,windows_audit,service.subject_session_id,
+nx_log_windows_sub_ce,sysmon_user,windows_audit,source.user.name,
+nx_log_windows_sub_ce,sysmon_utc_time,windows_audit,,"Not currently extracted in OMSS. (UtcTime in Sysmon Log )"
+nx_log_windows_sub_ce,target_domain_name,windows_audit,client.user.domain,
+nx_log_windows_sub_ce,target_linked_logon_id,windows_audit,,"Not yet mapped in OMSS. In OMSS Log eventID 4624 , there is no fieldname called - TargetLinkedLogonId"
+nx_log_windows_sub_ce,target_logon_id,windows_audit,client.user.id,
+nx_log_windows_sub_ce,target_user_name,windows_audit,client.user.name,
+nx_log_windows_sub_ce,target_user_sid,windows_audit,client.user.uuid,
+nx_log_windows_sub_ce,target_process_file_path,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,target_process_uuid,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,target_process_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,target_user,windows_audit,,"Not yet mapped in OMSS. Will need to map. It's EventID = 8 , TargetUser . Sysmon Log"
+nx_log_windows_sub_ce,target_user_domain,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,target_user_logon_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,target_username,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,task,windows_audit,,"Task seems to be JSON fieldname in eventID=4624 in NX Log. But, haven't seen this in OMSS customers Logs."
+nx_log_windows_sub_ce,thread_id,windows_audit,process.thread.id,
+nx_log_windows_sub_ce,thread_new_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,thread_start_address,windows_audit,target.process.address,"No sample log found in Kafka UI. But I found that Syslog EventID=8 , StartAddress might be the one."
+nx_log_windows_sub_ce,thread_start_function,windows_audit,target.process.function,"No sample log found in Kafka UI. But I found that Syslog EventID=8 , StartFunction might be the one."
+nx_log_windows_sub_ce,thread_start_module,windows_audit,target.process.module,"No sample log found in Kafka UI. But I found that Syslog EventID=8 , StartModule might be the one."
+nx_log_windows_sub_ce,transaction_id,windows_audit,,"Not currently extracted in OMSS. (TransactionId in eventID = 4656,4661 )"
+nx_log_windows_sub_ce,token_elevation_type,windows_audit,process.elevation_Type4,"eventID=4688"
+nx_log_windows_sub_ce,user,windows_audit,client.user.name,
+nx_log_windows_sub_ce,user_domain,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_id,windows_audit,source.user.uuid,
+nx_log_windows_sub_ce,user_linked_logon_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_linked_logon_uuid,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_logon_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,username,windows_audit,,"This could be client.user.name, but not sure at this stage. No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_network_account_domain,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_network_account_name,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_privilege_list,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_reporter_domain,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_reporter_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_reporter_name,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_reporter_sid,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_session_id,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,user_sid,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,virtual_account,windows_audit,,"VirtualAccount seems to be JSON fieldname in eventID=4624 in NX Log. But, haven't seen this in OMSS customers Logs."
+nx_log_windows_sub_ce,logon_authentication_lan_package_name,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_authentication_package_name,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_elevated_token,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_impersonation_level,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_key_length,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_restricted_admin_mode,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_transmitted_services,windows_audit,,"No sample log found in Kafka UI. Unable to determine"
+nx_log_windows_sub_ce,logon_virtual_account,windows_audit,,"No sample log found in Kafka UI. Unable to determine"

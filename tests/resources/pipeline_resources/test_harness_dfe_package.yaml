@@ -1,0 +1,34 @@
+global_settings:
+  schema_common_version: v001.001.007
+  derived_schema_paths: tests/resources/test_schemas/stable_schemas
+  meta_schema_paths: tests/resources/post_build_artefacts/dfe_meta_schemas
+  schema_output_path: tests/job_outputs/test_schema_output
+  default_target: test_schemas
+  target_path: ~/.dfe/dfe_targets.yaml
+organisations:
+- cluster_name: ''
+  org_id: detectionlab
+  schemas:
+  - logs_alerts
+  - logs_omss_aws_guardduty
+build_schemas:
+  no_cluster_declarations_needed: true
+  use_replicated_merge_tree: false
+  use_shared_merge_tree: false
+apply_schemas:
+  do_add_roles: false
+  do_add_columns: true
+schemas:
+  logs_alerts:
+    name: logs_alerts
+    meta_schema: logs_alerts.csv
+    meta_schema_version: v001.000.000
+    derived_schema_file_path: logs_alerts/logs_alerts_sub.csv
+    additional_fields_config: logs_alerts/logs_alerts_add.csv
+  logs_omss_aws_guardduty:
+    name: logs_omss_aws_guardduty
+    meta_schema: logs_base.csv
+    meta_schema_version: v001.000.000
+    derived_schema_file_path: null
+    additional_fields_config: logs_omss_aws_guardduty/logs_omss_aws_guardduty_add.csv
+    derived_schema_ttl: 7
