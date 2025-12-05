@@ -3,7 +3,7 @@ import yaml
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
-import logging
+
 import re
 from dotenv import load_dotenv
 import colorlog
@@ -318,7 +318,7 @@ class DFEConfigLoader:
     ) -> None:
         """Prints the specified target's host, port, and username from the configuration."""
         try:
-            logger = logger or logging.getLogger("DFELog - print target")
+            logger = logger or logging.getLogger("dfe_engine")
             logger.info(f"Getting target from the [{targets_file_path}]")
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=target_name, targets_file_path=targets_file_path

@@ -22,23 +22,23 @@ class SigmaRuleConverter:
         self.input_directory = input_directory
         self.output_directory = output_directory
         self.args_dfe_package_file_path = args_dfe_package_file_path
-        self.dfe_logger = DFELog.get_root_logger(logging_directory=dfe_root_log_path, log_file_prefix='dfe-sigma-converter')
+        self.logger = logger
         self._ensure_output_directory_exists()
         self.config = self._load_dfe_config()
-        self.field_mapping_service = FieldMappingService(self.config, self.dfe_logger)
+        self.field_mapping_service = FieldMappingService(self.config, self.logger)
         self.db_session = db_session
         self.is_api_mode = db_session is not None
         
         if self.is_api_mode:
-            self.dfe_logger.info("Initializing in FastAPI mode - using database tables for field mappings")
+            self.logger.info("Initializing in FastAPI mode - using database tables for field mappings")
         else:
-            self.dfe_logger.info("Initializing in CLI mode - using file-based field mappings")
+            self.logger.info("Initializing in CLI mode - using file-based field mappings")
 
     def _ensure_output_directory_exists(self) -> None:
         """Creates the output directory if it does not exist."""
         if not os.path.exists(self.output_directory):
             os.makedirs(self.output_directory)
-            self.dfe_logger.debug(f"Output directory created: {self.output_directory}")
+            self.logger.debug(f"Output directory created: {self.output_directory}")
 
     def _load_dfe_config(self) -> dict:
         """Loads the DFE package configuration."""
@@ -46,7 +46,7 @@ class SigmaRuleConverter:
             with open(self.args_dfe_package_file_path, 'r') as file:
                 return yaml.safe_load(file)
         except Exception as e:
-            self.dfe_logger.error(f"Error loading DFE config: {e}")
+            self.logger.error(f"Error loading DFE config: {e}")
             raise
 
     def _load_included_sigma_rules(self, include_path: str) -> dict:
@@ -83,7 +83,7 @@ class SigmaRuleConverter:
                     return rules_config
                 return {}
         except Exception as e:
-            self.dfe_logger.error(f"Error loading included sigma rules from {include_path}: {e}")
+            self.logger.error(f"Error loading included sigma rules from {include_path}: {e}")
             return {}
 
     def _get_schema_sigma_rules(self, schema_config: dict) -> dict:
@@ -129,7 +129,7 @@ class SigmaRuleConverter:
                 import json
                 rule = json.loads(rule)
             except (json.JSONDecodeError, TypeError) as e:
-                self.dfe_logger.error(f"Failed to parse rule content as JSON: {e}")
+                self.logger.error(f"Failed to parse rule content as JSON: {e}")
                 return {}
         
         metadata = {
@@ -204,7 +204,7 @@ class SigmaRuleConverter:
                 
                 for column in excluded_columns:
                     if column in schema_metadata:
-                        self.dfe_logger.debug(f"Removing overridden column '{column}' from schema metadata")
+                        self.logger.debug(f"Removing overridden column '{column}' from schema metadata")
                         schema_metadata.pop(column)
             
             return mappings, schema_metadata
@@ -219,7 +219,7 @@ class SigmaRuleConverter:
         :param schema_config: Schema configuration dictionary
         """
         rule_name = os.path.basename(file_path)
-        self.dfe_logger.info(f"Converting rule: {rule_name}")
+        self.logger.info(f"Converting rule: {rule_name}")
         
         try:
             if self.is_api_mode and self.db_session:
@@ -231,17 +231,17 @@ class SigmaRuleConverter:
                 ).fetchone()
                 
                 if not result:
-                    self.dfe_logger.error(f"Rule '{rule_name}' not found in database")
+                    self.logger.error(f"Rule '{rule_name}' not found in database")
                     raise ValueError(f"Rule '{rule_name}' not found in database")
                 
                 rule = result.rule_content
                 
-                self.dfe_logger.info(f"Rule content type: {type(rule)}")
+                self.logger.info(f"Rule content type: {type(rule)}")
                     
                 rel_path = rule_name
             else:
                 if not os.path.exists(file_path):
-                    self.dfe_logger.error(f"File not found: {file_path}")
+                    self.logger.error(f"File not found: {file_path}")
                     raise FileNotFoundError(f"File not found: {file_path}")
                     
                 with open(file_path, 'r') as file:
@@ -249,12 +249,12 @@ class SigmaRuleConverter:
 
                 rel_path = os.path.relpath(file_path, self.input_directory)
                 if not rel_path:
-                    self.dfe_logger.error(f"Could not get relative path for: {file_path}")
+                    self.logger.error(f"Could not get relative path for: {file_path}")
                     return
 
             field_mappings, schema_metadata = self._get_schema_mappings(schema_config, rel_path)
             if not field_mappings:
-                self.dfe_logger.warning("No field mappings found for schema")
+                self.logger.warning("No field mappings found for schema")
                 return
 
             source_fields = self.field_mapping_service.get_rule_source_fields(rule)
@@ -268,7 +268,7 @@ class SigmaRuleConverter:
             )
             
             if missing_mappings:
-                self.dfe_logger.warning(f"Rule '{rule_name}' has missing mappings for fields: {', '.join(missing_mappings)}")
+                self.logger.warning(f"Rule '{rule_name}' has missing mappings for fields: {', '.join(missing_mappings)}")
 
             alert_metadata = self._extract_rule_metadata(rule)
             sigma_rules_config = self._get_schema_sigma_rules(schema_config)
@@ -301,12 +301,12 @@ class SigmaRuleConverter:
                             if field in schema_metadata:
                                 matched_schema_info[field] = schema_metadata[field]
                                 if schema_metadata[field]['type'] == 'text' and schema_metadata[field]['index_type'] != 'text_search':
-                                    self.dfe_logger.warning(f"Field {field} is text type but missing text_search index")
+                                    self.logger.warning(f"Field {field} is text type but missing text_search index")
                     else:
                         if mapped_field in schema_metadata:
                             matched_schema_info[mapped_field] = schema_metadata[mapped_field]
                             if schema_metadata[mapped_field]['type'] == 'text' and schema_metadata[mapped_field]['index_type'] != 'text_search':
-                                self.dfe_logger.warning(f"Field {mapped_field} is text type but missing text_search index")
+                                self.logger.warning(f"Field {mapped_field} is text type but missing text_search index")
 
             pipeline_config = SigmaPipeline(field_mappings=pipeline_mappings)
             pipeline = pipeline_config.create_pipeline()
@@ -339,7 +339,7 @@ class SigmaRuleConverter:
                     with open(output_file_path, 'w') as output_file:
                         output_file.write(formatted_rules)
                     
-                    self.dfe_logger.info(f"Rule converted and saved to: {output_file_path}")
+                    self.logger.info(f"Rule converted and saved to: {output_file_path}")
                 finally:
                     if os.path.exists(temp_path):
                         os.unlink(temp_path)
@@ -355,10 +355,10 @@ class SigmaRuleConverter:
                 with open(output_file_path, 'w') as output_file:
                     output_file.write(formatted_rules)
                 
-                self.dfe_logger.info(f"Rule converted: {output_file_path}")
+                self.logger.info(f"Rule converted: {output_file_path}")
 
         except Exception as e:
-            self.dfe_logger.error(f"Exception during conversion: {e}")
+            self.logger.error(f"Exception during conversion: {e}")
             raise
 
     def _optimize_schema_info(self, schema_metadata: dict) -> dict:
@@ -627,7 +627,7 @@ class SigmaRuleConverter:
                             'source_fields': self._get_rule_source_fields(rule)
                         })
                 except Exception as e:
-                    self.dfe_logger.error(f"Error reading rule {rule_file}: {e}")
+                    self.logger.error(f"Error reading rule {rule_file}: {e}")
             
             if rules:
                 rules_by_schema[schema_name] = rules
@@ -655,7 +655,7 @@ class SigmaRuleConverter:
                 if not os.path.exists(schema_output_dir):
                     os.makedirs(schema_output_dir)
                 
-                self.dfe_logger.info(f"Processing single rule for schema: {schema_name}")
+                self.logger.info(f"Processing single rule for schema: {schema_name}")
                 original_output_dir = self.output_directory
                 self.output_directory = schema_output_dir
                 self.convert(single_file, schema_config)
@@ -669,10 +669,10 @@ class SigmaRuleConverter:
                 
             sigma_rules_config = self._get_schema_sigma_rules(schema_config)
             if not sigma_rules_config or 'rules' not in sigma_rules_config:
-                self.dfe_logger.info(f"No rules found for schema: {schema_name}")
+                self.logger.info(f"No rules found for schema: {schema_name}")
                 continue
                 
-            self.dfe_logger.info(f"Processing rules for schema: {schema_name}")
+            self.logger.info(f"Processing rules for schema: {schema_name}")
             schema_output_dir = os.path.join(self.output_directory, schema_name)
             if not os.path.exists(schema_output_dir):
                 os.makedirs(schema_output_dir)
@@ -694,9 +694,9 @@ class SigmaRuleConverter:
                         self.output_directory = original_output_dir
                         conversion_stats[schema_name] = conversion_stats.get(schema_name, 0) + 1
                     except Exception as e:
-                        self.dfe_logger.error(f"Error converting rule {file_path}: {e}")
+                        self.logger.error(f"Error converting rule {file_path}: {e}")
                 else:
-                    self.dfe_logger.error(f"Rule file not found: {file_path}")
+                    self.logger.error(f"Rule file not found: {file_path}")
 
         for schema_name, count in conversion_stats.items():
-            self.dfe_logger.info(f"Total rules converted for schema '{schema_name}': {count}")
+            self.logger.info(f"Total rules converted for schema '{schema_name}': {count}")

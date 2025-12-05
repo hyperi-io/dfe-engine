@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 from enum import Enum
 from hs_lib.logger import logger
-import logging
+
 import json
 
 
@@ -21,7 +21,7 @@ class HuntCheckpointManager:
 
     def __init__(
         self,
-        dfe_logger: Optional[logging.Logger] = None,
+        logger: Optional[logging.Logger] = None,
         database_name: Optional[str] = None,
         table_name: Optional[str] = None,
     ) -> None:
@@ -29,19 +29,16 @@ class HuntCheckpointManager:
         Initialize the HuntCheckpointManager.
 
         Args:
-            dfe_logger (Optional[logging.Logger]): Custom logger instance.
+            logger (Optional[logging.Logger]): Custom logger instance.
             table_name (Optional[str]): Custom table name.
             database_name (Optional[str]): Custom database name.
         """
         self.database_name: str = f"{database_name or self._AUDIT_DATABASE_NAME}"
         self.table_name: str = f"{table_name or self._DETECTION_CHECKPOINT_TABLE_NAME}"
-        self.dfe_logger = (
-            dfe_logger
-            if dfe_logger
-            else DFELog.get_root_logger(
-                logging_directory="./tmp/logs/",
-                file_prefix="checkpoint-hunt-manager",
-            ).log
+        self.logger = (
+            logger
+            if logger
+            else logger.log
         )
 
     def database_exists(self, ch_client, database_name: str) -> bool:
@@ -62,7 +59,7 @@ class HuntCheckpointManager:
             )
             return bool(result)
         except Exception as e:
-            self.dfe_logger.error(
+            self.logger.error(
                 f"Hunt Checkpoint: An error occurred while checking if the database exists: {e}",
                 exc_info=True,
             )
@@ -79,17 +76,17 @@ class HuntCheckpointManager:
         try:
             if self.table_exists(ch_client, database_name, table_name):
                 ch_client.execute(f"DROP TABLE IF EXISTS {database_name}.{table_name};")
-                self.dfe_logger.info(
+                self.logger.info(
                     f"Table [{database_name}.{table_name}] dropped successfully."
                 )
 
             if self.database_exists(ch_client, database_name):
                 ch_client.execute(f"DROP DATABASE IF EXISTS {database_name};")
-                self.dfe_logger.info(
+                self.logger.info(
                     f"Database [{database_name}] dropped successfully."
                 )
         except Exception as e:
-            self.dfe_logger.error(
+            self.logger.error(
                 f"Failed to drop database or table: {e}", exc_info=True
             )
 
@@ -112,7 +109,7 @@ class HuntCheckpointManager:
             )
             return bool(result)
         except Exception as e:
-            self.dfe_logger.error(f"Error checking table existence: {e}", exc_info=True)
+            self.logger.error(f"Error checking table existence: {e}", exc_info=True)
             return False
 
     def ensure_checkpoint_file_path_exists(self, hunt_checkpoint_path: str) -> None:
@@ -147,10 +144,10 @@ class HuntCheckpointManager:
                     f"CREATE DATABASE IF NOT EXISTS {self.database_name};"
                 )
             except Exception as e:
-                self.dfe_logger.error(f"Error creating database: {e}")
+                self.logger.error(f"Error creating database: {e}")
                 return False
         elif not create_missing_database:
-            self.dfe_logger.info("Missing Database and not creating it")
+            self.logger.info("Missing Database and not creating it")
             return False
 
         if create_missing_tables and not self.table_exists(
@@ -182,10 +179,10 @@ class HuntCheckpointManager:
                 """
                 ch_client.execute(create_table_sql)
             except Exception as e:
-                self.dfe_logger.error(f"Error creating table: {e}", exc_info=True)
+                self.logger.error(f"Error creating table: {e}", exc_info=True)
                 return False
         elif not create_missing_tables:
-            self.dfe_logger.info(
+            self.logger.info(
                 f"Table [{self.database_name}.{self.table_name}] already exists."
             )
             return False
@@ -200,7 +197,7 @@ class HuntCheckpointManager:
         hunt_name: str = "",
         rule_name: str = "",
         file_path: str = "",
-        dfe_logger: logging.Logger = None,
+        logger: logging.Logger = None,
     ) -> Optional[datetime]:
         """
         A method to fetch the last successful run's timestamp based on the destination type.
@@ -211,23 +208,23 @@ class HuntCheckpointManager:
             hunt_name (str, optional): Hunt name.
             rule_name (str, optional): Rule name.
             file_path (str, optional): File path, needed if checkpoint destination is FILE.
-            dfe_logger (logging.Logger, optional): Logger.
+            logger (logging.Logger, optional): Logger.
 
         Returns:
             Optional[datetime]: The timestamp of the last successful run, if any.
         """
         if checkpoint_destination == self.FILE:
-            dfe_logger.info(f"Checkpoints will be read from file [{file_path}]")
+            logger.info(f"Checkpoints will be read from file [{file_path}]")
             return self.get_last_successful_run_file(
                 customer=customer,
                 hunt_name=hunt_name,
                 rule_name=rule_name,
                 file_path=file_path,
-                dfe_logger=dfe_logger,
+                logger=logger,
             )
         else:  # CLICKHOUSE
             self.ensure_table_exists(ch_client)
-            dfe_logger.debug(
+            logger.debug(
                 f"Checkpoints will be read from ClickHouse table [{self.database_name}.{self.table_name}]"
             )
             return self.get_last_successful_run_clickhouse(
@@ -235,7 +232,7 @@ class HuntCheckpointManager:
                 ch_client=ch_client,
                 hunt_name=hunt_name,
                 rule_name=rule_name,
-                dfe_logger=dfe_logger,
+                logger=logger,
             )
 
     def get_last_successful_run_clickhouse(
@@ -244,7 +241,7 @@ class HuntCheckpointManager:
         hunt_name: str,
         rule_name: str,
         customer: str,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
     ) -> Optional[datetime]:
         """
         Fetch the last successful run's timestamp from ClickHouse.
@@ -254,7 +251,7 @@ class HuntCheckpointManager:
             hunt_name (str): Hunt name.
             rule_name (str): Rule name.
             customer (str): Customer name.
-            dfe_logger (logging.Logger): Logger instance.
+            logger (logging.Logger): Logger instance.
 
         Returns:
             Optional[datetime]: The timestamp of the last successful run, if any.
@@ -269,21 +266,21 @@ class HuntCheckpointManager:
             LIMIT 1;
         """
 
-        dfe_logger.debug(f"CheckPoint Query: {query}")
+        logger.debug(f"CheckPoint Query: {query}")
 
         try:
             result = ch_client.execute(query)
             if result and result != [(datetime(1970, 1, 1, 0, 0),)]:
                 last_success_time = result[0][0]
-                dfe_logger.debug(
+                logger.debug(
                     f"Last Successful Checkpoint Time: {last_success_time}"
                 )
                 return last_success_time
             else:
-                dfe_logger.info("No results found.")
+                logger.info("No results found.")
                 return None
         except Exception as e:
-            dfe_logger.error(
+            logger.error(
                 f"Failed to retrieve last successful run: {e}", exc_info=True
             )
             return None
@@ -294,7 +291,7 @@ class HuntCheckpointManager:
         rule_name: str,
         customer: str,
         file_path: str,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
     ) -> Optional[datetime]:
         """
         Fetch the last successful run's timestamp from file.
@@ -304,7 +301,7 @@ class HuntCheckpointManager:
             rule_name (str): Rule name.
             customer_name (str): Customer name.
             file_path (str): Path to the checkpoint file.
-            dfe_logger (logging.Logger): Logger instance.
+            logger (logging.Logger): Logger instance.
 
         Returns:
             Optional[datetime]: The timestamp of the last successful run, if any.
@@ -321,22 +318,22 @@ class HuntCheckpointManager:
                 and cp["hunt_name"] == hunt_name
                 and cp["rule_name"] == rule_name
             ]
-            dfe_logger.debug(f"relevant_checkpoints value is {relevant_checkpoints}")
+            logger.debug(f"relevant_checkpoints value is {relevant_checkpoints}")
             if relevant_checkpoints:
                 last_success_time = max(
                     datetime.strptime(cp["query_checkpoint_time"], "%Y-%m-%d %H:%M:%S")
                     for cp in relevant_checkpoints
                 )
-                dfe_logger.info(f"Last Success Time Executed: {last_success_time}")
+                logger.info(f"Last Success Time Executed: {last_success_time}")
                 return last_success_time
             else:
-                dfe_logger.info("No results found.")
+                logger.info("No results found.")
                 return None
         except FileNotFoundError:
-            dfe_logger.info("No checkpoint file found.")
+            logger.info("No checkpoint file found.")
             return None
         except Exception as e:
-            dfe_logger.error(
+            logger.error(
                 f"Failed to retrieve last successful run: {e}", exc_info=True
             )
             return None
@@ -357,7 +354,7 @@ class HuntCheckpointManager:
         query_schedule_time_str: str = None,
         previous_successful_checkpoint_str: str = None,
         query_checkpoint_time_str: str = None,
-        dfe_logger: logging.Logger = None,
+        logger: logging.Logger = None,
         file_path: str = "",
     ) -> None:
         """
@@ -377,7 +374,7 @@ class HuntCheckpointManager:
             previous_successful_checkpoint_str (str) : Last successfull query previously detected.
             query_checkpoint_time (str): Query Checkpoint time.
             execution_time_ms (int, optional): Execution time in milliseconds.
-            dfe_logger (logging.Logger, optional): Logger.
+            logger (logging.Logger, optional): Logger.
             file_path (str, optional): File path, needed if checkpoint destination is FILE.
         """
         if checkpoint_destination == self.FILE:
@@ -395,7 +392,7 @@ class HuntCheckpointManager:
                 query_checkpoint_time_str=query_checkpoint_time_str,
                 thread_id=thread_id,
                 execution_time_ms=execution_time_ms,
-                dfe_logger=dfe_logger,
+                logger=logger,
                 file_path=file_path,
             )
         else:  # CLICKHOUSE
@@ -414,7 +411,7 @@ class HuntCheckpointManager:
                 query_checkpoint_time_str=query_checkpoint_time_str,
                 thread_id=thread_id,
                 execution_time_ms=execution_time_ms,
-                dfe_logger=dfe_logger,
+                logger=logger,
             )
 
     def create_checkpoint_clickhouse(
@@ -431,7 +428,7 @@ class HuntCheckpointManager:
         previous_successful_checkpoint_str: str,
         query_checkpoint_time_str: str,
         execution_time_ms: int,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
         thread_id: str = "",
     ) -> None:
         """
@@ -448,7 +445,7 @@ class HuntCheckpointManager:
             previous_successful_checkpoint (str) : Last successfull query previously detected.
             query_checkpoint_time_str (datetime): Query Checkpoint time.
             execution_time_ms (int): Execution time in milliseconds.
-            dfe_logger (logging.Logger): Logger instance.
+            logger (logging.Logger): Logger instance.
             thread_id (str): Thread ID.
         """
 
@@ -483,10 +480,10 @@ class HuntCheckpointManager:
                     '{query_id}'
                     )
             """
-            dfe_logger.debug(insert_sql)
+            logger.debug(insert_sql)
             ch_client.execute(insert_sql)
         except Exception as e:
-            dfe_logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
+            logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
 
     def create_checkpoint_file(
         self,
@@ -502,7 +499,7 @@ class HuntCheckpointManager:
         end_time_str: str,
         query_checkpoint_time_str: str,
         execution_time_ms: int,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
         file_path: str = "",
     ) -> None:
         """
@@ -517,7 +514,7 @@ class HuntCheckpointManager:
             end_time (datetime): End time.
             query_checkpoint_time (datetime): Query Checkpoint time.
             execution_time_ms (int): Execution time in milliseconds.
-            dfe_logger (logging.Logger): Logger instance.
+            logger (logging.Logger): Logger instance.
             thread_id (str): Thread ID.
             file_path (str): Path to the checkpoint file.
         """
@@ -549,12 +546,12 @@ class HuntCheckpointManager:
             with open(file_path, "w") as file:
                 json.dump(checkpoints, file, indent=4)
 
-            dfe_logger.info(f"Checkpoint created successfully in file [{file_path}]")
+            logger.info(f"Checkpoint created successfully in file [{file_path}]")
         except Exception as e:
-            dfe_logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
+            logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
 
     def create_batch_checkpoint_clickhouse(
-        self, ch_client, checkpoints: List[Dict[str, Any]], dfe_logger: logging.Logger
+        self, ch_client, checkpoints: List[Dict[str, Any]], logger: logging.Logger
     ):
         """
         Insert the checkpoint data into the ClickHouse table.
@@ -562,10 +559,10 @@ class HuntCheckpointManager:
         Args:
             ch_client: ClickHouse client.
             checkpoints (List[Dict[str, Any]]): List of checkpoint data.
-            dfe_logger (logging.Logger): Logger instance.
+            logger (logging.Logger): Logger instance.
         """
 
-        dfe_logger.debug(
+        logger.debug(
             f"Starting batch checkpointing into [{self.database_name}.{self.table_name}]."
         )
         try:
@@ -616,17 +613,17 @@ class HuntCheckpointManager:
                 """,
                 data,
             )
-            dfe_logger.debug(
+            logger.debug(
                 f"Batch checkpoint created successfully in Clickhouse table [{self.database_name}.{self.table_name}]."
             )
         except Exception as e:
-            dfe_logger.error(f"Failed to create batch checkpoints: {e}", exc_info=True)
+            logger.error(f"Failed to create batch checkpoints: {e}", exc_info=True)
 
     def create_batch_checkpoint_file(
         self,
         checkpoints: List[Dict[str, Any]],
         file_path: str,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
     ) -> None:
         """
         Create or append to the checkpoint file.
@@ -649,10 +646,10 @@ class HuntCheckpointManager:
                     file.seek(0)
                     json.dump(existing_checkpoints, file, indent=4)
 
-            dfe_logger.debug(
+            logger.debug(
                 f"Checkpoints successfully appended/created in file [{file_path}]"
             )
         except Exception as e:
-            dfe_logger.error(
+            logger.error(
                 f"Failed to create or append checkpoints: {e}", exc_info=True
             )

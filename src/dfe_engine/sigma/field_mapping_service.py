@@ -37,7 +37,7 @@ def read_csv_mappings(schema_path: str) -> Dict[str, str]:
 class FieldMappingService:
     """Service for handling field mappings between Sigma rules and schema fields."""
     
-    def __init__(self, config: dict, logger: DFELog) -> None:
+    def __init__(self, config: dict, logger) -> None:
         """
         Initialize the field mapping service.
         
@@ -46,7 +46,7 @@ class FieldMappingService:
             logger: Logger instance for logging
         """
         self.config = config
-        self.dfe_logger = logger
+        self.logger = logger
         self.rules_input_dir = config.get('global_settings', {}).get('sigma_rules_input_dir', '../.dfe_sigma_rules_output')
         
     def _load_included_sigma_rules(self, include_path: str) -> dict:
@@ -89,7 +89,7 @@ class FieldMappingService:
                 return rules_config
                 
         except Exception as e:
-            self.dfe_logger.error(f"Error loading included sigma rules from {include_path}: {e}")
+            self.logger.error(f"Error loading included sigma rules from {include_path}: {e}")
             
         return {}
 
@@ -178,7 +178,7 @@ class FieldMappingService:
             return metadata
             
         except Exception as e:
-            self.dfe_logger.error(f"Error reading schema metadata from {schema_path}: {e}")
+            self.logger.error(f"Error reading schema metadata from {schema_path}: {e}")
             return {}
 
     def get_rule_metadata(self, schema_config: dict, rule_name: str, rule: dict) -> Dict[str, Any]:
@@ -264,7 +264,7 @@ class FieldMappingService:
         for field in source_fields:
             if field not in mappings:
                 schema_info = f" in schema '{schema_name}'" if schema_name else ""
-                self.dfe_logger.warning(f"Missing mapping for Sigma field: {field}{schema_info}")
+                self.logger.warning(f"Missing mapping for Sigma field: {field}{schema_info}")
                 missing_mappings.append(field)
             else:
                 schema_field = mappings[field]
@@ -308,7 +308,7 @@ class FieldMappingService:
         
         for field in duplicate_mappings:
             schema_info = f" in schema '{schema_name}'" if schema_name else ""
-            self.dfe_logger.warning(f"Duplicate mapping to schema field: {field}{schema_info}")
+            self.logger.warning(f"Duplicate mapping to schema field: {field}{schema_info}")
             
         return missing_mappings
 
@@ -336,10 +336,10 @@ class FieldMappingService:
             for row in result:
                 mappings[row.sigma_field] = row.schema_field
                 
-            self.dfe_logger.info(f"Loaded {len(mappings)} field mappings from database for device '{device}'")
+            self.logger.info(f"Loaded {len(mappings)} field mappings from database for device '{device}'")
                 
         except Exception as e:
-            self.dfe_logger.error(f"Error fetching field mappings from database: {e}")
+            self.logger.error(f"Error fetching field mappings from database: {e}")
             
         return mappings
 
@@ -377,10 +377,10 @@ class FieldMappingService:
                     "os_order": row.os_order
                 }
                 
-            self.dfe_logger.info(f"Loaded meta schema '{schema_name}' from database with {len(schema_metadata)} columns")
+            self.logger.info(f"Loaded meta schema '{schema_name}' from database with {len(schema_metadata)} columns")
                 
         except Exception as e:
-            self.dfe_logger.error(f"Error fetching meta schema from database: {e}")
+            self.logger.error(f"Error fetching meta schema from database: {e}")
             
         return schema_metadata
 
@@ -418,10 +418,10 @@ class FieldMappingService:
                     "os_order": row.os_order
                 }
                 
-            self.dfe_logger.info(f"Loaded derived schema additions for '{schema_name}' from database with {len(schema_metadata)} columns")
+            self.logger.info(f"Loaded derived schema additions for '{schema_name}' from database with {len(schema_metadata)} columns")
                 
         except Exception as e:
-            self.dfe_logger.error(f"Error fetching derived schema additions from database: {e}")
+            self.logger.error(f"Error fetching derived schema additions from database: {e}")
             
         return schema_metadata
 
@@ -441,10 +441,10 @@ class FieldMappingService:
             
         excluded_columns = set()
         try:
-            self.dfe_logger.info(f"No column overrides available for derived schema '{schema_name}' in unified table structure")
+            self.logger.info(f"No column overrides available for derived schema '{schema_name}' in unified table structure")
                 
         except Exception as e:
-            self.dfe_logger.error(f"Error fetching derived schema overrides from database: {e}")
+            self.logger.error(f"Error fetching derived schema overrides from database: {e}")
             
         return excluded_columns
 
@@ -466,11 +466,11 @@ class FieldMappingService:
         
         if db_session:
             mappings = self.get_db_schema_mappings(device, db_session)
-            self.dfe_logger.info(f"Using database-based mappings with {len(mappings)} entries for device '{device}'")
+            self.logger.info(f"Using database-based mappings with {len(mappings)} entries for device '{device}'")
             return mappings
             
         file_mappings, _ = self.get_schema_mappings(schema_config, rule_name)
-        self.dfe_logger.info(f"Using file-based mappings with {len(file_mappings)} entries")
+        self.logger.info(f"Using file-based mappings with {len(file_mappings)} entries")
         return file_mappings
         
     def get_schema_mappings(self, schema_config: dict, rule_name: str) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
@@ -559,7 +559,7 @@ class FieldMappingService:
                 import json
                 rule = json.loads(rule)
             except (json.JSONDecodeError, TypeError):
-                self.dfe_logger.error(f"Failed to parse rule content: {rule[:100] if isinstance(rule, str) else type(rule)}...")
+                self.logger.error(f"Failed to parse rule content: {rule[:100] if isinstance(rule, str) else type(rule)}...")
                 return []
                 
         fields = set()

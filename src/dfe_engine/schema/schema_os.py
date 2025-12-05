@@ -4,7 +4,7 @@ from pathlib import Path
 import pandas as pd
 from typing import List, Optional
 from datetime import datetime
-import logging
+
 from .schema_util import (
     SchemaUtils,
     SchemaValidationError,

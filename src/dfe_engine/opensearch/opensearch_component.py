@@ -13,7 +13,7 @@ class ValidationError(Exception):
 
 
 class OpenSearchComponent:
-    def __init__(self, logger: DFELog):
+    def __init__(self, logger):
         self.logger = logger
 
     def validate_component_template(self, template):

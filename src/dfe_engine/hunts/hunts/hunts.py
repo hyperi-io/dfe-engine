@@ -1,4 +1,4 @@
-import logging
+
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -25,7 +25,7 @@ class Hunt:
         global_target_table_name: str,
         hunt_log_path: str,
         target_config_data: Dict,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
         checkpoint_timestamp_field: str = "timestamp_load",
         customer_filters: Dict[str, Dict[str, str]] = None,
         checkpoint_destination: str = "clickhouse",
@@ -75,11 +75,11 @@ class Hunt:
         self.unsuccessful_log_file_name = f"{self.hunt_log_name}_unsuccessful_queries_pid_{os.getpid()}_{self.execution_time_str}.log"
         self.pid = os.getpid()
         self.thread_id = thread_id
-        self.dfe_logger = dfe_logger
+        self.logger = logger
         self.hunt_checkpoint_path = hunt_checkpoint_path
         if hunt_checkpoint_path and not os.path.exists(hunt_checkpoint_path):
             os.makedirs(hunt_checkpoint_path, exist_ok=True)
-        self.checkpoint_manager = HuntCheckpointManager(self.dfe_logger)
+        self.checkpoint_manager = HuntCheckpointManager(self.logger)
         self.description = f"Hunt '{self.name}', ID: [{self.unique_id}], Scheduled: [{self.cron}], Number Rules: [{len(self.rules)}]"
 
     def __str__(self) -> str:
@@ -137,7 +137,7 @@ class Hunt:
         self.queries_by_customer[org_id] = []
         total_number_of_rules = len(self.rules)
 
-        self.dfe_logger.debug(
+        self.logger.debug(
             f"\n\n Building [{total_number_of_rules}] rules for [{org_id}] "
             f"to be executed at [{self.execution_time_str}] --- \n\n."
         )
@@ -155,7 +155,7 @@ class Hunt:
             )
 
             if not target_table_name or not source_table_name:
-                self.dfe_logger.error(
+                self.logger.error(
                     f"Missing table names for rule [{rule_name}]. Skipping this rule."
                 )
                 continue
@@ -205,7 +205,7 @@ class Hunt:
                 env, org_id=self.customer, customer_filters=self.customer_filters
             )
         except Exception as e:
-            self.dfe_logger.warning(
+            self.logger.warning(
                 f"An error occurred while converting YAML to SQL for customer "
                 f"'{self.customer}': {e}",
                 exc_info=True,
@@ -259,7 +259,7 @@ class Hunt:
         )
         scheduled_start_time_str = scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S")
 
-        self.dfe_logger.info(
+        self.logger.info(
             f"Running hunt '{self.name}' on pid [{self.pid}] with cron expression: "
             f"{self.cron} with customer [{customer}] @ Scheduled Start Time @ {scheduled_start_time_str} with buffer of {self.log_buffer} seconds "
             f"with initial_checkpoint_lookback_minutes {self.initial_checkpoint_lookback_minutes} minutes "
@@ -280,13 +280,13 @@ class Hunt:
 
         try:
             with ClickHouseManager.get_instance(
-                self.dfe_logger, self.target_config_data
+                self.logger, self.target_config_data
             ).get_clickhouse_client() as ch_client:
                 successful_checkpoints = []
                 for customer, list_query in self.queries_by_customer.items():
                     total_number_of_queries = len(list_query)
                     rule_counter = 0
-                    self.dfe_logger.info(
+                    self.logger.info(
                         f"Running hunt '{self.name}' on pid [{self.pid}] with cron expression: "
                         f"{self.cron} with [{len(list_query)}] queries with Buffer "
                         f"set to: {self.log_buffer}. Executing @{execution_time_str} Customer @ {customer} Scheduled Start Time @ {scheduled_start_time_str} with buffer of {self.log_buffer} seconds"
@@ -305,14 +305,14 @@ class Hunt:
                                 hunt_name=self.name,
                                 rule_name=rule["rule_name"],
                                 file_path=file_path,
-                                dfe_logger=self.dfe_logger,
+                                logger=self.logger,
                             )
                         )
 
                         if last_success_time is None:
                             minute_schedule = self.convert_cron_to_minutes()
                             if minute_schedule == -1:
-                                self.dfe_logger.error(
+                                self.logger.error(
                                     f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
                                 )
                                 raise Exception(
@@ -327,12 +327,12 @@ class Hunt:
                             last_success_time_str = last_success_time.strftime(
                                 "%Y-%m-%d %H:%M:%S"
                             )
-                            self.dfe_logger.warning(
+                            self.logger.warning(
                                 f"No previous successful run for {self.name}. Initial run will be run using the cron job candence generated last success time '{last_success_time_str}'."
                             )
 
                         elif last_success_time:
-                            self.dfe_logger.debug(
+                            self.logger.debug(
                                 f"Last successful run for {self.name}: {last_success_time} to query against checkpoint field {self.checkpoint_timestamp_field}"
                             )
                             last_success_time_str = last_success_time.strftime(
@@ -346,7 +346,7 @@ class Hunt:
                         ).replace("{ timestamp_condition }", timestamp_condition)
 
                         try:
-                            self.dfe_logger.info(
+                            self.logger.info(
                                 f"-------- DFE Hunt {self.name} Executing --------- \n"
                                 f"Executing [{total_number_of_queries}] rules for [{self.name}] "
                                 f"with CRON [{self.cron}] executing at [{execution_time_str}] For "
@@ -367,7 +367,7 @@ class Hunt:
 
                             rule_counter += 1
                             successful_queries += 1
-                            self.dfe_logger.debug(
+                            self.logger.debug(
                                 f"Rule [{rule['rule_name']}] ({rule_counter}/{total_number_of_queries}) for org [{customer}] "
                                 f"successfully executed in [{query_execution_time_ms}] ms \n"
                                 f"Query Results: [{query_result}]"
@@ -404,23 +404,23 @@ class Hunt:
                         except Exception as e:
                             failed_queries += 1
                             error_message = str(e).split("Stack trace")[0]
-                            self.dfe_logger.error(
+                            self.logger.error(
                                 f"Hunt {self.name} failed\n error: {str(e)}\n SQL ---> [{query}] ERROR MESSAGE [{error_message}] \n"
                             )
                             continue
 
-                        self.dfe_logger.debug(
+                        self.logger.debug(
                             f"Hunt [{self.name}] executed ({rule_counter}/{total_number_of_queries}) "
                             f"for org [{customer}] executed @{execution_time_str} previous checkpoint {last_success_time} new checkpoint @{scheduled_start_time_w_buffer_str}"
                         )
 
                 if self.checkpoint_destination == Hunt.CLICKHOUSE:
                     self.checkpoint_manager.create_batch_checkpoint_clickhouse(
-                        ch_client, successful_checkpoints, self.dfe_logger
+                        ch_client, successful_checkpoints, self.logger
                     )
                 else:
                     self.checkpoint_manager.create_batch_checkpoint_file(
-                        successful_checkpoints, file_path, self.dfe_logger
+                        successful_checkpoints, file_path, self.logger
                     )
 
         except Exception as e:
@@ -428,7 +428,7 @@ class Hunt:
                 f"Hunt {self.name} failed during hunt execution. See specific log for {self.name} - "
                 f"{self.pid} for more details: {str(e)}"
             )
-            self.dfe_logger.error(base_error_message, exc_info=True)
+            self.logger.error(base_error_message, exc_info=True)
             raise e
 
         total_execution_time = (

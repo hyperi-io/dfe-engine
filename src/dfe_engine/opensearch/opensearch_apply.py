@@ -1,12 +1,13 @@
-import requests
-import boto3
-import re
-from requests.auth import HTTPBasicAuth
-from hs_lib.logger import logger
-import logging
 import json
 import os
-from typing import Dict, Any, Optional, Tuple
+import re
+from typing import Any, Dict, Optional, Tuple
+
+import boto3
+import requests
+from hs_lib.logger import logger
+from requests.auth import HTTPBasicAuth
+
 from .opensearch_component import OpenSearchComponent
 from .opensearch_index_templates import OpenSearchIndexTemplates
 from .opensearch_ism import OpenSearchISM
@@ -25,13 +26,7 @@ class OpenSearchApply:
         bypass_auth=False,
         force_devtest=False,
     ):
-        log_level = logging.DEBUG if verbose else logging.INFO
-        self.logger = DFELog.get_root_logger(
-            logging_directory=log_path,
-            log_file_prefix="dfe-opensearch-apply",
-            log_level=log_level,
-            console_level=log_level
-        )
+        self.logger = logger
         self.logger.info("Initialized OpenSearchApply.")
         self.opensearch_url = opensearch_url
         self.auth = self.get_auth(
