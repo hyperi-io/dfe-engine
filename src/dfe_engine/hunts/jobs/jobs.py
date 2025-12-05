@@ -2,7 +2,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from apscheduler.triggers.interval import IntervalTrigger
-import logging
+
 from typing import Callable, Any, List, Optional, Dict
 from datetime import datetime
 

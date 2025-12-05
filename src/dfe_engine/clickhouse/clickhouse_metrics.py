@@ -1,8 +1,8 @@
 from typing import Dict
-from hs_lib.logger import logger
-from .clickhouse_manager import ClickHouseManager
 
-logger = DFELog().log
+from hs_lib.logger import logger
+
+from .clickhouse_manager import ClickHouseManager
 
 class ClickHouseMetrics:
     """Class for retrieving metrics from ClickHouse using the connection pool."""

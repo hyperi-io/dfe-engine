@@ -3,7 +3,7 @@ from .schema_os import OpenSearchTemplate
 import importlib.resources as pkg_resources
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
-import logging
+
 import os
 import fnmatch
 import sqlparse

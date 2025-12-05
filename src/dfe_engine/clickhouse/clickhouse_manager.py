@@ -1,5 +1,5 @@
 import os
-import logging
+
 from threading import Lock
 from clickhouse_pool import ChPool
 

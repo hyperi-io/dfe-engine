@@ -1,7 +1,7 @@
 import os
 import uuid
 import json
-import logging
+
 import requests
 import urllib.parse
 from datetime import datetime
@@ -62,12 +62,7 @@ class OpenSearchDashboardIndexPattern:
         """
         self.opensearch = opensearch_apply
         log_level = logging.DEBUG if verbose else logging.INFO
-        self.logger = DFELog.get_root_logger(
-            logging_directory=log_path,
-            log_file_prefix="dfe-opensearch-dashboard",
-            log_level=log_level,
-            console_level=log_level
-        )
+        self.logger = logger
         self.logger.info("Initialized OpenSearchDashboardIndexPattern.")
         self.output_dir = None
         self.session = requests.Session()

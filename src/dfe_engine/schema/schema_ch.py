@@ -1,5 +1,5 @@
 from datetime import datetime
-import logging
+
 from pathlib import Path
 import typing
 import pandas as pd
