@@ -2,7 +2,7 @@ import os
 import yaml
 from jinja2 import Environment, TemplateSyntaxError
 from yaml.parser import ParserError
-import logging
+
 
 
 class HuntValidator:

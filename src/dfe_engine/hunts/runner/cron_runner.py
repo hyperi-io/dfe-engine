@@ -3,7 +3,7 @@ import time
 import threading
 import os
 import sys
-import logging
+
 from datetime import datetime, timezone
 from jinja2 import Environment, FileSystemLoader
 from .cron_job import CronJob
@@ -24,7 +24,7 @@ class CronRunner:
         hunt_checkpoint_path: str,
         hunt_cron_task_timeout: int,
         checkpoint_destination: str,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
         hunt_log_path: str,
         checkpoint_timestamp_field: str,
         target_config_data: dict,
@@ -35,7 +35,7 @@ class CronRunner:
         self.hunt_cron_task_timeout = hunt_cron_task_timeout
         self.checkpoint_destination = checkpoint_destination
         self.target_config_data = target_config_data
-        self.dfe_logger = dfe_logger
+        self.logger = logger
         self.checkpoint_timestamp_field = checkpoint_timestamp_field
         self.cron_runner = None
         self.daemon_pid = None
@@ -81,7 +81,7 @@ class CronRunner:
             - The `self.run_async()` coroutine is run until complete within the event loop.
             - The event loop is closed after completion to clean up resources.
         """
-        self.dfe_logger.info(" forking cron runner onto a thread target")
+        self.logger.info(" forking cron runner onto a thread target")
 
         pid = os.fork()
         if pid > 0:
@@ -93,14 +93,14 @@ class CronRunner:
             sys.exit(0)
 
         self.daemon_pid = os.getpid()
-        self.dfe_logger.info(f"Daemon process started with PID: [{self.daemon_pid}]")
+        self.logger.info(f"Daemon process started with PID: [{self.daemon_pid}]")
 
         asyncio.set_event_loop(asyncio.new_event_loop())
         loop = asyncio.get_event_loop()
         try:
             return loop.run_until_complete(self.run_async())
         except Exception:
-            self.dfe_logger.exception(
+            self.logger.exception(
                 "Unhandled exception occurred in the CronRunner:", exc_info=True
             )
         finally:
@@ -116,7 +116,7 @@ class CronRunner:
         try:
             return Environment(loader=FileSystemLoader(self.rule_repo_dir))
         except Exception:
-            self.dfe_logger.exception("Failed to setup the Jinja2 environment.")
+            self.logger.exception("Failed to setup the Jinja2 environment.")
             raise
 
     async def setup_cron_runner(self, rules_env):
@@ -127,7 +127,7 @@ class CronRunner:
                     if self.cron_runner is None:
                         self.cron_runner = CronJob(
                             hunt_log_path=self.hunt_log_path,
-                            dfe_logger=self.dfe_logger,
+                            logger=self.logger,
                             target_config_data=self.target_config_data,
                             checkpoint_timestamp_field=self.checkpoint_timestamp_field,
                         )
@@ -141,7 +141,7 @@ class CronRunner:
                         )
                         await self.cron_runner.start_scheduler()
         except Exception as e:
-            self.dfe_logger.error(
+            self.logger.error(
                 "Failed to setup or start the cron runner for scheduler.",
                 exc_info=True,
             )
@@ -156,14 +156,14 @@ class CronRunner:
                 if self.hunt_cron_task_timeout and self.hunt_cron_task_timeout > 0:
                     elapsed_time = time.time() - start_time
                     self.hunt_cron_task_timeout - elapsed_time
-                    # self.dfe_logger.info(f"Timeout set, this scheduler will stop in: {int(time_left)} seconds. PID: [{self.daemon_pid}]")
+                    # self.logger.info(f"Timeout set, this scheduler will stop in: {int(time_left)} seconds. PID: [{self.daemon_pid}]")
 
                 if (
                     self.hunt_cron_task_timeout
                     and self.hunt_cron_task_timeout > 0
                     and elapsed_time >= self.hunt_cron_task_timeout
                 ):
-                    self.dfe_logger.info(
+                    self.logger.info(
                         f"Timeout reached, stopping scheduler. PID: [{self.daemon_pid}]"
                     )
                     if not scheduler_stopped:
@@ -172,13 +172,13 @@ class CronRunner:
                     break
                 await asyncio.sleep(0.10)
         except asyncio.CancelledError:
-            self.dfe_logger.warning(
+            self.logger.warning(
                 "Cron runner operation cancelled. PID: [{self.daemon_pid}]"
             )
             if not scheduler_stopped:
                 await self.stop_cron_runner()
         except Exception:
-            self.dfe_logger.error(
+            self.logger.error(
                 "Unexpected error during job processing. PID: [{self.daemon_pid}]",
                 exc_info=True,
             )
@@ -191,19 +191,19 @@ class CronRunner:
         try:
             if self.cron_runner:
                 await self.cron_runner.stop_scheduler()
-                self.dfe_logger.info(
+                self.logger.info(
                     f"Scheduler stopped successfully. PID: [{self.daemon_pid}]"
                 )
                 for hunt in self.cron_runner.hunts:
-                    self.dfe_logger.info(
+                    self.logger.info(
                         f"Cron Runner Hunt - [{hunt.description}] PID: [{self.daemon_pid}]"
                     )
             else:
-                self.dfe_logger.warning(
+                self.logger.warning(
                     f"Scheduler is not running. PID: [{self.daemon_pid}]"
                 )
         except Exception as e:
-            self.dfe_logger.exception(
+            self.logger.exception(
                 f"Failed to stop the scheduler. PID: [{self.daemon_pid}]", exc_info=True
             )
             raise e

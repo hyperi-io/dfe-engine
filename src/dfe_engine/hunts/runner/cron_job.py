@@ -4,7 +4,7 @@ import uuid
 from typing import List, Callable
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
-import logging
+
 import os
 from datetime import datetime, timezone
 from jinja2 import Environment
@@ -23,7 +23,7 @@ class CronJob:
     def __init__(
         self,
         hunt_log_path: str,
-        dfe_logger: logging.Logger,
+        logger: logging.Logger,
         target_config_data: dict,
         checkpoint_timestamp_field: str,
         max_workers=None,
@@ -31,13 +31,13 @@ class CronJob:
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
         """
-        self.scheduler = JobScheduler(dfe_logger)
-        self.dfe_logger = dfe_logger
+        self.scheduler = JobScheduler(logger)
+        self.logger = logger
         self.checkpoint_timestamp_field = checkpoint_timestamp_field
         self.target_config_data = target_config_data
         self.hunt_log_path = hunt_log_path
         self.hunts = []
-        self.dfe_logger.info("cron job dfe logger initialized")
+        self.logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.stagger_minutes = 0
@@ -64,11 +64,11 @@ class CronJob:
                 with open(thread_tracking_file_path, "a") as file:
                     file.write(log_entry)
             else:
-                self.dfe_logger.warning(
+                self.logger.warning(
                     f"Hunt Directory contains this illegal file: [{hunt_file}]."
                 )
 
-        self.dfe_logger.debug(
+        self.logger.debug(
             f"Logged thread details for all relevant hunts in directory: {hunt_dir}."
         )
 
@@ -91,12 +91,12 @@ class CronJob:
         :param checkpoint_destination: The destination type for checkpoints.
         """
         number_of_hunts = 0
-        self.dfe_logger.info(
+        self.logger.info(
             f"Current working directory is {os.getcwd()} - {hunt_directory}"
         )
 
         for filename in os.listdir(hunt_directory):
-            self.dfe_logger.info(
+            self.logger.info(
                 f"Processing hunts [{hunt_directory}] - [{filename}] - [{number_of_hunts}]"
             )
 
@@ -109,7 +109,7 @@ class CronJob:
                             hunt_data,
                             env,
                             rule_repo_dir,
-                            self.dfe_logger,
+                            self.logger,
                             self.checkpoint_timestamp_field,
                         )
                         await self.process_hunt(
@@ -122,15 +122,15 @@ class CronJob:
                         )
                         number_of_hunts += 1
                     except ValueError as ve:
-                        self.dfe_logger.error(
+                        self.logger.error(
                             f"Validation error in file {filename}: {ve}"
                         )
                     except yaml.YAMLError as ye:
-                        self.dfe_logger.error(
+                        self.logger.error(
                             f"Error parsing YAML file {filename}: {ye}"
                         )
 
-        self.dfe_logger.info(f"Added [{number_of_hunts}]")
+        self.logger.info(f"Added [{number_of_hunts}]")
 
     async def process_hunt(
         self,
@@ -147,7 +147,7 @@ class CronJob:
         :param hunt_data: A dictionary containing hunt configuration.
         :param env: A Jinja2 Environment instance for SQL template rendering.
         """
-        self.dfe_logger.debug(f"Creating hunt with this data: \n {hunt_data}")
+        self.logger.debug(f"Creating hunt with this data: \n {hunt_data}")
         customers = hunt_data.get("customers", [])
 
         cron_config = hunt_data.get("cron", [])
@@ -159,16 +159,16 @@ class CronJob:
                     f"Comma-separated cron expressions are not supported: '{cron_config}'. "
                     f'Please use a list format instead:\ncron:\n  - "{cron_config.split(",")[0]}"\n  - "{cron_config.split(",")[1]}"'
                 )
-                self.dfe_logger.error(error_msg)
+                self.logger.error(error_msg)
                 raise ValueError(error_msg)
             cron_expressions = [cron_config]
-            self.dfe_logger.info(f"Using single cron expression: {cron_config}")
+            self.logger.info(f"Using single cron expression: {cron_config}")
         elif isinstance(cron_config, list):
             cron_expressions = cron_config
-            self.dfe_logger.info(f"Using multiple cron expressions: {cron_expressions}")
+            self.logger.info(f"Using multiple cron expressions: {cron_expressions}")
         else:
             error_msg = f"Invalid cron format: {cron_config}. Must be a string or list."
-            self.dfe_logger.error(error_msg)
+            self.logger.error(error_msg)
             raise ValueError(error_msg)
 
         if not self.checkpoint_timestamp_field:
@@ -183,7 +183,7 @@ class CronJob:
         tasks = []
 
         for cron_expression in cron_expressions:
-            self.dfe_logger.info(
+            self.logger.info(
                 f"Determining the frequency of hunt with cron: {cron_expression}"
             )
 
@@ -191,16 +191,16 @@ class CronJob:
                 hunt_frequency_minutes = self.calculate_frequency_from_cron(
                     cron_expression
                 )
-                self.dfe_logger.info(
+                self.logger.info(
                     f"Hunt Frequency from cron {cron_expression}: {hunt_frequency_minutes} minutes"
                 )
                 if hunt_frequency_minutes <= 0:
-                    self.dfe_logger.warning(
+                    self.logger.warning(
                         f"Invalid hunt frequency ({hunt_frequency_minutes} minutes) from cron {cron_expression}. Skipping."
                     )
                     continue
             except ValueError as e:
-                self.dfe_logger.error(
+                self.logger.error(
                     f"Invalid cron expression {cron_expression}: {e}. Skipping."
                 )
                 continue
@@ -208,12 +208,12 @@ class CronJob:
             min_intervals = max(total_customers, 10)
             self.stagger_minutes = hunt_frequency_minutes / min_intervals
             self.stagger_minutes = max(1, round(self.stagger_minutes))
-            self.dfe_logger.debug(
+            self.logger.debug(
                 f"Calculated stagger interval: {self.stagger_minutes} minutes across {min_intervals} intervals"
             )
 
             for customer in customers:
-                self.dfe_logger.debug(
+                self.logger.debug(
                     f"Scheduling hunts for customer: {customer} with cron: {cron_expression} and checkpoint field: {actual_checkpoint_timestamp_field}"
                 )
                 thread_id = threading.get_native_id()
@@ -231,7 +231,7 @@ class CronJob:
                 staggered_cron = self.modify_cron_expression(
                     cron_expression, minute_offset, total_customers
                 )
-                self.dfe_logger.debug(
+                self.logger.debug(
                     f"Original cron expression: {cron_expression}, staggered cron expression: {staggered_cron}"
                 )
 
@@ -250,7 +250,7 @@ class CronJob:
                     checkpoint_destination=checkpoint_destination,
                     hunt_checkpoint_path=hunt_checkpoint_path,
                     thread_id=thread_id_customer,
-                    dfe_logger=self.dfe_logger,
+                    logger=self.logger,
                 )
 
                 hunt.build_sql_queries_for_customers(env)
@@ -259,10 +259,10 @@ class CronJob:
                     job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}"
                 )
                 self.hunts.append(hunt)
-                self.dfe_logger.debug(
+                self.logger.debug(
                     f"Total hunts: {len(self.hunts)} - {hunt.description}"
                 )
-                self.dfe_logger.debug(f"Hunt Config: {hunt}")
+                self.logger.debug(f"Hunt Config: {hunt}")
                 customer_counter += 1
         if tasks:
             await asyncio.gather(*tasks)
@@ -309,7 +309,7 @@ class CronJob:
         """
         parts = cron_expression.split()
         if len(parts) != 5:
-            self.dfe_logger.warning(
+            self.logger.warning(
                 f"Invalid cron expression: {cron_expression}. Using original."
             )
             return cron_expression
@@ -318,7 +318,7 @@ class CronJob:
 
         if parts[0] == "*" or (parts[0].count(",") > 30):
             parts[0] = "*"
-            self.dfe_logger.info(
+            self.logger.info(
                 f"Modified for per-minute execution with customer {minute_offset}"
             )
             return " ".join(parts)
@@ -340,7 +340,7 @@ class CronJob:
 
                 parts[0] = str(minute_value)
                 parts[1] = f"{hour_offset}/{hour_step}"
-                self.dfe_logger.info(
+                self.logger.info(
                     f"Staggered long-interval cron: original={cron_expression}, modified={' '.join(parts)}, "
                     f"will run at minute {minute_value} of hours {hour_offset}, {hour_offset + hour_step}, "
                     f"{hour_offset + (2 * hour_step)}, etc."
@@ -358,7 +358,7 @@ class CronJob:
             new_minutes = [(int(m) + minute_offset) % 60 for m in minutes]
             parts[0] = ",".join(map(str, sorted(new_minutes)))
         except ValueError:
-            self.dfe_logger.warning(
+            self.logger.warning(
                 f"Cannot modify minute field: {parts[0]}. Using original."
             )
             return cron_expression
@@ -380,7 +380,7 @@ class CronJob:
             )
             return result
         except Exception as e:
-            self.dfe_logger.error(
+            self.logger.error(
                 f"Error executing hunt for customer {customer}: {e}", exc_info=True
             )
             raise
@@ -399,12 +399,12 @@ class CronJob:
             await self.scheduler.add_job_with_cron(
                 job_function, cron_expression, job_name
             )
-            self.dfe_logger.debug(f"get_scheduled_jobs - [{self.get_scheduled_jobs()}]")
-            self.dfe_logger.debug(
+            self.logger.debug(f"get_scheduled_jobs - [{self.get_scheduled_jobs()}]")
+            self.logger.debug(
                 f"describe_all_job_functions - [{self.scheduler.describe_all_job_functions()}]"
             )
         except Exception as e:
-            self.dfe_logger.error(f"Error adding cron job: {e}", exc_info=True)
+            self.logger.error(f"Error adding cron job: {e}", exc_info=True)
 
     async def stop_scheduler(self):
         """
@@ -413,25 +413,25 @@ class CronJob:
         try:
             await self.scheduler.stop_all_jobs()
         except Exception as e:
-            self.dfe_logger.error(f"Error stopping scheduler: {e}", exc_info=True)
+            self.logger.error(f"Error stopping scheduler: {e}", exc_info=True)
 
     async def start_scheduler(self) -> None:
         """
         Starts the scheduler if it's not already running.
         """
         if self.scheduler is None:
-            self.dfe_logger.warning("Scheduler is not initialized.")
+            self.logger.warning("Scheduler is not initialized.")
             return
         if not self.hunts:
-            self.dfe_logger.warning("No jobs to run. Scheduler not started.")
+            self.logger.warning("No jobs to run. Scheduler not started.")
             return
         try:
             await self.scheduler.start_scheduler()
-            self.dfe_logger.info("Scheduler started successfully with these hunts.")
+            self.logger.info("Scheduler started successfully with these hunts.")
             for hunt in self.hunts:
-                self.dfe_logger.debug(f"Cron Job Hunt Description [{hunt.description}]")
+                self.logger.debug(f"Cron Job Hunt Description [{hunt.description}]")
         except Exception as e:
-            self.dfe_logger.error(f"Error starting scheduler: {e}", exc_info=True)
+            self.logger.error(f"Error starting scheduler: {e}", exc_info=True)
 
     def get_scheduled_jobs(self) -> List[str]:
         """
@@ -446,6 +446,6 @@ class CronJob:
         Logs the scheduled jobs.
         """
         if not self.scheduler.get_scheduled_jobs():
-            self.dfe_logger.info("No scheduled jobs to display.")
+            self.logger.info("No scheduled jobs to display.")
             return None
         self.scheduler.print_scheduled_jobs()

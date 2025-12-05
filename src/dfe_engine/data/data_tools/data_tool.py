@@ -1,5 +1,5 @@
 import json
-import logging
+
 import datetime
 import pytz
 from clickhouse_driver import Client

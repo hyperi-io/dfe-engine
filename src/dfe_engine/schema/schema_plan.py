@@ -3,7 +3,7 @@ from typing import List, Tuple, Optional
 import re
 import os
 import json
-import logging
+
 from pathlib import Path
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from ..clickhouse.clickhouse_errors_mapping import ClickHouseErrorHandler

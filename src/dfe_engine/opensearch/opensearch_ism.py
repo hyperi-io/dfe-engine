@@ -4,7 +4,7 @@ from hs_lib.logger import logger
 
 
 class OpenSearchISM:
-    def __init__(self, logger: DFELog):
+    def __init__(self, logger):
         self.logger = logger
 
     def validate_ism_policy(self, policy):

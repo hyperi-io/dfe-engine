@@ -13,7 +13,7 @@ from ..runner.cron_runner import CronRunner
 from ...config.config_loader import DFEConfigLoader
 import multiprocessing
 import time
-import logging
+
 
 
 class HuntController:
@@ -33,25 +33,23 @@ class HuntController:
         test_mode: bool = False,
         verbose: bool = False,
     ) -> None:
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=arg_dfe_log_path, log_file_prefix="dfe-scheduler-hunt"
-        )
+        logger = logger
         if verbose:
-            dfe_logger.setLevel(logging.DEBUG)
+            logger.setLevel(logging.DEBUG)
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
-                arg_dfe_config_path, require_config=False, logger=dfe_logger
+                arg_dfe_config_path, require_config=False, logger=logger
             )
         except FileNotFoundError as error:
-            dfe_logger.error(f"Error loading the dfe config package: {error}")
+            logger.error(f"Error loading the dfe config package: {error}")
 
         if arg_target_file_path is None:
-            dfe_logger.warning(
+            logger.warning(
                 f" the arg_target_file_path is None. Please review the parameters.  Value [{arg_target_file_path}]"
             )
 
         if dfe_config.get("hunt_scheduler") is None:
-            dfe_logger.warning(
+            logger.warning(
                 " the dfe_package.yaml has no hunt scheduler configration files is None. You will need to ensure that you have passed in all settings via the CLI."
             )
 
@@ -96,12 +94,12 @@ class HuntController:
         )
 
         if targets_file_path is None:
-            dfe_logger.warning(
+            logger.warning(
                 f" the targets_file_path is still set to None. Please review the parameters and the dfe_package file. Value [{targets_file_path}]"
             )
 
         try:
-            dfe_logger.info(
+            logger.info(
                 f" Reading Target Config of {arg_target} from this file {targets_file_path}"
             )
             target_config_data = DFEConfigLoader.read_target_config(
@@ -109,12 +107,12 @@ class HuntController:
             )
 
             DFEConfigLoader.print_target(
-                logger=dfe_logger,
+                logger=logger,
                 targets_file_path=targets_file_path,
                 target_name=arg_target,
             )
         except FileNotFoundError as error:
-            dfe_logger.error(
+            logger.error(
                 f"Unable to load target or retrieve the hunt config paths: {error}",
                 exc_info=True,
             )
@@ -128,13 +126,13 @@ class HuntController:
         )
 
         if not targets_file_path:
-            dfe_logger.error("Target file path is missing.")
+            logger.error("Target file path is missing.")
             return
         if not hunt_config_path:
-            dfe_logger.error("Hunt config path is missing.")
+            logger.error("Hunt config path is missing.")
             return
         if not hunt_rules_path:
-            dfe_logger.error("Hunt rules path is missing.")
+            logger.error("Hunt rules path is missing.")
             return
 
         hunt_dirs = (
@@ -148,7 +146,7 @@ class HuntController:
             else [hunt_rules_path]
         )
 
-        dfe_logger.info(
+        logger.info(
             f"Processing {len(hunt_dirs)} hunt directories and {len(rule_dirs)} rule directories"
         )
 
@@ -157,7 +155,7 @@ class HuntController:
                 f"Number of hunt directories ({len(hunt_dirs)}) does not match "
                 f"number of rule directories ({len(rule_dirs)}). Please ensure they are paired correctly."
             )
-            dfe_logger.error(error_msg)
+            logger.error(error_msg)
             raise ValueError(error_msg)
 
         for hunt_dir in hunt_dirs:
@@ -188,7 +186,7 @@ class HuntController:
         #     to detect and debug issues during testing
 
         for hunt_dir, rule_dir in zip(hunt_dirs, rule_dirs):
-            dfe_logger.info(
+            logger.info(
                 f"Starting scheduler for paired hunt directory: {hunt_dir} and rule directory: {rule_dir}"
             )
 
@@ -202,7 +200,7 @@ class HuntController:
                     hunt_num_threads,
                     checkpoint_destination,
                     hunt_log_path,
-                    dfe_logger,
+                    logger,
                     checkpoint_timestamp_field,
                     target_config_data,
                 )
@@ -218,7 +216,7 @@ class HuntController:
                         hunt_num_threads,
                         checkpoint_destination,
                         hunt_log_path,
-                        dfe_logger,
+                        logger,
                         checkpoint_timestamp_field,
                         target_config_data,
                     ),
@@ -227,14 +225,14 @@ class HuntController:
                 processes.append(process)
                 time.sleep(1)
 
-        dfe_logger.info("Hunt scheduler processes started.")
+        logger.info("Hunt scheduler processes started.")
 
         if not test_mode:
             try:
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:
-                dfe_logger.info(
+                logger.info(
                     "Exiting main process. Hunt scheduler daemons will continue running."
                 )
 
@@ -247,7 +245,7 @@ class HuntController:
         hunt_num_threads,
         checkpoint_destination,
         hunt_log_path,
-        dfe_logger,
+        logger,
         checkpoint_timestamp_field,
         target_config_data,
     ):
@@ -260,7 +258,7 @@ class HuntController:
                 num_threads=hunt_num_threads,
                 checkpoint_destination=checkpoint_destination,
                 hunt_log_path=hunt_log_path,
-                dfe_logger=dfe_logger,
+                logger=logger,
                 checkpoint_timestamp_field=checkpoint_timestamp_field,
                 target_config_data=target_config_data,
             )
@@ -268,7 +266,7 @@ class HuntController:
             scheduler.print_hunt_parameters()
             asyncio.run(scheduler.schedule_hunts_async())
         except Exception as e:
-            dfe_logger.error(
+            logger.error(
                 f"Error running scheduler for hunt directory {hunt_dir} and rule directory {rule_dir}: {e}",
                 exc_info=True,
             )
@@ -316,9 +314,7 @@ class HuntController:
             args_hunt_log_path (Optional[str]): Path to the hunt files directory for log files.
         """
 
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=args_log_path, log_file_prefix="dfe-list-hunts"
-        )
+        logger = logger
 
         if not args_hunt_log_path:
             args_hunt_log_path = os.getenv(
@@ -328,7 +324,7 @@ class HuntController:
 
         try:
             config = DFEConfigLoader.load_dfe_package(
-                require_config=False, logger=dfe_logger
+                require_config=False, logger=logger
             )
         except FileNotFoundError as error:
             print(f"Error: {error}")
@@ -337,9 +333,7 @@ class HuntController:
         tmp_logs = args_log_path or config.get("global_settings", {}).get(
             "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
         )
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=tmp_logs, log_file_prefix="dfe-hunt-cli"
-        )
+        logger = logger
         hunt_log_file_path = os.path.join(
             args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
         )
@@ -392,12 +386,12 @@ class HuntController:
             )
             formatted_templates = []
             headers = []
-            dfe_logger.info(
+            logger.info(
                 f"\n\n{table_str}"
                 + tabulate(formatted_templates, headers=headers, tablefmt="grid")
             )
         else:
-            dfe_logger.warning("PID not found")
+            logger.warning("PID not found")
 
     @staticmethod
     def view_hunts(
@@ -414,9 +408,7 @@ class HuntController:
             args_hunt_log_path (Optional[str]): Path to the hunt files directory for log files.
         """
 
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=args_log_path, log_file_prefix="dfe-view-hunts"
-        )
+        logger = logger
 
         if not args_hunt_log_path:
             args_hunt_log_path = os.getenv(
@@ -426,7 +418,7 @@ class HuntController:
 
         try:
             config = DFEConfigLoader.load_dfe_package(
-                require_config=False, logger=dfe_logger
+                require_config=False, logger=logger
             )
         except FileNotFoundError as error:
             print(f"Error: {error}")
@@ -437,9 +429,7 @@ class HuntController:
         )
         pids = [args_pid] if not isinstance(args_pid, list) else args_pid
 
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=tmp_logs, log_file_prefix="dfe-hunt-cli"
-        )
+        logger = logger
 
         hunt_log_file_path = os.path.join(
             args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
@@ -482,7 +472,7 @@ class HuntController:
                 df["num_threads"] = df["num_threads"].fillna("unknown").astype("Int64")
 
                 if df.empty:
-                    dfe_logger.warning("PID not found")
+                    logger.warning("PID not found")
                 else:
                     data_list = df[
                         [
@@ -498,11 +488,11 @@ class HuntController:
                     tabulated_output = tabulate(
                         data_list, headers="keys", tablefmt="grid"
                     )
-                    dfe_logger.info(f"\n\n{tabulated_output}")
+                    logger.info(f"\n\n{tabulated_output}")
             else:
-                dfe_logger.warn("PID not found")
+                logger.warn("PID not found")
         else:
-            dfe_logger.warn("PID not found")
+            logger.warn("PID not found")
 
     @staticmethod
     def print_hunt_parameters(
@@ -522,21 +512,19 @@ class HuntController:
             args_target (Optional[str]): The name of the target environment.
             args_target_file_path (Optional[str]): The location of the dfe_target file.
         """
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=args_log_path, log_file_prefix="dfe-print-hunt-parameters"
-        )
+        logger = logger
 
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path,
                 require_config=False,
-                logger=dfe_logger,
+                logger=logger,
             )
             dfe_config_target_path = dfe_config["global_settings"].get(
                 "target_path", None
             )
         except FileNotFoundError as error:
-            dfe_logger.error(
+            logger.error(
                 f"Error: Was not able to load the dfe_package.yaml:\n{error}"
             )
             return
@@ -553,7 +541,7 @@ class HuntController:
             hunt_config_path = target_config_data["hunt_config_path"]
             hunt_rules_path = target_config_data["hunt_rules_path"]
         except FileNotFoundError as error:
-            dfe_logger.error(f"Unable to load target: {error}")
+            logger.error(f"Unable to load target: {error}")
             sys.exit(1)
 
         num_threads = dfe_config["hunt_scheduler"]["num_threads"]
@@ -578,19 +566,19 @@ class HuntController:
             "Configuration root path:": credentials_file_path,
         }
 
-        dfe_logger.info("\n--- Hunt Configuration Settings ---\n")
+        logger.info("\n--- Hunt Configuration Settings ---\n")
         for key, value in hunt_configuration_settings.items():
-            dfe_logger.info(f"{key:75} {value}")
-        dfe_logger.info("-----------------------------------\n")
+            logger.info(f"{key:75} {value}")
+        logger.info("-----------------------------------\n")
 
         try:
             rules = os.listdir(hunt_rules_path)
             for entry in rules:
                 entry_path = os.path.join(hunt_rules_path, entry)
                 if os.path.isfile(entry_path):
-                    dfe_logger.info(f"Rule Template Loading: {entry}")
+                    logger.info(f"Rule Template Loading: {entry}")
         except FileNotFoundError as e:
-            dfe_logger.error(f"Error accessing directory '{hunt_rules_path}': {e}")
+            logger.error(f"Error accessing directory '{hunt_rules_path}': {e}")
 
     @staticmethod
     def kill_all_hunts(args_log_path: str, args_hunt_log_path: Optional[str]) -> None:
@@ -602,9 +590,7 @@ class HuntController:
             args_log_path (str): Path to the DFE log directory.
             args_hunt_log_path (Optional[str]): Path to the hunt logs directory.
         """
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=args_log_path, log_file_prefix="dfe-kill-hunts"
-        )
+        logger = logger
 
         if not args_hunt_log_path:
             args_hunt_log_path = os.getenv(
@@ -619,20 +605,20 @@ class HuntController:
                         try:
                             pid_part = int(line.split("pid=")[1].split(",")[0].strip())
                             os.kill(pid_part, signal.SIGTERM)
-                            dfe_logger.info(f"Terminated process with PID: {pid_part}")
+                            logger.info(f"Terminated process with PID: {pid_part}")
                         except ValueError:
-                            dfe_logger.error(
+                            logger.error(
                                 f"Invalid PID format in line: {line.strip()}"
                             )
                         except ProcessLookupError:
-                            dfe_logger.error(f"No process found with PID: {pid_part}")
+                            logger.error(f"No process found with PID: {pid_part}")
 
                 thread_tracking_file_path.unlink()
-                dfe_logger.info(f"Deleted tracking file: {thread_tracking_file_path}")
+                logger.info(f"Deleted tracking file: {thread_tracking_file_path}")
             except Exception as e:
-                dfe_logger.error(f"Error handling thread tracking file: {e}")
+                logger.error(f"Error handling thread tracking file: {e}")
         else:
-            dfe_logger.info("No tracking file found.")
+            logger.info("No tracking file found.")
 
     @staticmethod
     def kill_hunt(
@@ -651,33 +637,29 @@ class HuntController:
             args_log_path (Optional[str]): Path to the common directory for log files.
         """
 
-        dfe_logger = DFELog.get_root_logger(
-            logging_directory=args_log_path, log_file_prefix="dfe-hunt-cli"
-        )
+        logger = logger
         try:
             dfe_package_config = DFEConfigLoader.load_dfe_package(
-                args_dfe_package_file_path, require_config=False, logger=dfe_logger
+                args_dfe_package_file_path, require_config=False, logger=logger
             )
         except FileNotFoundError as error:
-            dfe_logger = DFELog.get_root_logger(
-                logging_directory=args_log_path
-                or os.path.join(os.getcwd(), "tmp/logs/"),
+            logger = logger, "tmp/logs/"),
                 log_file_prefix="dfe-hunt-cli",
             )
-            dfe_logger.error(f"Error: {error}")
+            logger.error(f"Error: {error}")
             return
 
         args_log_path = args_log_path or dfe_package_config.get(
             "global_settings", {}
         ).get("tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/"))
 
-        DFEConfigLoader.print_default_target(logger=dfe_logger)
+        DFEConfigLoader.print_default_target(logger=logger)
 
         try:
             os.kill(args_kill_pid, signal.SIGTERM)
-            dfe_logger.info(f"Killed process with PID: {args_kill_pid}")
+            logger.info(f"Killed process with PID: {args_kill_pid}")
         except ProcessLookupError:
-            dfe_logger.warning(f"Process with PID {args_kill_pid} not found.")
+            logger.warning(f"Process with PID {args_kill_pid} not found.")
 
     @staticmethod
     def parse_log_entry(line: str) -> Dict[str, Any]:

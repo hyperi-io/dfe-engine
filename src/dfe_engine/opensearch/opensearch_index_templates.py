@@ -3,7 +3,7 @@ from hs_lib.logger import logger
 
 
 class OpenSearchIndexTemplates:
-    def __init__(self, logger: DFELog):
+    def __init__(self, logger):
         self.logger = logger
 
     def validate_index_template(self, template):

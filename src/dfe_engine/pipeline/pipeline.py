@@ -8,7 +8,7 @@ from .pipeline_util import (
     PipelineSchemaError,
 )
 from typing import Dict
-import logging
+
 
 
 class Pipeline:

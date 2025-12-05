@@ -1,5 +1,5 @@
 import requests
-import logging
+
 from typing import List
 from hs_lib.logger import logger
 
@@ -26,12 +26,7 @@ class OpenSearchTenancy:
         self.ca_cert_path = ca_cert_path
         self.excluded_tenants = excluded_tenants or ["global_tenant", "admin"]
         log_level = logging.DEBUG if verbose else logging.INFO
-        self.logger = DFELog.get_root_logger(
-            logging_directory=log_path,
-            log_file_prefix="dfe-opensearch-tenancy",
-            log_level=log_level,
-            console_level=log_level
-        )
+        self.logger = logger
         self.logger.info("Initialized OpenSearchTenancy.")
 
     def _make_request(self, method: str, url: str, **kwargs) -> requests.Response:

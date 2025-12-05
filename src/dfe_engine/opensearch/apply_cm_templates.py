@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-import logging
+
 from typing import Dict, List, Optional
 from pathlib import Path
 from hs_lib.logger import logger
@@ -33,12 +33,7 @@ class CMTemplateApply:
             verbose: Enable verbose logging
         """
         log_level = logging.DEBUG if verbose else logging.INFO
-        self.logger = DFELog.get_root_logger(
-            logging_directory=log_path,
-            log_file_prefix="dfe-cm-template-apply",
-            log_level=log_level,
-            console_level=log_level
-        )
+        self.logger = logger
         self.opensearch = OpenSearchApply(
             opensearch_url=opensearch_url,
             aws_profile=aws_profile,
