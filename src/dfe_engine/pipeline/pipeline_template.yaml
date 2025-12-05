@@ -1,0 +1,152 @@
+# HyperSec XDR Vector Helm Template
+# XDR Deployment Types: AWS, SaaS
+# Based on Vector Helm Chart deployment
+#
+# READ THIS FOR PARAMETERS 
+# https://github.com/vectordotdev/helm-charts/blob/develop/charts/vector/README.md
+#
+# v1.1    2024-06-25    Update for new caching and storage classes
+# v1.0    2023-06-29    PaaS migration for XDR 2.1
+#
+# (c) HyperSec 2024
+#
+
+# Extra env vars to pass to the `vector` container.
+env:
+  {% for env_var, value in env_vars.items() %}- name: {{ env_var }}
+    value: {{ value }}
+  {% endfor %}
+  # This is required for Keda
+  - name: KAFKA_BROKERS_SASL_SCRAM
+    valueFrom:
+      secretKeyRef:
+        name: kafka-sasl-secret
+        key: KAFKA_BROKERS_SASL_SCRAM
+# Env Vars Derived from Secrets
+envFrom:
+  - secretRef:
+      name: kafka-sasl-secret
+  {% if NAME == "vector-load-ch" %}
+  - secretRef:
+      name: vector-ch-creds
+  {% endif %}
+
+# Extra arguments to pass to the `vector` container.
+# These are the list of vector templates used in the pipeline
+args:
+  - --watch-config
+  - --no-graceful-shutdown-limit
+  {% for step in steps %}- --config
+  - {{ step }}
+  {% endfor %}
+
+
+# Various tweakables for the `Pod`s managed by `DaemonSet`.
+resources:
+  requests:
+    cpu: {{CPU_REQUESTS | default(1, true) * VA_MULTIPLIER | default(1, true)}} 
+    memory: {{MEMORY_REQUESTS | default(2, true) * VA_MULTIPLIER | default(1, true)}}Gi
+  limits:
+    cpu: {{CPU_LIMITS | default(2, true) * VA_MULTIPLIER | default(1, true)}}
+    memory: {{MEMORY_LIMITS | default(4, true) * VA_MULTIPLIER | default(1, true)}}Gi
+nodeSelector: {}
+
+{% if PVC_SIZE is defined %}
+# Vector will store it's data here.
+persistence:
+  enabled: true
+  accessModes: [ "ReadWriteOnce" ]
+  storageClassName: "vector-data"
+  size: {{PVC_SIZE | default("20Gi", true)}}
+  retentionPolicy: 
+    whenDeleted: Retain
+    whenScaled: Delete
+{% endif %}
+
+# Custom configuration to pass to the `vector` container.
+extraObjects:
+#### KEDA
+  - apiVersion: keda.sh/v1alpha1
+    kind: ScaledObject
+    metadata:
+      name: kafka-scaledobject
+      annotations:
+         scaledobject.keda.sh/transfer-hpa-ownership: "true"
+    spec:
+      scaleTargetRef:
+        apiVersion: apps/v1
+        kind: StatefulSet
+        name: {{NAME}}
+        envSourceContainerName: vector
+      pollingInterval: 30
+      minReplicaCount: {{MIN_REPLICAS | default(0, true)}}
+      maxReplicaCount: {{MAX_REPLICAS | default(1, true) * HA_MULTIPLIER | default(2, true)}}
+      cooldownPeriod: 300
+      advanced:
+        horizontalPodAutoscalerConfig:
+          name: {{NAME}}
+        restoreToOriginalReplicaCount: true
+        scalingModifiers:
+          target: "5"
+          activationTarget: "1"
+          formula: >
+            (kafka == 0) ? 0 :
+            (kafka > 0 && pod_count == 0)? 6 :
+            {% if PEAK_TIME  is defined %}(kafka > 0 && pod_count > 0 && peak_time == 1 && pod_count < {{PEAK_TIME_MIN_PODS | default(5, true)}})? 6 :{% endif %}
+            {% if SINK_NAME is defined %}
+            (kafka > {{KAFKA_LAG_THRESHOLD | default(1000000, true)}} * pod_count) ? 6 :
+            (kafka > {{KAFKA_LAG_THRESHOLD | default(1000000, true)}} && avg_eps > {{EXPECTED_EPS | default(1000, true)}} )? 6 :
+            (kafka > {{KAFKA_LAG_THRESHOLD | default(1000000, true)}} && avg_eps < {{EXPECTED_EPS | default(1000, true)}} )? 2 :{% else %}
+            (kafka > {{KAFKA_LAG_THRESHOLD | default(1000000, true)}} )? 6 :
+            (kafka < {{KAFKA_LAG_THRESHOLD | default(1000000, true)}}  )? 2 :{% endif %}
+            0
+          metricType: Value
+      triggers:
+      - type: kafka
+        name: kafka
+        metadata:
+          bootstrapServersFromEnv: KAFKA_BROKERS_SASL_SCRAM
+          consumerGroup: {{NAME}} # Make sure that this consumer group name is the same one that is consuming topics
+          sasl: scram_sha512
+          tls: enable
+          scaleToZeroOnInvalidOffset: "false"
+          lagThreshold: "{{KAFKA_LAG_THRESHOLD | default(1000000, true)}}"
+          activationThreshold: "0"
+          offsetResetPolicy: latest
+        authenticationRef:
+          name: keda-trigger-auth-kafka-credential
+      - type: prometheus
+        name: pod_count
+        metadata:
+          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          query: count(kube_pod_info{created_by_kind = "StatefulSet",namespace = "{{NAME}}"})
+          threshold: "1"
+          activationThreshold: "0"
+      {% if SINK_NAME is defined %}
+      - type: prometheus
+        name: avg_eps
+        metadata:
+          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          query: avg(rate(vector_component_sent_events_total{namespace="{{NAME}}",component_id=~".*{{SINK_NAME}}.*",component_kind="sink"}[5m]))
+          threshold: "{{EXPECTED_EPS | default(1000, true)}}"
+          activationThreshold: "0"
+      {% endif %}
+      {% if PEAK_TIME is defined %}
+      - type: prometheus
+        name: peak_time
+        metadata:
+          serverAddress: http://prometheus-kube-prometheus-prometheus.prometheus.svc:9090
+          query: (vector(time() % 86400 >= bool {{PEAK_TIME - 1800}}) *vector (time() % 86400 < bool {{PEAK_TIME + 1800}}))
+          threshold: "1"
+          activationThreshold: "0"
+      {% endif %}
+      {% if MIN_REPLICAS is defined %}
+      - type: cpu
+        metricType: Utilization
+        metadata:
+          value: "{{CPU_UTILIZATION_THRESHOLD | default(130, true)}}"
+      - type: memory
+        metricType: Utilization
+        metadata:
+          value: "{{MEMORY_UTILIZATION_THRESHOLD | default(130, true)}}"
+      {% endif %}

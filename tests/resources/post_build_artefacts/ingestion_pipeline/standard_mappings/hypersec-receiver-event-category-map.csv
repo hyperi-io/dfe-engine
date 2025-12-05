@@ -1,0 +1,12 @@
+iteration_group,match_field,match_field_value,set_field,set_value,comment
+receiver,tags.event.type,event.linux.host,tags.event.category,logs_syslog_linux,HyperCollector default integrated linux host syslog data (TCP 12205)
+receiver,tags.event.type,event.linux.audit,tags.event.category,logs_syslog_linux_audit,HyperCollector default integrated linux host syslog data (TCP 12201)
+receiver,tags.event.type,event.netflow,tags.event.category,logs_netflow,Netflow v9 V5 ipfix sflow
+receiver,SourceModuleType,im_msvistalog,tags.event.category,logs_nxlog_windows,HyperCollector default integrated NXLog CE Windows
+receiver,tags.event.type,event.hypersec.windows,tags.event.category,logs_hypersec_windows,HyperSec native Windows agent data
+receiver,tags.event.type,internal.metric,tags.event.category,logs_hypercol_metric,HyperCollector metrics
+receiver,tags.event.type,internal.log,tags.event.category,logs_hypercol_internal,HyperCollector internal logs
+receiver,tags.event.type,event.linux.syslog,tags.event.category,logs_syslog_linux,HyperCollector linux syslog data
+receiver,SourceModuleType,im_etw,tags.event.category,logs_nxlog_dns,HyperCollector default integrated NXLog EE Windows DNS
+receiver,SourceModuleType,im_file,tags.event.category,logs_nxlog_dhcp,HyperCollector default integrated NXLog EE Windows DHCP
+receiver,SourceModuleName,dnslog,tags.event.category,logs_nxlog_windows_dns,HyperCollector nxlog-windows-dns

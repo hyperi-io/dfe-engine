@@ -1,0 +1,100 @@
+{
+  "trigger": {
+    "schedule": {
+      "hourly": {
+        "minute": [
+          3,
+          13,
+          23,
+          33,
+          43,
+          53
+        ]
+      }
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "wise-aws_guardduty-parsed-*",
+          "bentleys-aws_guardduty-parsed*"
+        ],
+        "rest_total_hits_as_int": true,
+        "body": {
+          "size": 50,
+          "_source": {
+            "excludes": [
+              "service.id",
+              "source.host.id"
+            ]
+          },
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-15m/m",
+                      "lt": "now-5m/m"
+                    }
+                  }
+                }
+              ],
+              "must": [
+                {
+                  "regexp": {
+                    "event.record_type": {
+                      "value": "CryptoCurrency.*"
+                    }
+                  }
+                },
+                {
+                  "terms": {
+                    "event.severity": [
+                      "1",
+                      "2",
+                      "3"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "not_eq": 0
+      }
+    }
+  },
+  "actions": {
+    "index_payload": {
+      "transform": {
+        "script": {
+          "source": "return ['_doc': ctx.payload.hits.hits.stream().map(\n        v -> {v.get('_source').put('index', v.get('_index'));\n        v.remove('_index');\n        v.remove('_type');\n        v.get('_source').put('threat.detection', ctx.watch_id);\n        v.get('_source').put('event.timestamp_detected', ctx.trigger.triggered_time);\n        v.get('_source').put('threat.is_alert', true);\n        v.get('_source').put('threat.alert_type', 'Detection of cryptocurrency-related activity');\n        v.get('_source').put('threat.detection_description', 'AWS Guardduty detects alerts querying an IP Address or domain that is associated with Bitcoin or other cryptocurrency-related activity.');\n        v.get('_source').put('threat.severity', 'medium');\n        v.get('_source').put('threat.triage_score', 40);\n        v.get('_source').put('threat.ratingtime_sla_applies', 'true');\n        v.get('_source').put('id', v.get('_id'));\n        return v.get('_source')}).collect(Collectors.toList())]",
+          "lang": "painless"
+        }
+      },
+      "index": {
+        "index": "<alert-{now/M{YYYY.MM}}>"
+      }
+    }
+  },
+  "metadata": {
+    "description": "AWS Guardduty detects alerts querying an IP Address or domain that is associated with Bitcoin or other cryptocurrency-related activity.",
+    "title": "Detection of cryptocurrency-related activity",
+    "tags": [
+      "attack.Adversary_Opsecs",
+      "attack.t1316"
+    ],
+    "watcher_id": "aws_guardduty_crypto_currency",
+    "name": "aws_guardduty_crypto_currency",
+    "schedule_group": "3"
+  }
+}

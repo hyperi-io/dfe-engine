@@ -1,0 +1,5 @@
+iteration_group,parent_field,field_to_search,field_value,field_to_extract
+finalise,sysmon,SourceName,Microsoft-Windows-Sysmon,Message
+finalise,audit,program,auditd,msg
+finalise,sysmon,event.provider,Microsoft-Windows-Sysmon,winlog.event_data
+finalise,syslog,program,tag_audit_log,msg

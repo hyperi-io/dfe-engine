@@ -1,0 +1,98 @@
+{
+  "trigger": {
+    "schedule": {
+      "hourly": {
+        "minute": [
+          1,
+          11,
+          21,
+          31,
+          41,
+          51
+        ]
+      }
+    }
+  },
+  "input": {
+    "search": {
+      "request": {
+        "search_type": "query_then_fetch",
+        "indices": [
+          "wise-aws_guardduty-parsed-*",
+          "bentleys-aws_guardduty-parsed*"
+        ],
+        "rest_total_hits_as_int": true,
+        "body": {
+          "size": 50,
+          "_source": {
+            "excludes": [
+              "service.id",
+              "source.host.id"
+            ]
+          },
+          "query": {
+            "bool": {
+              "filter": [
+                {
+                  "range": {
+                    "@timestamp": {
+                      "gte": "now-15m/m",
+                      "lt": "now-5m/m"
+                    }
+                  }
+                }
+              ],
+              "must": [
+                {
+                  "regexp": {
+                    "event.record_type": "DefenseEvasion.*"
+                  }
+                },
+                {
+                  "terms": {
+                    "event.severity": [
+                      1,
+                      2,
+                      3
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    }
+  },
+  "condition": {
+    "compare": {
+      "ctx.payload.hits.total": {
+        "not_eq": 0
+      }
+    }
+  },
+  "actions": {
+    "index_payload": {
+      "transform": {
+        "script": {
+          "source": "return ['_doc': ctx.payload.hits.hits.stream().map(\n        v -> {v.get('_source').put('index', v.get('_index'));\n        v.remove('_index');\n        v.remove('_type');\n        v.get('_source').put('threat.detection', ctx.watch_id);\n        v.get('_source').put('threat.framework', 'MITRE ATT&CK');\n        v.get('_source').put('threat.tactic.id', 'TA0005');\n        v.get('_source').put('threat.tactic.name', 'Defense Evasion');\n        v.get('_source').put('threat.tactic.reference', 'https://attack.mitre.org/tactics/TA0005');\n        v.get('_source').put('event.timestamp_detected', ctx.trigger.triggered_time);\n        v.get('_source').put('threat.is_alert', true);\n        v.get('_source').put('threat.alert_type', 'AWS GuardDuty Defense Evasion detection');\n        v.get('_source').put('threat.detection_description', 'Detection of AWS GuardDuty findings of potential defense evasion activity.');\n        v.get('_source').put('threat.severity', 'high');\n        v.get('_source').put('threat.triage_score', 60);\n        v.get('_source').put('threat.ratingtime_sla_applies', 'true');\n        v.get('_source').put('id', v.get('_id'));\n        return v.get('_source')}).collect(Collectors.toList())]",
+          "lang": "painless"
+        }
+      },
+      "index": {
+        "index": "<alert-{now/M{YYYY.MM}}>"
+      }
+    }
+  },
+  "metadata": {
+    "description": "Detection of AWS GuardDuty findings of potential defense evasion activity.",
+    "title": "AWS GuardDuty Defense Evasion detection",
+    "tags": [
+      "attack.ta0005",
+      "attack.defense_evasion"
+    ],
+    "watcher_id": "aws_guardduty_defense_evasion",
+    "name": "aws_guardduty_defense_evasion",
+    "schedule_group": "1"
+  }
+}

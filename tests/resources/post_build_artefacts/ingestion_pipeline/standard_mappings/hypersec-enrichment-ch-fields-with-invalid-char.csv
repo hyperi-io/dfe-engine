@@ -1,0 +1,3 @@
+iteration_group,field_name,character
+receiver,TargetUserName,$
+receiver,related.user,$

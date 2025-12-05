@@ -1,0 +1,7 @@
+column,index_order,os_order
+timestamp,,
+message,,
+host*,,
+user*,,
+agent*,,
+salesforce*,,

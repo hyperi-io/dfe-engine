@@ -1,0 +1,6 @@
+[submodule "ci"]
+	path = ci
+	url = https://github.com/hypersec-io/ci.git
+[submodule "ai"]
+	path = ai
+	url = https://github.com/hypersec-io/ai.git

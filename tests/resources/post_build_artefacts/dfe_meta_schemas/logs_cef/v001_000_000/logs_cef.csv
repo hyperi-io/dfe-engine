@@ -1,0 +1,167 @@
+column,type,index_order,os_order,comment
+cef_version,string_fast_lowcardinality,,,
+device_event_class_id,string_fast,,,
+device_product,string_fast_lowcardinality,1,1,
+device_vendor,string_fast_lowcardinality,2,2,
+device_version,string_fast_lowcardinality,,,
+name,string_fast,,7,
+severity,string_fast_lowcardinality,,8,
+act,string_fast_lowcardinality,,9,Action taken by the device
+app,string_fast_lowcardinality,,10,Application level protocol
+c6a1,ipv6,,11,One of four IPv6 address fields available to map fields
+c6a2,ipv6,,12,One of four IPv6 address fields available to map fields
+c6a3,ipv6,,13,One of four IPv6 address fields available to map fields
+c6a4,ipv6,,14,One of four IPv6 address fields available to map fields
+c6a1_label,string,,,Corresponding label field
+c6a2_label,string,,,Corresponding label field
+c6a3_label,string,,,Corresponding label field
+c6a4_label,string,,,Corresponding label field
+cat,string_fast_lowcardinality,,15,Represents the category assigned by the originating device
+cfp1,float64,,16,One of four floating point fields available to map field
+cfp2,float64,,17,One of four floating point fields available to map field
+cfp3,float64,,18,One of four floating point fields available to map field 
+cfp4,float64,,19,One of four floating point fields available to map field
+cfp1_label,string,,,Corresponding label field
+cfp2_label,string,,,Corresponding label field
+cfp3_label,string,,,Corresponding label field
+cfp4_label,string,,,Corresponding label field
+cn1,int64,,20,One of three number fields available to map fields
+cn2,int64,,21,One of three number fields available to map fields
+cn3,int64,,22,One of three number fields available to map fields
+cn1_label,string,,,Corresponding label field
+cn2_label,string,,,Corresponding label field
+cn3_label,string,,,Corresponding label field
+cs1,string_fast,,23,One of six strings available to map fields
+cs2,string_fast,,24,One of six strings available to map fields
+cs3,string_fast,,25,One of six strings available to map fields
+cs4,string_fast,,26,One of six strings available to map fields
+cs5,string_fast,,27,One of six strings available to map fields
+cs6,string_fast,,28,One of six strings available to map fields
+cs1_label,string,,,Corresponding label field
+cs2_label,string,,,Corresponding label field
+cs3_label,string,,,Corresponding label field
+cs4_label,string,,,Corresponding label field
+cs5_label,string,,,Corresponding label field
+cs6_label,string,,,Corresponding label field
+destination_dns_domain,string_fast,,29,The DNS domain part of the complete fully qualified domain name
+destination_service_name,string_fast,,30,The service targeted by this event
+destination_translated_address,string_fast,,31,Identifies the translated destination that the event refers to in an IP network
+destination_translated_port,int32,,32,Port after it was translated
+device_custom_date1,datetime,,33,One of two timestamp fields available to map fields
+device_custom_date2,datetime,,34,One of two timestamp fields available to map fields
+device_custom_date1_label,string,,,Corresponding label field
+device_custom_date2_label,string,,,Corresponding label field
+device_direction,int32,,35,0 for inbound or 1 for outbound
+device_dns_domain,string_fast,,36,The DNS domain part of the complete fully qualified domain name
+device_external_id,string_fast,,37,A name that uniquely identifies the device generating this event
+device_facility,string,,38,The facility generating this event
+device_inbound_interface,string_fast,,39,Interface on which the packet or data entered the device
+device_nt_domain,string_fast,,40,The Windows domain name of the device address
+device_outbound_interface,string_fast,,41,Interface on which the packet or data left the device
+device_payload_id,string,,42,Unique identifier for the payload associated with the event
+device_process_name,string_fast,,43,Process name associated with the event
+device_translated_address,ipv4,,44,Identifies the translated device address that the event refers to in an IP network
+dhost,string_fast,,45,Identifies the destination that an event refers to in an IP network
+dmac,string,6,6,Six colon seperated hexadecimal numbers
+dntdom,string_fast,,46,The Windows domain name of the destination address
+dpid,int32,,47,Provides the ID of the destination process associated with the event
+dpriv,string,,48,Destination user privileges
+dproc,string_fast,,49,The name of the event destination process
+dpt,int32,,50,The valid port numbers are between 0 and 65535
+dst,ipv4,4,4,Identifies the destination address that the event refers to in an IP network ipv4
+dtz,string,,51,The timezone for the device generating the event
+duid,string_fast,,52,Identifies the destination user by ID
+duser,string,,53,Identifies the destination user by name
+dvc,ipv4,,54,Identifies the device address that an event refers to in an IP network
+dvchost,string_fast,5,5,Device host name
+dvcmac,string,,55,Six colon seperated hexadecimal numbers
+dvcpid,int32,,56,Provides the ID of the process on the device generating the event
+end,datetime,,57,The time at which the activity related to the event ended
+externalId,string_fast,,58,The ID used by an originating device
+file_create_time,datetime,,59,Time when the file was created
+file_hash,string_fast,,60,Hash of a file
+file_id,string,,61,An ID associated with a file could be the inode
+file_modification_time,datetime,,62,Time when the file was last modified
+file_path,string_fast,,63,Full path to the file including file name itself
+file_permission,string,,64,Permissions of the file
+file_type,string_fast,,65,Type of file 
+flex_date1,datetime,,66,A timestamp field available to map a timestamp
+flex_date1_label,string,,,Corresponding label field
+flex_string1,string_fast,,67,One of two string fields available to map
+flex_string1_label,string,,,Corresponding label field
+flex_string2,string_fast,,68,One of two string fields available to map
+flex_string2_label,string,,,Corresponding label field
+fname,string_fast,,69,Name of the file only
+fsize,int32,,70,Size of the file
+in,int32,,71,Number of bytes transferred inbound
+msg,string,,72,An arbitrary message giving more details about the event
+old_file_create_time,datetime,,73,Time when old file was created
+old_file_hash,string_fast,,74,Hash of the old file
+old_file_id,string,,75,An ID associated with the old file could be the inode
+old_file_modification_time,datetime,,76,Time when old file was last modified
+old_file_name,string_fast,,77,Name of the old file
+old_file_path,string_fast,,78,Full path to the old file
+old_file_permission,string,,79,Permissions of the old file
+old_file_size,int32,,80,Size of the old file
+old_file_type,string,,81,Type of the old file
+out,int32,,82,Number of bytes transferred outbound
+outcome,string_fast_lowcardinality,,83,Displays the outcome
+proto,string_fast_lowcardinality,,84,Identifies the layer4 protocol used
+reason,string_fast,,85,The reason an audit event was generated
+request,string_fast,,86,This field contains the URL accessed
+request_client_application,string_fast,,87,The user agent associated with the request
+request_context,string,,88,Description of the content from which the request originated
+request_cookies,string,,89,Cookies associated with the request
+request_method,string_fast_lowcardinality,,90,The method used to access a URL
+rt,datetime,,91,The time at which the event related to the activity was received
+shost,string_fast,,92,Identifies the source that an event refers to in an IP network
+smac,string,,93,Six colon seperated hexadecimal numbers
+sntdom,string_fast,,94,The Windows domain name for the source address
+source_dns_domain,string_fast,,95,The DNS domain part of the complete fully qualified domain name 
+source_service_name,string_fast,,96,The service that is responsible for generating this event
+source_translated_address,ipv4,,97,Identifies the translated source that the event refers to in an IP network
+source_translated_port,int32,,98,A port number after being translated
+spid,int32,,99,The ID of the source process associated with the event
+spriv,string,,100,Source user privileges
+sproc,string,,101,The name of the event’s source process
+spt,int32,,102,The valid port numbers are 0 to 65535
+src,ipv4,3,3,Identifies the source that an event refers to in an IP network
+start,datetime,,103,The time when the activity the event referred to started
+suid,string_fast,,104,Identifies the source user by ID
+suser,string_fast,,105,Identifies the source user by name
+type,int32,,106,Numeric base event type
+agent_dns_domain,string,,107,
+agent_nt_domain,string,,108,
+agent_translated_address,string,,109,
+agent_translated_zone_external_id,string,,110,
+agent_translated_zone_uri,string,,111,
+agent_zone_external_id,string,,112,
+agent_zone_uri,string,,113,
+agt,string,,114,
+ahost,string,,115,
+aid,string,,116,
+amac,string,,117,
+art,datetime,,118,
+at,string,,119,
+atz,string,,120,
+av,string,,121,
+customer_external_id,string,,122,
+customer_uri,string,,123,
+destination_translated_zone_external_id,string,,124,
+destination_translated_zone_uri,string,,125,
+destination_zone_external_id,string,,126,
+destination_zone_uri,string,,127,
+device_translated_zone_external_id,string,,128,
+device_translated_zone_uri,string,,129,
+device_zone_external_id,string,,130,
+device_zone_uri,string,,131,
+dlat,float64,,132,
+dlong,float64,,133,
+eventId,int64,,134,
+raw_event,string,,135,
+slat,float64,,136,
+slong,float64,,137,
+source_translated_zone_external_id,string,,138,
+source_translated_zone_uri,string,,139,
+source_zone_external_id,string,,140,
+source_zone_uri,string,,141,
