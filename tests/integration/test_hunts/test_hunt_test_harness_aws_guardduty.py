@@ -17,6 +17,9 @@ import yaml
 
 from hs_lib.logger import logger
 
+# These tests require a running ClickHouse instance
+pytestmark = pytest.mark.integration
+
 device_name = "aws_guardduty"
 schema_name = "logs_omss_aws_guardduty"
 meta_schema_name = "logs_base"

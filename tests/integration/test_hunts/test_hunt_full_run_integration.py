@@ -8,6 +8,9 @@ from jinja2 import Environment, FileSystemLoader
 from dfe_engine.hunts.hunts.hunts import Hunt
 from dfe_engine.config.config_loader import DFEConfigLoader
 
+# These tests require a running ClickHouse instance
+pytestmark = pytest.mark.integration
+
 
 def load_config(file_path: Path) -> dict:
     """Load YAML configuration from a file."""
