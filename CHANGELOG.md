@@ -1,3 +1,10 @@
+## [1.1.2](https://github.com/hypersec-io/dfe-engine/compare/v1.1.1...v1.1.2) (2025-12-08)
+
+
+### Bug Fixes
+
+* refactor complex functions and remove code TODOs ([31c1773](https://github.com/hypersec-io/dfe-engine/commit/31c1773d770d941ee409b852e2d988b322f5a3d7))
+
 ## [1.1.1](https://github.com/hypersec-io/dfe-engine/compare/v1.1.0...v1.1.1) (2025-12-08)
 
 
