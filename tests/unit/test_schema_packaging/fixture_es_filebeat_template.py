@@ -111,9 +111,7 @@ def logs_filebeat_template_subset():
                             "disk": {
                                 "properties": {
                                     "read": {"properties": {"bytes": {"type": "long"}}},
-                                    "write": {
-                                        "properties": {"bytes": {"type": "long"}}
-                                    },
+                                    "write": {"properties": {"bytes": {"type": "long"}}},
                                 }
                             },
                             "memory": {
@@ -138,12 +136,8 @@ def logs_filebeat_template_subset():
                             "labels": {"type": "object"},
                             "network": {
                                 "properties": {
-                                    "ingress": {
-                                        "properties": {"bytes": {"type": "long"}}
-                                    },
-                                    "egress": {
-                                        "properties": {"bytes": {"type": "long"}}
-                                    },
+                                    "ingress": {"properties": {"bytes": {"type": "long"}}},
+                                    "egress": {"properties": {"bytes": {"type": "long"}}},
                                 }
                             },
                         }

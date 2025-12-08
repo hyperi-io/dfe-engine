@@ -4,7 +4,6 @@ from ...yaml_utils import yaml_dump_string, yaml_load_string, YAMLError
 from hs_lib.logger import logger
 
 
-
 class HuntValidator:
     """
     A class that provides static methods for validating hunt configurations and related syntax.
@@ -29,7 +28,7 @@ class HuntValidator:
         try:
             yaml_load_string(yaml_dump_string(hunt_data))
         except YAMLError as e:
-            raise ValueError(f"Invalid YAML structure: {e}")
+            raise ValueError(f"Invalid YAML structure: {e}") from e
 
         # cron_expressions = hunt_data.get("cron", [])
         # if not isinstance(cron_expressions, list):
@@ -49,22 +48,12 @@ class HuntValidator:
             )
 
         global_target_table_name = hunt_data.get("global_target_table_name")
-        if (
-            not isinstance(global_target_table_name, str)
-            or not global_target_table_name.strip()
-        ):
-            raise ValueError(
-                "Invalid 'global_target_table_name'. It should be a non-empty string."
-            )
+        if not isinstance(global_target_table_name, str) or not global_target_table_name.strip():
+            raise ValueError("Invalid 'global_target_table_name'. It should be a non-empty string.")
 
         global_source_table_name = hunt_data.get("global_source_table_name")
-        if (
-            not isinstance(global_source_table_name, str)
-            or not global_source_table_name.strip()
-        ):
-            raise ValueError(
-                "Invalid 'global_source_table_name'. It should be a non-empty string."
-            )
+        if not isinstance(global_source_table_name, str) or not global_source_table_name.strip():
+            raise ValueError("Invalid 'global_source_table_name'. It should be a non-empty string.")
 
         if (
             not isinstance(checkpoint_timestamp_field, str)
@@ -111,9 +100,7 @@ class HuntValidator:
                 continue
 
             if not isinstance(customer_filters[customer], dict):
-                raise ValueError(
-                    f"Filters for customer '{customer}' should be a dictionary."
-                )
+                raise ValueError(f"Filters for customer '{customer}' should be a dictionary.")
 
             rules_filters = customer_filters[customer].get("rules", [])
             for rule_filter in rules_filters:
@@ -137,4 +124,4 @@ class HuntValidator:
                 template_content = file.read()
                 env.parse(template_content)
         except TemplateSyntaxError as e:
-            raise ValueError(f"Syntax error in rule file {rule_path}: {e}")
+            raise ValueError(f"Syntax error in rule file {rule_path}: {e}") from e

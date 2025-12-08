@@ -86,26 +86,23 @@ class SchemaController:
                 sys.exit(1)
 
             schema_directory = (
-                args_schema_directory
-                or dfe_config["global_settings"]["derived_schema_paths"]
+                args_schema_directory or dfe_config["global_settings"]["derived_schema_paths"]
             )
             derived_schema_path = Path(schema_directory)
 
             no_cluster_declarations_needed = (
                 args_no_cluster_declarations_needed
                 if args_no_cluster_declarations_needed is not None
-                else dfe_config["build_schemas"].get(
-                    "no_cluster_declarations_needed", True
-                )
+                else dfe_config["build_schemas"].get("no_cluster_declarations_needed", True)
             )
             use_replicated_merge_tree = (
                 args_use_replicated_merge_tree
                 if args_use_replicated_merge_tree is not None
                 else dfe_config["build_schemas"].get("use_replicated_merge_tree", True)
             )
-            use_json_feature = args_use_json_feature or dfe_config[
-                "global_settings"
-            ].get("use_json_feature", False)
+            use_json_feature = args_use_json_feature or dfe_config["global_settings"].get(
+                "use_json_feature", False
+            )
             use_shared_merge_tree = (
                 args_use_shared_merge_tree
                 if args_use_shared_merge_tree is not None
@@ -134,14 +131,10 @@ class SchemaController:
                     max_workers=args_max_workers,
                 )
                 schema_builder.build()
-                logger.debug(
-                    "Schema building completed successfully and output is here."
-                )
+                logger.debug("Schema building completed successfully and output is here.")
 
             except Exception as e:
-                logger.error(
-                    f"An error occurred while schemas planning: {e}", exc_info=True
-                )
+                logger.error(f"An error occurred while schemas planning: {e}", exc_info=True)
 
     @staticmethod
     def plan_schemas(
@@ -172,7 +165,7 @@ class SchemaController:
             args_org_filter_list (str): A comma seperate list to filter the org the action runs on.
             verbose (bool): For detailed logging.
             is_api_call (bool): Whether this is being called from a FastAPI endpoint.
-            
+
         Returns:
             List: If is_api_call is True, returns a list of plan results. Otherwise returns None.
         """
@@ -193,9 +186,7 @@ class SchemaController:
             dfe_config = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path
             )
-            dfe_config_target_path = dfe_config["global_settings"].get(
-                "target_path", None
-            )
+            dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
         except FileNotFoundError as error:
             logger.error(f"Error: {error}")
             if is_api_call:
@@ -203,11 +194,7 @@ class SchemaController:
             return
 
         try:
-            target_path = (
-                args_target_file_path
-                if args_target_file_path
-                else dfe_config_target_path
-            )
+            target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=args_target, targets_file_path=target_path
             )
@@ -224,9 +211,7 @@ class SchemaController:
 
         if args_org_filter_list:
             organisation_keys = set(args_org_filter_list.split(","))
-            organisations = [
-                org for org in organisations if org.get("org_id") in organisation_keys
-            ]
+            organisations = [org for org in organisations if org.get("org_id") in organisation_keys]
             logger.info(f"Filtered organisations: {organisations}")
         else:
             organisations = dfe_config.get("organisations", [])
@@ -256,9 +241,7 @@ class SchemaController:
             return results
 
         except Exception as e:
-            logger.error(
-                f"An error occurred while schemas planning: {e}", exc_info=True
-            )
+            logger.error(f"An error occurred while schemas planning: {e}", exc_info=True)
             raise
 
     @staticmethod
@@ -282,7 +265,7 @@ class SchemaController:
         args_derived_schema_filter_wildchar: str = None,
         args_org_filter_list: str = None,
         verbose: bool = False,
-        is_api_call: bool = False
+        is_api_call: bool = False,
     ) -> list[dict]:
         """
         Apply schema configurations and execute SQL scripts.
@@ -303,7 +286,7 @@ class SchemaController:
             args_schema_update_flag (str): Schema update flag.
             verbose (bool): For detailed logging.
             is_api_call (bool): Whether this is being called from a FastAPI endpoint.
-        
+
         Returns:
             list[dict]: If is_api_call is True, returns a list of modification results. Otherwise returns None.
         """
@@ -312,9 +295,7 @@ class SchemaController:
             dfe_config = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path
             )
-            dfe_config_target_path = dfe_config["global_settings"].get(
-                "target_path", None
-            )
+            dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
         except FileNotFoundError as error:
             logger.error(f"Error: {error}")
             if is_api_call:
@@ -322,11 +303,7 @@ class SchemaController:
             return
 
         try:
-            target_path = (
-                args_target_file_path
-                if args_target_file_path
-                else dfe_config_target_path
-            )
+            target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=args_target, targets_file_path=target_path
             )
@@ -344,7 +321,12 @@ class SchemaController:
                 "The '.dfe_schema_output' directory does not exist in the expected location."
             )
             if is_api_call:
-                return [{"status": "error", "error_message": "The '.dfe_schema_output' directory does not exist in the expected location."}]
+                return [
+                    {
+                        "status": "error",
+                        "error_message": "The '.dfe_schema_output' directory does not exist in the expected location.",
+                    }
+                ]
             return
 
         use_replicated_merge_tree = (
@@ -363,16 +345,14 @@ class SchemaController:
         use_json_feature = args_use_json_feature or dfe_config["global_settings"].get(
             "use_json_feature", False
         )
-        use_subsampling_feature = args_use_subsampling_feature or dfe_config[
-            "global_settings"
-        ].get("use_subsampling_feature", False)
+        use_subsampling_feature = args_use_subsampling_feature or dfe_config["global_settings"].get(
+            "use_subsampling_feature", False
+        )
         organisations = dfe_config.get("organisations", [])
 
         if args_org_filter_list:
             organisation_keys = set(args_org_filter_list.split(","))
-            organisations = [
-                org for org in organisations if org.get("org_id") in organisation_keys
-            ]
+            organisations = [org for org in organisations if org.get("org_id") in organisation_keys]
             logger.info(f"Filtered organisations: {organisations}")
         else:
             organisations = dfe_config.get("organisations", [])
@@ -422,7 +402,12 @@ class SchemaController:
                 f"An error occurred while modifying schemas: {e}. Please check your schema configurations and ensure that the specified schemas exist and are valid. If the issue persists, refer to the logs for more detailed information."
             )
             if is_api_call:
-                return [{"status": "error", "error_message": f"An error occurred while modifying schemas: {e}"}]
+                return [
+                    {
+                        "status": "error",
+                        "error_message": f"An error occurred while modifying schemas: {e}",
+                    }
+                ]
             raise
 
     @staticmethod
@@ -465,19 +450,13 @@ class SchemaController:
                 dfe_config = DFEConfigLoader.load_dfe_package(
                     config_file_path=args_dfe_package_file_path
                 )
-                dfe_config_target_path = dfe_config["global_settings"].get(
-                    "target_path", None
-                )
+                dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
             except FileNotFoundError as error:
                 logger.error(f"Error: {error}")
                 return
 
         try:
-            target_path = (
-                args_target_file_path
-                if args_target_file_path
-                else dfe_config_target_path
-            )
+            target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=args_target, targets_file_path=target_path
             )
@@ -486,15 +465,12 @@ class SchemaController:
             logger.error(f"Unable to load target: {error}", exc_info=True)
             sys.exit(1)
 
-        do_add_roles = args_do_add_roles or dfe_config["apply_schemas"].get(
-            "do_add_roles", False
-        )
+        do_add_roles = args_do_add_roles or dfe_config["apply_schemas"].get("do_add_roles", False)
         use_json_feature = args_use_json_feature or dfe_config["global_settings"].get(
             "use_json_feature", False
         )
         schema_directory_str = (
-            args_schema_directory
-            or dfe_config["global_settings"]["derived_schema_paths"]
+            args_schema_directory or dfe_config["global_settings"]["derived_schema_paths"]
         )
         Path(schema_directory_str)
         dfe_output_path = Path(dfe_config["global_settings"]["schema_output_path"])
@@ -509,9 +485,7 @@ class SchemaController:
 
         if args_org_filter_list:
             organisation_keys = set(args_org_filter_list.split(","))
-            organisations = [
-                org for org in organisations if org.get("org_id") in organisation_keys
-            ]
+            organisations = [org for org in organisations if org.get("org_id") in organisation_keys]
             logger.info(f"Filtered organisations: {organisations}")
         else:
             organisations = dfe_config.get("organisations", [])
@@ -560,15 +534,11 @@ class SchemaController:
             return None
 
     @staticmethod
-    def read_all_schemas_from_directory(
-        logger: Any, directory_path: Path
-    ) -> List[dict[str, str]]:
+    def read_all_schemas_from_directory(logger: Any, directory_path: Path) -> List[dict[str, str]]:
         meta_schemas = []
 
         if not directory_path.exists() or not directory_path.is_dir():
-            logger.error(
-                f"The directory '{directory_path}' does not exist or is not a directory."
-            )
+            logger.error(f"The directory '{directory_path}' does not exist or is not a directory.")
             return meta_schemas
 
         for schema_dir in directory_path.iterdir():
@@ -582,7 +552,9 @@ class SchemaController:
                                 template_version = SchemaUtils.normalize_dot_version(
                                     version_dir.name
                                 )
-                                template_resource_path = f"{schema_name}/{template_version}/{template_resource}"
+                                template_resource_path = (
+                                    f"{schema_name}/{template_version}/{template_resource}"
+                                )
 
                                 meta_schemas.append(
                                     {
@@ -603,9 +575,7 @@ class SchemaController:
         meta_schemas = []
 
         try:
-            config = DFEConfigLoader.load_dfe_package(
-                config_file_path=dfe_package_file_path
-            )
+            config = DFEConfigLoader.load_dfe_package(config_file_path=dfe_package_file_path)
             common_version = SchemaUtils.normalize_dot_version(
                 config["global_settings"]["schema_common_version"]
             )
@@ -620,8 +590,7 @@ class SchemaController:
 
         try:
             resource_full_path = (
-                resources.files(SchemaBuilder.COMMON_RESOURES_PACKAGE_NAME)
-                / common_resource_path
+                resources.files(SchemaBuilder.COMMON_RESOURES_PACKAGE_NAME) / common_resource_path
             )
             if resource_full_path.exists():
                 meta_schemas.append(
@@ -646,7 +615,6 @@ class SchemaController:
     def download_meta_schemas(
         args_dfe_package_file_path: str, args_log_path: str, args_output_zip: str
     ) -> None:
-
         csv_files = []
 
         try:
@@ -657,9 +625,7 @@ class SchemaController:
             logger.error(f"Error: {error}", exc_info=True)
             return
 
-        meta_schema_path = dfe_config_data.get("global_settings", {}).get(
-            "meta_schema_paths", None
-        )
+        meta_schema_path = dfe_config_data.get("global_settings", {}).get("meta_schema_paths", None)
         meta_schema_path = Path(meta_schema_path)
         if not meta_schema_path:
             raise ValueError(
@@ -688,7 +654,6 @@ class SchemaController:
         args_log_path: str,
         args_dfe_package_file_path: str,
     ) -> None:
-
         try:
             dfe_config_data = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path
@@ -697,9 +662,7 @@ class SchemaController:
             logger.error(f"Error: {error}", exc_info=True)
             return
 
-        meta_schema_path = dfe_config_data.get("global_settings", {}).get(
-            "meta_schema_paths", None
-        )
+        meta_schema_path = dfe_config_data.get("global_settings", {}).get("meta_schema_paths", None)
         meta_schema_path = Path(meta_schema_path)
 
         if not meta_schema_path:
@@ -707,18 +670,14 @@ class SchemaController:
                 "meta_schema_paths is missing from the configuration. Please provide it under 'global_settings'."
             )
 
-        meta_schemas = SchemaController.read_all_schemas_from_directory(
-            logger, meta_schema_path
-        )
+        meta_schemas = SchemaController.read_all_schemas_from_directory(logger, meta_schema_path)
 
         if meta_schemas:
             formatted_schemas = [
                 [
                     schema["schema_name"],
                     schema["template_resource"],
-                    schema["template_version"].replace(
-                        "_", "."
-                    ),  # Replace underscores with dots
+                    schema["template_version"].replace("_", "."),  # Replace underscores with dots
                     schema["resource_path"],
                 ]
                 for schema in meta_schemas
@@ -760,9 +719,7 @@ class SchemaController:
 
             header = "HyperSec DFE - Schema Types"
             logger.info("\n" + header)
-            logger.info(
-                "\n" + tabulate(df_selected, headers="keys", tablefmt="grid")
-            )
+            logger.info("\n" + tabulate(df_selected, headers="keys", tablefmt="grid"))
 
         except FileNotFoundError:
             logger.error(f"The file {csv_file_path} does not exist.")
@@ -778,7 +735,6 @@ class SchemaController:
         args_template_version: str,
         args_log_path: str,
     ) -> None:
-
         try:
             dfe_config_data = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path
@@ -787,14 +743,10 @@ class SchemaController:
             logger.error(f"Error: {error}", exc_info=True)
             return
 
-        meta_schema_path = dfe_config_data.get("global_settings", {}).get(
-            "meta_schema_paths", None
-        )
+        meta_schema_path = dfe_config_data.get("global_settings", {}).get("meta_schema_paths", None)
         meta_schema_path = Path(meta_schema_path)
 
-        meta_schemas = SchemaController.read_all_schemas_from_directory(
-            logger, meta_schema_path
-        )
+        meta_schemas = SchemaController.read_all_schemas_from_directory(logger, meta_schema_path)
 
         matched_resources = [
             resource
@@ -823,7 +775,13 @@ class SchemaController:
         logger.info("\n" + tabulate(fields, headers="firstrow", tablefmt="grid"))
 
     @staticmethod
-    def check_db_table(args_dfe_package_file_path, args_target_file_path, args_log_path, database_name: str, table_name: str) -> bool:
+    def check_db_table(
+        args_dfe_package_file_path,
+        args_target_file_path,
+        args_log_path,
+        database_name: str,
+        table_name: str,
+    ) -> bool:
         """
         Check if database and table already exists on clickhouse
 
@@ -836,14 +794,18 @@ class SchemaController:
         """
         with SchemaController.lock:
             try:
-                dfe_config = DFEConfigLoader.load_dfe_package(config_file_path=args_dfe_package_file_path)
-                dfe_config_target_path = dfe_config['global_settings'].get('target_path', None)
+                dfe_config = DFEConfigLoader.load_dfe_package(
+                    config_file_path=args_dfe_package_file_path
+                )
+                dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
             except FileNotFoundError as error:
                 logger.error(f"Error: {error}")
                 return
 
         target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
-        target_config_data = DFEConfigLoader.read_target_config(target_name="hypersec", targets_file_path=target_path)
+        target_config_data = DFEConfigLoader.read_target_config(
+            target_name="hypersec", targets_file_path=target_path
+        )
         clickhouse_manager = ClickHouseManager.get_instance(target_config_data=target_config_data)
         query = f"SELECT name FROM system.tables WHERE database = '{database_name}' AND name = '{table_name}'"
         with clickhouse_manager.get_clickhouse_client() as ch_client:

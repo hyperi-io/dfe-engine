@@ -40,9 +40,7 @@ def pytest_runtest_logreport(report):
 
 def pytest_terminal_summary(terminalreporter, exitstatus):
     """Print test summary at the end."""
-    logger.info(
-        "\n===================== test_profiles Test Summary ====================="
-    )
+    logger.info("\n===================== test_profiles Test Summary =====================")
     logger.info("Overall Statistics:")
     logger.info(f"Total Tests Run: {test_stats['total']}")
     logger.info(f"Tests Passed:    {test_stats['passed']}")

@@ -1,6 +1,5 @@
 import os
 import re
-from typing import Optional
 
 import pandas as pd
 from hs_lib.logger import logger
@@ -74,7 +73,9 @@ class HuntGenerator:
         elif "h" in schedule:
             return f"0 */{schedule[:-1]} * * *"
         else:
-            raise ValueError(f"Invalid schedule format: {schedule}. Expected format like '5m' or '1h'")
+            raise ValueError(
+                f"Invalid schedule format: {schedule}. Expected format like '5m' or '1h'"
+            )
 
     def _create_new_hunt_config(
         self,
@@ -105,13 +106,15 @@ class HuntGenerator:
 
         :param df: DataFrame containing watcher configuration data.
         """
-        for index, row in df.iterrows():
+        for _index, row in df.iterrows():
             try:
                 rule_name = row.get("name")
                 device_types = row.get("device_types")
                 schedule_duration = row.get("schedule_duration")
                 if len(device_types) == 0 or len(schedule_duration) == 0:
-                    raise ValueError(f"Missing device_types or schedule_duration for rule: {rule_name}")
+                    raise ValueError(
+                        f"Missing device_types or schedule_duration for rule: {rule_name}"
+                    )
 
                 device_prefix = "_".join(device for device in device_types)
                 schedule_prefix = schedule_duration[0]

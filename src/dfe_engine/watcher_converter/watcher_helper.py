@@ -37,9 +37,7 @@ def generate_con_abt(data_frame, continuous_features):
         populated_values = data_frame[feature].count()
         missing_values = data_frame[feature].isnull().sum()
         missing_percentage = (
-            100
-            if populated_values == 0
-            else ((missing_values / data_frame[feature].size) * 100)
+            100 if populated_values == 0 else ((missing_values / data_frame[feature].size) * 100)
         )
 
         cardinality = len(data_frame[feature].unique())
@@ -68,9 +66,7 @@ def generate_con_abt(data_frame, continuous_features):
         ]
         con_summary_stats_list.append(line_stats_list)
 
-    return pd.DataFrame.from_records(
-        con_summary_stats_list, columns=continous_summary_cols
-    )
+    return pd.DataFrame.from_records(con_summary_stats_list, columns=continous_summary_cols)
 
 
 def generate_cat_abt(data_frame, categorical_features):
@@ -79,14 +75,10 @@ def generate_cat_abt(data_frame, categorical_features):
         populated_values = data_frame[feature].count()
         missing_values = data_frame[feature].isnull().sum()
         missing_percentage = (
-            100
-            if populated_values == 0
-            else ((missing_values / data_frame[feature].size) * 100)
+            100 if populated_values == 0 else ((missing_values / data_frame[feature].size) * 100)
         )
 
-        if (
-            data_frame[feature].apply(isinstance, args=(list,)).any()
-        ):  # check if any row is a list
+        if data_frame[feature].apply(isinstance, args=(list,)).any():  # check if any row is a list
             flattened_list = [
                 item for sublist in data_frame[feature] for item in sublist
             ]  # flatten the list
@@ -137,6 +129,4 @@ def generate_cat_abt(data_frame, categorical_features):
         ]
         cat_summary_stats_list.append(line_stats_list)
 
-    return pd.DataFrame.from_records(
-        cat_summary_stats_list, columns=categorical_summary_cols
-    )
+    return pd.DataFrame.from_records(cat_summary_stats_list, columns=categorical_summary_cols)

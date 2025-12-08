@@ -9,6 +9,7 @@ from pathlib import Path
 # Load .env file if present (before any other imports that might use settings)
 try:
     from dotenv import load_dotenv
+
     env_path = Path(__file__).parent.parent.parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
@@ -261,9 +262,7 @@ def dfe_config_fixtures(tmp_path_factory):
     with open(targets_path, "w") as f:
         yaml.dump(targets_data, f)
 
-    post_build_path = (
-        Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
-    )
+    post_build_path = Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
 
     config_data = {
         "global_settings": {
@@ -279,9 +278,7 @@ def dfe_config_fixtures(tmp_path_factory):
                     "ingestion_pipeline_enrichment_standard_custom",
                 ],
                 "geoip": ["ingestion_pipeline_enrichment_geoip"],
-            },
-            "vector_files": {
-                "vector": ["ingestion_pipeline_templates"]
+                "vector": ["ingestion_pipeline_templates"],
             },
             "derived_schema_paths": "tests/resources/test_schemas/stable_schemas",
             "meta_schema_paths": str(post_build_path / "dfe_meta_schemas"),
@@ -396,9 +393,7 @@ def dfe_config_fixtures_subsampling(tmp_path_factory):
     with open(targets_path, "w") as f:
         yaml.dump(targets_data, f)
 
-    post_build_path = (
-        Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
-    )
+    post_build_path = Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
 
     config_data = {
         "global_settings": {
@@ -414,9 +409,7 @@ def dfe_config_fixtures_subsampling(tmp_path_factory):
                     "ingestion_pipeline_enrichment_standard_custom",
                 ],
                 "geoip": ["ingestion_pipeline_enrichment_geoip"],
-            },
-            "vector_files": {
-                "vector": ["ingestion_pipeline_templates"]
+                "vector": ["ingestion_pipeline_templates"],
             },
             "derived_schema_paths": "tests/resources/test_schemas/stable_schemas",
             "meta_schema_paths": str(post_build_path / "dfe_meta_schemas"),
@@ -530,9 +523,7 @@ def dfe_config_fixtures_backward_compatibility(tmp_path_factory):
     with open(targets_path, "w") as f:
         yaml.dump(targets_data, f)
 
-    post_build_path = (
-        Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
-    )
+    post_build_path = Path(__file__).parent.parent.parent / "resources" / "post_build_artefacts"
 
     config_data = {
         "global_settings": {
@@ -547,9 +538,7 @@ def dfe_config_fixtures_backward_compatibility(tmp_path_factory):
                     "ingestion_pipeline_enrichment_standard_custom",
                 ],
                 "geoip": ["ingestion_pipeline_enrichment_geoip"],
-            },
-            "vector_files": {
-                "vector": ["ingestion_pipeline_templates"]
+                "vector": ["ingestion_pipeline_templates"],
             },
             "derived_schema_paths": "tests/resources/test_schemas/stable_schemas",
             "meta_schema_paths": str(post_build_path / "dfe_meta_schemas"),
@@ -673,9 +662,7 @@ def pytest_runtest_logreport(report):
 
 def pytest_terminal_summary(terminalreporter, exitstatus):
     """Print test summary at the end."""
-    logger.info(
-        "\n===================== test_schemas Test Summary ====================="
-    )
+    logger.info("\n===================== test_schemas Test Summary =====================")
     logger.info("Overall Statistics:")
     logger.info(f"Total Tests Run: {test_stats['total']}")
     logger.info(f"Tests Passed:    {test_stats['passed']}")
@@ -767,8 +754,6 @@ def ensure_schema_db(ch_client):
 
                     time.sleep(retry_delay)
                     continue
-                raise Exception(
-                    f"Operation failed after {max_retries} attempts: {last_error}"
-                )
+                raise Exception(f"Operation failed after {max_retries} attempts: {last_error}")
 
     return _ensure_schema_db

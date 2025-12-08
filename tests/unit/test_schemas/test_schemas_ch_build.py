@@ -53,9 +53,7 @@ def create_schema(tmp_path) -> ClickHouseSchema:
 def validate_columns(expected_columns: List[str], normalized_sql_content: str):
     expected_columns = [col.replace(".", "_") for col in expected_columns]
     for column in expected_columns:
-        assert column in normalized_sql_content, (
-            f"Column '{column}' not found in SQL template."
-        )
+        assert column in normalized_sql_content, f"Column '{column}' not found in SQL template."
 
 
 def validate_common_headers(normalized_sql_content: str):
@@ -78,12 +76,8 @@ def validate_ttl_statements(normalized_sql_content: str):
         )
 
 
-def validate_order_by_clause(
-    expected_order_by_clause: str, normalized_sql_content: str
-):
-    assert "ORDER BY" in normalized_sql_content, (
-        "ORDER BY clause is missing in SQL template."
-    )
+def validate_order_by_clause(expected_order_by_clause: str, normalized_sql_content: str):
+    assert "ORDER BY" in normalized_sql_content, "ORDER BY clause is missing in SQL template."
     assert expected_order_by_clause in normalized_sql_content.replace("\n", " "), (
         f"ORDER BY clause is not correctly constructed. Expected \n{expected_order_by_clause} in {normalized_sql_content}"
     )
@@ -110,9 +104,7 @@ def validate_index_statement(schema: ClickHouseSchema, normalized_sql_content: s
     )
 
 
-def validate_partition_by_statement(
-    schema: ClickHouseSchema, normalized_sql_content: str
-):
+def validate_partition_by_statement(schema: ClickHouseSchema, normalized_sql_content: str):
     assert schema.PARTITION_BY_STATEMENT.strip() in normalized_sql_content, (
         "Partition by statement is missing in SQL template."
     )
@@ -121,9 +113,7 @@ def validate_partition_by_statement(
 def validate_datatype_statement(schema, expected_detailed_types: dict):
     schema.build_clickhouse_schema()
 
-    output_sql_path = os.path.join(
-        schema.schema_output_path, f"{schema.schema_name}.sql"
-    )
+    output_sql_path = os.path.join(schema.schema_output_path, f"{schema.schema_name}.sql")
 
     assert os.path.exists(output_sql_path), "SQL template was not generated."
 
@@ -146,9 +136,7 @@ def run_schema_validation_tests(
 ):
     schema.build_clickhouse_schema()
 
-    output_sql_path = os.path.join(
-        schema.schema_output_path, f"{schema.schema_name}.sql"
-    )
+    output_sql_path = os.path.join(schema.schema_output_path, f"{schema.schema_name}.sql")
     assert os.path.exists(output_sql_path), "SQL template was not generated."
 
     with open(output_sql_path, "r") as sql_file:
@@ -164,9 +152,7 @@ def run_schema_validation_tests(
     validate_partition_by_statement(schema, normalized_sql_content)
 
 
-def test_log_alerts_clickhouse_schema_common_003(
-    create_schema, create_base_meta_schema_alerts
-):
+def test_log_alerts_clickhouse_schema_common_003(create_schema, create_base_meta_schema_alerts):
     derived_schema_df = pd.DataFrame(
         {
             "column": ["event_id", "rule_id"],
@@ -187,19 +173,13 @@ def test_log_alerts_clickhouse_schema_common_003(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_alerts, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_alerts, derived_schema_df, add_fields_df)
     expected_columns = ["event_id", "rule_id", "alert_confidence_level"]
-    expected_order_by_clause = (
-        "ORDER BY (timestamp_load, event_id, alert_confidence_level)"
-    )
+    expected_order_by_clause = "ORDER BY (timestamp_load, event_id, alert_confidence_level)"
     run_schema_validation_tests(schema, expected_columns, expected_order_by_clause)
 
 
-def test_log_alerts_clickhouse_schema_common_005(
-    create_schema, create_base_meta_schema_alerts
-):
+def test_log_alerts_clickhouse_schema_common_005(create_schema, create_base_meta_schema_alerts):
     derived_schema_df = pd.DataFrame(
         {
             "column": ["event_id", "rule_id"],
@@ -227,13 +207,13 @@ def test_log_alerts_clickhouse_schema_common_005(
         use_subsampling_feature=True,
     )
     expected_columns = ["event_id", "rule_id", "alert_confidence_level"]
-    expected_order_by_clause = "ORDER BY (cityHash64(timestamp_load), timestamp_load, event_id, alert_confidence_level)"
+    expected_order_by_clause = (
+        "ORDER BY (cityHash64(timestamp_load), timestamp_load, event_id, alert_confidence_level)"
+    )
     run_schema_validation_tests(schema, expected_columns, expected_order_by_clause)
 
 
-def test_log_alerts_clickhouse_schema_common_index(
-    create_schema, create_base_meta_schema_alerts
-):
+def test_log_alerts_clickhouse_schema_common_index(create_schema, create_base_meta_schema_alerts):
     derived_schema_df = pd.DataFrame(
         {
             "column": ["event_id", "rule_id"],
@@ -254,14 +234,10 @@ def test_log_alerts_clickhouse_schema_common_index(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_alerts, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_alerts, derived_schema_df, add_fields_df)
     schema.build_clickhouse_schema()
 
-    output_sql_path = os.path.join(
-        schema.schema_output_path, f"{schema.schema_name}.sql"
-    )
+    output_sql_path = os.path.join(schema.schema_output_path, f"{schema.schema_name}.sql")
 
     with open(output_sql_path, "r") as sql_file:
         sql_content = sql_file.read()
@@ -293,9 +269,7 @@ def test_logs_nxlog_windows_clickhouse_schema_common_001(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_nxlog_windows, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_nxlog_windows, derived_schema_df, add_fields_df)
     expected_columns = ["event_id", "domain", "event_creation_time"]
     expected_order_by_clause = "ORDER BY (timestamp_load, domain)"
     expected_detailed_types = {
@@ -330,9 +304,7 @@ def test_logs_nxlog_windows_clickhouse_schema_common_002(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_nxlog_windows, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_nxlog_windows, derived_schema_df, add_fields_df)
     expected_columns = ["event_id", "domain", "event_creation_time"]
     expected_order_by_clause = "ORDER BY (timestamp_load, event_id, domain)"
     expected_detailed_types = {
@@ -344,9 +316,7 @@ def test_logs_nxlog_windows_clickhouse_schema_common_002(
     validate_datatype_statement(schema, expected_detailed_types)
 
 
-def test_log_filebeat_clickhouse_schema_common_003(
-    create_schema, create_base_meta_schema_filebeat
-):
+def test_log_filebeat_clickhouse_schema_common_003(create_schema, create_base_meta_schema_filebeat):
     derived_schema_df = pd.DataFrame(
         {
             "column": ["user*", "agent_properties_id"],
@@ -367,9 +337,7 @@ def test_log_filebeat_clickhouse_schema_common_003(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_filebeat, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_filebeat, derived_schema_df, add_fields_df)
     expected_columns = ["agent_properties_id", "user", "o365_audit_severity"]
     expected_order_by_clause = "ORDER BY (timestamp_load, agent_properties_id)"
     run_schema_validation_tests(schema, expected_columns, expected_order_by_clause)
@@ -400,9 +368,7 @@ def test_log_filebeat_catch_derived_schema_duplicates(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_filebeat, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_filebeat, derived_schema_df, add_fields_df)
 
     try:
         schema.build_clickhouse_schema()
@@ -434,50 +400,55 @@ def test_log_filebeat_catch_core_and_common_field_clash(
         }
     )
 
-    schema = create_schema(
-        create_base_meta_schema_filebeat, derived_schema_df, add_fields_df
-    )
+    schema = create_schema(create_base_meta_schema_filebeat, derived_schema_df, add_fields_df)
     schema.build_clickhouse_schema()
+
 
 def test_sub_schema_type_override_and_fallback(create_schema):
     """
     Test that sub-schema 'type' column overrides meta schema, and fallback works if missing.
     """
 
-    meta_schema_df = pd.DataFrame({
-        'column': ['event_id', 'rule_id'],
-        'type': ['string', 'int32'],
-        'default': ['', ''],
-        'index_order': [1, 2],
-        'os_order': [1, 2],
-        'comment': ['event id', 'rule id']
-    })
+    meta_schema_df = pd.DataFrame(
+        {
+            "column": ["event_id", "rule_id"],
+            "type": ["string", "int32"],
+            "default": ["", ""],
+            "index_order": [1, 2],
+            "os_order": [1, 2],
+            "comment": ["event id", "rule id"],
+        }
+    )
 
-    derived_schema_df = pd.DataFrame({
-        'column': ['event_id', 'rule_id'],
-        'type': ['string', ''],
-        'index_order': [1, 2],
-        'os_order': [1, 2],
-        'comment': ['event id', 'rule id']
-    })
+    derived_schema_df = pd.DataFrame(
+        {
+            "column": ["event_id", "rule_id"],
+            "type": ["string", ""],
+            "index_order": [1, 2],
+            "os_order": [1, 2],
+            "comment": ["event id", "rule id"],
+        }
+    )
 
-    add_fields_df = pd.DataFrame({
-        'column': [], 'type': [], 'default': [], 'index_order': [], 'os_order': [], 'comment': []
-    })
+    add_fields_df = pd.DataFrame(
+        {"column": [], "type": [], "default": [], "index_order": [], "os_order": [], "comment": []}
+    )
 
     schema = create_schema(meta_schema_df, derived_schema_df, add_fields_df)
     schema.build_clickhouse_schema()
 
-    output_sql_path = os.path.join(
-        schema.schema_output_path,
-        f"{schema.schema_name}.sql"
-    )
+    output_sql_path = os.path.join(schema.schema_output_path, f"{schema.schema_name}.sql")
     assert os.path.exists(output_sql_path), "SQL template was not generated."
-    with open(output_sql_path, 'r') as sql_file:
-        sql_content = sql_file.read().replace('\n', ' ')
+    with open(output_sql_path, "r") as sql_file:
+        sql_content = sql_file.read().replace("\n", " ")
 
-    assert re.search(r"event_id\s+String", sql_content, re.IGNORECASE), "event_id type override failed"
-    assert re.search(r"rule_id\s+Nullable\(Int32\)", sql_content, re.IGNORECASE), "rule_id fallback to meta schema type failed"
+    assert re.search(r"event_id\s+String", sql_content, re.IGNORECASE), (
+        "event_id type override failed"
+    )
+    assert re.search(r"rule_id\s+Nullable\(Int32\)", sql_content, re.IGNORECASE), (
+        "rule_id fallback to meta schema type failed"
+    )
+
 
 def test_sub_schema_full_override_and_fallback(create_schema):
     """
@@ -486,42 +457,46 @@ def test_sub_schema_full_override_and_fallback(create_schema):
     """
     import re
 
-    meta_schema_df = pd.DataFrame({
-        'column': ['event_id', 'rule_id'],
-        'type': ['string', 'int32'],
-        'index_type': ['tokenbf_v1', 'ngrambf_v1'],
-        'index_order': [1, 2],
-        'default': ['', ''],
-        'os_order': [1, 2],
-        'comment': ['event id', 'rule id']
-    })
+    meta_schema_df = pd.DataFrame(
+        {
+            "column": ["event_id", "rule_id"],
+            "type": ["string", "int32"],
+            "index_type": ["tokenbf_v1", "ngrambf_v1"],
+            "index_order": [1, 2],
+            "default": ["", ""],
+            "os_order": [1, 2],
+            "comment": ["event id", "rule id"],
+        }
+    )
 
-    derived_schema_df = pd.DataFrame({
-        'column': ['event_id', 'rule_id'],
-        'type': ['string_fast_lowcardinality', ''],
-        'index_type': ['ngrambf_v1', ''],
-        'index_order': [None, 99],
-        'default': ['', ''],
-        'os_order': [1, 2],
-        'comment': ['event id', 'rule id']
-    })
+    derived_schema_df = pd.DataFrame(
+        {
+            "column": ["event_id", "rule_id"],
+            "type": ["string_fast_lowcardinality", ""],
+            "index_type": ["ngrambf_v1", ""],
+            "index_order": [None, 99],
+            "default": ["", ""],
+            "os_order": [1, 2],
+            "comment": ["event id", "rule id"],
+        }
+    )
 
-    add_fields_df = pd.DataFrame({
-        'column': [], 'type': [], 'default': [], 'index_order': [], 'os_order': [], 'comment': []
-    })
+    add_fields_df = pd.DataFrame(
+        {"column": [], "type": [], "default": [], "index_order": [], "os_order": [], "comment": []}
+    )
 
     schema = create_schema(meta_schema_df, derived_schema_df, add_fields_df)
     schema.build_clickhouse_schema()
 
-    output_sql_path = os.path.join(
-        schema.schema_output_path,
-        f"{schema.schema_name}.sql"
-    )
+    output_sql_path = os.path.join(schema.schema_output_path, f"{schema.schema_name}.sql")
     assert os.path.exists(output_sql_path), "SQL template was not generated."
-    with open(output_sql_path, 'r') as sql_file:
-        sql_content = sql_file.read().replace('\n', ' ')
+    with open(output_sql_path, "r") as sql_file:
+        sql_content = sql_file.read().replace("\n", " ")
 
-
-    assert re.search(r"event_id\s+(LowCardinality\(String\)|String).*CODEC", sql_content, re.IGNORECASE), "event_id type override failed"
+    assert re.search(
+        r"event_id\s+(LowCardinality\(String\)|String).*CODEC", sql_content, re.IGNORECASE
+    ), "event_id type override failed"
     assert "1" in sql_content, "event_id index_order fallback failed"
-    assert re.search(r"rule_id\s+Nullable\(Int32\)", sql_content, re.IGNORECASE), "rule_id type fallback failed"
+    assert re.search(r"rule_id\s+Nullable\(Int32\)", sql_content, re.IGNORECASE), (
+        "rule_id type fallback failed"
+    )

@@ -15,10 +15,9 @@ import os
 import fnmatch
 import sqlparse
 from pathlib import Path
-from importlib import resources
-import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .schema_util import SchemaUtils, SchemaValidationError, SchemaNameConflictError
+from hs_lib.logger import logger
 
 
 class SchemaBuilderException(Exception):
@@ -59,7 +58,7 @@ class SchemaBuilder:
     def __init__(
         self,
         derived_schema_path: Path,
-        logger = None,
+        logger=None,
         no_cluster_declarations_needed: bool = True,
         use_replicated_merge_tree: bool = True,
         use_json_feature: bool = False,
@@ -92,9 +91,9 @@ class SchemaBuilder:
 
         self.organisations = config.get("organisations", [])
 
-        self.common_schema_version = config["global_settings"][
-            "schema_common_version"
-        ].replace(".", "_")
+        self.common_schema_version = config["global_settings"]["schema_common_version"].replace(
+            ".", "_"
+        )
         self.common_resource_path = f"common/{self.common_schema_version}"
 
         self.dfe_output_path = Path(config["global_settings"]["schema_output_path"])
@@ -108,20 +107,20 @@ class SchemaBuilder:
     def validate_norm_column_names(schema_columns: List[Dict[str, Any]]) -> None:
         """
         Validate that indexed ip_field columns don't conflict with user-defined _norm columns.
-        
+
         Raises:
             SchemaNameConflictError if conflict detected
         """
-        existing_cols = {col.get('column') for col in schema_columns if col.get('column')}
-        
+        existing_cols = {col.get("column") for col in schema_columns if col.get("column")}
+
         for col in schema_columns:
-            col_name = col.get('column')
-            col_type = col.get('type')
-            col_index_type = col.get('index_type')
-            
-            if col_type == 'ip_field' and col_index_type:
+            col_name = col.get("column")
+            col_type = col.get("type")
+            col_index_type = col.get("index_type")
+
+            if col_type == "ip_field" and col_index_type:
                 expected_norm_name = f"{col_name}_norm"
-                
+
                 if expected_norm_name in existing_cols:
                     error_msg = (
                         f"Conflict: '{expected_norm_name}' already exists. "
@@ -172,9 +171,7 @@ class SchemaBuilder:
         if not self.derived_schema_path:
             raise ValueError("derived_schema_path must be set")
 
-        meta_schema_paths = self.config.get("global_settings", {}).get(
-            "meta_schema_paths", None
-        )
+        meta_schema_paths = self.config.get("global_settings", {}).get("meta_schema_paths", None)
         meta_schema_file_path_base = Path(meta_schema_paths)
 
         meta_schema = schema_info.get("meta_schema")
@@ -203,12 +200,10 @@ class SchemaBuilder:
             / f"{meta_schema_no_extension}/{meta_schema_version}/{meta_schema_resource}",
             meta_schema_dir_path=meta_schema_file_path_base
             / f"{meta_schema_no_extension}/{meta_schema_version}",
-            unified_mapping_file_path=self.derived_schema_path
-            / unified_mapping_file_path
+            unified_mapping_file_path=self.derived_schema_path / unified_mapping_file_path
             if unified_mapping_file_path
             else None,
-            additional_fields_file_path=self.derived_schema_path
-            / additional_fields_file_path
+            additional_fields_file_path=self.derived_schema_path / additional_fields_file_path
             if additional_fields_file_path
             else None,
             derived_schema_file_path=self.derived_schema_path / derived_schema_file_path
@@ -230,17 +225,15 @@ class SchemaBuilder:
                     f"Also validate the full path of the schema resource '{resource_path}'."
                 )
                 raise SchemaBuilderException(error_msg)
-        except FileNotFoundError:
+        except FileNotFoundError as err:
             error_msg = (
                 f"Schema '{schema_name}' is missing from package '{package}'. "
                 f"Please make sure the schema name is correct and has the correct version number {version}. "
                 f"Also validate the full path of the schema resource '{resource_path}'."
             )
-            raise SchemaBuilderException(error_msg)
+            raise SchemaBuilderException(error_msg) from err
 
-    def _validate_path(
-        self, path: Optional[Path], path_description: str, schema_name: str
-    ):
+    def _validate_path(self, path: Optional[Path], path_description: str, schema_name: str):
         if path is not None and not path.exists():
             error_msg = (
                 f"{path_description} Schema '{schema_name}' does not exist. "
@@ -258,12 +251,10 @@ class SchemaBuilder:
             if not parsed_sql:
                 raise ValueError(f"Failed to parse SQL file: {sql_file}")
 
-            logger.info(
-                f"DDL Validation for SQL {sql_file} Completed Successfully."
-            )
+            logger.info(f"DDL Validation for SQL {sql_file} Completed Successfully.")
         except Exception as e:
             error_msg = f"Syntax error in SQL file {sql_file}: {e}"
-            raise SchemaBuilderException(error_msg)
+            raise SchemaBuilderException(error_msg) from e
 
     def validate_multiple_sql_files(self, sql_files: List[Path]):
         with ThreadPoolExecutor() as executor:
@@ -291,9 +282,7 @@ class SchemaBuilder:
         ]
         for path, description in paths:
             if path and not path.exists():
-                raise SchemaBuilderException(
-                    f"{description} does not exist at path: {path}"
-                )
+                raise SchemaBuilderException(f"{description} does not exist at path: {path}")
 
     def build(self):
         try:
@@ -310,9 +299,7 @@ class SchemaBuilder:
                     self._validate_schema_paths(schema_paths)
                     extracted_schemas[schema_name] = schema_paths
                 except SchemaBuilderException:
-                    logger.error(
-                        f"Validation failed for schema {schema_name}", stack_info=True
-                    )
+                    logger.error(f"Validation failed for schema {schema_name}", stack_info=True)
 
             with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
                 ch_futures = [
@@ -325,9 +312,7 @@ class SchemaBuilder:
             self.check_all_sql_files(self.dfe_output_path)
 
         except SchemaValidationError as e:
-            logger.error(
-                f"Schema validation failed in build process: {e}", stack_info=True
-            )
+            logger.error(f"Schema validation failed in build process: {e}", stack_info=True)
         except Exception as e:
             logger.error(f"Error in build process: {str(e)}", stack_info=True)
 
@@ -337,20 +322,14 @@ class SchemaBuilder:
             try:
                 future.result()
             except SchemaValidationError as e:
-                logger.error(
-                    f"Critical schema validation error during processing: {e}"
-                )
+                logger.error(f"Critical schema validation error during processing: {e}")
                 logger.error(
                     "Build process stopped due to critical schema validation errors. Please fix the errors and try again."
                 )
-                raise SystemExit(1)  # Re-raise to ensure the error stops the process
+                raise SystemExit(1) from e  # Re-raise to ensure the error stops the process
             except Exception as e:
-                logger.error(
-                    f"Unexpected error during processing: {str(e)}", stack_info=True
-                )
-                raise SystemExit(
-                    1
-                )  # Optionally, you can stop the process for generic errors as well
+                logger.error(f"Unexpected error during processing: {str(e)}", stack_info=True)
+                raise SystemExit(1) from e
 
     def _pretty_print_schema_info(self, schema_info: SchemaInfo):
         """Pretty print all variables in SchemaInfo for debugging purposes."""
@@ -386,9 +365,7 @@ class SchemaBuilder:
             logger.error(f"Schema validation failed: {e}")
             SystemExit(1)
         except Exception as e:
-            logger.error(
-                f"Error processing ClickHouse schemas for {schema_info.name}: {e}"
-            )
+            logger.error(f"Error processing ClickHouse schemas for {schema_info.name}: {e}")
             SystemExit(1)
         finally:
             logger.info(f"ClickHouse Schema Built {schema_info.name}")
@@ -399,13 +376,9 @@ class SchemaBuilder:
         Returns a dictionary of matching schemas.
         """
         matching_schemas = {}
-        schema_filter_list = (
-            self.schema_filter_list.split(",") if self.schema_filter_list else []
-        )
+        schema_filter_list = self.schema_filter_list.split(",") if self.schema_filter_list else []
         derived_schema_filter_list = (
-            self.derived_schema_filter_list.split(",")
-            if self.derived_schema_filter_list
-            else []
+            self.derived_schema_filter_list.split(",") if self.derived_schema_filter_list else []
         )
 
         # Skip sigma-related fields
@@ -421,8 +394,7 @@ class SchemaBuilder:
 
             # Check for exact matches in filters
             if any(
-                schema_name == schema
-                for schema in schema_filter_list + derived_schema_filter_list
+                schema_name == schema for schema in schema_filter_list + derived_schema_filter_list
             ):
                 matching_schemas[schema_name] = schema_info
                 continue
@@ -436,13 +408,11 @@ class SchemaBuilder:
                 matching_schemas[schema_name] = schema_info
                 continue
 
-            derived_schema_file_path = schema_info.get(
-                "derived_schema_file_path", ""
-            ).split("/")[-1]
+            derived_schema_file_path = schema_info.get("derived_schema_file_path", "").split("/")[
+                -1
+            ]
             if self.derived_schema_filter_wildchar and (
-                fnmatch.fnmatch(
-                    derived_schema_file_path, self.derived_schema_filter_wildchar
-                )
+                fnmatch.fnmatch(derived_schema_file_path, self.derived_schema_filter_wildchar)
                 if "*" in self.derived_schema_filter_wildchar
                 else self.derived_schema_filter_wildchar == derived_schema_file_path
             ):

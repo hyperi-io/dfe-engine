@@ -4,6 +4,7 @@ from hs_lib.logger import logger
 
 from .clickhouse_manager import ClickHouseManager
 
+
 class ClickHouseMetrics:
     """Class for retrieving metrics from ClickHouse using the connection pool."""
 
@@ -23,7 +24,7 @@ class ClickHouseMetrics:
         """
         try:
             client = self.ch_manager.get_clickhouse_client()
-            
+
             # Query for total executions
             total_executions = client.execute(
                 f"""
@@ -63,9 +64,13 @@ class ClickHouseMetrics:
 
             return {
                 "total_executions": total_executions[0][0] if total_executions else 0,
-                "last_execution_time": last_execution[0][0].strftime('%Y-%m-%d %H:%M:%S') if last_execution and last_execution[0][0] else None,
-                "average_execution_time": float(avg_execution_time[0][0]) if avg_execution_time and avg_execution_time[0][0] else 0.0,
-                "total_matches": total_matches[0][0] if total_matches else 0
+                "last_execution_time": last_execution[0][0].strftime("%Y-%m-%d %H:%M:%S")
+                if last_execution and last_execution[0][0]
+                else None,
+                "average_execution_time": float(avg_execution_time[0][0])
+                if avg_execution_time and avg_execution_time[0][0]
+                else 0.0,
+                "total_matches": total_matches[0][0] if total_matches else 0,
             }
 
         except Exception as e:
@@ -74,5 +79,5 @@ class ClickHouseMetrics:
                 "total_executions": 0,
                 "last_execution_time": None,
                 "average_execution_time": 0.0,
-                "total_matches": 0
+                "total_matches": 0,
             }

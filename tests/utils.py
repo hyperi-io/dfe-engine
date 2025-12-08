@@ -19,10 +19,7 @@ class TestConfigBuilder:
 
         # Get the absolute path to post_build_artefacts directory
         post_build_path = (
-            Path(__file__).parent
-            / "resources"
-            / "post_build_artefacts"
-            / "ingestion_pipeline"
+            Path(__file__).parent / "resources" / "post_build_artefacts" / "ingestion_pipeline"
         )
 
         config_data = {
@@ -30,17 +27,13 @@ class TestConfigBuilder:
                 "schema_common_version": "v001.001.007",
                 "schema_output_path": str(temp_dir),
                 "output": str(temp_dir / "ingestion_pipelines"),
-                "upload_ingestion_template_output_path": str(
-                    temp_dir / "upload_templates"
-                ),
+                "upload_ingestion_template_output_path": str(temp_dir / "upload_templates"),
                 "default_target": "integration",
                 "target_path": str(temp_dir / "dfe_targets.yaml"),
                 "vector_files": {
                     "standard": [str(post_build_path / "standard_mappings")],
                     "geoip": [str(post_build_path / "geoip_mappings")],
-                },
-                "vector_files": {
-                    "vector": [str(post_build_path / "core_templates")]
+                    "vector": [str(post_build_path / "core_templates")],
                 },
             },
             "vector_templates": {

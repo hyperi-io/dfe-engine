@@ -48,7 +48,9 @@ class TestDockerFixtures:
         )
 
         # Query data
-        result = clickhouse_client.query(f"SELECT count() FROM {clickhouse_test_database}.test_table")
+        result = clickhouse_client.query(
+            f"SELECT count() FROM {clickhouse_test_database}.test_table"
+        )
         assert result.result_rows[0][0] == 3
 
     @pytest.mark.integration

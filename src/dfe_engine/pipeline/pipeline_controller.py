@@ -21,7 +21,7 @@ class PipelineBuilderController:
         except FileNotFoundError:
             log.error(f"Resource does not exist: {package}/{resource_path}")
             return None
-        
+
     @staticmethod
     def list_ingestion_templates(
         args_dfe_package_file_path: str,
@@ -55,10 +55,8 @@ class PipelineBuilderController:
         except Exception as error:
             logger.error(f"Error: {error} reading package data using default values", exc_info=True)
             return {}
-        
-        vector_files = dfe_config_data.get(
-            "global_settings", {}
-        ).get("vector_files", {})
+
+        vector_files = dfe_config_data.get("global_settings", {}).get("vector_files", {})
         if not vector_files:
             logger.warning("No vector files found in the configuration.")
             return {}
@@ -66,7 +64,9 @@ class PipelineBuilderController:
             # Download the vector templates if the flag is set
             PipelineBuilderController.download_templates(
                 args_log_path=args_log_path,
-                args_output=dfe_config_data["global_settings"]["vector_files"].get("core").split("/src/")[0],
+                args_output=dfe_config_data["global_settings"]["vector_files"]
+                .get("core")
+                .split("/src/")[0],
                 args_version="latest",
             )
             logger.info("Vector templates downloaded successfully.")
@@ -99,7 +99,7 @@ class PipelineBuilderController:
         args_log_path: str,
         args_core_config: str = None,
         args_pipeline_template: Optional[str] = None,
-        args_extra_config: Optional[dict] = {},
+        args_extra_config: Optional[dict] = None,
         args_build_core: bool = False,
         args_download: bool = False,
     ) -> None:
@@ -119,16 +119,14 @@ class PipelineBuilderController:
             Exception: If there is an error loading or processing the dfe_package file.
             ValueError: If no ingestion pipelines are found in the dfe_package.
         """
+        if args_extra_config is None:
+            args_extra_config = {}
         try:
             logger.debug("Attempting to load default DFE package configuration...")
             if not args_core_config:
-                args_core_config = os.path.join(
-                    os.path.dirname(__file__), 'core_config.yaml'
-                )
-            
-            default_dfe_config = DFEConfigLoader.load_dfe_package(
-                config_file_path=args_core_config
-            )
+                args_core_config = os.path.join(os.path.dirname(__file__), "core_config.yaml")
+
+            default_dfe_config = DFEConfigLoader.load_dfe_package(config_file_path=args_core_config)
         except FileNotFoundError:
             logger.error(
                 f"Default DFE package file not found at {args_core_config}. "
@@ -138,7 +136,7 @@ class PipelineBuilderController:
             if args_core_config:
                 default_dfe_config = {}
 
-        if not args_build_core:    
+        if not args_build_core:
             default_dfe_config.pop("ingestion_pipelines")
             logger.debug("Attempting to load DFE package configuration...")
             try:
@@ -154,15 +152,14 @@ class PipelineBuilderController:
                 )
         else:
             dfe_config = {}
-        dfe_config = merge_configs(
-            default_yaml=default_dfe_config, override_yaml=dfe_config
-        )
+        dfe_config = merge_configs(default_yaml=default_dfe_config, override_yaml=dfe_config)
         ingestion_output_path = (
             args_ingestion_output_path
-            or dfe_config["global_settings"]["output"] or "./pipelines/core"
+            or dfe_config["global_settings"]["output"]
+            or "./pipelines/core"
         )
         os.makedirs(ingestion_output_path, exist_ok=True)
-        
+
         # if download is set, download the templates
         if args_download:
             logger.info(
@@ -171,7 +168,9 @@ class PipelineBuilderController:
             # Download the vector templates if the flag is set
             PipelineBuilderController.download_templates(
                 args_log_path=args_log_path,
-                args_output=dfe_config["global_settings"]["vector_files"].get("core").split("/src/")[0],
+                args_output=dfe_config["global_settings"]["vector_files"]
+                .get("core")
+                .split("/src/")[0],
             )
             logger.info("Vector templates downloaded successfully.")
         pipeline_builder = PipelineBuilder(
@@ -182,10 +181,7 @@ class PipelineBuilderController:
             extra_config=args_extra_config,
         )
         pipeline_builder.build()
-        logger.info(
-            "All Ingestion Pipeline Templates have been successfully rendered."
-        )
-
+        logger.info("All Ingestion Pipeline Templates have been successfully rendered.")
 
     @staticmethod
     def download_templates(
@@ -194,7 +190,7 @@ class PipelineBuilderController:
         args_repo_url: Optional[str] = None,
         args_version: Optional[str] = None,
         args_username: Optional[str] = None,
-        args_password: Optional[str] = None
+        args_password: Optional[str] = None,
     ) -> None:
         """
         Download templates from storage backend (local, HTTP, or S3).

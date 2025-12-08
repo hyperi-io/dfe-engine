@@ -69,16 +69,12 @@ def test_create_update_checkpoint(
         hunt_name=hunt_name,
         thread_id="111",
         log_buffer=60,
-        previous_successful_checkpoint_str=last_success_time.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        previous_successful_checkpoint_str=last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
         query_schedule_time_str=scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
         execution_time_str=execution_time.strftime("%Y-%m-%d %H:%M:%S"),
         execution_time_ms=execution_time_ms,
         end_time_str=end_time.strftime("%Y-%m-%d %H:%M:%S"),
-        query_checkpoint_time_str=scheduled_start_time_w_buffer.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        query_checkpoint_time_str=scheduled_start_time_w_buffer.strftime("%Y-%m-%d %H:%M:%S"),
         file_path=file_path,
         query_id=generated_query_id,
     )

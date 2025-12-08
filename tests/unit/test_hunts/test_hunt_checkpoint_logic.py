@@ -4,7 +4,6 @@ from pytz import utc
 from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
 from dfe_engine.config.config_loader import DFEConfigLoader
 import time
-import os
 from hs_lib.logger import logger as hs_logger
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -51,9 +50,7 @@ def test_logger(tmp_path):
 
 def test_ensure_table_exists(ch_client, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
         assert manager.ensure_table_exists(
             ch_client, create_missing_database=True, no_cluster_declarations_needed=True
@@ -66,9 +63,7 @@ def test_ensure_table_exists(ch_client, unique_names):
 
 def test_ensure_database_not_exists(ch_client, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
         assert manager.ensure_table_exists(
             ch_client, create_missing_database=True, no_cluster_declarations_needed=True
@@ -81,9 +76,7 @@ def test_ensure_database_not_exists(ch_client, unique_names):
 
 def test_ensure_table_not_exists(ch_client, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
         assert manager.ensure_table_exists(
             ch_client, create_missing_tables=True, no_cluster_declarations_needed=True
@@ -101,9 +94,7 @@ rule_name = create_unique_name("pc_posh_test_rule")
 
 def test_create_and_update_checkpoint_success(ch_client, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
 
     try:
         execution_time = datetime.now(timezone.utc)
@@ -117,12 +108,8 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
         query_window_seconds = 600
 
         scheduled_start_time = datetime.now(timezone.utc)
-        last_success_time = scheduled_start_time - timedelta(
-            seconds=query_window_seconds
-        )
-        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(
-            seconds=log_buffer
-        )
+        last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
+        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
         scheduled_start_time_w_buffer_str = scheduled_start_time_w_buffer.strftime(
             "%Y-%m-%d %H:%M:%S"
         )
@@ -137,9 +124,7 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
             hunt_name=hunt_name,
             log_buffer=log_buffer,
             thread_id="11111",
-            previous_successful_checkpoint_str=last_success_time.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            previous_successful_checkpoint_str=last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
             query_schedule_time_str=scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
             execution_time_str=execution_time_str,
             execution_time_ms=execution_time_ms,
@@ -164,13 +149,9 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
         )
 
 
-def test_create_and_update_checkpoint_success_windows_validation(
-    ch_client, unique_names
-):
+def test_create_and_update_checkpoint_success_windows_validation(ch_client, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
 
     try:
         hunt_name = "test_hunt"
@@ -190,13 +171,9 @@ def test_create_and_update_checkpoint_success_windows_validation(
         execution_time_ms = (end_time - execution_time).total_seconds() * 1000
         log_buffer = 60
         query_window_seconds = 600
-        last_success_time = scheduled_start_time - timedelta(
-            seconds=query_window_seconds
-        )
+        last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
         generated_query_id = str(uuid.uuid4())
-        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(
-            seconds=log_buffer
-        )
+        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
         scheduled_start_time_w_buffer_str = scheduled_start_time_w_buffer.strftime(
             "%Y-%m-%d %H:%M:%S"
         )
@@ -208,9 +185,7 @@ def test_create_and_update_checkpoint_success_windows_validation(
             hunt_name=hunt_name,
             log_buffer=log_buffer,
             thread_id="11111",
-            previous_successful_checkpoint_str=last_success_time.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            previous_successful_checkpoint_str=last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
             query_schedule_time_str=scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
             execution_time_str=execution_time_str,
             execution_time_ms=execution_time_ms,
@@ -219,9 +194,7 @@ def test_create_and_update_checkpoint_success_windows_validation(
             query_id=generated_query_id,
         )
 
-        logger.info(
-            "Sleeping for 5 seconds before creating the next checkpoint..."
-        )
+        logger.info("Sleeping for 5 seconds before creating the next checkpoint...")
         time.sleep(5)
 
         query_checkpoint_time = manager.get_last_successful_run(
@@ -237,16 +210,12 @@ def test_create_and_update_checkpoint_success_windows_validation(
         if query_checkpoint_time.tzinfo is None:
             query_checkpoint_time = utc.localize(query_checkpoint_time)
 
-        logger.info(
-            f"Retrieved previous successful run time: {previous_success_time}"
-        )
+        logger.info(f"Retrieved previous successful run time: {previous_success_time}")
         logger.info(f"Retrieved last successful run time: {query_checkpoint_time}")
 
         current_time = datetime.now(timezone.utc)
         time_diff = current_time - query_checkpoint_time
-        logger.info(
-            f"Time difference between checkpoints: {time_diff.total_seconds()} seconds"
-        )
+        logger.info(f"Time difference between checkpoints: {time_diff.total_seconds()} seconds")
 
         if not (5 <= time_diff.total_seconds() < 10):
             logger.warning(

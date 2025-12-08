@@ -1,4 +1,3 @@
-
 import os
 import uuid
 from datetime import datetime, timezone, timedelta
@@ -143,20 +142,14 @@ class Hunt:
 
         for rule_info in self.rules:
             rule_name = rule_info["rule_name"]
-            target_table_name = rule_info.get(
-                "target_table_name", self.global_target_table_name
-            )
-            source_table_name = rule_info.get(
-                "source_table_name", self.global_source_table_name
-            )
+            target_table_name = rule_info.get("target_table_name", self.global_target_table_name)
+            source_table_name = rule_info.get("source_table_name", self.global_source_table_name)
             self.initial_checkpoint_lookback_minutes = rule_info.get(
                 "initial_checkpoint_lookback_minutes", self.convert_cron_to_minutes()
             )
 
             if not target_table_name or not source_table_name:
-                logger.error(
-                    f"Missing table names for rule [{rule_name}]. Skipping this rule."
-                )
+                logger.error(f"Missing table names for rule [{rule_name}]. Skipping this rule.")
                 continue
 
             template = env.get_template(f"{rule_name}.jinja2")
@@ -179,10 +172,7 @@ class Hunt:
                             "{customer_filters}", f"({filter_clause})"
                         ).replace("{ customer_filters }", f"({filter_clause})")
 
-            if (
-                "{customer_filters}" in generated_sql
-                or "{ customer_filters }" in generated_sql
-            ):
+            if "{customer_filters}" in generated_sql or "{ customer_filters }" in generated_sql:
                 generated_sql = generated_sql.replace(
                     "{ customer_filters }", "{customer_filters}"
                 ).replace("{customer_filters}", "True")
@@ -238,9 +228,7 @@ class Hunt:
                 index += 1
         return 0
 
-    def execute_hunt(
-        self, customer: str, scheduled_start_time: datetime
-    ) -> Dict[str, Any]:
+    def execute_hunt(self, customer: str, scheduled_start_time: datetime) -> Dict[str, Any]:
         """
         Execute the hunt with the built SQL queries, considering the last successful run.
         Returns execution metrics including total execution time, number of successful queries,
@@ -250,9 +238,7 @@ class Hunt:
         failed_queries = 0
         execution_time = datetime.now(timezone.utc)
         execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
-        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(
-            seconds=self.log_buffer
-        )
+        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=self.log_buffer)
         scheduled_start_time_w_buffer_str = scheduled_start_time_w_buffer.strftime(
             "%Y-%m-%d %H:%M:%S"
         )
@@ -267,14 +253,10 @@ class Hunt:
         file_path = None
 
         if self.checkpoint_destination == self.FILE:
-            self.checkpoint_manager.ensure_checkpoint_file_path_exists(
-                self.hunt_checkpoint_path
-            )
+            self.checkpoint_manager.ensure_checkpoint_file_path_exists(self.hunt_checkpoint_path)
             file_path = os.path.join(
                 self.hunt_checkpoint_path,
-                f"hunt_checkpoints_{customer}_{self.execution_time_str}.json".replace(
-                    "_", "-"
-                ),
+                f"hunt_checkpoints_{customer}_{self.execution_time_str}.json".replace("_", "-"),
             )
 
         try:
@@ -296,15 +278,13 @@ class Hunt:
                         timestamp_condition = ""
                         generated_query_id = str(uuid.uuid4())
 
-                        last_success_time = (
-                            self.checkpoint_manager.get_last_successful_run(
-                                checkpoint_destination=self.checkpoint_destination,
-                                ch_client=ch_client,
-                                customer=customer,
-                                hunt_name=self.name,
-                                rule_name=rule["rule_name"],
-                                file_path=file_path,
-                            )
+                        last_success_time = self.checkpoint_manager.get_last_successful_run(
+                            checkpoint_destination=self.checkpoint_destination,
+                            ch_client=ch_client,
+                            customer=customer,
+                            hunt_name=self.name,
+                            rule_name=rule["rule_name"],
+                            file_path=file_path,
                         )
 
                         if last_success_time is None:
@@ -319,12 +299,8 @@ class Hunt:
                             look_back_in_minutes = timedelta(
                                 minutes=self.initial_checkpoint_lookback_minutes
                             )
-                            last_success_time = (
-                                scheduled_start_time_w_buffer - look_back_in_minutes
-                            )
-                            last_success_time_str = last_success_time.strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            )
+                            last_success_time = scheduled_start_time_w_buffer - look_back_in_minutes
+                            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
                             logger.warning(
                                 f"No previous successful run for {self.name}. Initial run will be run using the cron job candence generated last success time '{last_success_time_str}'."
                             )
@@ -333,15 +309,13 @@ class Hunt:
                             logger.debug(
                                 f"Last successful run for {self.name}: {last_success_time} to query against checkpoint field {self.checkpoint_timestamp_field}"
                             )
-                            last_success_time_str = last_success_time.strftime(
-                                "%Y-%m-%d %H:%M:%S"
-                            )
+                            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
 
                         timestamp_condition = f"({self.checkpoint_timestamp_field} >= '{last_success_time_str}' AND {self.checkpoint_timestamp_field} < '{scheduled_start_time_w_buffer_str}')"
 
-                        query = query.replace(
-                            "{timestamp_condition}", timestamp_condition
-                        ).replace("{ timestamp_condition }", timestamp_condition)
+                        query = query.replace("{timestamp_condition}", timestamp_condition).replace(
+                            "{ timestamp_condition }", timestamp_condition
+                        )
 
                         try:
                             logger.info(
@@ -354,9 +328,7 @@ class Hunt:
                             query_start_time = datetime.now(timezone.utc)
                             query_start_time.strftime("%Y-%m-%d %H:%M:%S")
 
-                            query_result = ch_client.execute(
-                                query, query_id=generated_query_id
-                            )
+                            query_result = ch_client.execute(query, query_id=generated_query_id)
                             query_end_time = datetime.now(timezone.utc)
                             query_end_time.strftime("%Y-%m-%d %H:%M:%S")
                             query_execution_time_ms = (
@@ -386,9 +358,7 @@ class Hunt:
                                     "execution_time": query_start_time.strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     ),
-                                    "end_time": query_end_time.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    ),
+                                    "end_time": query_end_time.strftime("%Y-%m-%d %H:%M:%S"),
                                     "previous_successful_checkpoint": last_success_time.strftime(
                                         "%Y-%m-%d %H:%M:%S"
                                     ),
@@ -429,9 +399,7 @@ class Hunt:
             logger.error(base_error_message, exc_info=True)
             raise e
 
-        total_execution_time = (
-            datetime.now(timezone.utc) - execution_time
-        ).total_seconds()
+        total_execution_time = (datetime.now(timezone.utc) - execution_time).total_seconds()
         return {
             "total_execution_time": total_execution_time,
             "successful_queries": successful_queries,

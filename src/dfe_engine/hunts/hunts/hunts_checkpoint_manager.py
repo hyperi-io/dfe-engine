@@ -69,19 +69,13 @@ class HuntCheckpointManager:
         try:
             if self.table_exists(ch_client, database_name, table_name):
                 ch_client.execute(f"DROP TABLE IF EXISTS {database_name}.{table_name};")
-                logger.info(
-                    f"Table [{database_name}.{table_name}] dropped successfully."
-                )
+                logger.info(f"Table [{database_name}.{table_name}] dropped successfully.")
 
             if self.database_exists(ch_client, database_name):
                 ch_client.execute(f"DROP DATABASE IF EXISTS {database_name};")
-                logger.info(
-                    f"Database [{database_name}] dropped successfully."
-                )
+                logger.info(f"Database [{database_name}] dropped successfully.")
         except Exception as e:
-            logger.error(
-                f"Failed to drop database or table: {e}", exc_info=True
-            )
+            logger.error(f"Failed to drop database or table: {e}", exc_info=True)
 
     def table_exists(self, ch_client, database_name: str, table_name: str) -> bool:
         """
@@ -129,13 +123,9 @@ class HuntCheckpointManager:
             bool: True if the table exists or is created successfully, False otherwise.
         """
 
-        if create_missing_database and not self.database_exists(
-            ch_client, self.database_name
-        ):
+        if create_missing_database and not self.database_exists(ch_client, self.database_name):
             try:
-                ch_client.execute(
-                    f"CREATE DATABASE IF NOT EXISTS {self.database_name};"
-                )
+                ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {self.database_name};")
             except Exception as e:
                 logger.error(f"Error creating database: {e}")
                 return False
@@ -147,11 +137,7 @@ class HuntCheckpointManager:
             ch_client, self.database_name, self.table_name
         ):
             try:
-                engine = (
-                    "MergeTree()"
-                    if no_cluster_declarations_needed
-                    else "SharedMergeTree()"
-                )
+                engine = "MergeTree()" if no_cluster_declarations_needed else "SharedMergeTree()"
                 create_table_sql = f"""
                 CREATE TABLE IF NOT EXISTS {self.database_name}.{self.table_name} (
                     customer_name LowCardinality(String) CODEC(LZ4),
@@ -175,9 +161,7 @@ class HuntCheckpointManager:
                 logger.error(f"Error creating table: {e}", exc_info=True)
                 return False
         elif not create_missing_tables:
-            logger.info(
-                f"Table [{self.database_name}.{self.table_name}] already exists."
-            )
+            logger.info(f"Table [{self.database_name}.{self.table_name}] already exists.")
             return False
 
         return True
@@ -190,7 +174,7 @@ class HuntCheckpointManager:
         hunt_name: str = "",
         rule_name: str = "",
         file_path: str = "",
-            ) -> Optional[datetime]:
+    ) -> Optional[datetime]:
         """
         A method to fetch the last successful run's timestamp based on the destination type.
 
@@ -261,17 +245,13 @@ class HuntCheckpointManager:
             result = ch_client.execute(query)
             if result and result != [(datetime(1970, 1, 1, 0, 0),)]:
                 last_success_time = result[0][0]
-                logger.debug(
-                    f"Last Successful Checkpoint Time: {last_success_time}"
-                )
+                logger.debug(f"Last Successful Checkpoint Time: {last_success_time}")
                 return last_success_time
             else:
                 logger.info("No results found.")
                 return None
         except Exception as e:
-            logger.error(
-                f"Failed to retrieve last successful run: {e}", exc_info=True
-            )
+            logger.error(f"Failed to retrieve last successful run: {e}", exc_info=True)
             return None
 
     def get_last_successful_run_file(
@@ -321,9 +301,7 @@ class HuntCheckpointManager:
             logger.info("No checkpoint file found.")
             return None
         except Exception as e:
-            logger.error(
-                f"Failed to retrieve last successful run: {e}", exc_info=True
-            )
+            logger.error(f"Failed to retrieve last successful run: {e}", exc_info=True)
             return None
 
     def checkpoint_rule(
@@ -342,7 +320,7 @@ class HuntCheckpointManager:
         query_schedule_time_str: str = None,
         previous_successful_checkpoint_str: str = None,
         query_checkpoint_time_str: str = None,
-                file_path: str = "",
+        file_path: str = "",
     ) -> None:
         """
         A method to create or update a checkpoint based on the destination type.
@@ -533,9 +511,7 @@ class HuntCheckpointManager:
         except Exception as e:
             logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
 
-    def create_batch_checkpoint_clickhouse(
-        self, ch_client, checkpoints: List[Dict[str, Any]]
-    ):
+    def create_batch_checkpoint_clickhouse(self, ch_client, checkpoints: List[Dict[str, Any]]):
         """
         Insert the checkpoint data into the ClickHouse table.
 
@@ -545,9 +521,7 @@ class HuntCheckpointManager:
             logger (logging.Logger): Logger instance.
         """
 
-        logger.debug(
-            f"Starting batch checkpointing into [{self.database_name}.{self.table_name}]."
-        )
+        logger.debug(f"Starting batch checkpointing into [{self.database_name}.{self.table_name}].")
         try:
             data = [
                 (
@@ -555,20 +529,14 @@ class HuntCheckpointManager:
                     str(checkpoint.get("rule_name", "na")),
                     str(checkpoint.get("thread_id", "na")),
                     int(checkpoint.get("log_buffer", 0)),
-                    datetime.strptime(
-                        checkpoint.get("query_schedule_time"), "%Y-%m-%d %H:%M:%S"
-                    ),
-                    datetime.strptime(
-                        checkpoint.get("execution_time"), "%Y-%m-%d %H:%M:%S"
-                    ),
+                    datetime.strptime(checkpoint.get("query_schedule_time"), "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime(checkpoint.get("execution_time"), "%Y-%m-%d %H:%M:%S"),
                     datetime.strptime(checkpoint.get("end_time"), "%Y-%m-%d %H:%M:%S"),
                     datetime.strptime(
                         checkpoint.get("previous_successful_checkpoint"),
                         "%Y-%m-%d %H:%M:%S",
                     ),
-                    datetime.strptime(
-                        checkpoint.get("query_checkpoint_time"), "%Y-%m-%d %H:%M:%S"
-                    ),
+                    datetime.strptime(checkpoint.get("query_checkpoint_time"), "%Y-%m-%d %H:%M:%S"),
                     int(checkpoint.get("execution_time_ms", 0)),
                     str(checkpoint.get("hunt_name", "na")),
                     str(checkpoint.get("query_id", "na")),
@@ -628,10 +596,6 @@ class HuntCheckpointManager:
                     file.seek(0)
                     json.dump(existing_checkpoints, file, indent=4)
 
-            logger.debug(
-                f"Checkpoints successfully appended/created in file [{file_path}]"
-            )
+            logger.debug(f"Checkpoints successfully appended/created in file [{file_path}]")
         except Exception as e:
-            logger.error(
-                f"Failed to create or append checkpoints: {e}", exc_info=True
-            )
+            logger.error(f"Failed to create or append checkpoints: {e}", exc_info=True)

@@ -62,9 +62,7 @@ class TestPackageVersioning:
         }
 
         for component, version_key in components.items():
-            metadata_file = (
-                test_dir / "post_build_artefacts" / component / "metadata.txt"
-            )
+            metadata_file = test_dir / "post_build_artefacts" / component / "metadata.txt"
             version = self.read_version(metadata_file, version_key)
             assert re.match(r"^\d+\.\d+\.\d+$", version), (
                 f"Version {version} in {component}/metadata.txt does not follow semantic versioning (x.y.z)"
@@ -82,9 +80,7 @@ class TestPackageVersioning:
 
         versions = {}
         for component, version_key in components.items():
-            metadata_file = (
-                test_dir / "post_build_artefacts" / component / "metadata.txt"
-            )
+            metadata_file = test_dir / "post_build_artefacts" / component / "metadata.txt"
             version = self.read_version(metadata_file, version_key)
             versions[component] = version
 
@@ -97,7 +93,7 @@ class TestPackageVersioning:
     def test_zip_file_creation(self, setup_test_env):
         """Test that ZIP files are created with correct version numbers"""
         pytest.skip("Skipping build script test due to environment dependency issues")
-        
+
         if not _check_zip_installed():
             pytest.skip(
                 "zip command is not installed. Please install zip package to run this test."
@@ -116,9 +112,7 @@ class TestPackageVersioning:
         )
 
         assert result.returncode == 0, (
-            f"Script failed with error.\n"
-            f"stdout: {result.stdout}\n"
-            f"stderr: {result.stderr}"
+            f"Script failed with error.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
         components = {
@@ -129,9 +123,7 @@ class TestPackageVersioning:
         }
 
         for component, version_key in components.items():
-            metadata_file = (
-                test_dir / "post_build_artefacts" / component / "metadata.txt"
-            )
+            metadata_file = test_dir / "post_build_artefacts" / component / "metadata.txt"
             version = self.read_version(metadata_file, version_key)
             zip_file = test_dir / "post_build_artefacts" / f"{component}-{version}.zip"
             assert zip_file.exists(), f"Expected ZIP file {zip_file} not found"

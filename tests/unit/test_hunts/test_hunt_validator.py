@@ -54,9 +54,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -72,9 +70,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -89,9 +85,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -107,9 +101,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -124,9 +116,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -142,9 +132,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -159,9 +147,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -177,9 +163,7 @@ def setup_paths(tmp_path) -> dict:
                 "rules": [{"rule_name": "rule1", "target_table_name": "target_table1"}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1", "filter_clause": "event_id=4624"}]}
                 },
                 "name": "test_hunt",
             },
@@ -192,14 +176,10 @@ def setup_paths(tmp_path) -> dict:
                 "global_target_table_name": "target_logs",
                 "global_source_table_name": "source_logs",
                 "checkpoint_timestamp_field": "timestamp",
-                "rules": [
-                    {"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}
-                ],
+                "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1.jinja2", "filter_clause": ""}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1.jinja2", "filter_clause": ""}]}
                 },
                 "name": "test_hunt",
             },
@@ -212,14 +192,10 @@ def setup_paths(tmp_path) -> dict:
                 "global_target_table_name": "target_logs",
                 "global_source_table_name": "source_logs",
                 "checkpoint_timestamp_field": "timestamp",
-                "rules": [
-                    {"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}
-                ],
+                "rules": [{"rule_name": "rule1", "initial_checkpoint_lookback_minutes": 60}],
                 "customers": ["customer1"],
                 "customer_filters": {
-                    "customer1": {
-                        "rules": [{"name": "rule1.jinja2", "filter_clause": ""}]
-                    }
+                    "customer1": {"rules": [{"name": "rule1.jinja2", "filter_clause": ""}]}
                 },
                 "name": "test_hunt",
             },
@@ -231,9 +207,7 @@ def test_validate_hunt_configuration(hunt_config, expected_message, setup_paths)
     config_path = setup_paths["config_path"] / "test_hunt_config.yaml"
     rule_repo_path = setup_paths["rule_repo_path"]
     rule_file_path = rule_repo_path / "rule1.jinja2"
-    rule_file_path.write_text(
-        "SELECT * FROM {{ table_name }} WHERE event_id={{ event_id }}"
-    )
+    rule_file_path.write_text("SELECT * FROM {{ table_name }} WHERE event_id={{ event_id }}")
 
     with open(config_path, "w") as f:
         yaml.dump(hunt_config, f)
@@ -246,9 +220,7 @@ def test_validate_hunt_configuration(hunt_config, expected_message, setup_paths)
             if "log_buffer" in expected_message and isinstance(
                 loaded_config.get("log_buffer"), str
             ):
-                raise ValueError(
-                    "Invalid 'log_buffer' value: 60. It should be a positive integer."
-                )
+                raise ValueError("Invalid 'log_buffer' value: 60. It should be a positive integer.")
             elif expected_message == "Invalid cron format" and isinstance(
                 loaded_config.get("cron"), int
             ):

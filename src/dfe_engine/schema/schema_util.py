@@ -1,6 +1,5 @@
 """Schema utility functions for the DFE data engine."""
 
-from hs_lib.logger import logger
 from pathlib import Path
 import re
 import os
@@ -65,9 +64,7 @@ class SchemaExceptions:
         def __init__(self, source_filename: str, message: str):
             self.source_filename = source_filename
             self.message = message
-            super().__init__(
-                f"Failed to backup file '{self.source_filename}': {self.message}"
-            )
+            super().__init__(f"Failed to backup file '{self.source_filename}': {self.message}")
 
     class SchemaValidationError(Exception):
         def __init__(self, message: str):
@@ -111,30 +108,28 @@ class SchemaUtils:
         try:
             file_handle.write(content)
         except Exception as e:
-            raise Exception(f"Error writing to the file: {e}")
+            raise Exception(f"Error writing to the file: {e}") from e
 
     @staticmethod
     def file_open(filename, mode):
         try:
             return open(filename, mode)
         except Exception as e:
-            raise Exception(f"Error opening the file: {e}")
+            raise Exception(f"Error opening the file: {e}") from e
 
     @staticmethod
     def file_close(file_handle):
         try:
             file_handle.close()
         except Exception as e:
-            raise Exception(f"Error closing the file: {e}")
+            raise Exception(f"Error closing the file: {e}") from e
 
     @staticmethod
     def create_path(create_path: str):
         try:
             os.makedirs(create_path, exist_ok=True)
         except OSError as e:
-            raise Exception(
-                f"Could not create schema output path: {create_path}. Error: {e}"
-            )
+            raise Exception(f"Could not create schema output path: {create_path}. Error: {e}")
 
     @staticmethod
     def read_customer_list(
@@ -157,9 +152,7 @@ class SchemaUtils:
                 cluster_name = organisation.get("cluster_name", "default_cluster")
                 customer_data[org_id] = {"org_id": org_id, "cluster_name": cluster_name}
         except Exception as e:
-            logger.error(
-                f"An error occurred while reading the customer list: {e}", exc_info=True
-            )
+            logger.error(f"An error occurred while reading the customer list: {e}", exc_info=True)
             raise
         return customer_data
 
@@ -207,9 +200,7 @@ class SchemaUtils:
         """
         schema_keys = set(schema_filter_list.split(",")) if schema_filter_list else None
         derived_schema_keys = (
-            set(derived_schema_filter_list.split(","))
-            if derived_schema_filter_list
-            else None
+            set(derived_schema_filter_list.split(",")) if derived_schema_filter_list else None
         )
 
         filtered_files = []
@@ -250,9 +241,7 @@ class SchemaUtils:
             )
 
         for file_name in files:
-            if file_name in SchemaUtils.__SQL_FILES_TO_IGNORE or not file_name.endswith(
-                ".sql"
-            ):
+            if file_name in SchemaUtils.__SQL_FILES_TO_IGNORE or not file_name.endswith(".sql"):
                 continue
 
             base_name, _ = os.path.splitext(file_name)
@@ -270,22 +259,22 @@ class SchemaUtils:
         def extract_clause(pattern, text, skip_column_definitions=False):
             """
             Extract a clause like PRIMARY KEY or ORDER BY from DDL.
-            
+
             Args:
                 pattern: Regex pattern to match
                 text: DDL text to search
-                skip_column_definitions: If True, only search after ENGINE clause to avoid matching 
+                skip_column_definitions: If True, only search after ENGINE clause to avoid matching
                                         ORDER BY inside column definitions (like PROJECTION)
             """
             search_text = text
             offset = 0
-            
+
             if skip_column_definitions:
-                engine_match = re.search(r'\bENGINE\b', text, re.IGNORECASE)
+                engine_match = re.search(r"\bENGINE\b", text, re.IGNORECASE)
                 if engine_match:
                     offset = engine_match.start()
                     search_text = text[offset:]
-            
+
             match = re.search(pattern, search_text, re.IGNORECASE)
             if not match:
                 return None
@@ -295,7 +284,7 @@ class SchemaUtils:
                 start_pos += 1
             if start_pos >= len(search_text):
                 return None
-            
+
             if search_text[start_pos] == "(":
                 start_pos += 1
                 count = 1
@@ -313,30 +302,30 @@ class SchemaUtils:
                 return search_text[start_pos:end_pos].strip()
             else:
                 end_patterns = [
-                    r'\n',
-                    r'\bTTL\b',
-                    r'\bSETTINGS\b',
-                    r'\bSAMPLE\b',
-                    r'\bPARTITION\b',
-                    r'\bPRIMARY\b',
-                    r'\bORDER\b',
-                    r';'
+                    r"\n",
+                    r"\bTTL\b",
+                    r"\bSETTINGS\b",
+                    r"\bSAMPLE\b",
+                    r"\bPARTITION\b",
+                    r"\bPRIMARY\b",
+                    r"\bORDER\b",
+                    r";",
                 ]
-                end_pattern = '|'.join(end_patterns)
+                end_pattern = "|".join(end_patterns)
                 next_match = re.search(end_pattern, search_text[start_pos:], re.IGNORECASE)
-                
+
                 if next_match:
-                    return search_text[start_pos:start_pos + next_match.start()].strip()
+                    return search_text[start_pos : start_pos + next_match.start()].strip()
                 else:
                     return search_text[start_pos:].strip()
 
         # Extract PRIMARY KEY and ORDER BY after ENGINE to avoid matching inside PROJECTION
         primary_key = extract_clause(r"PRIMARY\s+KEY", ddl_statement, skip_column_definitions=True)
         order_by_key = extract_clause(r"ORDER\s+BY", ddl_statement, skip_column_definitions=True)
-        
+
         # Extract partition by
         partition_by = extract_clause(r"PARTITION\s+BY", ddl_statement)
-        
+
         sample_by_match = re.search(
             r"SAMPLE\s+BY\s+([\w\d\(\),\s]+?)(?:\s+(?:SETTINGS|TTL|;)|\s*$)",
             ddl_statement,
@@ -381,17 +370,22 @@ class SchemaUtils:
             index_type = match.group(4).strip()
 
             type_param = match.group(5) or "0" if "set" in index_type.lower() else ""
-            type_with_param = (
-                f"{index_type}({type_param})" if type_param else index_type
-            )
+            type_with_param = f"{index_type}({type_param})" if type_param else index_type
             granularity = match.group(6) or "1"
 
-            index_details = (
-                f"{index_column} TYPE {type_with_param} GRANULARITY {granularity}"
-            )
+            index_details = f"{index_column} TYPE {type_with_param} GRANULARITY {granularity}"
             indexes.append((index_name, index_details))
 
-        return primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings
+        return (
+            primary_key,
+            order_by_key,
+            indexes,
+            ttl_value,
+            sample_by,
+            partition_by,
+            projection,
+            table_settings,
+        )
 
     @staticmethod
     def is_view(ddl_content: str) -> bool:
@@ -404,9 +398,7 @@ class SchemaUtils:
         Returns:
             bool: True if the DDL content represents a view, False otherwise.
         """
-        return (
-            "CREATE VIEW IF NOT EXISTS" in ddl_content or "CREATE VIEW" in ddl_content
-        )
+        return "CREATE VIEW IF NOT EXISTS" in ddl_content or "CREATE VIEW" in ddl_content
 
     @staticmethod
     def sql_column_fix_name(column_name: str) -> str:
@@ -439,12 +431,10 @@ class SchemaUtils:
             CSVValidationError: If the CSV file is missing columns or contains duplicate values in the specified column.
         """
         try:
-            df = SchemaUtils.load_pd_csv_from_resource(
-                package=package, resource_path=resource_path
-            )
+            df = SchemaUtils.load_pd_csv_from_resource(package=package, resource_path=resource_path)
         except Exception as error:
             error_msg = f"Error loading CSV from resource {package}/{resource_path}: {str(error)}"
-            raise CSVValidationError(error_msg, errors=error)
+            raise CSVValidationError(error_msg, errors=error) from error
 
         type_columns = sorted(column_names)
         cols_df = sorted(df.columns.tolist())
@@ -459,9 +449,7 @@ class SchemaUtils:
         df[dup_column] = df[dup_column].str.lower()
 
         if not df[dup_column].is_unique:
-            duplicate_values = df[df[dup_column].duplicated(keep=False)].sort_values(
-                dup_column
-            )
+            duplicate_values = df[df[dup_column].duplicated(keep=False)].sort_values(dup_column)
             error_msg = (
                 f"Duplicate {dup_column} provided in file {resource_path}\n"
                 + duplicate_values.to_markdown()
@@ -471,9 +459,7 @@ class SchemaUtils:
         return df
 
     @staticmethod
-    def load_derived_schema(
-        derived_schema_full_path: str, name: str, logger: Any
-    ):
+    def load_derived_schema(derived_schema_full_path: str, name: str, logger: Any):
         """
         Load and validate the sub-schema.
 
@@ -494,13 +480,9 @@ class SchemaUtils:
             return None
 
         if not os.path.isfile(derived_schema_full_path):
-            raise SchemaValidationError(
-                f"Sub-schema file not found: {derived_schema_full_path}"
-            )
+            raise SchemaValidationError(f"Sub-schema file not found: {derived_schema_full_path}")
 
-        derived_schema_raw_df = SchemaUtils.load_pd_csv(
-            derived_schema_full_path, name, logger
-        )
+        derived_schema_raw_df = SchemaUtils.load_pd_csv(derived_schema_full_path, name, logger)
         derived_schema_columns = sorted(derived_schema_raw_df.columns.tolist())
 
         required_columns = set(SchemaUtils.COLUMNS_SUB_SCHEMA)
@@ -516,9 +498,7 @@ class SchemaUtils:
         return derived_schema_raw_df
 
     @staticmethod
-    def load_additional_fields(
-        additional_fields_full_path: str, name: str, logger: Any
-    ):
+    def load_additional_fields(additional_fields_full_path: str, name: str, logger: Any):
         """
         Load additional fields from the given path.
 
@@ -566,20 +546,18 @@ class SchemaUtils:
         """
         meta_schema_df = meta_schema_df.astype(object)
         additional_schema_df = additional_schema_df.astype(object)
-        meta_schema_df = pd.concat(
-            [meta_schema_df, additional_schema_df], ignore_index=True
-        )
+        meta_schema_df = pd.concat([meta_schema_df, additional_schema_df], ignore_index=True)
 
         SchemaUtils.drop_duplicates(meta_schema_df)
 
-        logger.debug(
-            f"Number of fields with additional schema added: {len(additional_schema_df)}"
-        )
+        logger.debug(f"Number of fields with additional schema added: {len(additional_schema_df)}")
 
         return meta_schema_df
 
     @staticmethod
-    def apply_derived_schema(meta_schema_df: pd.DataFrame, derived_schema_df: pd.DataFrame, logger: Any):
+    def apply_derived_schema(
+        meta_schema_df: pd.DataFrame, derived_schema_df: pd.DataFrame, logger: Any
+    ):
         """
         Apply the sub-schema to the core schema.
 
@@ -596,106 +574,126 @@ class SchemaUtils:
             return meta_schema_df
 
         # Vectorized: Build field_set and parent_to_children mapping
-        all_columns = pd.concat([meta_schema_df['column'], derived_schema_df['column']], ignore_index=True)
+        all_columns = pd.concat(
+            [meta_schema_df["column"], derived_schema_df["column"]], ignore_index=True
+        )
         field_set = set(all_columns)
 
         # Vectorized: Extract parent fields (fields containing '.')
-        has_dot = all_columns.str.contains('.', regex=False)
+        has_dot = all_columns.str.contains(".", regex=False)
         dotted_columns = all_columns[has_dot]
-        parents = dotted_columns.str.split('.').str[0]
+        parents = dotted_columns.str.split(".").str[0]
 
         # Build parent_to_children using groupby
         parent_to_children = {}
         if len(parents) > 0:
-            parent_child_df = pd.DataFrame({'parent': parents, 'child': dotted_columns})
-            for parent, group in parent_child_df.groupby('parent'):
-                parent_to_children[parent] = set(group['child'])
+            parent_child_df = pd.DataFrame({"parent": parents, "child": dotted_columns})
+            for parent, group in parent_child_df.groupby("parent"):
+                parent_to_children[parent] = set(group["child"])
 
         # Find fields to remove (parents with only one child that exist in field_set)
         fields_to_remove = {
-            parent for parent, children in parent_to_children.items()
+            parent
+            for parent, children in parent_to_children.items()
             if parent in field_set and len(children) == 1
         }
 
         result_df = meta_schema_df.copy()
         if fields_to_remove:
-            result_df = result_df[~result_df['column'].isin(fields_to_remove)]
+            result_df = result_df[~result_df["column"].isin(fields_to_remove)]
 
         meta_schema_df = result_df
 
         # Vectorized: Filter by wildcard and exact matches
-        wildcard_mask = derived_schema_df['column'].str.endswith('*')
-        wildcard_cols = derived_schema_df.loc[wildcard_mask, 'column'].str.rstrip('*').tolist()
-        exact_cols = set(derived_schema_df.loc[~wildcard_mask, 'column'])
+        wildcard_mask = derived_schema_df["column"].str.endswith("*")
+        wildcard_cols = derived_schema_df.loc[wildcard_mask, "column"].str.rstrip("*").tolist()
+        exact_cols = set(derived_schema_df.loc[~wildcard_mask, "column"])
 
         # Build filter mask
-        in_exact = meta_schema_df['column'].isin(exact_cols)
-        starts_with_wildcard = meta_schema_df['column'].str.startswith(tuple(wildcard_cols)) if wildcard_cols else False
-        meta_schema_df = meta_schema_df[in_exact | starts_with_wildcard].copy()  # Make a copy to avoid SettingWithCopyWarning
+        in_exact = meta_schema_df["column"].isin(exact_cols)
+        starts_with_wildcard = (
+            meta_schema_df["column"].str.startswith(tuple(wildcard_cols))
+            if wildcard_cols
+            else False
+        )
+        meta_schema_df = meta_schema_df[
+            in_exact | starts_with_wildcard
+        ].copy()  # Make a copy to avoid SettingWithCopyWarning
 
         # Vectorized: Check for valid index_order (numeric values)
         has_valid_index_order = False
-        if 'index_order' in derived_schema_df.columns:
+        if "index_order" in derived_schema_df.columns:
             # Check if any non-null values exist that are numeric
-            idx_order = derived_schema_df['index_order']
-            has_valid_index_order = idx_order.notna().any() and pd.api.types.is_numeric_dtype(idx_order.dropna())
+            idx_order = derived_schema_df["index_order"]
+            has_valid_index_order = idx_order.notna().any() and pd.api.types.is_numeric_dtype(
+                idx_order.dropna()
+            )
 
         if has_valid_index_order:
-            logger.debug('Clearing base schema index_order for sub-schema override')
+            logger.debug("Clearing base schema index_order for sub-schema override")
             meta_schema_df = meta_schema_df.copy()
-            meta_schema_df['index_order'] = meta_schema_df['index_order'].astype('Int64')
-            meta_schema_df.loc[:, 'index_order'] = pd.NA
+            meta_schema_df["index_order"] = meta_schema_df["index_order"].astype("Int64")
+            meta_schema_df.loc[:, "index_order"] = pd.NA
 
             # Merge only 'column' and 'index_order' - other columns are handled via override lookup
-            merge_columns = ['column']
-            if 'index_order' in derived_schema_df.columns:
-                merge_columns.append('index_order')
+            merge_columns = ["column"]
+            if "index_order" in derived_schema_df.columns:
+                merge_columns.append("index_order")
 
             meta_schema_df = meta_schema_df.merge(
-                derived_schema_df[merge_columns],
-                on='column',
-                how='left',
-                suffixes=('', '_sub')
+                derived_schema_df[merge_columns], on="column", how="left", suffixes=("", "_sub")
             )
 
             # Replace index_order with the merged values from derived schema
-            if 'index_order_sub' in meta_schema_df.columns:
-                meta_schema_df['index_order'] = meta_schema_df['index_order_sub']
-                meta_schema_df.drop(columns=['index_order_sub'], inplace=True)
+            if "index_order_sub" in meta_schema_df.columns:
+                meta_schema_df["index_order"] = meta_schema_df["index_order_sub"]
+                meta_schema_df.drop(columns=["index_order_sub"], inplace=True)
 
             # Vectorized override: use derived_schema_df for lookups (not merged columns)
-            for col in ['index_type', 'type', 'index_order', 'default']:
+            for col in ["index_type", "type", "index_order", "default"]:
                 if col in derived_schema_df.columns:
                     # Build mapping from column name to override value using original derived_schema_df
-                    derived_subset = derived_schema_df[['column', col]].dropna(subset=[col])
+                    derived_subset = derived_schema_df[["column", col]].dropna(subset=[col])
                     # Filter out empty strings
-                    derived_subset = derived_subset[derived_subset[col].astype(str).str.strip() != '']
+                    derived_subset = derived_subset[
+                        derived_subset[col].astype(str).str.strip() != ""
+                    ]
                     if len(derived_subset) > 0:
-                        override_map = dict(zip(derived_subset['column'], derived_subset[col]))
+                        override_map = dict(
+                            zip(derived_subset["column"], derived_subset[col], strict=False)
+                        )
                         # Apply override using list comprehension (faster than apply, handles mixed types)
                         original_values = meta_schema_df[col].tolist()
-                        column_names = meta_schema_df['column'].tolist()
+                        column_names = meta_schema_df["column"].tolist()
                         new_values = [
                             override_map.get(col_name, orig_val)
-                            for col_name, orig_val in zip(column_names, original_values)
+                            for col_name, orig_val in zip(
+                                column_names, original_values, strict=False
+                            )
                         ]
                         meta_schema_df[col] = new_values
         else:
-            logger.warning('No valid index_order values found in derived schema.')
+            logger.warning("No valid index_order values found in derived schema.")
 
             # Vectorized override for non-index_order columns
-            for col in ['index_type', 'type', 'default']:
+            for col in ["index_type", "type", "default"]:
                 if col in derived_schema_df.columns:
-                    derived_subset = derived_schema_df[['column', col]].dropna(subset=[col])
-                    derived_subset = derived_subset[derived_subset[col].astype(str).str.strip() != '']
+                    derived_subset = derived_schema_df[["column", col]].dropna(subset=[col])
+                    derived_subset = derived_subset[
+                        derived_subset[col].astype(str).str.strip() != ""
+                    ]
                     if len(derived_subset) > 0:
-                        override_map = dict(zip(derived_subset['column'], derived_subset[col]))
+                        override_map = dict(
+                            zip(derived_subset["column"], derived_subset[col], strict=False)
+                        )
                         # Apply override using list comprehension
                         original_values = meta_schema_df[col].tolist()
-                        column_names = meta_schema_df['column'].tolist()
+                        column_names = meta_schema_df["column"].tolist()
                         new_values = [
                             override_map.get(col_name, orig_val)
-                            for col_name, orig_val in zip(column_names, original_values)
+                            for col_name, orig_val in zip(
+                                column_names, original_values, strict=False
+                            )
                         ]
                         meta_schema_df[col] = new_values
 
@@ -754,9 +752,7 @@ class SchemaUtils:
                 f"Parser error when reading CSV file: {schema_file_path}", errors=e
             )
         except Exception as e:
-            raise SchemaValidationError(
-                f"Failed to read CSV: {schema_file_path}", errors=e
-            )
+            raise SchemaValidationError(f"Failed to read CSV: {schema_file_path}", errors=e)
 
     @staticmethod
     def load_pd_csv_from_resource(package: str, resource_path: str) -> pd.DataFrame:
@@ -780,9 +776,7 @@ class SchemaUtils:
                 f"Parser error when reading CSV file: {resource_path}", errors=e
             )
         except Exception as e:
-            raise SchemaValidationError(
-                f"Failed to read CSV: {resource_path}", errors=e
-            )
+            raise SchemaValidationError(f"Failed to read CSV: {resource_path}", errors=e)
 
     @staticmethod
     def dict_remove_key_recursively(dict_obj, remove_key):
@@ -795,9 +789,7 @@ class SchemaUtils:
         return
 
     @staticmethod
-    def load_pd_csv(
-        csv_filename: str, schema_name: str, logger: Any
-    ) -> pd.DataFrame:
+    def load_pd_csv(csv_filename: str, schema_name: str, logger: Any) -> pd.DataFrame:
         """
         Load a CSV file into a Pandas DataFrame.
 
@@ -820,7 +812,7 @@ class SchemaUtils:
 
             logger.error(error_msg, exc_info=True)
 
-            raise SchemaValidationError(error_msg, errors=error)
+            raise SchemaValidationError(error_msg, errors=error) from error
 
     @staticmethod
     def drop_flattened_schema_duplicates(df: pd.DataFrame) -> pd.DataFrame:
@@ -878,9 +870,7 @@ class SchemaUtils:
 
         df_to_check["type"] = df_to_check["type"].str.lower()
 
-        duplicate_columns = df_to_check["column"][
-            df_to_check["column"].duplicated()
-        ].unique()
+        duplicate_columns = df_to_check["column"][df_to_check["column"].duplicated()].unique()
         if duplicate_columns.size > 0:
             msg = (
                 f"Duplicate column names provided in file {source_filename}: "
@@ -892,14 +882,14 @@ class SchemaUtils:
         column_set = set(df_to_check["column"])
         warnings = []
 
-        for column_name, column_type in zip(df_to_check["column"], df_to_check["type"]):
+        for column_name, column_type in zip(
+            df_to_check["column"], df_to_check["type"], strict=False
+        ):
             upstream_keys = column_name.split(".")
             if len(upstream_keys) > 1:
                 key_stage = ""
                 for upstream_key in upstream_keys[:-1]:
-                    key_stage = (
-                        f"{key_stage}.{upstream_key}" if key_stage else upstream_key
-                    )
+                    key_stage = f"{key_stage}.{upstream_key}" if key_stage else upstream_key
                     if key_stage in column_set:
                         warnings.append(
                             f"Column [{column_name}] has an upstream key [{key_stage}] that can also contain a value. "
@@ -1003,16 +993,12 @@ class SchemaUtils:
         for key in dict2:
             if key in dict1:
                 if isinstance(dict1[key], dict) and isinstance(dict2[key], dict):
-                    SchemaUtils.dict_merge(
-                        dict1[key], dict2[key], path + [str(key)], overwrite
-                    )
+                    SchemaUtils.dict_merge(dict1[key], dict2[key], path + [str(key)], overwrite)
                 elif dict1[key] != dict2[key]:
                     if overwrite:
                         dict1[key] = dict2[key]
                     else:
-                        raise SchemaValidationError(
-                            f"Conflict at {'.'.join(path + [str(key)])}"
-                        )
+                        raise SchemaValidationError(f"Conflict at {'.'.join(path + [str(key)])}")
             else:
                 dict1[key] = dict2[key]
 
@@ -1053,9 +1039,7 @@ class SchemaUtils:
                 ".", "_", regex=False
             )
         else:
-            common_header_schema_df["normalized_column"] = common_header_schema_df[
-                "column"
-            ]
+            common_header_schema_df["normalized_column"] = common_header_schema_df["column"]
             meta_schema_df["normalized_column"] = meta_schema_df["column"]
 
         meta_dups = meta_schema_df["normalized_column"].duplicated(keep="first")
@@ -1065,18 +1049,14 @@ class SchemaUtils:
                 f"{schema_name} has duplicate columns within meta schema: {meta_dup_cols}"
             )
 
-        common_dups = common_header_schema_df["normalized_column"].duplicated(
-            keep="first"
-        )
+        common_dups = common_header_schema_df["normalized_column"].duplicated(keep="first")
         if common_dups.any():
             common_dup_cols = common_header_schema_df[common_dups]["column"].tolist()
             logger.warning(
                 f"{schema_name} has duplicate columns within common schema: {common_dup_cols}"
             )
 
-        meta_schema_df = meta_schema_df.drop_duplicates(
-            subset="normalized_column", keep="first"
-        )
+        meta_schema_df = meta_schema_df.drop_duplicates(subset="normalized_column", keep="first")
         common_header_schema_df = common_header_schema_df.drop_duplicates(
             subset="normalized_column", keep="first"
         )
@@ -1091,17 +1071,13 @@ class SchemaUtils:
                 f"{schema_name} contains columns that already exist in common header: {duplicates_columns}. Common header values will be used."
             )
 
-        meta_schema_df_cleaned = meta_schema_df[~duplicates].drop(
-            columns="normalized_column"
-        )
+        meta_schema_df_cleaned = meta_schema_df[~duplicates].drop(columns="normalized_column")
         common_header_schema_df = common_header_schema_df.astype(object)
         meta_schema_df_cleaned = meta_schema_df_cleaned.astype(object)
         complete_schema_df = pd.concat(
             [common_header_schema_df, meta_schema_df_cleaned], ignore_index=True
         )
-        complete_schema_df = complete_schema_df.drop_duplicates(
-            subset="column", keep="first"
-        )
+        complete_schema_df = complete_schema_df.drop_duplicates(subset="column", keep="first")
         complete_schema_df.reset_index(drop=True, inplace=True)
 
         return complete_schema_df
@@ -1142,13 +1118,18 @@ class SchemaUtils:
                 continue
 
             has_nested_properties = property_key in value
-            has_multifields = include_multifields and "fields" in value and isinstance(value.get("fields"), dict)
+            has_multifields = (
+                include_multifields and "fields" in value and isinstance(value.get("fields"), dict)
+            )
 
             if has_nested_properties:
                 # Recurse into nested properties
                 flattened_items.update(
                     SchemaUtils.flatten_properties(
-                        value[property_key], new_key, sep=sep, include_multifields=include_multifields
+                        value[property_key],
+                        new_key,
+                        sep=sep,
+                        include_multifields=include_multifields,
                     )
                 )
             elif has_multifields:
@@ -1165,7 +1146,10 @@ class SchemaUtils:
                     # Pattern: {"fields": {"properties": {"text": {...}}}}
                     flattened_items.update(
                         SchemaUtils.flatten_properties(
-                            fields_dict["properties"], f"{new_key}.fields", sep=sep, include_multifields=include_multifields
+                            fields_dict["properties"],
+                            f"{new_key}.fields",
+                            sep=sep,
+                            include_multifields=include_multifields,
                         )
                     )
                 else:
@@ -1177,7 +1161,10 @@ class SchemaUtils:
                             if "properties" in field_def:
                                 flattened_items.update(
                                     SchemaUtils.flatten_properties(
-                                        field_def["properties"], multifield_key, sep=sep, include_multifields=include_multifields
+                                        field_def["properties"],
+                                        multifield_key,
+                                        sep=sep,
+                                        include_multifields=include_multifields,
                                     )
                                 )
                             else:
@@ -1188,9 +1175,7 @@ class SchemaUtils:
 
         return flattened_items
 
-    def extract_field_paths(
-        properties, parent_key: str = "", sep: str = "."
-    ) -> Set[str]:
+    def extract_field_paths(properties, parent_key: str = "", sep: str = ".") -> Set[str]:
         """
         Recursively extract field paths from a dictionary representing nested properties.
 
@@ -1208,9 +1193,7 @@ class SchemaUtils:
             field_path = f"{parent_key}{sep}{key}" if parent_key else key
             if "properties" in value:
                 field_paths.update(
-                    SchemaUtils.extract_field_paths(
-                        value["properties"], field_path, sep=sep
-                    )
+                    SchemaUtils.extract_field_paths(value["properties"], field_path, sep=sep)
                 )
             else:
                 field_paths.add(field_path)
@@ -1225,9 +1208,7 @@ class SchemaUtils:
 
 
 def generate_norm_column_sql(
-    column_name: str,
-    column_type: str,
-    index_type: Optional[str] = None
+    column_name: str, column_type: str, index_type: Optional[str] = None
 ) -> Optional[str]:
     """
     Generate MATERIALIZED _norm column SQL for indexed ip_field columns.
@@ -1241,7 +1222,7 @@ def generate_norm_column_sql(
         SQL for MATERIALIZED column, or None
     """
     # Check pd.notna first to avoid ambiguous boolean with pd.NA
-    if column_type == 'ip_field' and pd.notna(index_type) and index_type:
+    if column_type == "ip_field" and pd.notna(index_type) and index_type:
         norm_col_name = f"{column_name}_norm"
         # Use accessor syntax (.IPv4, .IPv6) for Variant field extraction
         return (
@@ -1251,4 +1232,3 @@ def generate_norm_column_sql(
             f"{column_name}.IPv6)"
         )
     return None
-

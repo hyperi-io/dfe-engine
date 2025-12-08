@@ -7,6 +7,10 @@ from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from datetime import datetime, timedelta
 from dfe_engine.schema.schema_update import SchemaModifier
 
+# These tests require a running ClickHouse instance with specific databases
+# Skip by default in CI - run with: pytest -m integration
+pytestmark = pytest.mark.integration
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
@@ -59,9 +63,7 @@ def test_build_schema(dfe_config_fixtures, dfe_package, setup_paths):
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -77,17 +79,13 @@ def test_build_schema(dfe_config_fixtures, dfe_package, setup_paths):
             / "logs_alerts"
             / "logs_alerts.sql"
         )
-        assert expected_schema_path.is_file(), (
-            f"Schema file not found: {expected_schema_path}"
-        )
+        assert expected_schema_path.is_file(), f"Schema file not found: {expected_schema_path}"
 
     except Exception as e:
         pytest.fail(f"Build schema failed: {e}")
 
 
-def test_apply_schemas(
-    ch_client, dfe_config_fixtures, dfe_package, setup_paths, ensure_schema_db
-):
+def test_apply_schemas(ch_client, dfe_config_fixtures, dfe_package, setup_paths, ensure_schema_db):
     """
     Test the application of schemas.
     """
@@ -105,9 +103,7 @@ def test_apply_schemas(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -118,25 +114,21 @@ def test_apply_schemas(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=dfe_config_fixtures["apply_schemas"]["do_add_roles"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
             args_schema_filter_list="logs_alerts",
         )
         validate_schema_exists(ch_client, "org321", "logs_alerts")
-        validate_schema_fields(
-            ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db("org321", apply_schema_operation)
@@ -163,7 +155,7 @@ def test_apply_schemas_not_exists(
 
     def apply_schema_operation():
         drop_schema_if_exists(ch_client, org_name, schema_name)
-        
+
         SchemaController.build_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
@@ -176,9 +168,7 @@ def test_apply_schemas_not_exists(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -189,25 +179,21 @@ def test_apply_schemas_not_exists(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=dfe_config_fixtures["apply_schemas"]["do_add_roles"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
             args_schema_filter_list=schema_name,
         )
         validate_schema_exists(ch_client, org_name, schema_name)
-        validate_schema_fields(
-            ch_client, org_name, schema_name, ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, org_name, schema_name, ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db(org_name, apply_schema_operation)
@@ -232,9 +218,7 @@ def test_plan_schemas(dfe_config_fixtures, dfe_package, setup_paths):
 
 
 @pytest.mark.parametrize("org_filter", [("org321,org111111"), ("org321")])
-def test_plan_schemas_with_org_spec(
-    dfe_config_fixtures, dfe_package, setup_paths, org_filter
-):
+def test_plan_schemas_with_org_spec(dfe_config_fixtures, dfe_package, setup_paths, org_filter):
     """
     Test the planning of schemas with organisation specification.
     """
@@ -302,9 +286,7 @@ def test_update_schemas(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -315,22 +297,20 @@ def test_update_schemas(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=dfe_config_fixtures["apply_schemas"]["do_add_roles"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
             args_schema_filter_list=schema_filter,
         )
-        
+
         SchemaController.modify_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_update_flag="YES",
@@ -343,9 +323,7 @@ def test_update_schemas(
                 "use_shared_merge_tree"
             ],
             args_do_add_columns=dfe_config_fixtures["apply_schemas"]["do_add_columns"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -357,9 +335,7 @@ def test_update_schemas(
             args_org_filter_list="org321",
         )
         validate_schema_exists(ch_client, "org321", "logs_alerts")
-        validate_schema_fields(
-            ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db("org321", update_schema_operation)
@@ -382,7 +358,7 @@ def test_update_schemas_with_data(
 
     def update_schema_with_data_operation():
         drop_schema_if_exists(ch_client, "org321", "logs_alerts")
-        
+
         SchemaController.build_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
@@ -395,9 +371,7 @@ def test_update_schemas_with_data(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -408,16 +382,14 @@ def test_update_schemas_with_data(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=dfe_config_fixtures["apply_schemas"]["do_add_roles"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -428,9 +400,13 @@ def test_update_schemas_with_data(
         values = []
         current_time = datetime.now()
         for i in range(num_of_inserts):
-            current_time = datetime.now() + timedelta(days=365*10) - timedelta(seconds=i)  # Use future timestamps to avoid TTL deletion
+            current_time = (
+                datetime.now() + timedelta(days=365 * 10) - timedelta(seconds=i)
+            )  # Use future timestamps to avoid TTL deletion
             timestamp_str = current_time.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-            values.append(f"('{timestamp_str}', '{timestamp_str}', 'test_hash_{i}', 'test_log_{i}', 'org321')")
+            values.append(
+                f"('{timestamp_str}', '{timestamp_str}', 'test_hash_{i}', 'test_log_{i}', 'org321')"
+            )
         query = (
             "INSERT INTO org321.logs_alerts (timestamp, timestamp_load, event_hash, logoriginal, org_id) VALUES"
             + ", ".join(values)
@@ -449,9 +425,7 @@ def test_update_schemas_with_data(
                 "use_shared_merge_tree"
             ],
             args_do_add_columns=dfe_config_fixtures["apply_schemas"]["do_add_columns"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -464,9 +438,7 @@ def test_update_schemas_with_data(
         )
 
         validate_schema_exists(ch_client, "org321", "logs_alerts")
-        validate_schema_fields(
-            ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db("org321", update_schema_with_data_operation)
@@ -504,9 +476,7 @@ def test_update_schemas_with_org_spec(
                 "use_shared_merge_tree"
             ],
             args_do_add_columns=dfe_config_fixtures["apply_schemas"]["do_add_columns"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -518,9 +488,7 @@ def test_update_schemas_with_org_spec(
             args_min_insert_block_size_rows=1048576,
         )
         validate_schema_exists(ch_client, "org321", "logs_alerts")
-        validate_schema_fields(
-            ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db("org321", update_schema_operation)
@@ -528,9 +496,7 @@ def test_update_schemas_with_org_spec(
         pytest.fail(str(e))
 
 
-@pytest.mark.parametrize(
-    "schema_filter", [("logs_alerts, nx_log_windows_sub_ce"), ("logs_alerts")]
-)
+@pytest.mark.parametrize("schema_filter", [("logs_alerts, nx_log_windows_sub_ce"), ("logs_alerts")])
 def test_update_schemas_with_schema_spec(
     ch_client,
     dfe_config_fixtures,
@@ -556,9 +522,7 @@ def test_update_schemas_with_schema_spec(
                 "use_shared_merge_tree"
             ],
             args_do_add_columns=dfe_config_fixtures["apply_schemas"]["do_add_columns"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -570,9 +534,7 @@ def test_update_schemas_with_schema_spec(
             args_min_insert_block_size_rows=1048576,
         )
         validate_schema_exists(ch_client, "org321", "logs_alerts")
-        validate_schema_fields(
-            ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"]
-        )
+        validate_schema_fields(ch_client, "org321", "logs_alerts", ["timestamp", "timestamp_load"])
 
     try:
         ensure_schema_db("org321", update_schema_operation)
@@ -659,12 +621,8 @@ def test_boolean_type_normalization(
         """)
 
         try:
-            existing_result = ch_client.execute(
-                f"DESCRIBE TABLE {org_name}.{schema_name}"
-            )
-            new_result = ch_client.execute(
-                f"DESCRIBE TABLE {org_name}.{schema_name}_new"
-            )
+            existing_result = ch_client.execute(f"DESCRIBE TABLE {org_name}.{schema_name}")
+            new_result = ch_client.execute(f"DESCRIBE TABLE {org_name}.{schema_name}_new")
             existing_columns = {row[0]: row[1] for row in existing_result}
             new_columns = {row[0]: row[1] for row in new_result}
             schema_modifier = SchemaModifier(
@@ -716,9 +674,7 @@ def test_apply_schemas_with_roles(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -729,16 +685,14 @@ def test_apply_schemas_with_roles(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=True,  # Enable role creation
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -780,9 +734,7 @@ def test_apply_schemas_with_schema_filtering(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -793,16 +745,14 @@ def test_apply_schemas_with_schema_filtering(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=False,
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -838,9 +788,7 @@ def test_apply_schemas_with_wildcard_filtering(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -851,16 +799,14 @@ def test_apply_schemas_with_wildcard_filtering(
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
-        
+
         SchemaController.apply_schemas(
             args_dfe_package_file_path=dfe_package,
             args_schema_directory=Path(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=False,
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -878,9 +824,7 @@ def test_apply_schemas_with_wildcard_filtering(
         pytest.fail(f"Apply schemas with wildcard filtering failed: {e}")
 
 
-def test_apply_schemas_missing_output_directory(
-    dfe_config_fixtures, dfe_package, setup_paths
-):
+def test_apply_schemas_missing_output_directory(dfe_config_fixtures, dfe_package, setup_paths):
     """
     Test applying schemas when output directory doesn't exist.
     This test verifies that apply_schemas handles missing output directory gracefully.
@@ -888,8 +832,9 @@ def test_apply_schemas_missing_output_directory(
     output_path = Path(dfe_config_fixtures["global_settings"]["schema_output_path"])
     if output_path.exists():
         import shutil
+
         shutil.rmtree(output_path)
-    
+
     SchemaController.apply_schemas(
         args_dfe_package_file_path=dfe_package,
         args_schema_directory=Path(dfe_config_fixtures["global_settings"]["derived_schema_paths"]),
@@ -901,9 +846,7 @@ def test_apply_schemas_missing_output_directory(
     )
 
 
-def test_apply_schemas_invalid_target(
-    dfe_config_fixtures, dfe_package, setup_paths
-):
+def test_apply_schemas_invalid_target(dfe_config_fixtures, dfe_package, setup_paths):
     """
     Test applying schemas with invalid target configuration.
     """
@@ -921,9 +864,7 @@ def test_apply_schemas_invalid_target(
         )
 
 
-def test_apply_schemas_no_organizations(
-    dfe_config_fixtures, dfe_package, setup_paths, tmp_path
-):
+def test_apply_schemas_no_organizations(dfe_config_fixtures, dfe_package, setup_paths, tmp_path):
     """
     Test applying schemas when no organizations are configured.
     This test verifies that apply_schemas handles the no organizations case gracefully.
@@ -933,7 +874,8 @@ def test_apply_schemas_no_organizations(
 
     temp_config_file = tmp_path / "temp_config.yaml"
     import yaml
-    with open(temp_config_file, 'w') as f:
+
+    with open(temp_config_file, "w") as f:
         yaml.dump(temp_config, f)
 
     output_path = Path(dfe_config_fixtures["global_settings"]["schema_output_path"])
@@ -941,9 +883,7 @@ def test_apply_schemas_no_organizations(
 
     SchemaController.apply_schemas(
         args_dfe_package_file_path=str(temp_config_file),
-        args_schema_directory=Path(
-            dfe_config_fixtures["global_settings"]["derived_schema_paths"]
-        ),
+        args_schema_directory=Path(dfe_config_fixtures["global_settings"]["derived_schema_paths"]),
         args_do_add_roles=False,
         args_use_json_feature=False,
         args_log_path=setup_paths,
@@ -952,9 +892,7 @@ def test_apply_schemas_no_organizations(
     )
 
 
-def test_apply_schemas_with_org_filtering(
-    ch_client, dfe_config_fixtures, dfe_package, setup_paths
-):
+def test_apply_schemas_with_org_filtering(ch_client, dfe_config_fixtures, dfe_package, setup_paths):
     """
     Test applying schemas with organization filtering.
     """
@@ -968,9 +906,7 @@ def test_apply_schemas_with_org_filtering(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=False,
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -989,56 +925,46 @@ def test_apply_schemas_with_org_filtering(
         ch_client.execute(f"DROP DATABASE IF EXISTS {org_name}")
 
 
-def test_apply_schemas_role_creation_failure(
-    dfe_config_fixtures, dfe_package, setup_paths, mocker
-):
+def test_apply_schemas_role_creation_failure(dfe_config_fixtures, dfe_package, setup_paths, mocker):
     """
     Test applying schemas when role creation fails.
     This test verifies that apply_schemas handles role creation failures gracefully.
     """
-    mock_schema_executor = mocker.patch('dfe_engine.schema.schema_controller.SchemaExecutor')
+    mock_schema_executor = mocker.patch("dfe_engine.schema.schema_controller.SchemaExecutor")
     mock_instance = mock_schema_executor.return_value
-    
+
     mock_instance.run_create_database.return_value = None
     mock_instance.process_sql_scripts.return_value = None
-    mock_instance.run_create_roles.side_effect = Exception("Role creation failed: insufficient privileges")
+    mock_instance.run_create_roles.side_effect = Exception(
+        "Role creation failed: insufficient privileges"
+    )
     mock_instance.cleanup.return_value = None
-    
+
     SchemaController.build_schemas(
         args_dfe_package_file_path=dfe_package,
-        args_schema_directory=Path(
-            dfe_config_fixtures["global_settings"]["derived_schema_paths"]
-        ),
+        args_schema_directory=Path(dfe_config_fixtures["global_settings"]["derived_schema_paths"]),
         args_no_cluster_declarations_needed=dfe_config_fixtures["build_schemas"][
             "no_cluster_declarations_needed"
         ],
         args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
             "use_replicated_merge_tree"
         ],
-        args_use_json_feature=dfe_config_fixtures["global_settings"][
-            "use_json_feature"
-        ],
+        args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
         args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
             "use_subsampling_feature", False
         ),
-        args_use_shared_merge_tree=dfe_config_fixtures["build_schemas"][
-            "use_shared_merge_tree"
-        ],
+        args_use_shared_merge_tree=dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"],
         args_log_path=setup_paths,
         args_target=dfe_config_fixtures["global_settings"]["default_target"],
         args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         args_schema_filter_list="logs_alerts",
     )
-    
+
     SchemaController.apply_schemas(
         args_dfe_package_file_path=dfe_package,
-        args_schema_directory=Path(
-            dfe_config_fixtures["global_settings"]["derived_schema_paths"]
-        ),
+        args_schema_directory=Path(dfe_config_fixtures["global_settings"]["derived_schema_paths"]),
         args_do_add_roles=True,  # This should fail but not prevent completion
-        args_use_json_feature=dfe_config_fixtures["global_settings"][
-            "use_json_feature"
-        ],
+        args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
         args_log_path=setup_paths,
         args_target=dfe_config_fixtures["global_settings"]["default_target"],
         args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
@@ -1062,9 +988,7 @@ def test_apply_schemas_concurrent_execution(
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=False,
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=setup_paths,
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],

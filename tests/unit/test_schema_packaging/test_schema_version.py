@@ -6,7 +6,9 @@ from pathlib import Path
 def test_derived_schema_version():
     """Test that derived schema version is properly set in metadata.txt"""
     repo_root = Path(__file__).parent.parent.parent.parent
-    metadata_path = repo_root / "tests/resources/post_build_artefacts/dfe_derived_schemas/metadata.txt"
+    metadata_path = (
+        repo_root / "tests/resources/post_build_artefacts/dfe_derived_schemas/metadata.txt"
+    )
 
     assert metadata_path.exists(), f"metadata.txt not found at {metadata_path}"
     with open(metadata_path, "r") as f:
@@ -18,9 +20,7 @@ def test_derived_schema_version():
     version = content.split("=")[1].strip()
 
     version_parts = version.split(".")
-    assert len(version_parts) == 3, (
-        "Version should have major, minor, and patch numbers"
-    )
+    assert len(version_parts) == 3, "Version should have major, minor, and patch numbers"
     for part in version_parts:
         assert part.isdigit(), "Version numbers should be digits"
 
@@ -28,16 +28,17 @@ def test_derived_schema_version():
 def test_schema_directory_structure():
     """Test that schema directory structure follows the versioning pattern"""
     repo_root = Path(__file__).parent.parent.parent.parent
-    base_dir = repo_root / "tests/resources/post_build_artefacts/dfe_derived_schemas/logs_beats_filebeat"
+    base_dir = (
+        repo_root / "tests/resources/post_build_artefacts/dfe_derived_schemas/logs_beats_filebeat"
+    )
 
     if not base_dir.exists():
         pytest.skip(f"Schema directory not found: {base_dir}")
-    
+
     schema_dirs = [
         d.name
-        for d in base_dir.iterdir() 
-        if d.name.startswith("logs_beats_filebeat_")
-        and d.is_dir()
+        for d in base_dir.iterdir()
+        if d.name.startswith("logs_beats_filebeat_") and d.is_dir()
     ]
 
     assert len(schema_dirs) > 0, "No schema directories found"
@@ -46,14 +47,10 @@ def test_schema_directory_structure():
         schema_dir = os.path.join(base_dir, schema_dir_name)
 
         version_dirs = [
-            d
-            for d in os.listdir(schema_dir)
-            if os.path.isdir(os.path.join(schema_dir, d))
+            d for d in os.listdir(schema_dir) if os.path.isdir(os.path.join(schema_dir, d))
         ]
 
-        assert len(version_dirs) > 0, (
-            f"No version directories found in {schema_dir_name}"
-        )
+        assert len(version_dirs) > 0, f"No version directories found in {schema_dir_name}"
 
         for version_dir_name in version_dirs:
             assert version_dir_name.startswith("v"), (
@@ -61,21 +58,13 @@ def test_schema_directory_structure():
             )
 
             version_numbers = version_dir_name[1:].split("_")
-            assert len(version_numbers) == 3, (
-                f"Version should have three parts: {version_dir_name}"
-            )
+            assert len(version_numbers) == 3, f"Version should have three parts: {version_dir_name}"
 
             for part in version_numbers:
-                assert len(part) == 3, (
-                    f"Each version part should be 3 digits: {version_dir_name}"
-                )
-                assert part.isdigit(), (
-                    f"Version parts should be numbers: {version_dir_name}"
-                )
+                assert len(part) == 3, f"Each version part should be 3 digits: {version_dir_name}"
+                assert part.isdigit(), f"Version parts should be numbers: {version_dir_name}"
 
-            schema_file = os.path.join(
-                schema_dir, version_dir_name, f"{schema_dir_name}_sub.csv"
-            )
+            schema_file = os.path.join(schema_dir, version_dir_name, f"{schema_dir_name}_sub.csv")
             assert os.path.exists(schema_file), f"Schema file not found: {schema_file}"
 
 

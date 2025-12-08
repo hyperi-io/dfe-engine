@@ -8,7 +8,6 @@ from hs_lib.logger import logger
 
 
 class DataTool:
-
     @staticmethod
     def handle_none(value):
         """Replace None values with an empty string or appropriate default value."""
@@ -30,33 +29,21 @@ class DataTool:
                     dt = dt.replace(tzinfo=pytz.UTC)
                 return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             except ValueError as e:
-                logger.error(
-                    f"Failed to parse datetime string: '{value}'. Error: {e}"
-                )
+                logger.error(f"Failed to parse datetime string: '{value}'. Error: {e}")
             except TypeError as e:
-                logger.error(
-                    f"Type error in datetime parsing: '{value}'. Error: {e}"
-                )
+                logger.error(f"Type error in datetime parsing: '{value}'. Error: {e}")
             except Exception as e:
-                logger.error(
-                    f"Unexpected error in datetime parsing: '{value}'. Error: {e}"
-                )
+                logger.error(f"Unexpected error in datetime parsing: '{value}'. Error: {e}")
         elif isinstance(value, (int, float)):  # Handle Unix timestamps
             try:
                 dt = datetime.datetime.fromtimestamp(value, tz=pytz.UTC)
                 return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             except (ValueError, OSError) as e:
-                logger.error(
-                    f"Failed to parse timestamp: '{value}'. Error: {e}"
-                )
+                logger.error(f"Failed to parse timestamp: '{value}'. Error: {e}")
             except Exception as e:
-                logger.error(
-                    f"Unexpected error in timestamp parsing: '{value}'. Error: {e}"
-                )
+                logger.error(f"Unexpected error in timestamp parsing: '{value}'. Error: {e}")
         else:
-            logger.warning(
-                f"Unexpected value type for datetime parsing: {type(value)}"
-            )
+            logger.warning(f"Unexpected value type for datetime parsing: {type(value)}")
         return None  # Return None for unhandled cases
 
     @staticmethod
@@ -64,12 +51,12 @@ class DataTool:
         """Ensure the value matches the expected type."""
         if isinstance(value, expected_type):
             return value
-        if expected_type == int and isinstance(value, (str, float)):
+        if expected_type is int and isinstance(value, (str, float)):
             try:
                 return int(float(value))
             except ValueError:
                 logger.info(f"Value conversion to int failed: {value}")
-        elif expected_type == float and isinstance(value, (str, int)):
+        elif expected_type is float and isinstance(value, (str, int)):
             try:
                 return float(value)
             except ValueError:
@@ -111,7 +98,6 @@ class DataTool:
             "source_port",
             "ip_port",
             "src_port",
-            "source_port",
             "src_port_number",
             "source_port_number",
             "thread_id",
@@ -151,8 +137,7 @@ class DataTool:
                     record = json.loads(line.strip())
                     # Prepare record values for insertion
                     record_values = [
-                        DataTool.parse_and_handle_value(key, record.get(key))
-                        for key in column_keys
+                        DataTool.parse_and_handle_value(key, record.get(key)) for key in column_keys
                     ]
 
                     # Format values for SQL

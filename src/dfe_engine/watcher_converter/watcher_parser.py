@@ -344,9 +344,7 @@ def get_mapped_field_name(field_name, field_map, logger, native_fields):
         return mapped_fields
     else:
         if not (native_fields):
-            logger.warning(
-                f"WARNING: Field '{original_field}' not found in field mapping"
-            )
+            logger.warning(f"WARNING: Field '{original_field}' not found in field mapping")
         return [sql_column_fix_name(original_field)]
 
 
@@ -385,19 +383,13 @@ class WatcherParser:
             if "mapping_for_where_fields.csv" in source_schema_path:
                 continue
             elif not os.path.isdir(source_schema_path):
-                logger.info(
-                    f"Skipping config file or unrelated directory {source_schema_path}."
-                )
+                logger.info(f"Skipping config file or unrelated directory {source_schema_path}.")
                 continue
             directory_name = os.path.basename(source_schema_path)
             try:
-                select_csv_path = os.path.join(
-                    source_schema_path, "mapping_for_select_fields.csv"
-                )
+                select_csv_path = os.path.join(source_schema_path, "mapping_for_select_fields.csv")
                 if self.native_fields:
-                    where_csv_path = os.path.join(
-                        schema_path, "mapping_for_where_fields.csv"
-                    )
+                    where_csv_path = os.path.join(schema_path, "mapping_for_where_fields.csv")
                 else:
                     where_csv_path = os.path.join(
                         source_schema_path, "mapping_for_where_fields.csv"
@@ -415,22 +407,19 @@ class WatcherParser:
                 select_df = select_df.drop(columns=["comment"], errors="ignore")
 
                 select_field_map[directory_name] = [
-                    sql_column_fix_name(field)
-                    for field in select_df["select_fields"].tolist()
+                    sql_column_fix_name(field) for field in select_df["select_fields"].tolist()
                 ]
-                for index, row in where_df.iterrows():
-                    if type(row["new_field"]) == str:
+                for _index, row in where_df.iterrows():
+                    if isinstance(row["new_field"], str):
                         row["new_field"] = row["new_field"].split("|")
                     else:
                         row["new_field"] = []
                 where_field_map[directory_name] = dict(
-                    zip(where_df["es_field"], where_df["new_field"])
+                    zip(where_df["es_field"], where_df["new_field"], strict=False)
                 )
 
             except pd.errors.EmptyDataError as e:
-                logger.error(
-                    f"Empty Data {select_csv_path}: {str(e)}", exc_info=True
-                )
+                logger.error(f"Empty Data {select_csv_path}: {str(e)}", exc_info=True)
                 raise e
             except pd.errors.ParserError as e:
                 logger.error(
@@ -439,9 +428,7 @@ class WatcherParser:
                 )
                 raise e
             except Exception as e:
-                logger.error(
-                    f"Unhandled error when parsing CSVs: {str(e)}", exc_info=True
-                )
+                logger.error(f"Unhandled error when parsing CSVs: {str(e)}", exc_info=True)
                 raise e
 
         return {
@@ -453,15 +440,11 @@ class WatcherParser:
         if self.raise_on_error:
             raise NotImplementedError(f"{msg} is not implemented")
         else:
-            logger.warning(
-                f"Skipping {watcher_name} due to: {msg} is not implemented"
-            )
+            logger.warning(f"Skipping {watcher_name} due to: {msg} is not implemented")
 
     def _return_watchers_directories(self, dir_path: str) -> List[str]:
         subdirs = [f.path for f in os.scandir(dir_path) if f.is_dir()]
-        subdirs_with_jsons = [
-            subdir for subdir in subdirs if glob.glob(subdir + "/*.json")
-        ]
+        subdirs_with_jsons = [subdir for subdir in subdirs if glob.glob(subdir + "/*.json")]
         for subdir in subdirs:
             if glob.glob(subdir + "/smd"):
                 subdirs_with_jsons.append(subdir + "/smd")
@@ -473,18 +456,9 @@ class WatcherParser:
 
         return subdirs_with_jsons
 
-    def _flatten_json_query(
-        self, json_data: Dict[str, Any], filepath: str
-    ) -> Dict[str, Any]:
-        schedule = (
-            json_data.get("trigger", {}).get("schedule", {}).get("interval", None)
-        )
-        indices = (
-            json_data.get("input", {})
-            .get("search", {})
-            .get("request", {})
-            .get("indices", [])
-        )
+    def _flatten_json_query(self, json_data: Dict[str, Any], filepath: str) -> Dict[str, Any]:
+        schedule = json_data.get("trigger", {}).get("schedule", {}).get("interval", None)
+        indices = json_data.get("input", {}).get("search", {}).get("request", {}).get("indices", [])
 
         bool_filter = (
             json_data.get("input", {})
@@ -496,7 +470,8 @@ class WatcherParser:
             .get("filter", [])
         )
 
-        unique_values = lambda lst: list(set(lst))
+        def unique_values(lst):
+            return list(set(lst))
 
         bool_must = (
             json_data.get("input", {})
@@ -542,9 +517,7 @@ class WatcherParser:
             .get("aggs", {})
         )
 
-        condition_script = (
-            json_data.get("condition", {}).get("script", {}).get("source", None)
-        )
+        condition_script = json_data.get("condition", {}).get("script", {}).get("source", None)
 
         action_transform_script = (
             json_data.get("actions", {})
@@ -570,15 +543,8 @@ class WatcherParser:
         metadata = json_data.get("metadata", {})
         filename = os.path.split(filepath)[1]
 
-        es_body = (
-            json_data.get("input", {})
-            .get("search", {})
-            .get("request", {})
-            .get("body", {})
-        )
-        detection_type, agg_names, watcher_query = self._normalise_and_classify_es_body(
-            es_body
-        )
+        es_body = json_data.get("input", {}).get("search", {}).get("request", {}).get("body", {})
+        detection_type, agg_names, watcher_query = self._normalise_and_classify_es_body(es_body)
 
         es_trigger = json_data.get("trigger", {})
         schedule_duration = self._convert_es_schedule_to_string(es_trigger)
@@ -609,9 +575,7 @@ class WatcherParser:
                 json_data = json.load(file)
                 return self._flatten_json_query(json_data, filename)
         except Exception as e:
-            logger.error(
-                f"An error occurred while processing file {filename}: {repr(e)}"
-            )
+            logger.error(f"An error occurred while processing file {filename}: {repr(e)}")
             raise
 
     def _process_directories(self, paths: List[str]) -> pd.DataFrame:
@@ -625,9 +589,7 @@ class WatcherParser:
                 ]
                 data.extend([self._process_file(fn) for fn in filenames])
             except Exception as e:
-                logger.error(
-                    f"An error occurred while processing directory {path}: {e}"
-                )
+                logger.error(f"An error occurred while processing directory {path}: {e}")
                 continue
         if len(data) == 0:
             logger.error(f"There is no watchers in the paths provided[{paths}]")
@@ -665,13 +627,9 @@ class WatcherParser:
                 else:
                     yield key
 
-    def _parse_action_transform_scripts(
-        self, df: pd.DataFrame, column_name: str
-    ) -> pd.DataFrame:
+    def _parse_action_transform_scripts(self, df: pd.DataFrame, column_name: str) -> pd.DataFrame:
         # Define the pattern to match the lines within the script
-        pattern = (
-            r"v\.get\('_source'\)\.put\('([^']*)',\s*('([^']*)'|\d+|true|false)\);"
-        )
+        pattern = r"v\.get\('_source'\)\.put\('([^']*)',\s*('([^']*)'|\d+|true|false)\);"
 
         # New columns to be added based on the patterns found
         new_columns = {
@@ -734,9 +692,9 @@ class WatcherParser:
         def loop_dictionary(dictionary):
             list_dictionary = {}
             for key, value in dictionary.items():
-                if type(value) == list:
+                if isinstance(value, list):
                     list_dictionary[key] = value
-                elif type(value) == dict:
+                elif isinstance(value, dict):
                     return loop_dictionary(value)
             return list_dictionary
 
@@ -769,27 +727,20 @@ class WatcherParser:
                     str(list_difference(sorted(list_dictionary["hour"]))) + "h",
                     sorted(list_dictionary["minute"])[0],
                 ]
-            elif (
-                len(list_dictionary["minute"]) == 1
-                and len(list_dictionary["hour"]) == 1
-            ):
+            elif len(list_dictionary["minute"]) == 1 and len(list_dictionary["hour"]) == 1:
                 return ["24h", list_dictionary["minute"][0]]
             else:
-                raise NotImplementedError(
-                    f"Schedule {list_dictionary} cannot be handled"
-                )
+                raise NotImplementedError(f"Schedule {list_dictionary} cannot be handled")
 
         list_dictionary = {}
         schedule_block = es_schedule.get("schedule", [])
 
-        list_difference = lambda list_values: max(
-            [list_values[i] - list_values[i - 1] for i in range(1, len(list_values))]
-        )
-        contains_multiple = (
-            lambda dict_to_check, match: True
-            if (match in dict_to_check and len(dict_to_check[match]) > 1)
-            else False
-        )
+        def list_difference(list_values):
+            return max([list_values[i] - list_values[i - 1] for i in range(1, len(list_values))])
+
+        def contains_multiple(dict_to_check, match):
+            return True if (match in dict_to_check and len(dict_to_check[match]) > 1) else False
+
         if "interval" in schedule_block:
             return [schedule_block["interval"], 0]
         else:
@@ -824,10 +775,7 @@ class WatcherParser:
                         index_components[-2] + "-" + index_components[-1]
                     ]
                 else:
-                    if (
-                        index_components[0] == "rbnz"
-                        and index_components[1] == "payments"
-                    ):
+                    if index_components[0] == "rbnz" and index_components[1] == "payments":
                         index_components = [
                             index_components[0] + "-" + index_components[1]
                         ] + index_components[2:]
@@ -880,9 +828,7 @@ class WatcherParser:
                             f"({mapped_field} IS NOT NULL AND {mapped_field} != '')"
                         )
                 else:
-                    raise NotImplementedError(
-                        f"For exists clause, cannot handle parameter {field}"
-                    )
+                    raise NotImplementedError(f"For exists clause, cannot handle parameter {field}")
             exists_clause = " OR ".join(exists_clause_sublist)
             return exists_clause
 
@@ -896,13 +842,11 @@ class WatcherParser:
                     field, field_mappings[0], logger, self.native_fields
                 )
 
-                if type(value) == dict:
+                if isinstance(value, dict):
                     for sub_field, sub_value in value.items():
                         if sub_field == "query":
                             for mapped_field in mapped_fields:
-                                match_clause_sublist.append(
-                                    f"{mapped_field} == '{sub_value}'"
-                                )
+                                match_clause_sublist.append(f"{mapped_field} == '{sub_value}'")
                         else:
                             raise NotImplementedError(
                                 f"For match clause, cannot handle parameter {sub_field}"
@@ -917,7 +861,7 @@ class WatcherParser:
             match_phrase_clause = ""
             match_phrase_clause_sublist = []
             for field, value in condition.items():
-                if type(value) == dict:
+                if isinstance(value, dict):
                     for sub_field, sub_value in value.items():
                         if sub_field == "query":
                             # field = sql_column_fix_name(field)
@@ -942,9 +886,7 @@ class WatcherParser:
                     )
 
                     for mapped_field in mapped_fields:
-                        match_phrase_clause_sublist.append(
-                            f"{mapped_field} == '{value}'"
-                        )
+                        match_phrase_clause_sublist.append(f"{mapped_field} == '{value}'")
             match_phrase_clause = " OR ".join(match_phrase_clause_sublist)
             return match_phrase_clause
 
@@ -963,11 +905,9 @@ class WatcherParser:
                 elif field == "query":
                     index = 0
                     while index < len(value):
-                        if (
-                            index > 0
-                            and value[index] == "*"
-                            and value[index - 1] != "."
-                        ) or (index == 0 and value[index] == "*"):
+                        if (index > 0 and value[index] == "*" and value[index - 1] != ".") or (
+                            index == 0 and value[index] == "*"
+                        ):
                             regex_val += ".*"
                             index += 1
                         else:
@@ -983,9 +923,7 @@ class WatcherParser:
                         new_regex_val = ""
                         regex_val_split = regex_val.split(" AND ")
                         for split_value in regex_val_split:
-                            new_regex_val = (
-                                new_regex_val + "(?=.*" + split_value + ").*"
-                            )
+                            new_regex_val = new_regex_val + "(?=.*" + split_value + ").*"
                         regex_val = new_regex_val[:-2]
                         contains_or_and = True
                 else:
@@ -994,15 +932,11 @@ class WatcherParser:
                     )
             if contains_or_and or is_regex_pattern(regex_val):
                 for mapped_field in mapped_fields:
-                    query_string_clauses_sublist.append(
-                        f"match({mapped_field}, '{regex_val}')"
-                    )
+                    query_string_clauses_sublist.append(f"match({mapped_field}, '{regex_val}')")
             else:
                 sql_like = sql_like.replace("'", "''")
                 for mapped_field in mapped_fields:
-                    query_string_clauses_sublist.append(
-                        f"{mapped_field} LIKE '{sql_like}'"
-                    )
+                    query_string_clauses_sublist.append(f"{mapped_field} LIKE '{sql_like}'")
             query_string_clause = " OR ".join(query_string_clauses_sublist)
             return query_string_clause
 
@@ -1048,15 +982,11 @@ class WatcherParser:
                         ]
                     )
             range_clauses = (
-                " AND ".join(range_clauses_sublist[0])
-                if (len(range_clauses_sublist) > 0)
-                else ""
+                " AND ".join(range_clauses_sublist[0]) if (len(range_clauses_sublist) > 0) else ""
             )
             return range_clauses
 
-        def construct_regexp_clause(
-            field: str, value: str, is_case_insensitive: bool
-        ) -> str:
+        def construct_regexp_clause(field: str, value: str, is_case_insensitive: bool) -> str:
             """Constructs a regex clause based on the provided parameters."""
             regexp_clauses_sublist = []
             # field = sql_column_fix_name(field)
@@ -1066,15 +996,17 @@ class WatcherParser:
             )
 
             value_index = 0
-            is_not_escaped = lambda index: value[index - 1] != "\\"
+
+            def is_not_escaped(index):
+                return value[index - 1] != "\\"
+
             characters_to_escape = ["'"]
 
             value = value.replace("\\", "\\\\")
 
             for character in value:
                 if character in characters_to_escape and (
-                    value_index + 1 < len(value)
-                    and value[value_index : value_index + 2] != ".*"
+                    value_index + 1 < len(value) and value[value_index : value_index + 2] != ".*"
                 ):
                     if value_index - 1 >= 0 and is_not_escaped(value_index):
                         value = value[:value_index] + "\\" + value[value_index:]
@@ -1086,9 +1018,7 @@ class WatcherParser:
             sql_like = value.replace(".*", "%")
             for mapped_field in mapped_fields:
                 if is_case_insensitive:
-                    regexp_clauses_sublist.append(
-                        f"match({mapped_field}, '(?i:({value}))')"
-                    )
+                    regexp_clauses_sublist.append(f"match({mapped_field}, '(?i:({value}))')")
                 elif is_regex_pattern(value) or "|" in value:
                     regexp_clauses_sublist.append(f"match({mapped_field}, '{value}')")
                 elif ".*" not in value:
@@ -1147,19 +1077,17 @@ class WatcherParser:
                 )
 
                 string_of_terms = "("
-                if type(terms) == str:
+                if isinstance(terms, str):
                     # handle string terms, e.g. aws_cloudtrail_admin_privileges.json
                     terms = [terms]
-                if type(terms) == list:
+                if isinstance(terms, list):
                     for term in terms:
-                        if type(term) == int:
+                        if isinstance(term, int):
                             term = str(term)
                         term = term.replace("'", "\\'")
                         string_of_terms += f"'{term}', "
                 else:
-                    raise NotImplementedError(
-                        f"For terms clause, cannot handle parameter {field}"
-                    )
+                    raise NotImplementedError(f"For terms clause, cannot handle parameter {field}")
                 string_of_terms = string_of_terms[:-2] + ")"
 
                 for mapped_field in mapped_fields:
@@ -1191,13 +1119,9 @@ class WatcherParser:
                 is_case_insensitive = values.get("case_insensitive", False)
                 for mapped_field in mapped_fields:
                     if is_case_insensitive:
-                        wildcard_clause_sublist.append(
-                            f"{mapped_field} ILIKE '{sql_value}'"
-                        )
+                        wildcard_clause_sublist.append(f"{mapped_field} ILIKE '{sql_value}'")
                     else:
-                        wildcard_clause_sublist.append(
-                            f"{mapped_field} LIKE '{sql_value}'"
-                        )
+                        wildcard_clause_sublist.append(f"{mapped_field} LIKE '{sql_value}'")
 
             wildcard_clause = " OR ".join(wildcard_clause_sublist)
             return wildcard_clause
@@ -1235,9 +1159,7 @@ class WatcherParser:
                     "handle_condition - script", watcher_name=file_name
                 )
             else:
-                raise NotImplementedError(
-                    f"Condition type {cluster_type} has not been implemented"
-                )
+                raise NotImplementedError(f"Condition type {cluster_type} has not been implemented")
 
         def handle_should_cluster(cluster_type, cluster, clause_list):
             clause_list.extend([cluster_type, "("])
@@ -1251,7 +1173,7 @@ class WatcherParser:
                         else:
                             loop_items(conditions, 0, clause_list)
                     else:
-                        if type(conditions) == dict:
+                        if isinstance(conditions, dict):
                             clause_list.append(handle_cluster(clause_type, conditions))
             clause_list.append(")")
 
@@ -1279,18 +1201,16 @@ class WatcherParser:
                         clause_list.append(cluster)
                         continue
                     elif cluster_type in ["filter", "must", "must_not", "should"]:
-                        if type(cluster) == dict:
+                        if isinstance(cluster, dict):
                             cluster = [cluster]
                         if cluster_type == "should":
-                            clause_list = handle_should_cluster(
-                                cluster_type, cluster, clause_list
-                            )
+                            clause_list = handle_should_cluster(cluster_type, cluster, clause_list)
                             continue
 
                         clause_list.append(cluster_type)
-                    if type(cluster) == dict:
+                    if isinstance(cluster, dict):
                         clause_list.append(handle_cluster(cluster_type, cluster))
-                    elif type(cluster) == list:
+                    elif isinstance(cluster, list):
                         inner_index = start_index
                         start_index = start_index + 1
                         for clause in cluster:
@@ -1306,7 +1226,7 @@ class WatcherParser:
             sub_condition_count = 0
             for clause in sql_clauses[start_index:]:
                 if sub_condition_count == 0 and (
-                    type(clause) == int or (type(clause) == str and clause.isdigit())
+                    isinstance(clause, int) or (isinstance(clause, str) and clause.isdigit())
                 ):
                     return int(clause)
                 elif clause == "(":
@@ -1325,10 +1245,8 @@ class WatcherParser:
                 elif sql_clauses[index] == ")":
                     sub_condition_count -= 1
                 elif sub_condition_count == 0 and not (
-                    type(sql_clauses[index]) == int
-                    or (
-                        type(sql_clauses[index]) == str and sql_clauses[index].isdigit()
-                    )
+                    isinstance(sql_clauses[index], int)
+                    or (isinstance(sql_clauses[index], str) and sql_clauses[index].isdigit())
                 ):
                     nested_conditions.append(sql_clauses[index])
                 index += 1
@@ -1344,7 +1262,7 @@ class WatcherParser:
                     return "AND"
                 elif stack[-1][1] == 1 and stack[-1][1] < stack[-1][2]:
                     return "OR"
-                elif stack[-1][1] == None:
+                elif stack[-1][1] is None:
                     return "OR"
             elif stack[-1] == "bool":
                 return "AND"
@@ -1355,7 +1273,7 @@ class WatcherParser:
             delimiter = ""
             for index, clause in enumerate(sql_clauses):
                 delimiter = find_delimiter(stack)
-                if type(clause) == int or (type(clause) == str and clause.isdigit()):
+                if isinstance(clause, int) or (isinstance(clause, str) and clause.isdigit()):
                     continue
                 elif clause in ["filter", "must", "must_not", "should", "bool"]:
                     if clause == "filter":
@@ -1375,9 +1293,7 @@ class WatcherParser:
                                 stack.append(
                                     [
                                         "should",
-                                        extract_should_conditions(
-                                            sql_clauses, index - 1
-                                        ),
+                                        extract_should_conditions(sql_clauses, index - 1),
                                         count_should_conditions(sql_clauses, index + 1),
                                     ]
                                 )
@@ -1400,30 +1316,28 @@ class WatcherParser:
                             index < len(sql_clauses) - 1
                             and sql_clauses[index + 1] != ")"
                             and not (
-                                type(sql_clauses[index + 1]) == int
+                                isinstance(sql_clauses[index + 1], int)
                                 or (
-                                    type(sql_clauses[index + 1]) == str
+                                    isinstance(sql_clauses[index + 1], str)
                                     and sql_clauses[index + 1].isdigit()
                                 )
                             )
                         ):
                             final_string += f"{clause} {delimiter} "
-                        elif (
-                            index < len(sql_clauses) - 1
-                            and sql_clauses[index + 1] == ")"
-                        ):
+                        elif index < len(sql_clauses) - 1 and sql_clauses[index + 1] == ")":
                             final_string += f"{clause}"
-                        elif index < len(sql_clauses) - 2 and sql_clauses[
-                            index + 2
-                        ] in ["must", "should", "must_not"]:
+                        elif index < len(sql_clauses) - 2 and sql_clauses[index + 2] in [
+                            "must",
+                            "should",
+                            "must_not",
+                        ]:
                             final_string += f"{clause} {delimiter} "
                         else:
                             final_string += f"{clause}"
                 elif sql_clauses[index + 1] != ")" and not (
-                    type(sql_clauses[index + 1]) == int
+                    isinstance(sql_clauses[index + 1], int)
                     or (
-                        type(sql_clauses[index + 1]) == str
-                        and sql_clauses[index + 1].isdigit()
+                        isinstance(sql_clauses[index + 1], str) and sql_clauses[index + 1].isdigit()
                     )
                 ):
                     if len(clause) == 0:
@@ -1456,9 +1370,7 @@ class WatcherParser:
 
         # check if there are any unhandled clauses left
         if len(es_query) > 0:
-            raise NotImplementedError(
-                f"Remaining keys on body: {[k for k in es_query.keys()]}"
-            )
+            raise NotImplementedError(f"Remaining keys on body: {[k for k in es_query.keys()]}")
         if len(es_query_query) > 0:
             raise NotImplementedError(
                 f"Remaining keys on query: {[k for k in es_query_query.keys()]}"
@@ -1514,14 +1426,12 @@ class WatcherParser:
         for key in k:
             # iterate through the aggregations and descend into them
             agg = a[key]
-            if type(agg) == type({}) and "aggs" in agg.keys():
+            if isinstance(agg, dict) and "aggs" in agg.keys():
                 return self._check_for_hit(agg["aggs"], count + [key])
 
         return count
 
-    def _normalise_and_classify_es_body(
-        self, es_query: Dict[str, Any]
-    ) -> (str, list, dict):
+    def _normalise_and_classify_es_body(self, es_query: Dict[str, Any]) -> (str, list, dict):
         """
         Determine the detection type and normalise the aggregation names
 
@@ -1577,8 +1487,8 @@ class WatcherParser:
 
             try:
                 detection_type = names[agg_depth]
-            except IndexError:
-                raise NotImplementedError(f"Not handled for agg_depth of {agg_depth}")
+            except IndexError as err:
+                raise NotImplementedError(f"Not handled for agg_depth of {agg_depth}") from err
 
             if detection_type is None:
                 raise NotImplementedError(f"Not handled for agg_depth of {agg_depth}")
@@ -1607,12 +1517,12 @@ class WatcherParser:
             ValueError when whitelist removal fails
         """
 
-        def check_bool_subtree(subtree, l, whitelist, found_whitelist, split_logic):
+        def check_bool_subtree(subtree, level, whitelist, found_whitelist, split_logic):
             subtree_copy = deepcopy(subtree)
             for key, subquery in subtree.items():
                 if "tenant.name" in json.dumps(subquery):
                     if key == "should":
-                        tlq = self._remove_tenant_in_should(subtree, level=l)
+                        tlq = self._remove_tenant_in_should(subtree, level=level)
                         subtree_copy = tlq["logic"]
                         whitelist = tlq["whitelists"]
                         found_whitelist = tlq["found_tenant_whitelist"]
@@ -1634,7 +1544,7 @@ class WatcherParser:
                                     split_logic_whitelist,
                                 ) = check_bool_subtree(
                                     subsubq["bool"],
-                                    l + 1,
+                                    level + 1,
                                     whitelist,
                                     found_whitelist,
                                     split_logic,
@@ -1655,16 +1565,14 @@ class WatcherParser:
                                     for phrase in logic_phrases:
                                         if "terms" in phrase.keys():
                                             if "tenant.name" in phrase["terms"].keys():
-                                                customers = phrase["terms"][
-                                                    "tenant.name"
-                                                ]
+                                                customers = phrase["terms"]["tenant.name"]
                                                 subtree_copy[phrase_meta].remove(phrase)
 
                                 found_tenant_whitelist = True
                                 tree_return = {"bool": subtree_copy}
                                 for customer in customers:
                                     wl = self._tenant_whitelist_dict_add_item(
-                                        whitelist, l, customer, tree_return
+                                        whitelist, level, customer, tree_return
                                     )
 
                                 return (
@@ -1713,9 +1621,7 @@ class WatcherParser:
                 if "terms" in item.keys():
                     if "tenant.name" in item["terms"].keys():
                         found_tenant_whitelist = True
-                        customer_data["top_level_must_not"].append(
-                            top_level_query.pop("must_not")
-                        )
+                        customer_data["top_level_must_not"].append(top_level_query.pop("must_not"))
                 elif "bool" in item.keys() and "tenant.name" in json.dumps(item):
                     # going to assume single level nesting
 
@@ -1724,9 +1630,7 @@ class WatcherParser:
                     musts = subtree.pop("must")
 
                     if not subtree == {}:
-                        raise NotImplementedError(
-                            "Cannot handle complex top level must nots"
-                        )
+                        raise NotImplementedError("Cannot handle complex top level must nots")
 
                     # walk through musts to determine applicable customers
                     for m in musts:
@@ -1777,26 +1681,22 @@ class WatcherParser:
             "split_logic_whitelist": split_logic_whitelist,
         }
 
-    def _tenant_whitelist_dict_add_item(
-        self, d: dict, l: int, c: str, item: dict
-    ) -> dict:
-        # d = dict to add to, l = level, c = customer
+    def _tenant_whitelist_dict_add_item(self, d: dict, level: int, c: str, item: dict) -> dict:
+        # d = dict to add to, level = level, c = customer
 
         # check for existing customer dict
         if c not in d.keys():
             d[c] = {}
 
         # create level if it doesn't exist
-        if l not in d[c].keys():
-            d[c][l] = []
+        if level not in d[c].keys():
+            d[c][level] = []
 
-        d[c][l].append(item)
+        d[c][level].append(item)
 
         return d
 
-    def _remove_tenant_in_should(
-        self, input: dict, level: int = 0, removed_items={}
-    ) -> dict:
+    def _remove_tenant_in_should(self, input: dict, level: int = 0, removed_items=None) -> dict:
         """
         Recursive function to look for terms queries on tenant.name inside a should query
 
@@ -1826,6 +1726,8 @@ class WatcherParser:
             If minimum_should_match is greater than 1, decrement it and warn
         """
 
+        if removed_items is None:
+            removed_items = {}
         found_tenant_whitelist = True
 
         # Make some copies
@@ -1836,7 +1738,6 @@ class WatcherParser:
         # allocate some defaults
         found_tenant = False
         pop_items = []
-        removeds = []
 
         #  Go through should
         for i1, item in enumerate(should_copy):
@@ -1853,10 +1754,8 @@ class WatcherParser:
                         for customer, levels in nested_should["whitelists"].items():
                             for lev, level_items in levels.items():
                                 for item in level_items:
-                                    removed_items = (
-                                        self._tenant_whitelist_dict_add_item(
-                                            removed_items, lev, customer, item
-                                        )
+                                    removed_items = self._tenant_whitelist_dict_add_item(
+                                        removed_items, lev, customer, item
                                     )
 
                         if item_bool == nested:
@@ -1868,13 +1767,13 @@ class WatcherParser:
                             pop_items.append(item)
                             continue
                     # Need it to be a list for enumerate
-                    if not type(val) == type([]):
+                    if not isinstance(val, list):
                         val = [val]
 
                     # go through the bits in clause
                     for t in val:
                         #  terms must be dict
-                        if not type(t) == type({}):
+                        if not isinstance(t, dict):
                             continue
 
                         if "term" in t.keys():
@@ -1907,31 +1806,22 @@ class WatcherParser:
                                                     if (
                                                         bool_type == "must"
                                                         and phrase_type == "terms"
-                                                        and "tenant.name"
-                                                        in phrase_contents.keys()
+                                                        and "tenant.name" in phrase_contents.keys()
                                                     ):
-                                                        customers = phrase_contents[
-                                                            "tenant.name"
-                                                        ]
+                                                        customers = phrase_contents["tenant.name"]
 
-                                                        wl_copy["bool"][
-                                                            bool_type
-                                                        ].remove(phrase)
+                                                        wl_copy["bool"][bool_type].remove(phrase)
 
                                         for customer in customers:
-                                            removed_items = (
-                                                self._tenant_whitelist_dict_add_item(
-                                                    removed_items,
-                                                    level,
-                                                    customer,
-                                                    wl_copy,
-                                                )
+                                            removed_items = self._tenant_whitelist_dict_add_item(
+                                                removed_items,
+                                                level,
+                                                customer,
+                                                wl_copy,
                                             )
 
                                     sls["whitelists"] = removed_items
-                                    sls["found_tenant_whitelist"] = (
-                                        found_tenant_whitelist
-                                    )
+                                    sls["found_tenant_whitelist"] = found_tenant_whitelist
                                     sls["split_logic_whitelist"] = True
 
                                     return sls
@@ -1943,10 +1833,8 @@ class WatcherParser:
                                     subitem = deepcopy(item)
                                     del subitem["bool"][key]
                                     for customer in customers:
-                                        removed_items = (
-                                            self._tenant_whitelist_dict_add_item(
-                                                removed_items, level, customer, subitem
-                                            )
+                                        removed_items = self._tenant_whitelist_dict_add_item(
+                                            removed_items, level, customer, subitem
                                         )
 
                                     should.remove(item)
@@ -1975,10 +1863,7 @@ class WatcherParser:
                 # Remove should and minimum_should_match if it's empty
                 input.pop("should")
                 input.pop("minimum_should_match", {})
-            if (
-                "minimum_should_match" in input.keys()
-                and input["minimum_should_match"] > 1
-            ):
+            if "minimum_should_match" in input.keys() and input["minimum_should_match"] > 1:
                 msg = f"Modified minimum_should_match. This logic is immature. Manually check the output. ({self.detection_name})"
                 logger.warn(msg)
                 input["minimum_should_match"] -= 1
@@ -2086,9 +1971,7 @@ class WatcherParser:
 
         field_map = {}
         for m in mapping:
-            field_map[m["source_detection_field_name"]] = m[
-                "target_unified_schema_field_name"
-            ]
+            field_map[m["source_detection_field_name"]] = m["target_unified_schema_field_name"]
         return field_map
 
     def compute_where_clause(self, row):
@@ -2096,9 +1979,7 @@ class WatcherParser:
         return self._convert_es_query_to_sql_where(
             row["es_body"],  # The Elasticsearch query
             file_name=row["filename"],
-            field_mappings=row[
-                "where_fields"
-            ],  # The field mappings for the where clause
+            field_mappings=row["where_fields"],  # The field mappings for the where clause
             logger=logger,
         )
 
@@ -2120,9 +2001,7 @@ class WatcherParser:
                     logger=logger,
                 )
             )
-        return pd.Series(
-            [cte_with_clause, cte_template, cte_table_name, cte_where_condition]
-        )
+        return pd.Series([cte_with_clause, cte_template, cte_table_name, cte_where_condition])
 
     def _extract_device_types(self, es_indices: Dict[str, Any]) -> Set[str]:
         """
@@ -2153,10 +2032,7 @@ class WatcherParser:
                     ]
                 else:
                     # Special case handling for specific naming conventions
-                    if (
-                        index_components[0] == "rbnz"
-                        and index_components[1] == "payments"
-                    ):
+                    if index_components[0] == "rbnz" and index_components[1] == "payments":
                         index_components = [
                             index_components[0] + "-" + index_components[1]
                         ] + index_components[2:]
@@ -2192,10 +2068,8 @@ class WatcherParser:
             new_key = ""
             for key, value in dictionary.items():
                 new_key = f"{parent_key}{separator}{key}" if parent_key else key
-                if type(value) == dict:
-                    flattened_dictionary.update(
-                        flatten_nested_dictionary(value, new_key)
-                    )
+                if isinstance(value, dict):
+                    flattened_dictionary.update(flatten_nested_dictionary(value, new_key))
                 elif "field" in new_key and value == "tenant.name":
                     continue
                 elif new_key.endswith("field"):
@@ -2217,8 +2091,7 @@ class WatcherParser:
                     for row in data:
                         if (
                             split_value[len(split_value) - 2] in row["agg_name"]
-                            or f"{split_value[len(split_value) - 2]}|cardinality"
-                            in row["agg_name"]
+                            or f"{split_value[len(split_value) - 2]}|cardinality" in row["agg_name"]
                         ):
                             found_variable = f"{split_value[len(split_value) - 2]}"
                             break
@@ -2229,19 +2102,13 @@ class WatcherParser:
                     for row in data:
                         if f"{found_variable}|cardinality" in row["agg_name"]:
                             variable_name = (
-                                script_words[index]
-                                .split(".")[1]
-                                .replace(")", "")
-                                .replace("{", "")
+                                script_words[index].split(".")[1].replace(")", "").replace("{", "")
                             )
                             row["agg_operator"] = script_words[index - 1]
                             row["agg_value"] = transform_script_params[variable_name]
                         elif f"{found_variable}" in row["agg_name"]:
                             variable_name = (
-                                script_words[index]
-                                .split(".")[1]
-                                .replace(")", "")
-                                .replace("{", "")
+                                script_words[index].split(".")[1].replace(")", "").replace("{", "")
                             )
                             row["agg_operator"] = script_words[index - 1]
                             row["agg_value"] = transform_script_params[variable_name]
@@ -2302,9 +2169,7 @@ class WatcherParser:
         new_df = pd.DataFrame(data)
         df = pd.concat(
             [
-                blank_df[
-                    ["agg_name", "agg_field", "agg_operator", "agg_value", "agg_parent"]
-                ],
+                blank_df[["agg_name", "agg_field", "agg_operator", "agg_value", "agg_parent"]],
                 new_df,
             ],
             ignore_index=True,
@@ -2407,7 +2272,7 @@ class WatcherParser:
             # If it aggregates on 2 fields - combined
             elif template == cte_templates.cte_template_2():
                 # If the row is the parent row (i.e. aggregation 1)
-                if row.get("agg_parent", "") == None:
+                if row.get("agg_parent", "") is None:
                     main_table_name += "agg2_bucket"
                     agg2_field1 = ", ".join(row.get("agg_field", ""))
                     agg2_all_fields = [
@@ -2449,7 +2314,7 @@ class WatcherParser:
             # If it aggregates on 2 fields - single field1 AND cardinality field2
             elif template == cte_templates.cte_template_4():
                 # If the row is the parent row (i.e. aggregation 1)
-                if row.get("agg_parent", "") == None:
+                if row.get("agg_parent", "") is None:
                     main_table_name += "agg4_bucket"
                     agg4_field = ", ".join(row.get("agg_field", ""))
                     agg4_name = row.get("agg_name", "").replace("|cardinality", "")
@@ -2463,7 +2328,7 @@ class WatcherParser:
                     ]
                     agg4_indent_val = 12
                 else:
-                    for field in child_row.get("agg_field", "").iloc[0]:
+                    for _field in child_row.get("agg_field", "").iloc[0]:
                         count_conditions += [
                             f"{main_table_name}.unique_{', '.join(row.get('agg_field', ''))}s {row.get('agg_operator', '')} {int(row.get('agg_value', ''))}"
                         ]
@@ -2573,9 +2438,7 @@ class WatcherParser:
         logger.info(f"Number of Cols: {raw_df.shape[1]}")
         logger.info(f"Cols: {raw_df.columns}")
 
-        es_watchers_dsl_df = raw_df.applymap(
-            lambda x: x.strip() if type(x) == str else x
-        )
+        es_watchers_dsl_df = raw_df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
         es_watchers_dsl_df = es_watchers_dsl_df[
             [
                 "filename",
@@ -2615,9 +2478,9 @@ class WatcherParser:
                     unique_values[index].append(subterm)
 
         es_watchers_dsl_df["all_terms"] = unique_values
-        es_watchers_dsl_df["unique_terms_count"] = es_watchers_dsl_df[
-            "all_terms"
-        ].apply(lambda x: len(set(x)))
+        es_watchers_dsl_df["unique_terms_count"] = es_watchers_dsl_df["all_terms"].apply(
+            lambda x: len(set(x))
+        )
         es_watchers_dsl_df["used_terms_count"] = es_watchers_dsl_df["all_terms"].apply(
             lambda x: len(list(x))
         )
@@ -2631,13 +2494,13 @@ class WatcherParser:
         es_watchers_dsl_df["device_types"] = es_watchers_dsl_df["indices"].apply(
             lambda x: set(self._extract_device_types({"indices": x}))
         )
-        es_watchers_dsl_df["select_fields"] = es_watchers_dsl_df[
-            "device_customer_map"
-        ].apply(lambda x: self._map_fields(self.schema_maps["select_field_map"], x))
+        es_watchers_dsl_df["select_fields"] = es_watchers_dsl_df["device_customer_map"].apply(
+            lambda x: self._map_fields(self.schema_maps["select_field_map"], x)
+        )
 
-        es_watchers_dsl_df["where_fields"] = es_watchers_dsl_df[
-            "device_customer_map"
-        ].apply(lambda x: self._map_fields(self.schema_maps["where_field_map"], x))
+        es_watchers_dsl_df["where_fields"] = es_watchers_dsl_df["device_customer_map"].apply(
+            lambda x: self._map_fields(self.schema_maps["where_field_map"], x)
+        )
 
         es_watchers_dsl_df["where_clause"] = es_watchers_dsl_df.apply(
             lambda row: self.compute_where_clause(row), axis=1
@@ -2645,24 +2508,16 @@ class WatcherParser:
 
         es_watchers_dsl_df[
             ["cte_with_clause", "cte_template", "cte_table_name", "cte_where_condition"]
-        ] = es_watchers_dsl_df.apply(
-            lambda row: self.compute_cte_with_clause(row), axis=1
-        )
+        ] = es_watchers_dsl_df.apply(lambda row: self.compute_cte_with_clause(row), axis=1)
 
         es_watchers_dsl_df = self._parse_action_transform_scripts(
             es_watchers_dsl_df, "action_transform_script"
         )
 
-        logger.info(
-            f"es_watchers_dsl_df Number of Rows: {es_watchers_dsl_df.shape[0]}"
-        )
-        logger.info(
-            f"es_watchers_dsl_df Number of Cols: {es_watchers_dsl_df.shape[1]}"
-        )
+        logger.info(f"es_watchers_dsl_df Number of Rows: {es_watchers_dsl_df.shape[0]}")
+        logger.info(f"es_watchers_dsl_df Number of Cols: {es_watchers_dsl_df.shape[1]}")
         logger.info(f"es_watchers_dsl_df Cols: {es_watchers_dsl_df.columns}")
-        logger.info(
-            f"es_watchers_dsl_df - where fields Elastic detections:{self.unique_fields} \n"
-        )
+        logger.info(f"es_watchers_dsl_df - where fields Elastic detections:{self.unique_fields} \n")
 
         return es_watchers_dsl_df
 

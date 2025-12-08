@@ -1,7 +1,21 @@
+import json
+import os
+import tempfile
+from pathlib import Path
+
 import pytest
+import yaml
+from unittest.mock import patch
 
 # Skip all tests in this module - CLI tests belong to dfe-cli, not dfe-engine library
 pytestmark = pytest.mark.skip(reason="CLI tests belong to dfe-cli package, not dfe-engine library")
+
+# Placeholder imports for skipped tests - actual implementations are in dfe-cli
+PipelineBuilder = None
+PipelineBuilderController = None
+CliRunner = None
+cli = None
+logger = None
 
 
 @pytest.fixture(scope="module")
@@ -73,13 +87,7 @@ def sample_dfe_config(temp_dir, sample_vector_template):
             "KAFKA_BOOTSTRAP_SERVERS": "kafka:9092",
             "KAFKA_TOPICS": "topic1,topic2",
         },
-        "vector_templates": {
-            "source": [
-                {
-                    "name": "0-source-step.yml"
-                }
-            ]
-        },
+        "vector_templates": {"source": [{"name": "0-source-step.yml"}]},
         "ingestion_pipelines": {
             "test_pipeline": {
                 "steps": [{"id": "0-source-step.yml"}],
@@ -92,10 +100,7 @@ def sample_dfe_config(temp_dir, sample_vector_template):
 def test_pipeline_builder_initialization(sample_dfe_config):
     builder = PipelineBuilder(sample_dfe_config)
     assert builder.dfe_config == sample_dfe_config
-    assert (
-        builder.ingestion_output_path
-        == sample_dfe_config["global_settings"]["output"]
-    )
+    assert builder.ingestion_output_path == sample_dfe_config["global_settings"]["output"]
 
 
 def test_pipeline_builder_with_custom_output_path(sample_dfe_config):
@@ -161,9 +166,7 @@ def test_build_multiple_pipelines(sample_dfe_config, sample_vector_step, temp_di
     assert os.path.exists(os.path.join(output_dir, "another-pipeline.yaml"))
 
 
-def test_build_pipeline_with_custom_template_path(
-    sample_dfe_config, sample_vector_step, temp_dir
-):
+def test_build_pipeline_with_custom_template_path(sample_dfe_config, sample_vector_step, temp_dir):
     # Create custom template
     custom_template_content = """
 apiVersion: v1
@@ -186,9 +189,7 @@ data:
         f.write(custom_template_content)
 
     # Copy step file to custom templates directory
-    custom_step_dir = os.path.join(
-        temp_dir, "custom_templates"
-    )
+    custom_step_dir = os.path.join(temp_dir, "custom_templates")
     os.makedirs(custom_step_dir, exist_ok=True)
     custom_step_path = os.path.join(custom_step_dir, "0-source-step.yml")
     with open(custom_step_path, "w") as f:
@@ -202,9 +203,7 @@ sources:
     """)
 
     # Update config to use custom template and paths
-    sample_dfe_config["global_settings"]["helm_template"] = (
-        custom_template_path
-    )
+    sample_dfe_config["global_settings"]["helm_template"] = custom_template_path
     sample_dfe_config["global_settings"]["vector_files"] = {
         "source": os.path.join(temp_dir, "custom_templates"),
         "transform": os.path.join(temp_dir, "custom_templates"),
@@ -224,9 +223,7 @@ sources:
         assert content["metadata"]["name"] == "custom-test-pipeline"
 
 
-def test_build_pipeline_with_invalid_yaml_template(
-    sample_dfe_config, sample_vector_step, temp_dir
-):
+def test_build_pipeline_with_invalid_yaml_template(sample_dfe_config, sample_vector_step, temp_dir):
     # Create invalid template
     invalid_template_content = """
     invalid:
@@ -263,10 +260,12 @@ def test_pipeline_builder_without_extra_config(sample_dfe_config):
     """Test PipelineBuilder initialization without extra_config parameter."""
     builder = PipelineBuilder(sample_dfe_config)
     # Should have default empty dict if not provided
-    assert hasattr(builder, 'extra_config')
+    assert hasattr(builder, "extra_config")
 
 
-def test_build_pipeline_with_extra_config_template_variables(sample_dfe_config, sample_vector_step, temp_dir):
+def test_build_pipeline_with_extra_config_template_variables(
+    sample_dfe_config, sample_vector_step, temp_dir
+):
     """Test building pipeline where extra_config provides template variables."""
     # Create template that uses variables from extra_config at the main template level
     template_content = """
@@ -296,11 +295,8 @@ data:
     os.makedirs(output_dir, exist_ok=True)
 
     # Extra config with template variables
-    extra_config = {
-        "NAMESPACE": "production",
-        "CUSTOM_FIELD": "extra_config_value"
-    }
-    
+    extra_config = {"NAMESPACE": "production", "CUSTOM_FIELD": "extra_config_value"}
+
     builder = PipelineBuilder(sample_dfe_config, extra_config=extra_config)
     builder.build()
 
@@ -312,7 +308,9 @@ data:
         assert content["metadata"]["labels"]["custom-label"] == "extra_config_value"
 
 
-def test_build_pipeline_extra_config_overrides_defaults(sample_dfe_config, sample_vector_step, temp_dir):
+def test_build_pipeline_extra_config_overrides_defaults(
+    sample_dfe_config, sample_vector_step, temp_dir
+):
     """Test that extra_config can override default configuration values."""
     # Test that extra_config overrides default values at the template level
     template_content = """
@@ -342,7 +340,7 @@ data:
 
     # Extra config that overrides the default
     extra_config = {"TOPICS": "override-topic"}
-    
+
     builder = PipelineBuilder(sample_dfe_config, extra_config=extra_config)
     builder.build()
 
@@ -354,7 +352,9 @@ data:
         assert topic_annotation == "override-topic"
 
 
-def test_build_pipeline_extra_config_with_simple_key_value_pairs(sample_dfe_config, sample_vector_step, temp_dir):
+def test_build_pipeline_extra_config_with_simple_key_value_pairs(
+    sample_dfe_config, sample_vector_step, temp_dir
+):
     """Test extra_config with simple key-value pairs as expected from JSON string input."""
     # Create template that uses simple extra_config key-value pairs
     template_content = """
@@ -387,12 +387,8 @@ data:
     os.makedirs(output_dir, exist_ok=True)
 
     # Simple extra_config with string key-value pairs (as would come from JSON)
-    extra_config = {
-        "ENVIRONMENT": "production",
-        "VERSION": "2.1.0",
-        "TEAM": "security"
-    }
-    
+    extra_config = {"ENVIRONMENT": "production", "VERSION": "2.1.0", "TEAM": "security"}
+
     builder = PipelineBuilder(sample_dfe_config, extra_config=extra_config)
     builder.build()
 
@@ -418,7 +414,7 @@ class TestBuildIngestionPipelinesCLI:
     @pytest.fixture
     def mock_pipeline_controller(self):
         """Mock the PipelineBuilderController to avoid external dependencies."""
-        with patch('dfecli.main.PipelineBuilderController') as mock:
+        with patch("dfecli.main.PipelineBuilderController") as mock:
             yield mock
 
     def test_build_ingestion_pipelines_cli_with_extra_config_valid_json(
@@ -427,154 +423,195 @@ class TestBuildIngestionPipelinesCLI:
         """Test CLI command with valid JSON extra_config parameter."""
         # Setup mock
         mock_pipeline_controller.build_ingestion_pipelines.return_value = None
-        
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs',
-            '--extra_config', '{"key1": "value1", "key2": "value2"}'
-        ])
+
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+                "--extra_config",
+                '{"key1": "value1", "key2": "value2"}',
+            ],
+        )
 
         # Verify command succeeded
         assert result.exit_code == 0, f"Command failed: {result.output}"
-        
+
         # Verify the controller was called with correct parameters
         mock_pipeline_controller.build_ingestion_pipelines.assert_called_once()
         call_args = mock_pipeline_controller.build_ingestion_pipelines.call_args
-        
+
         # Check that extra_config was parsed and passed correctly
-        assert call_args.kwargs['args_extra_config'] == {"key1": "value1", "key2": "value2"}
+        assert call_args.kwargs["args_extra_config"] == {"key1": "value1", "key2": "value2"}
 
     def test_build_ingestion_pipelines_cli_with_empty_extra_config(
         self, runner, mock_pipeline_controller
     ):
         """Test CLI command with empty JSON extra_config."""
         mock_pipeline_controller.build_ingestion_pipelines.return_value = None
-        
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs',
-            '--extra_config', '{}'
-        ])
+
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+                "--extra_config",
+                "{}",
+            ],
+        )
 
         assert result.exit_code == 0
         call_args = mock_pipeline_controller.build_ingestion_pipelines.call_args
-        assert call_args.kwargs['args_extra_config'] == {}
+        assert call_args.kwargs["args_extra_config"] == {}
 
     def test_build_ingestion_pipelines_cli_without_extra_config(
         self, runner, mock_pipeline_controller
     ):
         """Test CLI command without extra_config parameter (backward compatibility)."""
         mock_pipeline_controller.build_ingestion_pipelines.return_value = None
-        
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs'
-        ])
+
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+            ],
+        )
 
         assert result.exit_code == 0
         call_args = mock_pipeline_controller.build_ingestion_pipelines.call_args
         # Should default to empty dict
-        assert call_args.kwargs['args_extra_config'] == {}
+        assert call_args.kwargs["args_extra_config"] == {}
 
-@pytest.mark.skip(reason="This test needs env variables to be set to download templates. Only run if the env vars are set.")
+
+@pytest.mark.skip(
+    reason="This test needs env variables to be set to download templates. Only run if the env vars are set."
+)
 def test_build_core_pipelines_without_custom_config(temp_dir):
     """Test that core pipelines can be built without any custom configuration."""
     output_dir = os.path.join(temp_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Build only core pipelines (args_build_core=True)
     try:
         PipelineBuilderController.build_ingestion_pipelines(
             args_dfe_package_file_path="non_existent.yaml",  # Should be ignored when build_core=True
             args_ingestion_output_path=output_dir,
             args_log_path=temp_dir,
-            args_build_core=True  # This should use only core config
+            args_build_core=True,  # This should use only core config
         )
         # If we reach here, core pipelines were built successfully
         assert True
-        
+
         # Check that output files were created
         output_files = os.listdir(output_dir)
         assert len(output_files) > 0, "Core pipelines should generate output files"
-        
+
         # Verify at least one core pipeline was built
         core_pipeline_names = [
             "vector-all-prep-ch-load.yaml",
-            "vector-load-ch.yaml", 
+            "vector-load-ch.yaml",
             "vector-all-load-s3.yaml",
             "vector-logs-hypercol-metric-finalise.yaml",
-            "vector-receiver.yaml"
+            "vector-receiver.yaml",
         ]
         found_core_pipeline = any(name in output_files for name in core_pipeline_names)
-        assert found_core_pipeline, f"Expected to find core pipeline files, but found: {output_files}"
-        
+        assert found_core_pipeline, (
+            f"Expected to find core pipeline files, but found: {output_files}"
+        )
+
     except Exception as e:
         # Only allow expected errors like missing vector templates
-        expected_errors = ["FileNotFoundError", "TemplateNotFound", "No such file", "pipeline_template.yaml"]
-        assert any(error in str(e) for error in expected_errors), f"Unexpected error building core pipelines: {e}"
+        expected_errors = [
+            "FileNotFoundError",
+            "TemplateNotFound",
+            "No such file",
+            "pipeline_template.yaml",
+        ]
+        assert any(error in str(e) for error in expected_errors), (
+            f"Unexpected error building core pipelines: {e}"
+        )
 
-@pytest.mark.skip(reason="This test needs env variables to be set to download templates. Only run if the env vars are set.")
+
+@pytest.mark.skip(
+    reason="This test needs env variables to be set to download templates. Only run if the env vars are set."
+)
 def test_custom_config_overrides_core_config(temp_dir):
     """Test that custom config environment variables override core config variables."""
     # Create a minimal custom config that overrides a core env var
     custom_config = {
         "default_env_vars": {
             "PROMETHEUS_EXPORTER": "custom.prometheus.com:9090",  # Override core default
-            "CUSTOM_VAR": "custom_value"
+            "CUSTOM_VAR": "custom_value",
         },
         "ingestion_pipelines": {
             "test-custom-pipeline": {
-                "env": {
-                    "KAFKA_SOURCE_TOPIC_LIST": ["custom_topic"]
-                },
+                "env": {"KAFKA_SOURCE_TOPIC_LIST": ["custom_topic"]},
                 "steps": [
                     {"id": "hs-xdr-vector-ct-all-main.yml"},
                     {"id": "hs-xdr-vector-ct-all-prometheus.yml"},
                     {"id": "003-source-kafka-sasl-scram.yml"},
                     {"id": "101-transform-flatten-message.yml"},
                     {"id": "201-sink-clickhouse-saas.yml"},
-                ]
+                ],
             }
-        }
+        },
     }
-    
+
     # Create custom config file
     custom_config_path = os.path.join(temp_dir, "custom_config.yaml")
     with open(custom_config_path, "w") as f:
         yaml.dump(custom_config, f)
-    
+
     output_dir = os.path.join(temp_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    
+
     try:
         PipelineBuilderController.build_ingestion_pipelines(
             args_dfe_package_file_path=custom_config_path,
             args_ingestion_output_path=output_dir,
             args_log_path=temp_dir,
-            args_build_core=False  # Use custom config merged with core
+            args_build_core=False,  # Use custom config merged with core
         )
-        
+
         # Check that custom pipeline was created
         output_files = os.listdir(output_dir)
         assert "test-custom-pipeline.yaml" in output_files
-        
+
         # Read the generated pipeline and verify custom env var override
         with open(os.path.join(output_dir, "test-custom-pipeline.yaml")) as f:
             pipeline_content = f.read()
-            
+
         # Should contain the custom PROMETHEUS_EXPORTER value
-        assert "custom.prometheus.com:9090" in pipeline_content, "Custom PROMETHEUS_EXPORTER should override core value"
+        assert "custom.prometheus.com:9090" in pipeline_content, (
+            "Custom PROMETHEUS_EXPORTER should override core value"
+        )
         # assert "CUSTOM_VAR" in pipeline_content, "Custom env var should be present"
-        
+
     except Exception as e:
         # Only allow expected errors like missing vector templates
-        expected_errors = ["FileNotFoundError", "TemplateNotFound", "No such file", "configuration file", "pipeline_template.yaml"]
+        expected_errors = [
+            "FileNotFoundError",
+            "TemplateNotFound",
+            "No such file",
+            "configuration file",
+            "pipeline_template.yaml",
+        ]
         assert any(error in str(e) for error in expected_errors), f"Unexpected error: {e}"
 
-@pytest.mark.skip(reason="This test needs env variables to be set to download templates. Only run if the env vars are set.")
+
+@pytest.mark.skip(
+    reason="This test needs env variables to be set to download templates. Only run if the env vars are set."
+)
 def test_extra_config_has_highest_priority(temp_dir):
     """Test that extra_config has highest priority over both core and custom config."""
     # Create a custom config with some env vars
@@ -582,68 +619,80 @@ def test_extra_config_has_highest_priority(temp_dir):
         "default_env_vars": {
             "PROMETHEUS_EXPORTER": "custom.prometheus.com:9090",
             "VECTOR_DATA_DIR": "/custom-vector-dir",
-            "CUSTOM_VAR": "custom_value"
+            "CUSTOM_VAR": "custom_value",
         },
         "ingestion_pipelines": {
             "test-priority-pipeline": {
-                "env": {
-                    "KAFKA_SOURCE_TOPIC_LIST": ["priority_topic"]
-                },
+                "env": {"KAFKA_SOURCE_TOPIC_LIST": ["priority_topic"]},
                 "steps": [
                     {"id": "hs-xdr-vector-ct-all-main.yml"},
                     {"id": "hs-xdr-vector-ct-all-prometheus.yml"},
                     {"id": "003-source-kafka-sasl-scram.yml"},
                     {"id": "101-transform-flatten-message.yml"},
                     {"id": "201-sink-clickhouse-saas.yml"},
-                ]
+                ],
             }
-        }
+        },
     }
-    
+
     # Create custom config file
     custom_config_path = os.path.join(temp_dir, "priority_config.yaml")
     with open(custom_config_path, "w") as f:
         yaml.dump(custom_config, f)
-    
+
     output_dir = os.path.join(temp_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    
+
     # Extra config that should override both core and custom
     extra_config = {
         "PROMETHEUS_EXPORTER": "extra.prometheus.com:9090",  # Should override custom
         "VECTOR_DATA_DIR": "/extra-vector-dir",  # Should override custom
-        "EXTRA_ONLY_VAR": "extra_only_value"  # Should be added
+        "EXTRA_ONLY_VAR": "extra_only_value",  # Should be added
     }
-    
+
     try:
         PipelineBuilderController.build_ingestion_pipelines(
             args_dfe_package_file_path=custom_config_path,
             args_ingestion_output_path=output_dir,
             args_log_path=temp_dir,
             args_build_core=False,
-            args_extra_config=extra_config  # This should have highest priority
+            args_extra_config=extra_config,  # This should have highest priority
         )
-        
+
         # Check that pipeline was created
         output_files = os.listdir(output_dir)
         assert "test-priority-pipeline.yaml" in output_files
-        
+
         # Read the generated pipeline and verify extra config takes priority
         with open(os.path.join(output_dir, "test-priority-pipeline.yaml")) as f:
             pipeline_content = f.read()
-            
+
         # Should contain the extra config values (highest priority)
-        assert "extra.prometheus.com:9090" in pipeline_content, "Extra PROMETHEUS_EXPORTER should override custom and core"
-        assert "/extra-vector-dir" in pipeline_content, "Extra VECTOR_DATA_DIR should override custom and core"
+        assert "extra.prometheus.com:9090" in pipeline_content, (
+            "Extra PROMETHEUS_EXPORTER should override custom and core"
+        )
+        assert "/extra-vector-dir" in pipeline_content, (
+            "Extra VECTOR_DATA_DIR should override custom and core"
+        )
         # assert "EXTRA_ONLY_VAR" in pipeline_content, "Extra-only var should be present"
-        
+
         # Should NOT contain the custom values that were overridden
-        assert "custom.prometheus.com:9090" not in pipeline_content, "Custom PROMETHEUS_EXPORTER should be overridden by extra"
-        assert "/custom-vector-dir" not in pipeline_content, "Custom VECTOR_DATA_DIR should be overridden by extra"
-        
+        assert "custom.prometheus.com:9090" not in pipeline_content, (
+            "Custom PROMETHEUS_EXPORTER should be overridden by extra"
+        )
+        assert "/custom-vector-dir" not in pipeline_content, (
+            "Custom VECTOR_DATA_DIR should be overridden by extra"
+        )
+
     except Exception as e:
         # Only allow expected errors like missing vector templates
-        expected_errors = ["FileNotFoundError", "TemplateNotFound", "No such file", "configuration file", "pipeline_template.yaml"]
+        expected_errors = [
+            "FileNotFoundError",
+            "TemplateNotFound",
+            "No such file",
+            "configuration file",
+            "pipeline_template.yaml",
+        ]
         assert any(error in str(e) for error in expected_errors), f"Unexpected error: {e}"
 
 
@@ -658,19 +707,25 @@ class TestBuildIngestionPipelinesCLIExtended:
     @pytest.fixture
     def mock_pipeline_controller(self):
         """Mock the PipelineBuilderController to avoid external dependencies."""
-        with patch('dfecli.main.PipelineBuilderController') as mock:
+        with patch("dfecli.main.PipelineBuilderController") as mock:
             yield mock
 
     def test_build_ingestion_pipelines_cli_with_invalid_json(
         self, runner, mock_pipeline_controller
     ):
         """Test CLI command with invalid JSON in extra_config."""
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs',
-            '--extra_config', '{"invalid": json}'
-        ])
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+                "--extra_config",
+                '{"invalid": json}',
+            ],
+        )
 
         # Should fail with exit code 1 due to invalid JSON (hard failure)
         assert result.exit_code == 1, f"Expected exit code 1, got {result.exit_code}"
@@ -683,24 +738,30 @@ class TestBuildIngestionPipelinesCLIExtended:
     ):
         """Test CLI command with various JSON value types in extra_config."""
         mock_pipeline_controller.build_ingestion_pipelines.return_value = None
-        
+
         extra_config = {
             "string_val": "test_string",
             "number_val": "123",
             "boolean_val": "true",
-            "env_var": "production"
+            "env_var": "production",
         }
-        
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs',
-            '--extra_config', json.dumps(extra_config)
-        ])
+
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+                "--extra_config",
+                json.dumps(extra_config),
+            ],
+        )
 
         assert result.exit_code == 0
         call_args = mock_pipeline_controller.build_ingestion_pipelines.call_args
-        assert call_args.kwargs['args_extra_config'] == extra_config
+        assert call_args.kwargs["args_extra_config"] == extra_config
 
     def test_build_ingestion_pipelines_cli_with_missing_env_vars(
         self, runner, mock_pipeline_controller
@@ -708,15 +769,21 @@ class TestBuildIngestionPipelinesCLIExtended:
         """Test CLI command with missing environment variables (hard failure)."""
         # Configure mock to raise PipelineSchemaError (simulating missing env vars)
         from dfe_engine.pipeline.pipeline_util import PipelineSchemaError
+
         mock_pipeline_controller.build_ingestion_pipelines.side_effect = PipelineSchemaError(
             "Env var KAFKA_SOURCE_TOPIC_LIST is None. You need to define this env var in the pipeline or global settings or in the .env file."
         )
-        
-        result = runner.invoke(cli, [
-            'build-ingestion-pipelines',
-            '--package_yaml', '/fake/path/dfe_package.yaml',
-            '--log_path', '/fake/logs'
-        ])
+
+        result = runner.invoke(
+            cli,
+            [
+                "build-ingestion-pipelines",
+                "--package_yaml",
+                "/fake/path/dfe_package.yaml",
+                "--log_path",
+                "/fake/logs",
+            ],
+        )
 
         # Should fail with exit code 1 due to missing environment variables (hard failure)
         assert result.exit_code == 1, f"Expected exit code 1, got {result.exit_code}"

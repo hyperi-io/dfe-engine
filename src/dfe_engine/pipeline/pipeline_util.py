@@ -2,8 +2,6 @@ from enum import Enum
 import re
 import os
 
-from hs_lib.logger import logger
-
 
 class VectorStepType(Enum):
     """The type of vector step"""
@@ -58,9 +56,7 @@ def get_vector_step_type(vector_step: str, package_config: dict) -> str:
     template_type = None
     found_template = False
     paths = []
-    for key, value in package_config.get("global_settings", {}).get(
-        "vector_files", {}
-    ).items():
+    for key, value in package_config.get("global_settings", {}).get("vector_files", {}).items():
         paths.append(value)
         if os.path.exists(value) and vector_step in os.listdir(value):
             found_template = True
@@ -70,7 +66,6 @@ def get_vector_step_type(vector_step: str, package_config: dict) -> str:
         raise PipelineSchemaError(
             f"Vector {vector_step} not found. Make sure your template is located in either {paths}"
         )
-    
 
 
 def read_vector_step_config(vector_step: str, package_config: dict) -> str:
@@ -93,14 +88,8 @@ def read_vector_step_config(vector_step: str, package_config: dict) -> str:
         PipelineSchemaError: If the vector configuration file does not exist at the constructed path.
     """
     # get the base folder for vectors
-    template_type = get_vector_step_type(
-        vector_step, package_config
-    )
-    base_path = (
-        package_config.get("global_settings", {})
-        .get("vector_files", {})
-        .get(template_type)
-    )
+    template_type = get_vector_step_type(vector_step, package_config)
+    base_path = package_config.get("global_settings", {}).get("vector_files", {}).get(template_type)
     full_path = os.path.join(base_path, vector_step)
 
     # read the config file for the vector step
@@ -269,9 +258,7 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
         ):
             input_name = vector_step_name_to_input(vector_step)
             if input_name in step_vars and input_name not in required_env_vars:
-                step_env_vars[input_name] = [vector_step_name_to_output(
-                    steps[i - 1]["id"]
-                )]
+                step_env_vars[input_name] = [vector_step_name_to_output(steps[i - 1]["id"])]
 
     # Update required_env_vars with step-specific vars
     required_env_vars.update(step_env_vars)
@@ -281,9 +268,10 @@ def gather_env_variables_for_pipeline(package_config: dict, pipeline_name: str) 
         if value is None and key in global_env_vars:
             required_env_vars[key] = global_env_vars[key]
     # vector vars
-    vector_env_vars = {key: value for key, value in required_env_vars.items() if key in step_env_vars}
+    vector_env_vars = {
+        key: value for key, value in required_env_vars.items() if key in step_env_vars
+    }
     return required_env_vars, vector_env_vars
-
 
 
 def merge_configs(default_yaml: dict, override_yaml: dict) -> dict:

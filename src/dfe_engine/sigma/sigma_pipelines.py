@@ -1,9 +1,11 @@
-import os
 from sigma.processing.pipeline import ProcessingPipeline, ProcessingItem
 from sigma.processing.transformations import FieldMappingTransformation
 
+
 class SigmaPipelineConfig:
-    def __init__(self, name: str, priority: int, allowed_backends: frozenset, field_mappings: dict) -> None:
+    def __init__(
+        self, name: str, priority: int, allowed_backends: frozenset, field_mappings: dict
+    ) -> None:
         """
         Initializes the SigmaPipelineConfig with the pipeline name, priority, allowed backends, and field mappings.
 
@@ -33,10 +35,11 @@ class SigmaPipelineConfig:
             items=[
                 ProcessingItem(
                     identifier="field_mapping",
-                    transformation=FieldMappingTransformation(self.field_mappings)
+                    transformation=FieldMappingTransformation(self.field_mappings),
                 )
-            ]
+            ],
         )
+
 
 class SigmaPipeline(SigmaPipelineConfig):
     def __init__(self, field_mappings: dict) -> None:
@@ -45,7 +48,12 @@ class SigmaPipeline(SigmaPipelineConfig):
 
         :param field_mappings: Dictionary mapping Sigma fields to schema fields.
         """
-        super().__init__(name="clickhouse pipeline", priority=20, allowed_backends=frozenset(), field_mappings=field_mappings)
+        super().__init__(
+            name="clickhouse pipeline",
+            priority=20,
+            allowed_backends=frozenset(),
+            field_mappings=field_mappings,
+        )
 
     def create_pipeline(self) -> ProcessingPipeline:
         """

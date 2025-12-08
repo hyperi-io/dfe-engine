@@ -41,9 +41,7 @@ paths = {
     "dfe_package_path": os.path.join(
         os.getcwd(), "tests/resources/pipeline_resources/test_harness_dfe_package.yaml"
     ),
-    "hunt_log_path": os.path.join(
-        os.getcwd(), f"{root_log_path}/temp/hunt_logs_{device_name}"
-    ),
+    "hunt_log_path": os.path.join(os.getcwd(), f"{root_log_path}/temp/hunt_logs_{device_name}"),
     "hunt_checkpoint_path": os.path.join(
         os.getcwd(), f"{root_log_path}/temp/hunt_checkpoint_{device_name}"
     ),
@@ -104,7 +102,7 @@ def test_db_name():
 @pytest.fixture(scope="session")
 def dfe_config_fixtures(tmp_path_factory, test_db_name):
     """Create test configuration with proper paths."""
-    temp_dir = tmp_path_factory.mktemp("test_dfe_schema_output")
+    tmp_path_factory.mktemp("test_dfe_schema_output")
     targets_dir = tmp_path_factory.mktemp("test_targets")
     targets_path = targets_dir / "dfe_targets.yaml"
     targets_data = {
@@ -132,9 +130,7 @@ def dfe_config_fixtures(tmp_path_factory, test_db_name):
             "use_json_feature": False,
             "target_path": str(targets_path),
         },
-        "organisations": [
-            {"cluster_name": "", "org_id": test_db_name, "schemas": expected_tables}
-        ],
+        "organisations": [{"cluster_name": "", "org_id": test_db_name, "schemas": expected_tables}],
         "build_schemas": {
             "no_cluster_declarations_needed": True,
             "use_replicated_merge_tree": False,
@@ -169,9 +165,7 @@ def dfe_config_fixtures(tmp_path_factory, test_db_name):
 
 def build_and_apply_schemas(dfe_config_fixtures):
     """Builds the schema based on the sample schema (in ./elastic_watcher_converter/sample_schemas)"""
-    dfe_sample_schema_output = Path(
-        dfe_config_fixtures["global_settings"]["schema_output_path"]
-    )
+    dfe_sample_schema_output = Path(dfe_config_fixtures["global_settings"]["schema_output_path"])
 
     if os.path.exists(dfe_config_fixtures["global_settings"]["schema_output_path"]):
         shutil.rmtree(dfe_config_fixtures["global_settings"]["schema_output_path"])
@@ -191,9 +185,7 @@ def build_and_apply_schemas(dfe_config_fixtures):
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -211,21 +203,15 @@ def build_and_apply_schemas(dfe_config_fixtures):
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"]
             ),
             args_do_add_roles=dfe_config_fixtures["apply_schemas"]["do_add_roles"],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_log_path=paths["temp_path"],
             args_target=dfe_config_fixtures["global_settings"]["default_target"],
             args_target_file_path=dfe_config_fixtures["global_settings"]["target_path"],
         )
 
     except Exception as e:
-        logger.error(
-            f"An error occured building and applying schemas: {str(e)}", exc_info=True
-        )
-        raise AssertionError(
-            f"An error occured building and applying schemas: {str(e)}"
-        )
+        logger.error(f"An error occured building and applying schemas: {str(e)}", exc_info=True)
+        raise AssertionError(f"An error occured building and applying schemas: {str(e)}")
 
 
 """ Loads the rule files of the given directory """
@@ -239,7 +225,7 @@ def load_hunt_rule_names(directory):
         logger.info(f"Files: {files}")
         for file_name in files:
             rule_file_path = os.path.join(root, file_name)
-            with open(rule_file_path, "r", encoding="utf-8") as f:
+            with open(rule_file_path, "r", encoding="utf-8"):
                 rule_names.append(file_name.replace(".jinja2", ""))
 
     return rule_names
@@ -261,7 +247,7 @@ def parse_and_convert_watchers(output_path) -> pd.DataFrame:
         )
         parser = WatcherParser(
             schema_map_path="tests/resources/test_schema_mapping/openmss",
-                        native_fields=uses_native_fields,
+            native_fields=uses_native_fields,
         )
         watcher_df = parser.parse_watchers(hunt_params["es_watchers"])
         converter = WatcherConverter(output_path)
@@ -281,9 +267,7 @@ def parse_and_convert_watchers(output_path) -> pd.DataFrame:
 """ Compiles and tests the rules based off dummy hunts and records successes/failures """
 
 
-def compile_and_test_rules(
-    rule_file_names, watcher_df, dfe_config_fixtures, test_db_name
-):
+def compile_and_test_rules(rule_file_names, watcher_df, dfe_config_fixtures, test_db_name):
     """Compiles and tests the rules based off dummy hunts and records successes/failures"""
     # Ensure database exists before running hunts
     try:
@@ -318,9 +302,7 @@ def compile_and_test_rules(
 
     for rule_name in rule_file_names:
         logger.info(f"Running rule {rule_name}...")
-        where_clause = watcher_df.loc[
-            watcher_df["watcher_id"] == rule_name, "where_clause"
-        ]
+        where_clause = watcher_df.loc[watcher_df["watcher_id"] == rule_name, "where_clause"]
         if len(where_clause) > 1:
             logger.warning(
                 f"There are more than 1 entries for {rule_name} in the watcher parser output. Proceeding using the first value."
@@ -341,11 +323,9 @@ def compile_and_test_rules(
             target_config_data=config,
             checkpoint_destination="clickhouse",
             hunt_checkpoint_path=paths["hunt_checkpoint_path"],
-                    )
-        hunt.convert_yaml_to_sql(env=env, org_id=test_db_name, customer_filters={})
-        hunt.execute_hunt(
-            customer=test_db_name, scheduled_start_time=datetime.now(timezone.utc)
         )
+        hunt.convert_yaml_to_sql(env=env, org_id=test_db_name, customer_filters={})
+        hunt.execute_hunt(customer=test_db_name, scheduled_start_time=datetime.now(timezone.utc))
 
         for file_name in os.listdir(paths["hunt_log_path"]):
             if rule_name in file_name:
@@ -374,19 +354,13 @@ def test_rules_execution(test_db_name, dfe_config_fixtures, ch_client):
         build_and_apply_schemas(dfe_config_fixtures=dfe_config_fixtures)
 
         Path(paths["converted_rule_path"]).mkdir(exist_ok=True)
-        paths["converted_rule_path"] = os.path.join(
-            paths["converted_rule_path"], device_name
-        )
+        paths["converted_rule_path"] = os.path.join(paths["converted_rule_path"], device_name)
         if os.path.exists(paths["converted_rule_path"]):
             shutil.rmtree(paths["converted_rule_path"])
 
-        watcher_df = parse_and_convert_watchers(
-            output_path=paths["converted_rule_path"]
-        )
+        watcher_df = parse_and_convert_watchers(output_path=paths["converted_rule_path"])
 
-        rule_file_names = load_hunt_rule_names(
-            directory=paths["converted_rule_path"]
-        )
+        rule_file_names = load_hunt_rule_names(directory=paths["converted_rule_path"])
         results = compile_and_test_rules(
             rule_file_names=rule_file_names,
             watcher_df=watcher_df,

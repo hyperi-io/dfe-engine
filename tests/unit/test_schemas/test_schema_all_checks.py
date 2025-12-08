@@ -5,6 +5,10 @@ import logging
 from dfe_engine.schema.schema_controller import SchemaModifier
 from unittest.mock import MagicMock, patch
 
+# These tests require a running ClickHouse instance with specific databases
+# Skip by default in CI - run with: pytest -m integration
+pytestmark = pytest.mark.integration
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
@@ -16,9 +20,7 @@ logger.addHandler(handler)
 def update_schemas(dfe_config_fixtures, target_config_data):
     dfe_output_directory = dfe_config_fixtures["global_settings"]["schema_output_path"]
     organisations = dfe_config_fixtures.get("organisations", [])
-    use_json_feature = dfe_config_fixtures["global_settings"].get(
-        "use_json_feature", False
-    )
+    use_json_feature = dfe_config_fixtures["global_settings"].get("use_json_feature", False)
     use_subsampling_feature = dfe_config_fixtures["global_settings"].get(
         "use_subsampling_feature", False
     )
@@ -26,14 +28,10 @@ def update_schemas(dfe_config_fixtures, target_config_data):
         dfe_output_directory=dfe_output_directory,
         schema_update_flag="YES",
         drop_replacement_table_flag="YES",
-        use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
-            "use_replicated_merge_tree"
-        ],
+        use_replicated_merge_tree=dfe_config_fixtures["build_schemas"]["use_replicated_merge_tree"],
         use_json_feature=use_json_feature,
         use_subsampling_feature=use_subsampling_feature,
-        use_shared_merge_tree=dfe_config_fixtures["build_schemas"][
-            "use_shared_merge_tree"
-        ],
+        use_shared_merge_tree=dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"],
         do_add_columns=dfe_config_fixtures["apply_schemas"]["do_add_columns"],
         organisations=organisations,
         target_config_data=target_config_data,
@@ -323,9 +321,7 @@ def test_validate_data_migration(update_schemas):
     update_schemas.check_table_records = MagicMock(return_value=100)
     update_schemas.validate_data_migration(database_name, table_name)
     update_schemas.check_table_records.assert_any_call(database_name, table_name)
-    update_schemas.check_table_records.assert_any_call(
-        database_name, f"replacement_{table_name}"
-    )
+    update_schemas.check_table_records.assert_any_call(database_name, f"replacement_{table_name}")
 
 
 def test_drop_replacement_table(update_schemas):
@@ -340,9 +336,7 @@ def test_drop_replacement_table(update_schemas):
     def normalize_whitespace(query):
         return re.sub(r"\s+", " ", query).strip()
 
-    normalized_actual = normalize_whitespace(
-        update_schemas.ch_client.execute.call_args[0][0]
-    )
+    normalized_actual = normalize_whitespace(update_schemas.ch_client.execute.call_args[0][0])
     normalized_expected = normalize_whitespace(expected_query)
     assert normalized_actual == normalized_expected, (
         f"Expected:\n{expected_query}\nBut got:\n{update_schemas.ch_client.execute.call_args[0][0]}"
@@ -369,9 +363,7 @@ def test_add_single_index_type(update_schemas):
         ("idx_existing", "(existing_column) TYPE minmax GRANULARITY 1"),
         ("idx_new", "(new_column) TYPE bloom_filter GRANULARITY 1"),
     ]
-    update_schemas.add_indexes(
-        "test_db", "test_table", current_indexes, expected_indexes
-    )
+    update_schemas.add_indexes("test_db", "test_table", current_indexes, expected_indexes)
 
     expected_query = """
         ALTER TABLE test_db.test_table
@@ -533,9 +525,7 @@ def test_remove_indexes(update_schemas):
     ]
     expected_indexes = [("idx_to_keep", "(column1) TYPE minmax GRANULARITY 1")]
 
-    update_schemas.remove_indexes(
-        "test_db", "test_table", current_indexes, expected_indexes
-    )
+    update_schemas.remove_indexes("test_db", "test_table", current_indexes, expected_indexes)
 
     expected_query = """
         ALTER TABLE test_db.test_table
@@ -621,12 +611,26 @@ def test_parse_columns_from_ddl_with_projections(update_schemas):
     columns = update_schemas.parse_columns_from_ddl(ddl)
     expected_columns = {"id", "name", "timestamp", "complex_column"}
     assert set(columns) == expected_columns
-    
-    forbidden_words = ['timestamp_optimized', 'complex_proj', 'another_proj', 'PROJECTION', 
-                      'SELECT', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'cnt', 'avg_id', 'some_table']
-    
+
+    forbidden_words = [
+        "timestamp_optimized",
+        "complex_proj",
+        "another_proj",
+        "PROJECTION",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "GROUP",
+        "ORDER",
+        "cnt",
+        "avg_id",
+        "some_table",
+    ]
+
     for word in forbidden_words:
-        assert word not in columns, f"Projection-related word '{word}' should not be in columns: {columns}"
+        assert word not in columns, (
+            f"Projection-related word '{word}' should not be in columns: {columns}"
+        )
 
 
 def test_get_columns_with_types(update_schemas):
@@ -699,10 +703,10 @@ def test_generate_alter_statements_with_projections(update_schemas):
 
     assert len(statements) == 1
     statement = statements[0]
-    
+
     assert "timestamp DateTime" in statement
     assert "new_field UInt64" in statement
-    
+
     assert "PROJECTION" not in statement
     assert "timestamp_optimized" not in statement
     assert "aggregated_proj" not in statement
@@ -714,9 +718,7 @@ def test_normalize_data_type(update_schemas):
     """Test normalizing data type names."""
     assert update_schemas.normalize_data_type("Bool") == "Boolean"
     assert update_schemas.normalize_data_type("Nullable(Bool)") == "Nullable(Boolean)"
-    assert (
-        update_schemas.normalize_data_type("UInt32") == "UInt32"
-    )  # No change expected
+    assert update_schemas.normalize_data_type("UInt32") == "UInt32"  # No change expected
 
 
 def test_create_replacement_table_with_sample_by_to_none(update_schemas):
@@ -738,12 +740,19 @@ def test_create_replacement_table_with_sample_by_to_none(update_schemas):
     with patch(
         "dfe_engine.schema.schema_util.SchemaUtils.extract_keys_and_indexes_from_ddl"
     ) as mock_extract:
-        mock_extract.return_value = (None, None, [], None, "cityHash64(timestamp_load)", None, None, None)
+        mock_extract.return_value = (
+            None,
+            None,
+            [],
+            None,
+            "cityHash64(timestamp_load)",
+            None,
+            None,
+            None,
+        )
         update_schemas.execute_query = MagicMock(return_value=[(0,)])
 
-        update_schemas.create_replacement_table(
-            "test_db", "test_table", "id", "id", "", "7"
-        )
+        update_schemas.create_replacement_table("test_db", "test_table", "id", "id", "", "7")
 
         query = update_schemas.execute_query.call_args[0][0]
         assert "SAMPLE BY cityHash64(timestamp_load)" in query
@@ -776,9 +785,13 @@ def test_create_replacement_table_database_not_exists(update_schemas):
     """Test replacement table creation when database doesn't exist."""
     update_schemas.table_exists = MagicMock(return_value=False)
     update_schemas.ch_client = MagicMock()
-    update_schemas.ch_client.execute = MagicMock(side_effect=Exception("Database 'nonexistent_db' does not exist"))
+    update_schemas.ch_client.execute = MagicMock(
+        side_effect=Exception("Database 'nonexistent_db' does not exist")
+    )
 
-    with pytest.raises(Exception, match="An error occurred in creating replacement table: Database does not exist"):
+    with pytest.raises(
+        Exception, match="An error occurred in creating replacement table: Database does not exist"
+    ):
         update_schemas.create_replacement_table(
             "nonexistent_db", "test_table", "id", "timestamp", "", "1"
         )
@@ -790,10 +803,11 @@ def test_create_replacement_table_insufficient_permissions(update_schemas):
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock(side_effect=Exception("Not enough privileges"))
 
-    with pytest.raises(Exception, match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists."):
-        update_schemas.create_replacement_table(
-            "test_db", "test_table", "id", "timestamp", "", "1"
-        )
+    with pytest.raises(
+        Exception,
+        match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists.",
+    ):
+        update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
 
 
 def test_create_replacement_table_disk_space_error(update_schemas):
@@ -802,10 +816,11 @@ def test_create_replacement_table_disk_space_error(update_schemas):
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock(side_effect=Exception("Not enough space on disk"))
 
-    with pytest.raises(Exception, match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists."):
-        update_schemas.create_replacement_table(
-            "test_db", "test_table", "id", "timestamp", "", "1"
-        )
+    with pytest.raises(
+        Exception,
+        match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists.",
+    ):
+        update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
 
 
 def test_create_replacement_table_invalid_ddl_syntax(update_schemas):
@@ -814,29 +829,30 @@ def test_create_replacement_table_invalid_ddl_syntax(update_schemas):
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock(side_effect=Exception("Syntax error"))
 
-    with pytest.raises(Exception, match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists."):
-        update_schemas.create_replacement_table(
-            "test_db", "test_table", "id", "timestamp", "", "1"
-        )
+    with pytest.raises(
+        Exception,
+        match="An error occurred in creating replacement table: Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists.",
+    ):
+        update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
 
 
 def test_create_replacement_table_already_exists(update_schemas):
     """Test replacement table creation when table already exists."""
     update_schemas.table_exists = MagicMock(return_value=True)  # Replacement table already exists
-    update_schemas.get_existing_schema_ddl = MagicMock(return_value="""
+    update_schemas.get_existing_schema_ddl = MagicMock(
+        return_value="""
     CREATE TABLE test_db.test_table (
         id UInt32,
         timestamp DateTime
     ) ENGINE = MergeTree()
     PRIMARY KEY (id)
     ORDER BY (timestamp)
-    """)
+    """
+    )
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock()
 
-    update_schemas.create_replacement_table(
-        "test_db", "test_table", "id", "timestamp", "", "1"
-    )
+    update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
 
     assert update_schemas.ch_client.execute.call_count >= 2
 
@@ -861,7 +877,8 @@ def test_create_replacement_table_with_complex_ddl(update_schemas):
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock()
 
-    update_schemas.get_existing_schema_ddl = MagicMock(return_value="""
+    update_schemas.get_existing_schema_ddl = MagicMock(
+        return_value="""
     CREATE TABLE test_db.test_table (
         id UInt32,
         timestamp DateTime,
@@ -871,14 +888,17 @@ def test_create_replacement_table_with_complex_ddl(update_schemas):
     ) ENGINE = MergeTree()
     PRIMARY KEY (id)
     ORDER BY (timestamp)
-    """)
-
-    update_schemas.create_replacement_table(
-        "test_db", "test_table", "id", "timestamp", "", "1"
+    """
     )
 
+    update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
+
     assert update_schemas.ch_client.execute.called
-    create_calls = [call for call in update_schemas.ch_client.execute.call_args_list if 'CREATE TABLE' in str(call)]
+    create_calls = [
+        call
+        for call in update_schemas.ch_client.execute.call_args_list
+        if "CREATE TABLE" in str(call)
+    ]
     assert len(create_calls) > 0
     query = create_calls[-1][0][0]
 
@@ -890,20 +910,22 @@ def test_create_replacement_table_with_complex_ddl(update_schemas):
 
 def test_create_replacement_table_concurrent_creation(update_schemas):
     """Test replacement table creation with concurrent access."""
-    update_schemas.table_exists = MagicMock(side_effect=[False, True])  # Table created by another process
+    update_schemas.table_exists = MagicMock(
+        side_effect=[False, True]
+    )  # Table created by another process
     update_schemas.ch_client = MagicMock()
     update_schemas.ch_client.execute = MagicMock()
-    update_schemas.get_existing_schema_ddl = MagicMock(return_value="""
+    update_schemas.get_existing_schema_ddl = MagicMock(
+        return_value="""
     CREATE TABLE test_db.test_table (
         id UInt32,
         timestamp DateTime
     ) ENGINE = MergeTree()
     PRIMARY KEY (id)
     ORDER BY (timestamp)
-    """)
-
-    update_schemas.create_replacement_table(
-        "test_db", "test_table", "id", "timestamp", "", "1"
+    """
     )
+
+    update_schemas.create_replacement_table("test_db", "test_table", "id", "timestamp", "", "1")
 
     assert update_schemas.ch_client.execute.called

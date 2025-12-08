@@ -46,12 +46,8 @@ class CronRunner:
         else:
             settings = get_settings()
             self.hunt_log_path = settings.hunts.log_path or CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
-        self.execution_time_str = datetime.now(timezone.utc).strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-        self.thread_tracking_file_path = os.path.join(
-            self.hunt_log_path, self.THREAD_TRACKING_LOG
-        )
+        self.execution_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self.thread_tracking_file_path = os.path.join(self.hunt_log_path, self.THREAD_TRACKING_LOG)
         os.makedirs(self.hunt_log_path, exist_ok=True)
 
     def run(self):
@@ -103,9 +99,7 @@ class CronRunner:
         try:
             return loop.run_until_complete(self.run_async())
         except Exception:
-            logger.exception(
-                "Unhandled exception occurred in the CronRunner:", exc_info=True
-            )
+            logger.exception("Unhandled exception occurred in the CronRunner:", exc_info=True)
         finally:
             loop.close()
 
@@ -165,18 +159,14 @@ class CronRunner:
                     and self.hunt_cron_task_timeout > 0
                     and elapsed_time >= self.hunt_cron_task_timeout
                 ):
-                    logger.info(
-                        f"Timeout reached, stopping scheduler. PID: [{self.daemon_pid}]"
-                    )
+                    logger.info(f"Timeout reached, stopping scheduler. PID: [{self.daemon_pid}]")
                     if not scheduler_stopped:
                         await self.stop_cron_runner()
                         scheduler_stopped = True
                     break
                 await asyncio.sleep(0.10)
         except asyncio.CancelledError:
-            logger.warning(
-                "Cron runner operation cancelled. PID: [{self.daemon_pid}]"
-            )
+            logger.warning("Cron runner operation cancelled. PID: [{self.daemon_pid}]")
             if not scheduler_stopped:
                 await self.stop_cron_runner()
         except Exception:
@@ -193,17 +183,11 @@ class CronRunner:
         try:
             if self.cron_runner:
                 await self.cron_runner.stop_scheduler()
-                logger.info(
-                    f"Scheduler stopped successfully. PID: [{self.daemon_pid}]"
-                )
+                logger.info(f"Scheduler stopped successfully. PID: [{self.daemon_pid}]")
                 for hunt in self.cron_runner.hunts:
-                    logger.info(
-                        f"Cron Runner Hunt - [{hunt.description}] PID: [{self.daemon_pid}]"
-                    )
+                    logger.info(f"Cron Runner Hunt - [{hunt.description}] PID: [{self.daemon_pid}]")
             else:
-                logger.warning(
-                    f"Scheduler is not running. PID: [{self.daemon_pid}]"
-                )
+                logger.warning(f"Scheduler is not running. PID: [{self.daemon_pid}]")
         except Exception as e:
             logger.exception(
                 f"Failed to stop the scheduler. PID: [{self.daemon_pid}]", exc_info=True
