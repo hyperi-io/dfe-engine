@@ -345,7 +345,7 @@ class SchemaBuilder:
         try:
             schema_gen_ch = ClickHouseSchema(
                 name=schema_info.name,
-                version="1",  # TODO: Fix and add schema version to dfe_package if necessary
+                version="1",
                 meta_schema_file_path=schema_info.meta_schema_file_path,
                 common_resource_path=self.common_resource_path,
                 derived_schema_full_path=schema_info.derived_schema_file_path,

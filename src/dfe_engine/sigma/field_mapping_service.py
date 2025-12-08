@@ -38,8 +38,10 @@ def read_csv_mappings(schema_path: str) -> Dict[str, str]:
                     column_name = row.get("column", "")
                     if column_name:
                         mappings[sigma_field_name] = column_name
-    except Exception:
-        pass
+    except FileNotFoundError:
+        logger.debug(f"Field mapping CSV not found: {schema_path}")
+    except (OSError, csv.Error) as e:
+        logger.warning(f"Failed to read field mappings from {schema_path}: {e}")
     return mappings
 
 

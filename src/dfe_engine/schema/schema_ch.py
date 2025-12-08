@@ -171,14 +171,13 @@ class ClickHouseSchema:
         if not clickhouse_type:
             return False
         try:
-            # normalize
             ch = str(clickhouse_type)
             if column_type == "ip_field":
                 return True
-            # also accept cases where type maps to Variant but logical type differs
+            # Also accept cases where type maps to Variant but logical type differs
             if "Variant(IPv4" in ch or "Variant(IPv6" in ch:
                 return True
-        except Exception:
+        except (TypeError, AttributeError):
             return False
         return False
 

@@ -234,163 +234,21 @@ class Hunt:
         Returns execution metrics including total execution time, number of successful queries,
         number of failed queries, etc.
         """
-        successful_queries = 0
-        failed_queries = 0
         execution_time = datetime.now(timezone.utc)
-        execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
-        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=self.log_buffer)
-        scheduled_start_time_w_buffer_str = scheduled_start_time_w_buffer.strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
-        scheduled_start_time_str = scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S")
+        execution_context = self._prepare_execution_context(scheduled_start_time, execution_time)
 
         logger.info(
             f"Running hunt '{self.name}' on pid [{self.pid}] with cron expression: "
-            f"{self.cron} with customer [{customer}] @ Scheduled Start Time @ {scheduled_start_time_str} with buffer of {self.log_buffer} seconds "
+            f"{self.cron} with customer [{customer}] @ Scheduled Start Time @ {execution_context['scheduled_start_time_str']} with buffer of {self.log_buffer} seconds "
             f"with initial_checkpoint_lookback_minutes {self.initial_checkpoint_lookback_minutes} minutes "
         )
 
-        file_path = None
-
-        if self.checkpoint_destination == self.FILE:
-            self.checkpoint_manager.ensure_checkpoint_file_path_exists(self.hunt_checkpoint_path)
-            file_path = os.path.join(
-                self.hunt_checkpoint_path,
-                f"hunt_checkpoints_{customer}_{self.execution_time_str}.json".replace("_", "-"),
-            )
+        file_path = self._get_checkpoint_file_path(customer)
 
         try:
-            with ClickHouseManager.get_instance(
-                self.target_config_data
-            ).get_clickhouse_client() as ch_client:
-                successful_checkpoints = []
-                for customer, list_query in self.queries_by_customer.items():
-                    total_number_of_queries = len(list_query)
-                    rule_counter = 0
-                    logger.info(
-                        f"Running hunt '{self.name}' on pid [{self.pid}] with cron expression: "
-                        f"{self.cron} with [{len(list_query)}] queries with Buffer "
-                        f"set to: {self.log_buffer}. Executing @{execution_time_str} Customer @ {customer} Scheduled Start Time @ {scheduled_start_time_str} with buffer of {self.log_buffer} seconds"
-                    )
-
-                    for index, query in enumerate(list_query):
-                        rule = self.rules[index]
-                        timestamp_condition = ""
-                        generated_query_id = str(uuid.uuid4())
-
-                        last_success_time = self.checkpoint_manager.get_last_successful_run(
-                            checkpoint_destination=self.checkpoint_destination,
-                            ch_client=ch_client,
-                            customer=customer,
-                            hunt_name=self.name,
-                            rule_name=rule["rule_name"],
-                            file_path=file_path,
-                        )
-
-                        if last_success_time is None:
-                            minute_schedule = self.convert_cron_to_minutes()
-                            if minute_schedule == -1:
-                                logger.error(
-                                    f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
-                                )
-                                raise Exception(
-                                    f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
-                                )
-                            look_back_in_minutes = timedelta(
-                                minutes=self.initial_checkpoint_lookback_minutes
-                            )
-                            last_success_time = scheduled_start_time_w_buffer - look_back_in_minutes
-                            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
-                            logger.warning(
-                                f"No previous successful run for {self.name}. Initial run will be run using the cron job candence generated last success time '{last_success_time_str}'."
-                            )
-
-                        elif last_success_time:
-                            logger.debug(
-                                f"Last successful run for {self.name}: {last_success_time} to query against checkpoint field {self.checkpoint_timestamp_field}"
-                            )
-                            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
-
-                        timestamp_condition = f"({self.checkpoint_timestamp_field} >= '{last_success_time_str}' AND {self.checkpoint_timestamp_field} < '{scheduled_start_time_w_buffer_str}')"
-
-                        query = query.replace("{timestamp_condition}", timestamp_condition).replace(
-                            "{ timestamp_condition }", timestamp_condition
-                        )
-
-                        try:
-                            logger.info(
-                                f"-------- DFE Hunt {self.name} Executing --------- \n"
-                                f"Executing [{total_number_of_queries}] rules for [{self.name}] "
-                                f"with CRON [{self.cron}] executing at [{execution_time_str}] For "
-                                f"Timestamp Condition [{timestamp_condition}]."
-                            )
-
-                            query_start_time = datetime.now(timezone.utc)
-                            query_start_time.strftime("%Y-%m-%d %H:%M:%S")
-
-                            query_result = ch_client.execute(query, query_id=generated_query_id)
-                            query_end_time = datetime.now(timezone.utc)
-                            query_end_time.strftime("%Y-%m-%d %H:%M:%S")
-                            query_execution_time_ms = (
-                                query_end_time - query_start_time
-                            ).total_seconds() * 1000
-
-                            rule_counter += 1
-                            successful_queries += 1
-                            logger.debug(
-                                f"Rule [{rule['rule_name']}] ({rule_counter}/{total_number_of_queries}) for org [{customer}] "
-                                f"successfully executed in [{query_execution_time_ms}] ms \n"
-                                f"Query Results: [{query_result}]"
-                            )
-
-                            successful_checkpoints.append(
-                                {
-                                    "checkpoint_destination": self.checkpoint_destination,
-                                    "customer_name": customer,
-                                    "rule_name": rule["rule_name"],
-                                    "hunt_name": self.name,
-                                    "query_id": generated_query_id,
-                                    "thread_id": self.thread_id,
-                                    "log_buffer": self.log_buffer,
-                                    "query_schedule_time": scheduled_start_time.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    ),
-                                    "execution_time": query_start_time.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    ),
-                                    "end_time": query_end_time.strftime("%Y-%m-%d %H:%M:%S"),
-                                    "previous_successful_checkpoint": last_success_time.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    ),
-                                    "query_checkpoint_time": scheduled_start_time_w_buffer.strftime(
-                                        "%Y-%m-%d %H:%M:%S"
-                                    ),
-                                    "execution_time_ms": query_execution_time_ms,
-                                    "file_path": file_path,
-                                }
-                            )
-                        except Exception as e:
-                            failed_queries += 1
-                            error_message = str(e).split("Stack trace")[0]
-                            logger.error(
-                                f"Hunt {self.name} failed\n error: {str(e)}\n SQL ---> [{query}] ERROR MESSAGE [{error_message}] \n"
-                            )
-                            continue
-
-                        logger.debug(
-                            f"Hunt [{self.name}] executed ({rule_counter}/{total_number_of_queries}) "
-                            f"for org [{customer}] executed @{execution_time_str} previous checkpoint {last_success_time} new checkpoint @{scheduled_start_time_w_buffer_str}"
-                        )
-
-                if self.checkpoint_destination == Hunt.CLICKHOUSE:
-                    self.checkpoint_manager.create_batch_checkpoint_clickhouse(
-                        ch_client, successful_checkpoints
-                    )
-                else:
-                    self.checkpoint_manager.create_batch_checkpoint_file(
-                        successful_checkpoints, file_path
-                    )
-
+            successful_queries, failed_queries = self._execute_queries(
+                execution_context, file_path
+            )
         except Exception as e:
             base_error_message = (
                 f"Hunt {self.name} failed during hunt execution. See specific log for {self.name} - "
@@ -406,3 +264,197 @@ class Hunt:
             "failed_queries": failed_queries,
             "hunt_name": self.name,
         }
+
+    def _prepare_execution_context(
+        self, scheduled_start_time: datetime, execution_time: datetime
+    ) -> Dict[str, Any]:
+        """Prepare execution context with timestamps and formatting."""
+        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=self.log_buffer)
+        return {
+            "execution_time": execution_time,
+            "execution_time_str": execution_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "scheduled_start_time": scheduled_start_time,
+            "scheduled_start_time_str": scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+            "scheduled_start_time_w_buffer": scheduled_start_time_w_buffer,
+            "scheduled_start_time_w_buffer_str": scheduled_start_time_w_buffer.strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
+        }
+
+    def _get_checkpoint_file_path(self, customer: str) -> Optional[str]:
+        """Get checkpoint file path if using file-based checkpointing."""
+        if self.checkpoint_destination == self.FILE:
+            self.checkpoint_manager.ensure_checkpoint_file_path_exists(self.hunt_checkpoint_path)
+            return os.path.join(
+                self.hunt_checkpoint_path,
+                f"hunt_checkpoints_{customer}_{self.execution_time_str}.json".replace("_", "-"),
+            )
+        return None
+
+    def _execute_queries(
+        self, execution_context: Dict[str, Any], file_path: Optional[str]
+    ) -> tuple:
+        """Execute all queries and return success/failure counts."""
+        successful_queries = 0
+        failed_queries = 0
+
+        with ClickHouseManager.get_instance(
+            self.target_config_data
+        ).get_clickhouse_client() as ch_client:
+            successful_checkpoints = []
+            for customer, list_query in self.queries_by_customer.items():
+                total_number_of_queries = len(list_query)
+                rule_counter = 0
+                logger.info(
+                    f"Running hunt '{self.name}' on pid [{self.pid}] with cron expression: "
+                    f"{self.cron} with [{len(list_query)}] queries with Buffer "
+                    f"set to: {self.log_buffer}. Executing @{execution_context['execution_time_str']} Customer @ {customer} Scheduled Start Time @ {execution_context['scheduled_start_time_str']} with buffer of {self.log_buffer} seconds"
+                )
+
+                for index, query in enumerate(list_query):
+                    result = self._execute_single_query(
+                        ch_client,
+                        query,
+                        index,
+                        customer,
+                        execution_context,
+                        file_path,
+                        total_number_of_queries,
+                    )
+
+                    if result["success"]:
+                        rule_counter += 1
+                        successful_queries += 1
+                        successful_checkpoints.append(result["checkpoint"])
+                        logger.debug(
+                            f"Hunt [{self.name}] executed ({rule_counter}/{total_number_of_queries}) "
+                            f"for org [{customer}] executed @{execution_context['execution_time_str']} previous checkpoint {result['last_success_time']} new checkpoint @{execution_context['scheduled_start_time_w_buffer_str']}"
+                        )
+                    else:
+                        failed_queries += 1
+
+            self._save_checkpoints(ch_client, successful_checkpoints, file_path)
+
+        return successful_queries, failed_queries
+
+    def _execute_single_query(
+        self,
+        ch_client,
+        query: str,
+        index: int,
+        customer: str,
+        execution_context: Dict[str, Any],
+        file_path: Optional[str],
+        total_number_of_queries: int,
+    ) -> Dict[str, Any]:
+        """Execute a single query and return result with checkpoint data."""
+        rule = self.rules[index]
+        generated_query_id = str(uuid.uuid4())
+
+        last_success_time = self.checkpoint_manager.get_last_successful_run(
+            checkpoint_destination=self.checkpoint_destination,
+            ch_client=ch_client,
+            customer=customer,
+            hunt_name=self.name,
+            rule_name=rule["rule_name"],
+            file_path=file_path,
+        )
+
+        last_success_time, last_success_time_str = self._resolve_last_success_time(
+            last_success_time, execution_context
+        )
+
+        timestamp_condition = f"({self.checkpoint_timestamp_field} >= '{last_success_time_str}' AND {self.checkpoint_timestamp_field} < '{execution_context['scheduled_start_time_w_buffer_str']}')"
+
+        query = query.replace("{timestamp_condition}", timestamp_condition).replace(
+            "{ timestamp_condition }", timestamp_condition
+        )
+
+        try:
+            logger.info(
+                f"-------- DFE Hunt {self.name} Executing --------- \n"
+                f"Executing [{total_number_of_queries}] rules for [{self.name}] "
+                f"with CRON [{self.cron}] executing at [{execution_context['execution_time_str']}] For "
+                f"Timestamp Condition [{timestamp_condition}]."
+            )
+
+            query_start_time = datetime.now(timezone.utc)
+            query_result = ch_client.execute(query, query_id=generated_query_id)
+            query_end_time = datetime.now(timezone.utc)
+            query_execution_time_ms = (query_end_time - query_start_time).total_seconds() * 1000
+
+            logger.debug(
+                f"Rule [{rule['rule_name']}] for org [{customer}] "
+                f"successfully executed in [{query_execution_time_ms}] ms \n"
+                f"Query Results: [{query_result}]"
+            )
+
+            checkpoint = {
+                "checkpoint_destination": self.checkpoint_destination,
+                "customer_name": customer,
+                "rule_name": rule["rule_name"],
+                "hunt_name": self.name,
+                "query_id": generated_query_id,
+                "thread_id": self.thread_id,
+                "log_buffer": self.log_buffer,
+                "query_schedule_time": execution_context["scheduled_start_time"].strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                "execution_time": query_start_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "end_time": query_end_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "previous_successful_checkpoint": last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
+                "query_checkpoint_time": execution_context["scheduled_start_time_w_buffer"].strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+                "execution_time_ms": query_execution_time_ms,
+                "file_path": file_path,
+            }
+
+            return {"success": True, "checkpoint": checkpoint, "last_success_time": last_success_time}
+
+        except Exception as e:
+            error_message = str(e).split("Stack trace")[0]
+            logger.error(
+                f"Hunt {self.name} failed\n error: {str(e)}\n SQL ---> [{query}] ERROR MESSAGE [{error_message}] \n"
+            )
+            return {"success": False}
+
+    def _resolve_last_success_time(
+        self, last_success_time: Optional[datetime], execution_context: Dict[str, Any]
+    ) -> tuple:
+        """Resolve the last success time, using lookback if none exists."""
+        if last_success_time is None:
+            minute_schedule = self.convert_cron_to_minutes()
+            if minute_schedule == -1:
+                logger.error(
+                    f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
+                )
+                raise Exception(
+                    f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
+                )
+            look_back_in_minutes = timedelta(minutes=self.initial_checkpoint_lookback_minutes)
+            last_success_time = execution_context["scheduled_start_time_w_buffer"] - look_back_in_minutes
+            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
+            logger.warning(
+                f"No previous successful run for {self.name}. Initial run will be run using the cron job candence generated last success time '{last_success_time_str}'."
+            )
+        else:
+            logger.debug(
+                f"Last successful run for {self.name}: {last_success_time} to query against checkpoint field {self.checkpoint_timestamp_field}"
+            )
+            last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
+
+        return last_success_time, last_success_time_str
+
+    def _save_checkpoints(
+        self, ch_client, successful_checkpoints: List[Dict], file_path: Optional[str]
+    ) -> None:
+        """Save checkpoints to the appropriate destination."""
+        if self.checkpoint_destination == Hunt.CLICKHOUSE:
+            self.checkpoint_manager.create_batch_checkpoint_clickhouse(
+                ch_client, successful_checkpoints
+            )
+        else:
+            self.checkpoint_manager.create_batch_checkpoint_file(
+                successful_checkpoints, file_path
+            )

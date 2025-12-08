@@ -33,16 +33,67 @@ class HuntController:
         test_mode: bool = False,
         verbose: bool = False,
     ) -> None:
+        dfe_config = HuntController._load_dfe_config(arg_dfe_config_path, arg_target_file_path)
+        if dfe_config is None:
+            return
+
+        config_values = HuntController._resolve_config_values(
+            dfe_config,
+            arg_target_file_path,
+            arg_hunt_timeout,
+            arg_hunt_num_threads,
+            arg_checkpoint_destination,
+            arg_hunt_log_path,
+            arg_hunt_dir,
+            arg_hunt_rule_repo_dir,
+            arg_checkpoint_timestamp_field,
+        )
+
+        target_config_data = HuntController._load_target_config(
+            arg_target, config_values["targets_file_path"]
+        )
+        if target_config_data is None:
+            return
+
+        paths = HuntController._resolve_hunt_paths(
+            config_values, target_config_data
+        )
+        if paths is None:
+            return
+
+        hunt_dirs, rule_dirs = HuntController._validate_directories(
+            paths["hunt_config_path"], paths["hunt_rules_path"]
+        )
+        if hunt_dirs is None:
+            return
+
+        hunt_log_path = HuntController._resolve_hunt_log_path(config_values["hunt_log_path"])
+
+        HuntController._start_schedulers(
+            hunt_dirs,
+            rule_dirs,
+            config_values,
+            hunt_log_path,
+            target_config_data,
+            test_mode,
+        )
+
+    @staticmethod
+    def _load_dfe_config(
+        config_path: str, target_file_path: Optional[str]
+    ) -> Optional[dict]:
+        """Load DFE config and perform initial validation."""
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
-                arg_dfe_config_path, require_config=False, logger=logger
+                config_path, require_config=False, logger=logger
             )
         except FileNotFoundError as error:
             logger.error(f"Error loading the dfe config package: {error}")
+            return None
 
-        if arg_target_file_path is None:
+        if target_file_path is None:
             logger.warning(
-                f" the arg_target_file_path is None. Please review the parameters.  Value [{arg_target_file_path}]"
+                f" the arg_target_file_path is None. Please review the parameters.  Value [{target_file_path}]"
             )
 
         if dfe_config.get("hunt_scheduler") is None:
@@ -50,46 +101,68 @@ class HuntController:
                 " the dfe_package.yaml has no hunt scheduler configration files is None. You will need to ensure that you have passed in all settings via the CLI."
             )
 
-        targets_file_path = HuntController._get_config_value(
-            arg_target_file_path, dfe_config, "global_settings", "target_path"
-        )
-        hunt_checkpoint_path = dfe_config.get("global_settings", {}).get(
-            "hunt_checkpoint_path", None
-        )
-        hunt_cron_task_timeout = HuntController._get_config_value(
-            arg_hunt_timeout, dfe_config, "hunt_scheduler", "timeout", default=-1
-        )
-        hunt_num_threads = HuntController._get_config_value(
-            arg_hunt_num_threads, dfe_config, "hunt_scheduler", "num_threads", default=1
-        )
-        checkpoint_destination = HuntController._get_config_value(
-            arg_checkpoint_destination,
-            dfe_config,
-            "hunt_scheduler",
-            "checkpoint_destination",
-            "clickhouse",
-        )
-        hunt_log_path = HuntController._get_config_value(
-            arg_hunt_log_path,
-            dfe_config,
-            "hunt_scheduler",
-            "hunt_log_path",
-            default=os.path.join(os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH),
-        )
-        hunt_config_path = HuntController._get_config_value(
-            arg_hunt_dir, dfe_config, "hunt_scheduler", "hunt_dir"
-        )
-        hunt_rules_path = HuntController._get_config_value(
-            arg_hunt_rule_repo_dir, dfe_config, "hunt_scheduler", "rule_repo_dir"
-        )
-        checkpoint_timestamp_field = HuntController._get_config_value(
-            arg_checkpoint_timestamp_field,
-            dfe_config,
-            "hunt_scheduler",
-            "checkpoint_timestamp_field",
-            "timestamp",
-        )
+        return dfe_config
 
+    @staticmethod
+    def _resolve_config_values(
+        dfe_config: dict,
+        arg_target_file_path: Optional[str],
+        arg_hunt_timeout: int,
+        arg_hunt_num_threads: int,
+        arg_checkpoint_destination: str,
+        arg_hunt_log_path: Optional[str],
+        arg_hunt_dir: Optional[str],
+        arg_hunt_rule_repo_dir: Optional[str],
+        arg_checkpoint_timestamp_field: str,
+    ) -> dict:
+        """Resolve all configuration values from args and config."""
+        return {
+            "targets_file_path": HuntController._get_config_value(
+                arg_target_file_path, dfe_config, "global_settings", "target_path"
+            ),
+            "hunt_checkpoint_path": dfe_config.get("global_settings", {}).get(
+                "hunt_checkpoint_path", None
+            ),
+            "hunt_cron_task_timeout": HuntController._get_config_value(
+                arg_hunt_timeout, dfe_config, "hunt_scheduler", "timeout", default=-1
+            ),
+            "hunt_num_threads": HuntController._get_config_value(
+                arg_hunt_num_threads, dfe_config, "hunt_scheduler", "num_threads", default=1
+            ),
+            "checkpoint_destination": HuntController._get_config_value(
+                arg_checkpoint_destination,
+                dfe_config,
+                "hunt_scheduler",
+                "checkpoint_destination",
+                "clickhouse",
+            ),
+            "hunt_log_path": HuntController._get_config_value(
+                arg_hunt_log_path,
+                dfe_config,
+                "hunt_scheduler",
+                "hunt_log_path",
+                default=os.path.join(os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH),
+            ),
+            "hunt_config_path": HuntController._get_config_value(
+                arg_hunt_dir, dfe_config, "hunt_scheduler", "hunt_dir"
+            ),
+            "hunt_rules_path": HuntController._get_config_value(
+                arg_hunt_rule_repo_dir, dfe_config, "hunt_scheduler", "rule_repo_dir"
+            ),
+            "checkpoint_timestamp_field": HuntController._get_config_value(
+                arg_checkpoint_timestamp_field,
+                dfe_config,
+                "hunt_scheduler",
+                "checkpoint_timestamp_field",
+                "timestamp",
+            ),
+        }
+
+    @staticmethod
+    def _load_target_config(
+        target_name: Optional[str], targets_file_path: Optional[str]
+    ) -> Optional[dict]:
+        """Load target configuration."""
         if targets_file_path is None:
             logger.warning(
                 f" the targets_file_path is still set to None. Please review the parameters and the dfe_package file. Value [{targets_file_path}]"
@@ -97,17 +170,18 @@ class HuntController:
 
         try:
             logger.info(
-                f" Reading Target Config of {arg_target} from this file {targets_file_path}"
+                f" Reading Target Config of {target_name} from this file {targets_file_path}"
             )
             target_config_data = DFEConfigLoader.read_target_config(
-                target_name=arg_target, targets_file_path=targets_file_path
+                target_name=target_name, targets_file_path=targets_file_path
             )
 
             DFEConfigLoader.print_target(
                 logger=logger,
                 targets_file_path=targets_file_path,
-                target_name=arg_target,
+                target_name=target_name,
             )
+            return target_config_data
         except FileNotFoundError as error:
             logger.error(
                 f"Unable to load target or retrieve the hunt config paths: {error}",
@@ -115,19 +189,38 @@ class HuntController:
             )
             raise
 
-        hunt_config_path = hunt_config_path or target_config_data.get("hunt_config_path", None)
-        hunt_rules_path = hunt_rules_path or target_config_data.get("hunt_rules_path", None)
+    @staticmethod
+    def _resolve_hunt_paths(
+        config_values: dict, target_config_data: dict
+    ) -> Optional[dict]:
+        """Resolve hunt and rules paths, validating required values."""
+        hunt_config_path = config_values["hunt_config_path"] or target_config_data.get(
+            "hunt_config_path", None
+        )
+        hunt_rules_path = config_values["hunt_rules_path"] or target_config_data.get(
+            "hunt_rules_path", None
+        )
 
-        if not targets_file_path:
+        if not config_values["targets_file_path"]:
             logger.error("Target file path is missing.")
-            return
+            return None
         if not hunt_config_path:
             logger.error("Hunt config path is missing.")
-            return
+            return None
         if not hunt_rules_path:
             logger.error("Hunt rules path is missing.")
-            return
+            return None
 
+        return {
+            "hunt_config_path": hunt_config_path,
+            "hunt_rules_path": hunt_rules_path,
+        }
+
+    @staticmethod
+    def _validate_directories(
+        hunt_config_path: str, hunt_rules_path: str
+    ) -> Optional[tuple]:
+        """Parse and validate hunt and rule directories."""
         hunt_dirs = (
             [dir.strip() for dir in hunt_config_path.split(",")]
             if "," in hunt_config_path
@@ -159,24 +252,29 @@ class HuntController:
             if not os.path.isdir(rule_dir):
                 raise Exception(f"Rules repository directory [{rule_dir}] not found.")
 
+        return hunt_dirs, rule_dirs
+
+    @staticmethod
+    def _resolve_hunt_log_path(hunt_log_path: Optional[str]) -> str:
+        """Resolve the hunt log path from config or settings."""
         if not hunt_log_path:
             settings = get_settings()
-            hunt_log_path = settings.hunts.log_path or os.path.join(
+            return settings.hunts.log_path or os.path.join(
                 os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
+        return hunt_log_path
 
+    @staticmethod
+    def _start_schedulers(
+        hunt_dirs: List[str],
+        rule_dirs: List[str],
+        config_values: dict,
+        hunt_log_path: str,
+        target_config_data: dict,
+        test_mode: bool,
+    ) -> None:
+        """Start hunt schedulers for each directory pair."""
         processes = []
-
-        # Process each pair of hunt and rule directories
-        # The test_mode parameter serves several important purposes:
-        #  1. When test_mode=True, execution runs synchronously in the current process, allowing
-        #     unit tests to complete without hanging on the infinite loop at the end
-        #  2. When test_mode=False (default), creates separate daemon processes that continue
-        #     running independently, which is the desired behavior for production
-        #  3. This design allows tests to validate the hunt scheduling logic without creating
-        #     permanent background processes that would persist after tests complete
-        #  4. In test mode, exceptions will propagate directly to the caller, making it easier
-        #     to detect and debug issues during testing
 
         for hunt_dir, rule_dir in zip(hunt_dirs, rule_dirs, strict=False):
             logger.info(
@@ -184,33 +282,31 @@ class HuntController:
             )
 
             if test_mode:
-                # Run synchronously in the current process for testing
                 HuntController._run_scheduler(
                     hunt_dir,
                     rule_dir,
-                    hunt_checkpoint_path,
-                    hunt_cron_task_timeout,
-                    hunt_num_threads,
-                    checkpoint_destination,
+                    config_values["hunt_checkpoint_path"],
+                    config_values["hunt_cron_task_timeout"],
+                    config_values["hunt_num_threads"],
+                    config_values["checkpoint_destination"],
                     hunt_log_path,
                     logger,
-                    checkpoint_timestamp_field,
+                    config_values["checkpoint_timestamp_field"],
                     target_config_data,
                 )
             else:
-                # Create a separate daemon process for normal operation
                 process = multiprocessing.Process(
                     target=HuntController._run_scheduler,
                     args=(
                         hunt_dir,
                         rule_dir,
-                        hunt_checkpoint_path,
-                        hunt_cron_task_timeout,
-                        hunt_num_threads,
-                        checkpoint_destination,
+                        config_values["hunt_checkpoint_path"],
+                        config_values["hunt_cron_task_timeout"],
+                        config_values["hunt_num_threads"],
+                        config_values["checkpoint_destination"],
                         hunt_log_path,
                         logger,
-                        checkpoint_timestamp_field,
+                        config_values["checkpoint_timestamp_field"],
                         target_config_data,
                     ),
                 )

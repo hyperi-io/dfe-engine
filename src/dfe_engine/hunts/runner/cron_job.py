@@ -127,13 +127,50 @@ class CronJob:
 
         :param hunt_data: A dictionary containing hunt configuration.
         :param env: A Jinja2 Environment instance for SQL template rendering.
+        :param hunt_checkpoint_path: Path for hunt checkpoints.
+        :param checkpoint_destination: Destination for checkpoints.
+        :param hunt_directory: Directory containing hunt configurations.
+        :param thread_tracking_file_path: Path for thread tracking file.
         """
         logger.debug(f"Creating hunt with this data: \n {hunt_data}")
+
         customers = hunt_data.get("customers", [])
+        cron_expressions = self._parse_cron_config(hunt_data.get("cron", []))
+        actual_checkpoint_timestamp_field = self._get_checkpoint_field(hunt_data)
 
-        cron_config = hunt_data.get("cron", [])
-        cron_expressions = []
+        total_customers = len(customers)
+        customer_counter = 0
+        tasks = []
 
+        for cron_expression in cron_expressions:
+            hunt_frequency_minutes = self._get_hunt_frequency(cron_expression)
+            if hunt_frequency_minutes is None:
+                continue
+
+            self._calculate_stagger_interval(hunt_frequency_minutes, total_customers)
+
+            for customer in customers:
+                await self._schedule_customer_hunt(
+                    hunt_data=hunt_data,
+                    env=env,
+                    customer=customer,
+                    cron_expression=cron_expression,
+                    hunt_frequency_minutes=hunt_frequency_minutes,
+                    customer_counter=customer_counter,
+                    total_customers=total_customers,
+                    actual_checkpoint_timestamp_field=actual_checkpoint_timestamp_field,
+                    hunt_checkpoint_path=hunt_checkpoint_path,
+                    checkpoint_destination=checkpoint_destination,
+                    hunt_directory=hunt_directory,
+                    thread_tracking_file_path=thread_tracking_file_path,
+                )
+                customer_counter += 1
+
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    def _parse_cron_config(self, cron_config) -> list:
+        """Parse cron configuration into a list of expressions."""
         if isinstance(cron_config, str):
             if "," in cron_config:
                 error_msg = (
@@ -142,100 +179,113 @@ class CronJob:
                 )
                 logger.error(error_msg)
                 raise ValueError(error_msg)
-            cron_expressions = [cron_config]
             logger.info(f"Using single cron expression: {cron_config}")
+            return [cron_config]
         elif isinstance(cron_config, list):
-            cron_expressions = cron_config
-            logger.info(f"Using multiple cron expressions: {cron_expressions}")
+            logger.info(f"Using multiple cron expressions: {cron_config}")
+            return cron_config
         else:
             error_msg = f"Invalid cron format: {cron_config}. Must be a string or list."
             logger.error(error_msg)
             raise ValueError(error_msg)
 
+    def _get_checkpoint_field(self, hunt_data: dict) -> str:
+        """Get the checkpoint timestamp field from hunt data or defaults."""
         if not self.checkpoint_timestamp_field:
             self.checkpoint_timestamp_field = "timestamp_load"
-        actual_checkpoint_timestamp_field = hunt_data.get(
-            "checkpoint_timestamp_field", self.checkpoint_timestamp_field
+        return hunt_data.get("checkpoint_timestamp_field", self.checkpoint_timestamp_field)
+
+    def _get_hunt_frequency(self, cron_expression: str) -> float | None:
+        """Calculate hunt frequency from cron expression, returning None if invalid."""
+        logger.info(f"Determining the frequency of hunt with cron: {cron_expression}")
+
+        try:
+            hunt_frequency_minutes = self.calculate_frequency_from_cron(cron_expression)
+            logger.info(
+                f"Hunt Frequency from cron {cron_expression}: {hunt_frequency_minutes} minutes"
+            )
+            if hunt_frequency_minutes <= 0:
+                logger.warning(
+                    f"Invalid hunt frequency ({hunt_frequency_minutes} minutes) from cron {cron_expression}. Skipping."
+                )
+                return None
+            return hunt_frequency_minutes
+        except ValueError as e:
+            logger.error(f"Invalid cron expression {cron_expression}: {e}. Skipping.")
+            return None
+
+    def _calculate_stagger_interval(
+        self, hunt_frequency_minutes: float, total_customers: int
+    ) -> None:
+        """Calculate the stagger interval for distributing customer hunts."""
+        min_intervals = max(total_customers, 10)
+        self.stagger_minutes = hunt_frequency_minutes / min_intervals
+        self.stagger_minutes = max(1, round(self.stagger_minutes))
+        logger.debug(
+            f"Calculated stagger interval: {self.stagger_minutes} minutes across {min_intervals} intervals"
         )
 
-        len(hunt_data["rules"])
-        total_customers = len(customers)
-        customer_counter = 0
-        tasks = []
+    async def _schedule_customer_hunt(
+        self,
+        hunt_data: dict,
+        env: Environment,
+        customer: str,
+        cron_expression: str,
+        hunt_frequency_minutes: float,
+        customer_counter: int,
+        total_customers: int,
+        actual_checkpoint_timestamp_field: str,
+        hunt_checkpoint_path: str,
+        checkpoint_destination: str,
+        hunt_directory: str,
+        thread_tracking_file_path: str,
+    ) -> None:
+        """Schedule a hunt for a specific customer."""
+        logger.debug(
+            f"Scheduling hunts for customer: {customer} with cron: {cron_expression} and checkpoint field: {actual_checkpoint_timestamp_field}"
+        )
 
-        for cron_expression in cron_expressions:
-            logger.info(f"Determining the frequency of hunt with cron: {cron_expression}")
+        thread_id = threading.get_native_id()
+        thread_id_customer = f"{customer}_{str(int(uuid.uuid4().hex, 16))[:12]}_{thread_id}"
+        self.log_thread_details_for_all_hunts(
+            thread_id=thread_id_customer,
+            hunt_dir=hunt_directory,
+            thread_tracking_file_path=thread_tracking_file_path,
+        )
 
-            try:
-                hunt_frequency_minutes = self.calculate_frequency_from_cron(cron_expression)
-                logger.info(
-                    f"Hunt Frequency from cron {cron_expression}: {hunt_frequency_minutes} minutes"
-                )
-                if hunt_frequency_minutes <= 0:
-                    logger.warning(
-                        f"Invalid hunt frequency ({hunt_frequency_minutes} minutes) from cron {cron_expression}. Skipping."
-                    )
-                    continue
-            except ValueError as e:
-                logger.error(f"Invalid cron expression {cron_expression}: {e}. Skipping.")
-                continue
+        minute_offset = int((customer_counter * self.stagger_minutes) % hunt_frequency_minutes)
+        staggered_cron = self.modify_cron_expression(
+            cron_expression, minute_offset, total_customers
+        )
+        logger.debug(
+            f"Original cron expression: {cron_expression}, staggered cron expression: {staggered_cron}"
+        )
 
-            min_intervals = max(total_customers, 10)
-            self.stagger_minutes = hunt_frequency_minutes / min_intervals
-            self.stagger_minutes = max(1, round(self.stagger_minutes))
-            logger.debug(
-                f"Calculated stagger interval: {self.stagger_minutes} minutes across {min_intervals} intervals"
-            )
+        hunt = Hunt(
+            cron=staggered_cron,
+            log_buffer=hunt_data["log_buffer"],
+            customer=customer,
+            rules=hunt_data["rules"],
+            name=hunt_data["name"],
+            global_source_table_name=hunt_data["global_source_table_name"],
+            global_target_table_name=hunt_data["global_target_table_name"],
+            hunt_log_path=self.hunt_log_path,
+            target_config_data=self.target_config_data,
+            checkpoint_timestamp_field=actual_checkpoint_timestamp_field,
+            customer_filters=hunt_data.get("customer_filters", {}),
+            checkpoint_destination=checkpoint_destination,
+            hunt_checkpoint_path=hunt_checkpoint_path,
+            thread_id=thread_id_customer,
+        )
 
-            for customer in customers:
-                logger.debug(
-                    f"Scheduling hunts for customer: {customer} with cron: {cron_expression} and checkpoint field: {actual_checkpoint_timestamp_field}"
-                )
-                thread_id = threading.get_native_id()
-                thread_id_customer = f"{customer}_{str(int(uuid.uuid4().hex, 16))[:12]}_{thread_id}"
-                self.log_thread_details_for_all_hunts(
-                    thread_id=thread_id_customer,
-                    hunt_dir=hunt_directory,
-                    thread_tracking_file_path=thread_tracking_file_path,
-                )
-                minute_offset = int(
-                    (customer_counter * self.stagger_minutes) % hunt_frequency_minutes
-                )
-                staggered_cron = self.modify_cron_expression(
-                    cron_expression, minute_offset, total_customers
-                )
-                logger.debug(
-                    f"Original cron expression: {cron_expression}, staggered cron expression: {staggered_cron}"
-                )
-
-                hunt = Hunt(
-                    cron=staggered_cron,
-                    log_buffer=hunt_data["log_buffer"],
-                    customer=customer,
-                    rules=hunt_data["rules"],
-                    name=hunt_data["name"],
-                    global_source_table_name=hunt_data["global_source_table_name"],
-                    global_target_table_name=hunt_data["global_target_table_name"],
-                    hunt_log_path=self.hunt_log_path,
-                    target_config_data=self.target_config_data,
-                    checkpoint_timestamp_field=actual_checkpoint_timestamp_field,
-                    customer_filters=hunt_data.get("customer_filters", {}),
-                    checkpoint_destination=checkpoint_destination,
-                    hunt_checkpoint_path=hunt_checkpoint_path,
-                    thread_id=thread_id_customer,
-                )
-
-                hunt.build_sql_queries_for_customers(env)
-                job_func = partial(self._run_hunt_for_customer, hunt, customer)
-                await self.add_cron_job(
-                    job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}"
-                )
-                self.hunts.append(hunt)
-                logger.debug(f"Total hunts: {len(self.hunts)} - {hunt.description}")
-                logger.debug(f"Hunt Config: {hunt}")
-                customer_counter += 1
-        if tasks:
-            await asyncio.gather(*tasks)
+        hunt.build_sql_queries_for_customers(env)
+        job_func = partial(self._run_hunt_for_customer, hunt, customer)
+        await self.add_cron_job(
+            job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}"
+        )
+        self.hunts.append(hunt)
+        logger.debug(f"Total hunts: {len(self.hunts)} - {hunt.description}")
+        logger.debug(f"Hunt Config: {hunt}")
 
     def calculate_frequency_from_cron(self, cron_expression: str) -> float:
         """
