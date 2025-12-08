@@ -43,10 +43,10 @@ def parse_order_by_columns(sql_content: str) -> list:
         if "ORDER BY" in line and "PROJECTION" not in line:
             order_by_line = line
             break
-    
+
     if not order_by_line:
         raise ValueError("No ORDER BY clause found")
-        
+
     order_by_clause = order_by_line.split("ORDER BY")[1].strip()
     order_by_columns_raw = order_by_clause[1:-1].strip()
     order_by_columns = []
@@ -167,9 +167,7 @@ def test_common_header_precedence(dfe_config_fixtures, create_schema, use_subsam
         assert order_by_columns[0] == "cityHash64(timestamp_load)", (
             "cityHash64(timestamp_load) must be first in ORDER BY when subsampling is enabled"
         )
-        assert order_by_columns[1] == "timestamp_load", (
-            "timestamp_load must be second in ORDER BY"
-        )
+        assert order_by_columns[1] == "timestamp_load", "timestamp_load must be second in ORDER BY"
     else:
         assert order_by_columns[0] == "timestamp_load", (
             "timestamp_load must be first in ORDER BY when subsampling is disabled"
@@ -177,9 +175,7 @@ def test_common_header_precedence(dfe_config_fixtures, create_schema, use_subsam
 
 
 @pytest.mark.parametrize("use_subsampling", [False, True])
-def test_derived_schema_order_precedence(
-    dfe_config_fixtures, create_schema, use_subsampling
-):
+def test_derived_schema_order_precedence(dfe_config_fixtures, create_schema, use_subsampling):
     """Test that derived schema index_order takes precedence over meta schema."""
     meta_schema_df = pd.DataFrame(
         [
@@ -276,9 +272,7 @@ def test_derived_schema_order_precedence(
 
 
 @pytest.mark.parametrize("use_subsampling", [False, True])
-def test_invalid_index_order_handling(
-    dfe_config_fixtures, create_schema, use_subsampling
-):
+def test_invalid_index_order_handling(dfe_config_fixtures, create_schema, use_subsampling):
     """Test handling of invalid index_order values in derived schema."""
     meta_schema_df = pd.DataFrame(
         [
@@ -353,9 +347,7 @@ def test_invalid_index_order_handling(
 
 
 @pytest.mark.parametrize("use_subsampling", [False, True])
-def test_missing_index_order_handling(
-    dfe_config_fixtures, create_schema, use_subsampling
-):
+def test_missing_index_order_handling(dfe_config_fixtures, create_schema, use_subsampling):
     """Test handling of missing index_order values."""
     meta_schema_df = pd.DataFrame(
         [
@@ -443,9 +435,7 @@ def test_missing_index_order_handling(
 
 
 @pytest.mark.parametrize("use_subsampling", [False, True])
-def test_duplicate_index_order_handling(
-    dfe_config_fixtures, create_schema, use_subsampling
-):
+def test_duplicate_index_order_handling(dfe_config_fixtures, create_schema, use_subsampling):
     """Test handling of duplicate index_order values."""
     meta_schema_df = pd.DataFrame(
         [

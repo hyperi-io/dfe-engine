@@ -4,7 +4,6 @@ import yaml
 import uuid
 import stat
 import shutil
-from pathlib import Path
 
 from hs_lib.logger import logger
 from dfe_engine.settings import get_settings, reset_settings
@@ -226,9 +225,7 @@ def pytest_runtest_logreport(report):
 
 def pytest_terminal_summary(terminalreporter, exitstatus):
     """Print test summary at the end."""
-    logger.info(
-        "\n===================== test_schemas Test Summary ====================="
-    )
+    logger.info("\n===================== test_schemas Test Summary =====================")
     logger.info("Overall Statistics:")
     logger.info(f"Total Tests Run: {test_stats['total']}")
     logger.info(f"Tests Passed:    {test_stats['passed']}")

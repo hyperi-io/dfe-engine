@@ -36,11 +36,9 @@ def dfe_config_fixtures():
                 "geoip": [
                     "../../post_build_artefacts/dfe_meta_schemas_package/ingestion_pipeline_enrichment_geoip"
                 ],
-            },
-            "vector_files": {
                 "vector": [
                     "../../post_build_artefacts/dfe_meta_schemas_package/ingestion_pipeline_templates"
-                ]
+                ],
             },
             "meta_schema_paths": "../../post_build_artefacts/dfe_meta_schemas_package/dfe_meta_schemas",
         },
@@ -157,9 +155,7 @@ def pytest_runtest_logreport(report):
 
 def pytest_terminal_summary(terminalreporter, exitstatus):
     """Print test summary at the end."""
-    logger.info(
-        "\n===================== test_schema_packaging Test Summary ====================="
-    )
+    logger.info("\n===================== test_schema_packaging Test Summary =====================")
     logger.info("Overall Statistics:")
     logger.info(f"Total Tests Run: {test_stats['total']}")
     logger.info(f"Tests Passed:    {test_stats['passed']}")

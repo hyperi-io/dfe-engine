@@ -36,38 +36,22 @@ class HuntScheduler:
         # Note: No need to pass parameters that are available as instance attributes
         logger.info("\n--- Hunt Configuration Settings --- \n")
         logger.info(f"Hunt directory:                        {self.hunt_dir}")
-        logger.info(
-            f"Rule repository directory:             {self.rule_repo_dir}"
-        )
-        logger.info(
-            f"Hunt Checkpoint Path:                  {self.hunt_checkpoint_path}"
-        )
-        logger.info(
-            f"hunt_cron_task_timeout:                {self.hunt_cron_task_timeout} seconds"
-        )
-        logger.info(
-            f"Number of threads:                     {self.num_threads}"
-        )
-        logger.info(
-            f"Hunt Checkpoint Destination:           {self.checkpoint_destination}"
-        )
-        logger.info(
-            f"Hunt logs directory:                   {self.hunt_log_path}"
-        )
+        logger.info(f"Rule repository directory:             {self.rule_repo_dir}")
+        logger.info(f"Hunt Checkpoint Path:                  {self.hunt_checkpoint_path}")
+        logger.info(f"hunt_cron_task_timeout:                {self.hunt_cron_task_timeout} seconds")
+        logger.info(f"Number of threads:                     {self.num_threads}")
+        logger.info(f"Hunt Checkpoint Destination:           {self.checkpoint_destination}")
+        logger.info(f"Hunt logs directory:                   {self.hunt_log_path}")
 
         try:
             rules = os.listdir(self.rule_repo_dir)
-            logger.info(
-                f"-- Loading Rules Rules from {self.rule_repo_dir} -- "
-            )
+            logger.info(f"-- Loading Rules Rules from {self.rule_repo_dir} -- ")
             for entry in rules:
                 entry_path = os.path.join(self.rule_repo_dir, entry)
                 if os.path.isfile(entry_path):
                     logger.info(f"Loaded Hunt Rule: {entry}")
         except FileNotFoundError as e:
-            logger.error(
-                f"Error accessing directory '{self.rule_repo_dir}': {e}"
-            )
+            logger.error(f"Error accessing directory '{self.rule_repo_dir}': {e}")
 
         logger.info("-----------------------------------")
 
@@ -76,9 +60,7 @@ class HuntScheduler:
         loop.run_until_complete(self._run_schedule_with_hunts_threadpool())
 
     async def _run_schedule_with_hunts_threadpool(self):
-        logger.info(
-            "Scheduling hunts with {0} threads.".format(self.max_threads)
-        )
+        logger.info("Scheduling hunts with {0} threads.".format(self.max_threads))
 
         async def async_tasks():
             with ThreadPoolExecutor():
@@ -92,9 +74,7 @@ class HuntScheduler:
 
     async def _run_schedule_with_hunts(self):
         try:
-            logger.info(
-                f"DFE-Run-Cron with [{self.hunt_dir}] [{self.rule_repo_dir}]"
-            )
+            logger.info(f"DFE-Run-Cron with [{self.hunt_dir}] [{self.rule_repo_dir}]")
             runner = CronRunner(
                 hunt_dir=self.hunt_dir,
                 rule_repo_dir=self.rule_repo_dir,
@@ -108,7 +88,5 @@ class HuntScheduler:
             logger.info(f"DFE-Run-Cron setup[{runner}]")
             await runner.run()
         except Exception as e:
-            logger.error(
-                f"An error occurred scheduling the hunts: {e}", exc_info=True
-            )
+            logger.error(f"An error occurred scheduling the hunts: {e}", exc_info=True)
             raise

@@ -1,7 +1,12 @@
 import pytest
+import os
 
 # Skip all tests in this module - CLI tests belong to dfe-cli, not dfe-engine library
 pytestmark = pytest.mark.skip(reason="CLI tests belong to dfe-cli package, not dfe-engine library")
+
+# Placeholder imports for skipped tests - actual implementations are in dfe-cli
+CliRunner = None
+cli = None
 
 
 @pytest.fixture
@@ -26,21 +31,13 @@ def test_build_schema(
                 "--schema_filter_list",
                 "logs_alerts",
                 "--no_cluster_declarations_needed",
-                str(
-                    dfe_config_fixtures["build_schemas"][
-                        "no_cluster_declarations_needed"
-                    ]
-                ),
+                str(dfe_config_fixtures["build_schemas"]["no_cluster_declarations_needed"]),
                 "--use_replicated_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_replicated_merge_tree"]),
                 "--use_shared_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"]),
                 "--use_subsampling_feature",
-                str(
-                    dfe_config_fixtures["global_settings"].get(
-                        "use_subsampling_feature", False
-                    )
-                ),
+                str(dfe_config_fixtures["global_settings"].get("use_subsampling_feature", False)),
                 "--log_path",
                 setup_paths,
                 "--target",
@@ -86,21 +83,13 @@ def test_build_schema_wildchar(
                 "--schema_filter_wildchar",
                 "logs_alerts*",
                 "--no_cluster_declarations_needed",
-                str(
-                    dfe_config_fixtures["build_schemas"][
-                        "no_cluster_declarations_needed"
-                    ]
-                ),
+                str(dfe_config_fixtures["build_schemas"]["no_cluster_declarations_needed"]),
                 "--use_replicated_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_replicated_merge_tree"]),
                 "--use_shared_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"]),
                 "--use_subsampling_feature",
-                str(
-                    dfe_config_fixtures["global_settings"].get(
-                        "use_subsampling_feature", False
-                    )
-                ),
+                str(dfe_config_fixtures["global_settings"].get("use_subsampling_feature", False)),
                 "--log_path",
                 setup_paths,
                 "--target",
@@ -144,21 +133,13 @@ def test_build_schema_all(
                 "--schema_directory",
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"],
                 "--no_cluster_declarations_needed",
-                str(
-                    dfe_config_fixtures["build_schemas"][
-                        "no_cluster_declarations_needed"
-                    ]
-                ),
+                str(dfe_config_fixtures["build_schemas"]["no_cluster_declarations_needed"]),
                 "--use_replicated_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_replicated_merge_tree"]),
                 "--use_shared_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"]),
                 "--use_subsampling_feature",
-                str(
-                    dfe_config_fixtures["global_settings"].get(
-                        "use_subsampling_feature", False
-                    )
-                ),
+                str(dfe_config_fixtures["global_settings"].get("use_subsampling_feature", False)),
                 "--log_path",
                 setup_paths,
                 "--target",
@@ -203,21 +184,13 @@ def test_build_schema_only_beats(
                 "--schema_directory",
                 dfe_config_fixtures["global_settings"]["derived_schema_paths"],
                 "--no_cluster_declarations_needed",
-                str(
-                    dfe_config_fixtures["build_schemas"][
-                        "no_cluster_declarations_needed"
-                    ]
-                ),
+                str(dfe_config_fixtures["build_schemas"]["no_cluster_declarations_needed"]),
                 "--use_replicated_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_replicated_merge_tree"]),
                 "--use_shared_merge_tree",
                 str(dfe_config_fixtures["build_schemas"]["use_shared_merge_tree"]),
                 "--use_subsampling_feature",
-                str(
-                    dfe_config_fixtures["global_settings"].get(
-                        "use_subsampling_feature", False
-                    )
-                ),
+                str(dfe_config_fixtures["global_settings"].get("use_subsampling_feature", False)),
                 "--log_path",
                 setup_paths,
                 "--target",
@@ -253,7 +226,7 @@ def test_plan_schemas(
 ):
     """Test planning schemas without requiring ClickHouse."""
     with capsys.disabled():
-        result = runner.invoke(
+        runner.invoke(
             cli,
             [
                 "plan-schemas",
@@ -270,7 +243,6 @@ def test_plan_schemas(
             ],
             catch_exceptions=True,
         )
-
 
     output_dir = dfe_config_fixtures["global_settings"]["schema_output_path"]
     expected_sql_files = [
@@ -292,7 +264,7 @@ def test_plan_schemas_wildchar(
 ):
     """Test planning schemas with wildcard pattern without requiring ClickHouse."""
     with capsys.disabled():
-        result = runner.invoke(
+        runner.invoke(
             cli,
             [
                 "plan-schemas",

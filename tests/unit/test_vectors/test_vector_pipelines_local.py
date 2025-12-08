@@ -8,7 +8,7 @@ from dfe_engine.pipeline.pipeline_util import (
     get_vector_pipelines,
     get_pipeline,
     gather_env_variables_for_pipeline,
-    read_vector_step_config
+    read_vector_step_config,
 )
 
 
@@ -47,7 +47,6 @@ sources:
     bootstrap_servers: "${KAFKA_BROKERS_SASL_SCRAM:?err}"
     group_id: "${KAFKA_CONSUMER_GROUP:?err}"
     topics: ${KAFKA_SOURCE_TOPIC_LIST:?err}""",
-        
         "101-transform-flatten-message.yml": """# Transform for flattening message
 transforms:
   101_transform_flatten_message_parse:
@@ -63,7 +62,6 @@ transforms:
     condition:
       type: "vrl"
       source: "!is_empty(.)" """,
-      
         "201-sink-clickhouse-saas.yml": """# Sink for ClickHouse
 sinks:
   201_sink_clickhouse_saas:
@@ -76,15 +74,13 @@ sinks:
       - ${_201_SINK_CLICKHOUSE_SAAS_INPUT:?err}
     endpoint: "${CLICKHOUSE_ENDPOINT:?err}:8443"
     table: "{{tags_event_category}}" """,
-    
         "hs-xdr-vector-ct-all-main.yml": """# Base configuration
 data_dir: "${VECTOR_DATA_DIR:?err}"
 api:
   enabled: true
   address: 0.0.0.0:8686
   playground: false""",
-  
-"hs-xdr-vector-ct-all-prometheus.yml": """# Prometheus metrics
+        "hs-xdr-vector-ct-all-prometheus.yml": """# Prometheus metrics
 sources:
   internal_metrics:
     type: internal_metrics
@@ -126,10 +122,10 @@ def sample_dfe_config(
                 "core": sample_vector_templates,
                 "standard": sample_enrichment_files,
                 "geoip": sample_geoip_files,
-                "custom": os.path.join(temp_dir, "custom_templates")
+                "custom": os.path.join(temp_dir, "custom_templates"),
             },
             "helm_template": "dfe_engine/pipeline/pipeline_template.yaml",
-            "vector_config_mount_path": "/etc/vector_config/src"
+            "vector_config_mount_path": "/etc/vector_config/src",
         },
         "default_env_vars": {
             "PROMETHEUS_EXPORTER": "0.0.0.0:9090",
@@ -139,7 +135,7 @@ def sample_dfe_config(
             "CLICKHOUSE_AUTH_USER": "default",
             "CLICKHOUSE_AUTH_PASSWORD": "password",
             "CLICKHOUSE_ENDPOINT": "localhost",
-            "VECTOR_DATA_DIR": "/vector-data-dir"
+            "VECTOR_DATA_DIR": "/vector-data-dir",
         },
         "ingestion_pipelines": {
             "test-pipeline": {
@@ -156,9 +152,9 @@ def sample_dfe_config(
                     {"id": "003-source-kafka-sasl-scram.yml"},
                     {"id": "101-transform-flatten-message.yml"},
                     {"id": "201-sink-clickhouse-saas.yml"},
-                ]
+                ],
             }
-        }
+        },
     }
 
 
@@ -184,42 +180,49 @@ def test_get_nonexistent_pipeline(sample_dfe_config):
 
 def test_gather_env_variables_for_pipeline(sample_dfe_config):
     """Test that environment variables are gathered correctly for pipeline."""
-    env_vars, vector_env_vars = gather_env_variables_for_pipeline(sample_dfe_config, "test-pipeline")
-    
+    env_vars, vector_env_vars = gather_env_variables_for_pipeline(
+        sample_dfe_config, "test-pipeline"
+    )
+
     # Check that default env vars are included
     assert "PROMETHEUS_EXPORTER" in env_vars
     assert env_vars["PROMETHEUS_EXPORTER"] == "0.0.0.0:9090"
-    
+
     # Check that pipeline env vars are included - for now just verify it exists
     # TODO: Check why pipeline env vars are not overriding default env vars
     assert "KAFKA_SOURCE_TOPIC_LIST" in env_vars
-    
+
     # Check that meta vars are included
     assert "EXPECTED_EPS" in env_vars
     assert env_vars["EXPECTED_EPS"] == 1000
-    
+
     # Check that vector_env_vars contains step-specific variables
     assert isinstance(vector_env_vars, dict)
 
 
 def test_read_vector_step_config(sample_dfe_config):
-    """Test that vector step configs can be read correctly."""
+    """Test that vector step configs can be read correctly.
+
+    Note: read_vector_step_config returns raw text (str) because Vector configs
+    contain ${VAR} syntax that isn't valid YAML.
+    """
     config = read_vector_step_config("003-source-kafka-sasl-scram.yml", sample_dfe_config)
     assert config is not None
-    assert "sources" in config
-    assert "003_source_kafka_sasl_scram" in config["sources"]
+    assert isinstance(config, str)
+    assert "sources:" in config
+    assert "003_source_kafka_sasl_scram:" in config
 
 
 def test_vector_templates_exist(sample_vector_templates):
     """Test that vector template files are created correctly."""
     expected_files = [
         "003-source-kafka-sasl-scram.yml",
-        "101-transform-flatten-message.yml", 
+        "101-transform-flatten-message.yml",
         "201-sink-clickhouse-saas.yml",
         "hs-xdr-vector-ct-all-main.yml",
-        "hs-xdr-vector-ct-all-prometheus.yml"
+        "hs-xdr-vector-ct-all-prometheus.yml",
     ]
-    
+
     for file_name in expected_files:
         file_path = os.path.join(sample_vector_templates, file_name)
         assert os.path.exists(file_path), f"Template file {file_name} should exist"
@@ -230,16 +233,16 @@ def test_dfe_config_structure(sample_dfe_config):
     assert "global_settings" in sample_dfe_config
     assert "default_env_vars" in sample_dfe_config
     assert "ingestion_pipelines" in sample_dfe_config
-    
+
     # Check global settings
     global_settings = sample_dfe_config["global_settings"]
     assert "vector_files" in global_settings
     assert "core" in global_settings["vector_files"]
-    
+
     # Check pipeline structure
     pipelines = sample_dfe_config["ingestion_pipelines"]
     assert "test-pipeline" in pipelines
-    
+
     test_pipeline = pipelines["test-pipeline"]
     assert "steps" in test_pipeline
     assert "env" in test_pipeline
@@ -252,26 +255,26 @@ def test_build_ingestion_pipelines(sample_dfe_config, temp_dir):
     dfe_package_path = os.path.join(temp_dir, "dfe_package.yaml")
     with open(dfe_package_path, "w") as f:
         yaml.dump(sample_dfe_config, f)
-    
+
     # Create output directory
     output_path = os.path.join(temp_dir, "pipeline_output")
     os.makedirs(output_path, exist_ok=True)
-    
+
     # Create log directory
     log_path = os.path.join(temp_dir, "logs")
     os.makedirs(log_path, exist_ok=True)
-    
+
     # Test the build function
     try:
         PipelineBuilderController.build_ingestion_pipelines(
             args_dfe_package_file_path=dfe_package_path,
             args_ingestion_output_path=output_path,
             args_log_path=log_path,
-            args_build_core=True
+            args_build_core=True,
         )
         # If no exception is raised, the function works correctly
         assert True
-    except Exception as e:
+    except Exception:
         assert True
         # Expected errors in test environment (missing templates, dependencies, etc.)
         # expected_errors = ["Error", "FileNotFoundError", "TemplateNotFound", "pipeline_template.yaml","PipelineSchemaError"]

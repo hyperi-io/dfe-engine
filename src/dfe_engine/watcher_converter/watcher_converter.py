@@ -1,6 +1,5 @@
 import re
 import os
-from typing import Optional
 
 import pandas as pd
 import yaml
@@ -116,9 +115,7 @@ class WatcherConverter:
                 os.path.join(self.output_directory, "/".join(filename.split("/")[:-1])),
                 exist_ok=True,
             )
-        filepath = os.path.join(
-            self.output_directory, f"{filename.replace('.json', '')}.jinja2"
-        )
+        filepath = os.path.join(self.output_directory, f"{filename.replace('.json', '')}.jinja2")
         with open(filepath, "w") as file:
             file.write(sql_insert)
         logger.info(f"SQL statement written to {filepath}")
@@ -167,14 +164,14 @@ class WatcherConverter:
         """
         failed_watchers = []
         successful_watchers = []
-        
-        for index, row in df.iterrows():
+
+        for _index, row in df.iterrows():
             try:
                 logger.info(f" values for sql template generation \n\n{row}\n\n")
 
                 # Format and extract all event specific fields
                 select_fields = row.get("select_fields", [])
-                
+
                 # Handle different select_fields structures safely
                 extension_alert_select_field_names = ""
                 if select_fields:
@@ -185,13 +182,13 @@ class WatcherConverter:
                         else:
                             # Simple list
                             field_list = select_fields
-                        
+
                         if field_list and all(isinstance(f, str) for f in field_list):
                             prefix_required = ",\n" + " " * 8
                             extension_alert_select_field_names = (
                                 prefix_required + f",\n{' ' * 8}".join(field_list)
                             )
-                
+
                 org_id = "{{org_id}}"
                 source_table = self._set_source_table_and_check_device_types(row)
 
@@ -208,14 +205,12 @@ class WatcherConverter:
                     cte_with_clause=""
                     if len(row.get("aggs", "")) == 0
                     else f"\n{' ' * 4}"
-                    + cte_with_clause_value
-                    .format(
+                    + cte_with_clause_value.format(
                         org_id=org_id,
                         source_table=f"{self._set_source_table_and_check_device_types(row)}",
                         condition=cte_where_condition_value,
                         cte_table_name=cte_table_name_value,
-                    )
-                    .strip(),
+                    ).strip(),
                     # SELECT fields
                     alert_description=row.get("threat.detection_description", ""),
                     alert_framework=row.get("threat.framework", ""),
@@ -252,9 +247,7 @@ class WatcherConverter:
                     else "",
                 )
 
-                sql_insert = re.sub(
-                    r"^    ", "", sql_insert, flags=re.MULTILINE
-                ).strip()
+                sql_insert = re.sub(r"^    ", "", sql_insert, flags=re.MULTILINE).strip()
 
                 # Write the SQL insert statement to a YAML file named after the row's filename column
                 unique_device_types = []
@@ -267,29 +260,26 @@ class WatcherConverter:
                     )
                 device_name = unique_device_types[0]
                 if self.sort_by_device:
-                    self._write_to_file(
-                        sql_insert, device_name + "/rules/" + row["name"]
-                    )
+                    self._write_to_file(sql_insert, device_name + "/rules/" + row["name"])
                 else:
                     self._write_to_file(sql_insert, row["name"])
-                
-                successful_watchers.append(row.get('name', row.get('filename', 'unknown')))
+
+                successful_watchers.append(row.get("name", row.get("filename", "unknown")))
 
             except Exception as e:
-                watcher_name = row.get('name', row.get('filename', 'unknown'))
+                watcher_name = row.get("name", row.get("filename", "unknown"))
                 logger.error(
                     f"Error processing watcher {watcher_name}: {e}",
                     exc_info=True,
                 )
-                failed_watchers.append({
-                    'name': watcher_name,
-                    'error': str(e)
-                })
+                failed_watchers.append({"name": watcher_name, "error": str(e)})
                 # Continue processing other watchers instead of failing completely
                 continue
 
         # Report summary
-        logger.info(f"Watcher conversion summary: {len(successful_watchers)} successful, {len(failed_watchers)} failed")
+        logger.info(
+            f"Watcher conversion summary: {len(successful_watchers)} successful, {len(failed_watchers)} failed"
+        )
         if successful_watchers:
             logger.info(f"Successfully converted: {successful_watchers}")
         if failed_watchers:
@@ -306,5 +296,5 @@ class WatcherConverter:
         """
         if org_id is not None:
             df = df.copy()
-            df['org_id'] = org_id
+            df["org_id"] = org_id
         self._generate_and_write_sql_inserts(df)

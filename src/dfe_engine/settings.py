@@ -160,7 +160,14 @@ def _get_env_overrides() -> dict:
 
     DFE_ prefixed vars take precedence over legacy names.
     """
-    overrides = {"clickhouse": {}, "hunts": {}, "artifactory": {}, "postgres": {}, "kafka": {}, "storage": {}}
+    overrides = {
+        "clickhouse": {},
+        "hunts": {},
+        "artifactory": {},
+        "postgres": {},
+        "kafka": {},
+        "storage": {},
+    }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
     if val := _get_env("DFE_CLICKHOUSE_HOST", "CLICKHOUSE_HOST"):

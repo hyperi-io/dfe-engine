@@ -8,8 +8,6 @@ from jinja2 import Environment, FileSystemLoader
 from dfe_engine.hunts.hunts.hunts import Hunt
 from dfe_engine.config.config_loader import DFEConfigLoader
 
-from hs_lib.logger import logger
-
 
 def load_config(file_path: Path) -> dict:
     """Load YAML configuration from a file."""
@@ -110,9 +108,7 @@ def test_basic_hunt_alerts(
     env = Environment(loader=FileSystemLoader(template_dir))
     target_name = dfe_config_fixtures["global_settings"]["default_target"]
     targets_file_path = dfe_config_fixtures["global_settings"]["target_path"]
-    target_config_data = DFEConfigLoader.read_target_config(
-        target_name, targets_file_path
-    )
+    target_config_data = DFEConfigLoader.read_target_config(target_name, targets_file_path)
 
     cronlist = ["* * * * *", "*/2 * * * *"]
 
@@ -128,19 +124,15 @@ def test_basic_hunt_alerts(
             global_target_table_name=target_table_name,
             checkpoint_timestamp_field=checkpoint_timestamp_field,
             customer_filters={
-                "detectionlab": {
-                    "rules": [{"name": rule_name, "filter_clause": filter_clause}]
-                }
+                "detectionlab": {"rules": [{"name": rule_name, "filter_clause": filter_clause}]}
             },
             hunt_log_path=str(setup_paths["hunt_log_path"]),
             target_config_data=target_config_data,
             checkpoint_destination="clickhouse",
             hunt_checkpoint_path=str(setup_paths["hunt_checkpoint_path"]),
-                    )
-
-        hunt.convert_yaml_to_sql(
-            env, org_id=org_id, customer_filters=hunt.customer_filters
         )
+
+        hunt.convert_yaml_to_sql(env, org_id=org_id, customer_filters=hunt.customer_filters)
 
         assert len(hunt.queries_by_customer) == 1, (
             f"Expected 1 query, found {len(hunt.queries_by_customer)}"
@@ -148,9 +140,5 @@ def test_basic_hunt_alerts(
         assert expected_query == hunt.queries_by_customer["detectionlab"][0], (
             f"-->Expected query:{expected_query}-->Generated query:{hunt.queries_by_customer['detectionlab'][0]}"
         )
-        scheduled_start_time_w_buffer = datetime.now(timezone.utc) - timedelta(
-            seconds=60
-        )
-        hunt.execute_hunt(
-            customer=org_id, scheduled_start_time=scheduled_start_time_w_buffer
-        )
+        scheduled_start_time_w_buffer = datetime.now(timezone.utc) - timedelta(seconds=60)
+        hunt.execute_hunt(customer=org_id, scheduled_start_time=scheduled_start_time_w_buffer)

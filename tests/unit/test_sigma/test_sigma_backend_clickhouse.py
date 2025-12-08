@@ -93,9 +93,7 @@ def test_clickhouse_and_expression(clickhouse_backend: SqlBackend):
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["(fieldA = 'valueA' AND fieldB = 'valueB')"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_or_expression(clickhouse_backend: SqlBackend):
@@ -114,9 +112,7 @@ def test_clickhouse_or_expression(clickhouse_backend: SqlBackend):
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["(fieldA = 'valueA' OR fieldB = 'valueB')"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_and_or_expression(clickhouse_backend: SqlBackend):
@@ -140,9 +136,7 @@ def test_clickhouse_and_or_expression(clickhouse_backend: SqlBackend):
     expected_query = [
         "((fieldA = 'valueA1' OR fieldA = 'valueA2') AND (fieldB = 'valueB1' OR fieldB = 'valueB2'))"
     ]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_or_and_expression(clickhouse_backend: SqlBackend):
@@ -165,9 +159,7 @@ def test_clickhouse_or_and_expression(clickhouse_backend: SqlBackend):
     expected_query = [
         "((fieldA = 'valueA1' AND fieldB = 'valueB1') OR (fieldA = 'valueA2' AND fieldB = 'valueB2'))"
     ]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_or_wildcard_expression(clickhouse_backend: SqlBackend):
@@ -186,12 +178,8 @@ def test_clickhouse_or_wildcard_expression(clickhouse_backend: SqlBackend):
             condition: sel
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-    expected_query = [
-        "(fieldA = 'valueA' OR fieldA = 'valueB' OR fieldA ILIKE 'valueC%')"
-    ]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    expected_query = ["(fieldA = 'valueA' OR fieldA = 'valueB' OR fieldA ILIKE 'valueC%')"]
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_regex_query(clickhouse_backend: SqlBackend):
@@ -209,9 +197,7 @@ def test_clickhouse_regex_query(clickhouse_backend: SqlBackend):
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["(match(fieldA, 'foo.*bar') AND fieldB = 'foo')"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_clickhouse_cidr_query(clickhouse_backend: SqlBackend):
@@ -277,9 +263,7 @@ def test_clickhouse_field_name_with_whitespace(clickhouse_backend: SqlBackend):
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["'field\\ name' = 'value'"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_wildcard_ilike(clickhouse_backend: SqlBackend):
@@ -306,9 +290,7 @@ def test_wildcard_ilike(clickhouse_backend: SqlBackend):
     """
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["(Channel ILIKE '%Security%' OR Channel ILIKE '%powercat.ps1%')"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_full_alert_format_with_metadata(clickhouse_backend: SqlBackend):
@@ -482,12 +464,8 @@ def test_text_search_field_handling():
     """
 
     generated_query = backend.convert(SigmaCollection.from_yaml(sigma_yaml))
-    expected_query = [
-        "(message GLOBAL IN INDEX idx_ngram_bf 'error' AND message ILIKE '%error%')"
-    ]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    expected_query = ["(message GLOBAL IN INDEX idx_ngram_bf 'error' AND message ILIKE '%error%')"]
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_text_field_without_text_search():
@@ -509,9 +487,7 @@ def test_text_field_without_text_search():
 
     generated_query = backend.convert(SigmaCollection.from_yaml(sigma_yaml))
     expected_query = ["message = 'error'"]
-    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(
-        expected_query[0]
-    )
+    assert normalize_sql_query(generated_query[0]) == normalize_sql_query(expected_query[0])
 
 
 def test_malformed_cidr_handling(clickhouse_backend: SqlBackend):
@@ -527,9 +503,7 @@ def test_malformed_cidr_handling(clickhouse_backend: SqlBackend):
             condition: selection
     """
     try:
-        generated_query = clickhouse_backend.convert(
-            SigmaCollection.from_yaml(sigma_yaml)
-        )
+        generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
         assert "selection" in str(generated_query)
     except Exception as e:
         assert "CIDR" in str(e) or "IP" in str(e)
@@ -564,15 +538,9 @@ def test_nested_field_mappings(clickhouse_backend: SqlBackend):
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
 
     assert "event.user.name = 'admin'" in generated_query[0]
-    assert (
-        "event.source.address" in generated_query[0]
-        and "192.168.1.1" in generated_query[0]
-    )
+    assert "event.source.address" in generated_query[0] and "192.168.1.1" in generated_query[0]
     assert "event.source.port = '22'" in generated_query[0]
-    assert (
-        "event.destination.address" in generated_query[0]
-        and "10.0.0.1" in generated_query[0]
-    )
+    assert "event.destination.address" in generated_query[0] and "10.0.0.1" in generated_query[0]
     assert "event.destination.port = '445'" in generated_query[0]
 
 
@@ -598,9 +566,7 @@ def test_multi_value_field_mappings(clickhouse_backend: SqlBackend):
 
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
 
-    assert (
-        "(url.full = 'admin.php' OR url.original = 'admin.php')" in generated_query[0]
-    )
+    assert "(url.full = 'admin.php' OR url.original = 'admin.php')" in generated_query[0]
 
     assert "source.ip" in generated_query[0]
     assert "client.ip" in generated_query[0]

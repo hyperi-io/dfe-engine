@@ -9,9 +9,7 @@ This test suite verifies that:
 """
 
 import logging
-import pytest
 import pandas as pd
-from pathlib import Path
 from dfe_engine.schema.schema_util import SchemaUtils
 
 logger = logging.getLogger(__name__)
@@ -25,21 +23,26 @@ logger.addHandler(handler)
 # TEST 1: Default Column Preservation Through Merge Operations
 # ============================================================================
 
+
 class TestDefaultColumnPreservationInMergeOperations:
     """Tests for default column preservation through merge operations."""
 
     def test_apply_derived_schema_preserves_defaults(self):
         """Test that apply_derived_schema preserves default column."""
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3"],
-            "type": ["String", "Int32", "Float64"],
-            "default": ["'unknown'", "0", "0.0"],
-            "index_order": [1, 2, 3],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3"],
+                "type": ["String", "Int32", "Float64"],
+                "default": ["'unknown'", "0", "0.0"],
+                "index_order": [1, 2, 3],
+            }
+        )
 
-        derived_schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -55,16 +58,20 @@ class TestDefaultColumnPreservationInMergeOperations:
 
     def test_apply_derived_schema_with_wildcards_preserves_defaults(self):
         """Test that wildcard filtering in derived schema preserves defaults."""
-        meta_schema_df = pd.DataFrame({
-            "column": ["parent", "parent.child1", "parent.child2", "sibling"],
-            "type": ["Tuple(String, String)", "String", "String", "String"],
-            "default": ["", "'default1'", "'default2'", "'sib_default'"],
-            "index_order": [1, 2, 3, 4],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["parent", "parent.child1", "parent.child2", "sibling"],
+                "type": ["Tuple(String, String)", "String", "String", "String"],
+                "default": ["", "'default1'", "'default2'", "'sib_default'"],
+                "index_order": [1, 2, 3, 4],
+            }
+        )
 
-        derived_schema_df = pd.DataFrame({
-            "column": ["parent.*", "sibling"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["parent.*", "sibling"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -75,7 +82,7 @@ class TestDefaultColumnPreservationInMergeOperations:
         # Verify default column is preserved
         assert "default" in result_df.columns, "default column should be preserved"
         # Check specific defaults are maintained
-        for idx, row in result_df.iterrows():
+        for _idx, row in result_df.iterrows():
             if row["column"] == "parent.child1":
                 assert row["default"] == "'default1'"
             elif row["column"] == "parent.child2":
@@ -85,19 +92,23 @@ class TestDefaultColumnPreservationInMergeOperations:
 
     def test_apply_derived_schema_with_index_order_override(self):
         """Test that derived schema index_order override preserves defaults."""
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3"],
-            "type": ["String", "Int32", "Float64"],
-            "default": ["'unknown'", "0", "0.0"],
-            "index_order": [1, 2, 3],
-            "index_type": ["minmax", "minmax", "minmax"],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3"],
+                "type": ["String", "Int32", "Float64"],
+                "default": ["'unknown'", "0", "0.0"],
+                "index_order": [1, 2, 3],
+                "index_type": ["minmax", "minmax", "minmax"],
+            }
+        )
 
-        derived_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3"],
-            "index_order": [3, 1, 2],  # Different order
-            "index_type": ["minmax", "minmax", "minmax"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3"],
+                "index_order": [3, 1, 2],  # Different order
+                "index_type": ["minmax", "minmax", "minmax"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -115,19 +126,23 @@ class TestDefaultColumnPreservationInMergeOperations:
 
     def test_apply_additional_fields_preserves_defaults(self):
         """Test that apply_additional_fields preserves default column."""
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-            "type": ["String", "Int32"],
-            "default": ["'meta_default'", "0"],
-            "index_order": [1, 2],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+                "type": ["String", "Int32"],
+                "default": ["'meta_default'", "0"],
+                "index_order": [1, 2],
+            }
+        )
 
-        additional_fields_df = pd.DataFrame({
-            "column": ["field3", "field4"],
-            "type": ["Float64", "String"],
-            "default": ["1.5", "'additional_default'"],
-            "index_order": [3, 4],
-        })
+        additional_fields_df = pd.DataFrame(
+            {
+                "column": ["field3", "field4"],
+                "type": ["Float64", "String"],
+                "default": ["1.5", "'additional_default'"],
+                "index_order": [3, 4],
+            }
+        )
 
         result_df = SchemaUtils.apply_additional_fields(
             meta_schema_df=meta_schema_df,
@@ -138,7 +153,7 @@ class TestDefaultColumnPreservationInMergeOperations:
         # Verify default column is preserved
         assert "default" in result_df.columns, "default column should be preserved"
         assert len(result_df) == 4, "Should have 4 rows"
-        
+
         # Verify all defaults are present
         assert "'meta_default'" in result_df["default"].values
         assert "0" in result_df["default"].values
@@ -150,20 +165,23 @@ class TestDefaultColumnPreservationInMergeOperations:
 # TEST 2: Default Column in Load Operations
 # ============================================================================
 
+
 class TestDefaultColumnInLoadOperations:
     """Tests for default column loading from various sources."""
 
     def test_load_schema_from_directory_adds_default_if_missing(self, tmp_path):
         """Test that load_schema_from_directory adds default column if missing.
-        
+
         This tests BACKWARD COMPATIBILITY - if a meta schema doesn't have the
         default column yet, it should be automatically added to prevent errors.
         """
-        schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-            "type": ["String", "Int32"],
-            "index_order": [1, 2],
-        })
+        schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+                "type": ["String", "Int32"],
+                "index_order": [1, 2],
+            }
+        )
 
         schema_path = tmp_path / "schema.csv"
         schema_df.to_csv(schema_path, index=False)
@@ -171,21 +189,25 @@ class TestDefaultColumnInLoadOperations:
         loaded_df = SchemaUtils.load_schema_from_directory(schema_file_path=str(schema_path))
 
         # Verify default column was added
-        assert "default" in loaded_df.columns, "default column should be added (backward compatibility)"
+        assert "default" in loaded_df.columns, (
+            "default column should be added (backward compatibility)"
+        )
         assert len(loaded_df) == 2
 
     def test_load_schema_from_directory_preserves_existing_defaults(self, tmp_path):
         """Test that load_schema_from_directory preserves existing default values.
-        
+
         When a meta schema already has the default column with values, they should
         be preserved exactly as they are in the CSV.
         """
-        schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-            "type": ["String", "Int32"],
-            "default": ["'preserved'", "100"],
-            "index_order": [1, 2],
-        })
+        schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+                "type": ["String", "Int32"],
+                "default": ["'preserved'", "100"],
+                "index_order": [1, 2],
+            }
+        )
 
         schema_path = tmp_path / "schema.csv"
         schema_df.to_csv(schema_path, index=False)
@@ -201,26 +223,31 @@ class TestDefaultColumnInLoadOperations:
 # TEST 3: Default Column Backward Compatibility
 # ============================================================================
 
+
 class TestDefaultColumnBackwardCompatibility:
     """Tests for backward compatibility with schemas missing the default column."""
 
     def test_merge_with_no_default_column_in_derived_schema(self):
         """Test merging when derived schema doesn't have default column.
-        
+
         If derived schema is old and doesn't have the default column, the merge
         should still work and preserve defaults from meta schema.
         """
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3"],
-            "type": ["String", "Int32", "Float64"],
-            "default": ["'meta_val'", "10", "1.5"],
-            "index_order": [1, 2, 3],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3"],
+                "type": ["String", "Int32", "Float64"],
+                "default": ["'meta_val'", "10", "1.5"],
+                "index_order": [1, 2, 3],
+            }
+        )
 
         # Old derived schema format without default column
-        derived_schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -235,23 +262,27 @@ class TestDefaultColumnBackwardCompatibility:
 
     def test_merge_with_no_default_column_in_additional_fields(self):
         """Test merging when additional fields don't have default column.
-        
+
         If additional fields are old format without default column, they should
         be handled gracefully.
         """
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1"],
-            "type": ["String"],
-            "default": ["'meta_val'"],
-            "index_order": [1],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1"],
+                "type": ["String"],
+                "default": ["'meta_val'"],
+                "index_order": [1],
+            }
+        )
 
         # Old additional fields format without default column
-        additional_fields_df = pd.DataFrame({
-            "column": ["field2"],
-            "type": ["Int32"],
-            "index_order": [2],
-        })
+        additional_fields_df = pd.DataFrame(
+            {
+                "column": ["field2"],
+                "type": ["Int32"],
+                "index_order": [2],
+            }
+        )
 
         result_df = SchemaUtils.apply_additional_fields(
             meta_schema_df=meta_schema_df,
@@ -268,25 +299,30 @@ class TestDefaultColumnBackwardCompatibility:
 # TEST 4: Default Column with Partial Values
 # ============================================================================
 
+
 class TestDefaultColumnWithPartialValues:
     """Tests for schemas where only some fields have default values."""
 
     def test_apply_derived_schema_with_partial_defaults(self):
         """Test derived schema filtering with partial defaults.
-        
+
         When only some fields in meta schema have defaults, filtering should
         preserve both the fields with defaults and those without.
         """
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3", "field4"],
-            "type": ["String", "Int32", "Float64", "DateTime"],
-            "default": ["'val1'", "", "'val3'", ""],  # Only field1 and field3 have defaults
-            "index_order": [1, 2, 3, 4],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3", "field4"],
+                "type": ["String", "Int32", "Float64", "DateTime"],
+                "default": ["'val1'", "", "'val3'", ""],  # Only field1 and field3 have defaults
+                "index_order": [1, 2, 3, 4],
+            }
+        )
 
-        derived_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3", "field4"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3", "field4"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -302,24 +338,28 @@ class TestDefaultColumnWithPartialValues:
 
     def test_apply_additional_fields_with_partial_defaults(self):
         """Test additional fields with partial defaults.
-        
+
         Additional fields might have some fields with defaults and some without.
         This should be preserved through the merge.
         """
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1"],
-            "type": ["String"],
-            "default": ["'existing'"],
-            "index_order": [1],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1"],
+                "type": ["String"],
+                "default": ["'existing'"],
+                "index_order": [1],
+            }
+        )
 
         # Additional fields with mixed defaults
-        additional_fields_df = pd.DataFrame({
-            "column": ["field2", "field3"],
-            "type": ["Int32", "String"],
-            "default": ["100", ""],  # field2 has default, field3 doesn't
-            "index_order": [2, 3],
-        })
+        additional_fields_df = pd.DataFrame(
+            {
+                "column": ["field2", "field3"],
+                "type": ["Int32", "String"],
+                "default": ["100", ""],  # field2 has default, field3 doesn't
+                "index_order": [2, 3],
+            }
+        )
 
         result_df = SchemaUtils.apply_additional_fields(
             meta_schema_df=meta_schema_df,
@@ -337,27 +377,32 @@ class TestDefaultColumnWithPartialValues:
 # TEST 5: Schema Merging with Mixed Default Scenarios
 # ============================================================================
 
+
 class TestSchemaMergingWithMixedDefaultScenarios:
     """Tests for complex scenarios combining multiple merge operations."""
 
     def test_derived_then_additional_fields_preserves_all_defaults(self):
         """Test that chaining derived schema + additional fields preserves defaults.
-        
+
         When applying both derived schema filtering and then additional fields,
         all default values should be preserved through both operations.
         """
         # Start with meta schema with defaults
-        meta_schema_df = pd.DataFrame({
-            "column": ["field1", "field2", "field3"],
-            "type": ["String", "Int32", "Float64"],
-            "default": ["'meta1'", "0", "1.5"],
-            "index_order": [1, 2, 3],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2", "field3"],
+                "type": ["String", "Int32", "Float64"],
+                "default": ["'meta1'", "0", "1.5"],
+                "index_order": [1, 2, 3],
+            }
+        )
 
         # Apply derived schema (filter to field1, field2)
-        derived_schema_df = pd.DataFrame({
-            "column": ["field1", "field2"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["field1", "field2"],
+            }
+        )
 
         filtered_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,
@@ -366,12 +411,14 @@ class TestSchemaMergingWithMixedDefaultScenarios:
         )
 
         # Then add additional fields
-        additional_fields_df = pd.DataFrame({
-            "column": ["field4"],
-            "type": ["String"],
-            "default": ["'additional'"],
-            "index_order": [4],
-        })
+        additional_fields_df = pd.DataFrame(
+            {
+                "column": ["field4"],
+                "type": ["String"],
+                "default": ["'additional'"],
+                "index_order": [4],
+            }
+        )
 
         final_df = SchemaUtils.apply_additional_fields(
             meta_schema_df=filtered_df,
@@ -388,21 +435,25 @@ class TestSchemaMergingWithMixedDefaultScenarios:
 
     def test_complex_nested_field_scenario_with_defaults(self):
         """Test complex nested field scenario with partial defaults.
-        
+
         Test a realistic scenario with nested fields (parent.child) where some
         have defaults and derived schema filters by wildcard.
         """
-        meta_schema_df = pd.DataFrame({
-            "column": ["parent", "parent.child1", "parent.child2", "parent.child3", "sibling"],
-            "type": ["Tuple(String, String, String)", "String", "String", "String", "String"],
-            "default": ["", "'default1'", "", "'default3'", "'sibling_default'"],
-            "index_order": [1, 2, 3, 4, 5],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["parent", "parent.child1", "parent.child2", "parent.child3", "sibling"],
+                "type": ["Tuple(String, String, String)", "String", "String", "String", "String"],
+                "default": ["", "'default1'", "", "'default3'", "'sibling_default'"],
+                "index_order": [1, 2, 3, 4, 5],
+            }
+        )
 
         # Use wildcard to include all parent.* and sibling
-        derived_schema_df = pd.DataFrame({
-            "column": ["parent.*", "sibling"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["parent.*", "sibling"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
             meta_schema_df=meta_schema_df,

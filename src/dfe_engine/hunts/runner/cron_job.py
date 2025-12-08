@@ -41,18 +41,14 @@ class CronJob:
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.stagger_minutes = 0
 
-    def log_thread_details_for_all_hunts(
-        self, thread_id, hunt_dir, thread_tracking_file_path
-    ):
+    def log_thread_details_for_all_hunts(self, thread_id, hunt_dir, thread_tracking_file_path):
         """
         Logs the details of the current thread, associated with all hunts in the hunt directory, and timestamp to a tracking file.
         """
         timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
 
         hunt_files = [
-            file
-            for file in os.listdir(hunt_dir)
-            if os.path.isfile(os.path.join(hunt_dir, file))
+            file for file in os.listdir(hunt_dir) if os.path.isfile(os.path.join(hunt_dir, file))
         ]
         for hunt_file in hunt_files:
             if hunt_file.endswith((".yml", ".yaml")):  # Filter for .yml and .yaml files
@@ -63,13 +59,9 @@ class CronJob:
                 with open(thread_tracking_file_path, "a") as file:
                     file.write(log_entry)
             else:
-                logger.warning(
-                    f"Hunt Directory contains this illegal file: [{hunt_file}]."
-                )
+                logger.warning(f"Hunt Directory contains this illegal file: [{hunt_file}].")
 
-        logger.debug(
-            f"Logged thread details for all relevant hunts in directory: {hunt_dir}."
-        )
+        logger.debug(f"Logged thread details for all relevant hunts in directory: {hunt_dir}.")
 
     async def add_hunts_from_directory(
         self,
@@ -90,14 +82,10 @@ class CronJob:
         :param checkpoint_destination: The destination type for checkpoints.
         """
         number_of_hunts = 0
-        logger.info(
-            f"Current working directory is {os.getcwd()} - {hunt_directory}"
-        )
+        logger.info(f"Current working directory is {os.getcwd()} - {hunt_directory}")
 
         for filename in os.listdir(hunt_directory):
-            logger.info(
-                f"Processing hunts [{hunt_directory}] - [{filename}] - [{number_of_hunts}]"
-            )
+            logger.info(f"Processing hunts [{hunt_directory}] - [{filename}] - [{number_of_hunts}]")
 
             if filename.endswith(".yml") or filename.endswith(".yaml"):
                 file_path = os.path.join(hunt_directory, filename)
@@ -119,13 +107,9 @@ class CronJob:
                     )
                     number_of_hunts += 1
                 except ValueError as ve:
-                    logger.error(
-                        f"Validation error in file {filename}: {ve}"
-                    )
+                    logger.error(f"Validation error in file {filename}: {ve}")
                 except YAMLError as ye:
-                    logger.error(
-                        f"Error parsing YAML file {filename}: {ye}"
-                    )
+                    logger.error(f"Error parsing YAML file {filename}: {ye}")
 
         logger.info(f"Added [{number_of_hunts}]")
 
@@ -180,14 +164,10 @@ class CronJob:
         tasks = []
 
         for cron_expression in cron_expressions:
-            logger.info(
-                f"Determining the frequency of hunt with cron: {cron_expression}"
-            )
+            logger.info(f"Determining the frequency of hunt with cron: {cron_expression}")
 
             try:
-                hunt_frequency_minutes = self.calculate_frequency_from_cron(
-                    cron_expression
-                )
+                hunt_frequency_minutes = self.calculate_frequency_from_cron(cron_expression)
                 logger.info(
                     f"Hunt Frequency from cron {cron_expression}: {hunt_frequency_minutes} minutes"
                 )
@@ -197,9 +177,7 @@ class CronJob:
                     )
                     continue
             except ValueError as e:
-                logger.error(
-                    f"Invalid cron expression {cron_expression}: {e}. Skipping."
-                )
+                logger.error(f"Invalid cron expression {cron_expression}: {e}. Skipping.")
                 continue
 
             min_intervals = max(total_customers, 10)
@@ -214,9 +192,7 @@ class CronJob:
                     f"Scheduling hunts for customer: {customer} with cron: {cron_expression} and checkpoint field: {actual_checkpoint_timestamp_field}"
                 )
                 thread_id = threading.get_native_id()
-                thread_id_customer = (
-                    f"{customer}_{str(int(uuid.uuid4().hex, 16))[:12]}_{thread_id}"
-                )
+                thread_id_customer = f"{customer}_{str(int(uuid.uuid4().hex, 16))[:12]}_{thread_id}"
                 self.log_thread_details_for_all_hunts(
                     thread_id=thread_id_customer,
                     hunt_dir=hunt_directory,
@@ -255,9 +231,7 @@ class CronJob:
                     job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}"
                 )
                 self.hunts.append(hunt)
-                logger.debug(
-                    f"Total hunts: {len(self.hunts)} - {hunt.description}"
-                )
+                logger.debug(f"Total hunts: {len(self.hunts)} - {hunt.description}")
                 logger.debug(f"Hunt Config: {hunt}")
                 customer_counter += 1
         if tasks:
@@ -291,7 +265,7 @@ class CronJob:
 
             return frequency_minutes
         except Exception as e:
-            raise ValueError(f"Invalid cron expression: {e}")
+            raise ValueError(f"Invalid cron expression: {e}") from e
 
     def modify_cron_expression(
         self, cron_expression: str, minute_offset: int, total_customers: int
@@ -305,18 +279,14 @@ class CronJob:
         """
         parts = cron_expression.split()
         if len(parts) != 5:
-            logger.warning(
-                f"Invalid cron expression: {cron_expression}. Using original."
-            )
+            logger.warning(f"Invalid cron expression: {cron_expression}. Using original.")
             return cron_expression
 
         minute_offset = int(minute_offset)
 
         if parts[0] == "*" or (parts[0].count(",") > 30):
             parts[0] = "*"
-            logger.info(
-                f"Modified for per-minute execution with customer {minute_offset}"
-            )
+            logger.info(f"Modified for per-minute execution with customer {minute_offset}")
             return " ".join(parts)
 
         if parts[0] == "0" and parts[1].startswith("*/"):
@@ -354,9 +324,7 @@ class CronJob:
             new_minutes = [(int(m) + minute_offset) % 60 for m in minutes]
             parts[0] = ",".join(map(str, sorted(new_minutes)))
         except ValueError:
-            logger.warning(
-                f"Cannot modify minute field: {parts[0]}. Using original."
-            )
+            logger.warning(f"Cannot modify minute field: {parts[0]}. Using original.")
             return cron_expression
 
         return " ".join(parts)
@@ -371,14 +339,10 @@ class CronJob:
         """
         try:
             scheduled_start_time = datetime.now(timezone.utc)
-            result = await asyncio.to_thread(
-                hunt.execute_hunt, customer, scheduled_start_time
-            )
+            result = await asyncio.to_thread(hunt.execute_hunt, customer, scheduled_start_time)
             return result
         except Exception as e:
-            logger.error(
-                f"Error executing hunt for customer {customer}: {e}", exc_info=True
-            )
+            logger.error(f"Error executing hunt for customer {customer}: {e}", exc_info=True)
             raise
 
     async def add_cron_job(
@@ -392,9 +356,7 @@ class CronJob:
         :param job_name: The name of the job.
         """
         try:
-            await self.scheduler.add_job_with_cron(
-                job_function, cron_expression, job_name
-            )
+            await self.scheduler.add_job_with_cron(job_function, cron_expression, job_name)
             logger.debug(f"get_scheduled_jobs - [{self.get_scheduled_jobs()}]")
             logger.debug(
                 f"describe_all_job_functions - [{self.scheduler.describe_all_job_functions()}]"

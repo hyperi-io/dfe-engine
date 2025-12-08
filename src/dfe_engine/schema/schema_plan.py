@@ -57,7 +57,7 @@ class SchemaPlan:
         schema_filter_wildchar: str = None,
         derived_schema_filter_wildchar: str = None,
         target_config_data: dict = None,
-        logger = None,
+        logger=None,
     ):
         """
         Initialize the SchemaPlan with required parameters.
@@ -75,13 +75,13 @@ class SchemaPlan:
         )
         self.ch_client = self.clickhouse_manager.get_clickhouse_client()
 
-    def process_sql_scripts(self, is_api_call: bool= False) -> List[dict]:
+    def process_sql_scripts(self, is_api_call: bool = False) -> List[dict]:
         """
         Processes and executes SQL scripts based on the provided customer data.
-        
+
         Parameters:
             is_api_call (bool, optional): If True, return results as structured data for API use. Defaults to False.
-            
+
         Returns:
             List[Dict]: If is_api_call is True, returns a list of structured results. Otherwise returns None.
         """
@@ -98,7 +98,7 @@ class SchemaPlan:
                 exc_info=True,
             )
             if is_api_call:
-                return [{"status": "error", "error_message": parsed_error['user_message']}]
+                return [{"status": "error", "error_message": parsed_error["user_message"]}]
             return None
 
     def collect_schema_files(self, customer_data: dict) -> List[Tuple[str, str, str]]:
@@ -112,7 +112,7 @@ class SchemaPlan:
             List[Tuple[str, str, str]]: List of tuples containing (org_id, root, file_name).
         """
         schema_files = []
-        for org_id, data in customer_data.items():
+        for org_id, _data in customer_data.items():
             for root, _, files in SchemaUtils.walk_schema_directory(
                 dfe_output_directory=self.dfe_output_directory
             ):
@@ -135,7 +135,9 @@ class SchemaPlan:
         logger.info(f"Using the following list of schemas: '{schema_files}'.")
         return schema_files
 
-    def execute_schema_files(self, schema_files: List[Tuple[str, str, str]], is_api_call: bool) -> List[dict]:
+    def execute_schema_files(
+        self, schema_files: List[Tuple[str, str, str]], is_api_call: bool
+    ) -> List[dict]:
         """
         Execute the collected schema files.
 
@@ -158,7 +160,9 @@ class SchemaPlan:
                         f"This is a View {table_name} so it will be skipped from processing"
                     )
                     continue
-                result = self.plan_schemas(ddl_content, database_name, table_name, is_api_call=is_api_call)
+                result = self.plan_schemas(
+                    ddl_content, database_name, table_name, is_api_call=is_api_call
+                )
                 if is_api_call and result:
                     results.append(result)
         return results
@@ -186,7 +190,7 @@ class SchemaPlan:
 
         in_projection = False
         projection_paren_count = 0
-        
+
         for line in columns_part.splitlines():
             line = line.strip()
             if not line or line.startswith("--"):
@@ -196,13 +200,12 @@ class SchemaPlan:
 
             if line.startswith("INDEX "):
                 continue
-            
-            
+
             if line.startswith("PROJECTION "):
                 in_projection = True
                 projection_paren_count = line.count("(") - line.count(")")
                 continue
-            
+
             if in_projection:
                 projection_paren_count += line.count("(") - line.count(")")
                 if projection_paren_count <= 0:
@@ -253,22 +256,23 @@ class SchemaPlan:
                     )
                     return []
             else:
-                logger.warning(
-                    f"Table {database_name}.{table_name} does not exist."
-                )
+                logger.warning(f"Table {database_name}.{table_name} does not exist.")
                 return []
-    def plan_schemas(self, ddl_statement: str, database_name: str, table_name: str, is_api_call: bool = False):
+
+    def plan_schemas(
+        self, ddl_statement: str, database_name: str, table_name: str, is_api_call: bool = False
+    ):
         """
         Plan Schemas to display the schema drift, including table size information
         and column differences (columns to be added).
-        
+
         Args:
             ddl_statement (str): The DDL statement to plan.
             database_name (str): The database name to plan for.
             table_name (str): The table name to plan for.
             is_api_call (bool, optional): If True, return the results as structured data instead of just logging.
                                           For FastAPI endpoint use. Defaults to False.
-        
+
         Returns:
             dict: If is_api_call is True, returns a structured dict with plan results.
                   Otherwise returns None.
@@ -296,11 +300,11 @@ class SchemaPlan:
                     "columns_to_add": [],
                     "data_type_changes": [],
                     "table_size_bytes": 0,
-                    "total_rows": 0
-                }
+                    "total_rows": 0,
+                },
             }
 
-        target_name = self.target_config_data.get('target_name', 'No target name specified')
+        target_name = self.target_config_data.get("target_name", "No target name specified")
         logger.info(f"\n\nPlanning schema for table: {table_name} @ in target [{target_name}]")
 
         try:
@@ -312,12 +316,25 @@ class SchemaPlan:
                 if is_api_call:
                     api_result["status"] = "new_table"
                     api_result["differences"]["has_changes"] = True
-                    api_result["differences"]["change_summary"] = f"New database {database_name} needs to be created"
-                    primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
+                    api_result["differences"]["change_summary"] = (
+                        f"New database {database_name} needs to be created"
+                    )
+                    (
+                        primary_key,
+                        order_by_key,
+                        indexes,
+                        ttl_value,
+                        sample_by,
+                        partition_by,
+                        projection,
+                        table_settings,
+                    ) = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
                     api_result["differences"]["expected_primary_key"] = primary_key
                     api_result["differences"]["expected_order_by_key"] = order_by_key
                     api_result["differences"]["expected_sample_by"] = sample_by or ""
-                    api_result["differences"]["expected_indexes"] = [{"name": idx[0], "definition": idx[1]} for idx in indexes]
+                    api_result["differences"]["expected_indexes"] = [
+                        {"name": idx[0], "definition": idx[1]} for idx in indexes
+                    ]
                     return api_result
                 else:
                     self.print_new_table_structure(database_name, table_name, ddl_statement)
@@ -327,9 +344,9 @@ class SchemaPlan:
             logger.error(f"Error checking databases: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
-                api_result["error_message"] = parsed_error['user_message']
-                api_result["error_details"] = parsed_error['message']
-                api_result["error_code"] = parsed_error['code']
+                api_result["error_message"] = parsed_error["user_message"]
+                api_result["error_details"] = parsed_error["message"]
+                api_result["error_code"] = parsed_error["code"]
                 return api_result
             return
 
@@ -339,24 +356,39 @@ class SchemaPlan:
                 if is_api_call:
                     api_result["status"] = "new_table"
                     api_result["differences"]["has_changes"] = True
-                    api_result["differences"]["change_summary"] = f"New table {table_name} needs to be created"
-                    primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
+                    api_result["differences"]["change_summary"] = (
+                        f"New table {table_name} needs to be created"
+                    )
+                    (
+                        primary_key,
+                        order_by_key,
+                        indexes,
+                        ttl_value,
+                        sample_by,
+                        partition_by,
+                        projection,
+                        table_settings,
+                    ) = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
                     api_result["differences"]["expected_primary_key"] = primary_key
                     api_result["differences"]["expected_order_by_key"] = order_by_key
                     api_result["differences"]["expected_sample_by"] = sample_by or ""
-                    api_result["differences"]["expected_indexes"] = [{"name": idx[0], "definition": idx[1]} for idx in indexes]
+                    api_result["differences"]["expected_indexes"] = [
+                        {"name": idx[0], "definition": idx[1]} for idx in indexes
+                    ]
                     return api_result
                 else:
                     self.print_new_table_structure(database_name, table_name, ddl_statement)
                     return
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            logger.error(f"Error checking tables in database {database_name}: {parsed_error['message']}")
+            logger.error(
+                f"Error checking tables in database {database_name}: {parsed_error['message']}"
+            )
             if is_api_call:
                 api_result["status"] = "error"
-                api_result["error_message"] = parsed_error['user_message']
-                api_result["error_details"] = parsed_error['message']
-                api_result["error_code"] = parsed_error['code']
+                api_result["error_message"] = parsed_error["user_message"]
+                api_result["error_details"] = parsed_error["message"]
+                api_result["error_code"] = parsed_error["code"]
                 return api_result
             return
 
@@ -364,26 +396,31 @@ class SchemaPlan:
 
         logger.debug(f"**** Current Schema DDL in {current_schema_ddl} /n")
         logger.debug(f"**** Expected Schema DDL in {ddl_statement} /n")
-        
+
         expected_schema_ddl = ddl_statement
 
         if not current_schema_ddl and not expected_schema_ddl:
-            logger.warning(f"Both current and expected schemas are not available for table {table_name}.")
+            logger.warning(
+                f"Both current and expected schemas are not available for table {table_name}."
+            )
             if is_api_call:
                 api_result["status"] = "error"
-                api_result["error_message"] = f"Both current and expected schemas are not available for table {table_name}."
+                api_result["error_message"] = (
+                    f"Both current and expected schemas are not available for table {table_name}."
+                )
                 return api_result
             return
 
         try:
             new_columns = self.parse_columns_from_ddl(expected_schema_ddl)
             existing_columns = self.fetch_existing_columns(database_name, table_name)
-        
+
             columns_to_add = list(set(new_columns) - set(existing_columns))
             logger.info(f"Columns to add: {columns_to_add}")
-            
-            
-            data_type_changes = self._detect_data_type_changes(database_name, table_name, expected_schema_ddl)
+
+            data_type_changes = self._detect_data_type_changes(
+                database_name, table_name, expected_schema_ddl
+            )
             if data_type_changes:
                 logger.info(f"Data type changes detected: {data_type_changes}")
         except Exception as e:
@@ -391,57 +428,64 @@ class SchemaPlan:
             logger.error(f"Error analyzing columns: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
-                api_result["error_message"] = parsed_error['user_message']
-                api_result["error_details"] = parsed_error['message']
-                api_result["error_code"] = parsed_error['code']
+                api_result["error_message"] = parsed_error["user_message"]
+                api_result["error_details"] = parsed_error["message"]
+                api_result["error_code"] = parsed_error["code"]
                 return api_result
             return
 
         try:
-            diff_result = self.detect_schema_differences(database_name, table_name, current_schema_ddl, expected_schema_ddl)
+            diff_result = self.detect_schema_differences(
+                database_name, table_name, current_schema_ddl, expected_schema_ddl
+            )
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
             logger.error(f"Error detecting schema differences: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
-                api_result["error_message"] = parsed_error['user_message']
-                api_result["error_details"] = parsed_error['message']
-                api_result["error_code"] = parsed_error['code']
+                api_result["error_message"] = parsed_error["user_message"]
+                api_result["error_details"] = parsed_error["message"]
+                api_result["error_code"] = parsed_error["code"]
                 return api_result
             return
-        
+
         if not current_schema_ddl:
-            logger.info(f"Schema for table {table_name} does not exist. New schema will be created.")
+            logger.info(
+                f"Schema for table {table_name} does not exist. New schema will be created."
+            )
             if is_api_call:
                 api_result["status"] = "new_table"
                 api_result["differences"]["has_changes"] = True
-                api_result["differences"]["change_summary"] = f"New table {table_name} will be created"
-        
+                api_result["differences"]["change_summary"] = (
+                    f"New table {table_name} will be created"
+                )
+
         try:
             table_size_info = self.capture_current_table_size(database_name, table_name)
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
             logger.error(f"Error capturing table size: {parsed_error['message']}")
             if is_api_call:
-                api_result["status"] = "error" 
-                api_result["error_message"] = parsed_error['user_message']
-                api_result["error_details"] = parsed_error['message']
-                api_result["error_code"] = parsed_error['code']
+                api_result["status"] = "error"
+                api_result["error_message"] = parsed_error["user_message"]
+                api_result["error_details"] = parsed_error["message"]
+                api_result["error_code"] = parsed_error["code"]
                 table_size_info = TableStats(
-                    table_name=table_name,
-                    size_bytes=0,
-                    total_rows=0,
-                    rows_by_day=[]
+                    table_name=table_name, size_bytes=0, total_rows=0, rows_by_day=[]
                 )
         report = []
 
         if diff_result.schema_difference or columns_to_add or data_type_changes:
-            logger.info(f"module.{database_name}.{table_name}: Refreshing schema... [id={table_name}]")
+            logger.info(
+                f"module.{database_name}.{table_name}: Refreshing schema... [id={table_name}]"
+            )
 
             report.append("\n*******************TABLE STATISTICS******************************\n")
             report.append(f"- Table Size: {table_size_info.size_bytes} bytes")
             report.append(f"- Total rows: {table_size_info.total_rows}")
-            report.append(f"- Rows by day: {json.dumps(table_size_info.rows_by_day, indent=4, default = self.default_json_serializer)}")
+            report.append(
+                f"- Rows by day: {json.dumps(table_size_info.rows_by_day, indent=4, default=self.default_json_serializer)}"
+            )
 
             if is_api_call:
                 api_result["status"] = "changes_detected"
@@ -452,41 +496,88 @@ class SchemaPlan:
             report.append("- Changes:")
             change_summaries = []
             if diff_result.schema_diff:
-                if diff_result.schema_diff.current_primary_key != diff_result.schema_diff.expected_primary_key:
-                    report.append(f"    * Primary Key: {diff_result.schema_diff.current_primary_key} -> {diff_result.schema_diff.expected_primary_key}")
+                if (
+                    diff_result.schema_diff.current_primary_key
+                    != diff_result.schema_diff.expected_primary_key
+                ):
+                    report.append(
+                        f"    * Primary Key: {diff_result.schema_diff.current_primary_key} -> {diff_result.schema_diff.expected_primary_key}"
+                    )
                     if is_api_call:
-                        api_result["differences"]["current_primary_key"] = diff_result.schema_diff.current_primary_key
-                        api_result["differences"]["expected_primary_key"] = diff_result.schema_diff.expected_primary_key
-                        change_summaries.append(f"Primary Key: {diff_result.schema_diff.current_primary_key} -> {diff_result.schema_diff.expected_primary_key}")
-                        
-                if diff_result.schema_diff.current_order_by_key != diff_result.schema_diff.expected_order_by_key:
-                    report.append(f"    * Order By Key: {diff_result.schema_diff.current_order_by_key} -> {diff_result.schema_diff.expected_order_by_key}")
+                        api_result["differences"]["current_primary_key"] = (
+                            diff_result.schema_diff.current_primary_key
+                        )
+                        api_result["differences"]["expected_primary_key"] = (
+                            diff_result.schema_diff.expected_primary_key
+                        )
+                        change_summaries.append(
+                            f"Primary Key: {diff_result.schema_diff.current_primary_key} -> {diff_result.schema_diff.expected_primary_key}"
+                        )
+
+                if (
+                    diff_result.schema_diff.current_order_by_key
+                    != diff_result.schema_diff.expected_order_by_key
+                ):
+                    report.append(
+                        f"    * Order By Key: {diff_result.schema_diff.current_order_by_key} -> {diff_result.schema_diff.expected_order_by_key}"
+                    )
                     if is_api_call:
-                        api_result["differences"]["current_order_by_key"] = diff_result.schema_diff.current_order_by_key
-                        api_result["differences"]["expected_order_by_key"] = diff_result.schema_diff.expected_order_by_key
-                        change_summaries.append(f"Order By Key: {diff_result.schema_diff.current_order_by_key} -> {diff_result.schema_diff.expected_order_by_key}")
-                        
-                if diff_result.schema_diff.current_sample_by != diff_result.schema_diff.expected_sample_by:
-                    current_sample_display = f'""' if diff_result.schema_diff.current_sample_by == "" else diff_result.schema_diff.current_sample_by
-                    expected_sample_display = f'""' if diff_result.schema_diff.expected_sample_by == "" else diff_result.schema_diff.expected_sample_by
-                    report.append(f"    * Sample By: {current_sample_display} -> {expected_sample_display}")
+                        api_result["differences"]["current_order_by_key"] = (
+                            diff_result.schema_diff.current_order_by_key
+                        )
+                        api_result["differences"]["expected_order_by_key"] = (
+                            diff_result.schema_diff.expected_order_by_key
+                        )
+                        change_summaries.append(
+                            f"Order By Key: {diff_result.schema_diff.current_order_by_key} -> {diff_result.schema_diff.expected_order_by_key}"
+                        )
+
+                if (
+                    diff_result.schema_diff.current_sample_by
+                    != diff_result.schema_diff.expected_sample_by
+                ):
+                    current_sample_display = (
+                        '""'
+                        if diff_result.schema_diff.current_sample_by == ""
+                        else diff_result.schema_diff.current_sample_by
+                    )
+                    expected_sample_display = (
+                        '""'
+                        if diff_result.schema_diff.expected_sample_by == ""
+                        else diff_result.schema_diff.expected_sample_by
+                    )
+                    report.append(
+                        f"    * Sample By: {current_sample_display} -> {expected_sample_display}"
+                    )
                     if is_api_call:
-                        api_result["differences"]["current_sample_by"] = diff_result.schema_diff.current_sample_by
-                        api_result["differences"]["expected_sample_by"] = diff_result.schema_diff.expected_sample_by
-                        change_summaries.append(f"Sample By: {current_sample_display} -> {expected_sample_display}")
-                
+                        api_result["differences"]["current_sample_by"] = (
+                            diff_result.schema_diff.current_sample_by
+                        )
+                        api_result["differences"]["expected_sample_by"] = (
+                            diff_result.schema_diff.expected_sample_by
+                        )
+                        change_summaries.append(
+                            f"Sample By: {current_sample_display} -> {expected_sample_display}"
+                        )
+
                 index_changes = self.summarize_changes(
                     diff_result.schema_diff.current_primary_key,
                     diff_result.schema_diff.expected_primary_key,
                     diff_result.schema_diff.current_indexes,
-                    diff_result.schema_diff.expected_indexes
+                    diff_result.schema_diff.expected_indexes,
                 )
                 report.extend(index_changes)
-                
+
                 if is_api_call:
-                    api_result["differences"]["current_indexes"] = [{"name": idx[0], "definition": idx[1]} for idx in diff_result.schema_diff.current_indexes]
-                    api_result["differences"]["expected_indexes"] = [{"name": idx[0], "definition": idx[1]} for idx in diff_result.schema_diff.expected_indexes]
-                    
+                    api_result["differences"]["current_indexes"] = [
+                        {"name": idx[0], "definition": idx[1]}
+                        for idx in diff_result.schema_diff.current_indexes
+                    ]
+                    api_result["differences"]["expected_indexes"] = [
+                        {"name": idx[0], "definition": idx[1]}
+                        for idx in diff_result.schema_diff.expected_indexes
+                    ]
+
                     for change in index_changes:
                         if change.strip():
                             change_summaries.append(change.strip().replace("    * ", ""))
@@ -500,29 +591,33 @@ class SchemaPlan:
                     diff_result.schema_diff.current_sample_by,
                     diff_result.schema_diff.expected_sample_by,
                     diff_result.schema_diff.current_indexes,
-                    diff_result.schema_diff.expected_indexes
+                    diff_result.schema_diff.expected_indexes,
                 )
-            
+
             if columns_to_add:
                 report.append(f"    * Columns to Add: {', '.join(columns_to_add)}")
                 if is_api_call:
                     api_result["differences"]["columns_to_add"] = columns_to_add
                     change_summaries.append(f"Columns to Add: {', '.join(columns_to_add)}")
-            
+
             if data_type_changes:
                 data_type_summary = []
                 for change in data_type_changes:
-                    data_type_summary.append(f"{change['column']}: {change['current_type']} -> {change['expected_type']}")
+                    data_type_summary.append(
+                        f"{change['column']}: {change['current_type']} -> {change['expected_type']}"
+                    )
                 report.append(f"    * Data Type Changes: {', '.join(data_type_summary)}")
                 if is_api_call:
                     api_result["differences"]["data_type_changes"] = data_type_changes
                     change_summaries.append(f"Data Type Changes: {len(data_type_changes)} columns")
-            
+
             if is_api_call and change_summaries:
                 api_result["differences"]["change_summary"] = "; ".join(change_summaries)
-                    
+
         else:
-            logger.info(f"\nmodule.{database_name}.{table_name}: No schema changes detected [id={table_name}]\n")
+            logger.info(
+                f"\nmodule.{database_name}.{table_name}: No schema changes detected [id={table_name}]\n"
+            )
             report.append("\nNo changes detected in schema.\n")
             if is_api_call:
                 api_result["status"] = "no_changes"
@@ -536,16 +631,14 @@ class SchemaPlan:
                 report.append(f"    * {part}")
         else:
             report.append("\nValidate Parts Creation: No parts found or not applicable.\n")
-        
+
         report.append("\n*************************************************\n")
 
         report_output = "\n".join(report)
         logger.info(report_output)
-        
+
         if is_api_call:
             return api_result
-
-
 
     def print_new_table_structure(
         self, database_name: str, table_name: str, expected_schema_ddl: str
@@ -553,14 +646,19 @@ class SchemaPlan:
         """
         Print the structure of the new table that is going to be created.
         """
-        primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings = (
-            SchemaUtils.extract_keys_and_indexes_from_ddl(expected_schema_ddl)
-        )
+        (
+            primary_key,
+            order_by_key,
+            indexes,
+            ttl_value,
+            sample_by,
+            partition_by,
+            projection,
+            table_settings,
+        ) = SchemaUtils.extract_keys_and_indexes_from_ddl(expected_schema_ddl)
 
         report = []
-        report.append(
-            "\n******************* new table to create ****************************\n"
-        )
+        report.append("\n******************* new table to create ****************************\n")
         report.append(f"Table {table_name} in database {database_name} does not exist.")
         report.append(f"++Primary Key: {primary_key}")
         report.append(f"++Order By Key: {order_by_key}")
@@ -570,14 +668,14 @@ class SchemaPlan:
             report.append(f"++ Index: {index_name} -> {index_details}")
         if ttl_value:
             report.append(f"++ TTL: {ttl_value} days")
-        report.append(
-            "\n*****************************************************************\n"
-        )
+        report.append("\n*****************************************************************\n")
 
         report_output = "\n".join(report)
         logger.info(report_output)
 
-    def detect_schema_differences(self, database_name, table_name, current_schema_ddl, expected_schema_ddl):
+    def detect_schema_differences(
+        self, database_name, table_name, current_schema_ddl, expected_schema_ddl
+    ):
         """
         Detect differences between the current table schema and the expected schema.
         """
@@ -591,13 +689,22 @@ class SchemaPlan:
                 current_sample_by="",
                 expected_sample_by="",
                 current_indexes=[],
-                expected_indexes=[]
-            )
+                expected_indexes=[],
+            ),
         )
 
-        expected_primary_key, expected_order_by_key, expected_indexes, ttl_value, expected_sample_by, expected_partition_by, expected_projection, expected_table_settings = SchemaUtils.extract_keys_and_indexes_from_ddl(expected_schema_ddl)
+        (
+            expected_primary_key,
+            expected_order_by_key,
+            expected_indexes,
+            ttl_value,
+            expected_sample_by,
+            expected_partition_by,
+            expected_projection,
+            expected_table_settings,
+        ) = SchemaUtils.extract_keys_and_indexes_from_ddl(expected_schema_ddl)
         expected_sample_by = expected_sample_by or ""
-        
+
         current_schema_query = f"""
             SELECT primary_key, sorting_key
             FROM system.tables
@@ -613,7 +720,16 @@ class SchemaPlan:
             current_order_by_key = None
 
         if current_schema_ddl:
-            _, _, current_indexes, _, current_sample_by, current_partition_by, current_projection, current_table_settings = SchemaUtils.extract_keys_and_indexes_from_ddl(current_schema_ddl)
+            (
+                _,
+                _,
+                current_indexes,
+                _,
+                current_sample_by,
+                current_partition_by,
+                current_projection,
+                current_table_settings,
+            ) = SchemaUtils.extract_keys_and_indexes_from_ddl(current_schema_ddl)
             current_sample_by = current_sample_by or ""
         else:
             current_sample_by = ""
@@ -623,15 +739,17 @@ class SchemaPlan:
             """Compare two index lists ignoring order"""
             if len(current_idx) != len(expected_idx):
                 return False
-            
+
             current_set = set(current_idx)
             expected_set = set(expected_idx)
             return current_set == expected_set
 
-        schema_difference = (current_primary_key != expected_primary_key or
-                            current_order_by_key != expected_order_by_key or
-                            not indexes_equal(current_indexes, expected_indexes) or
-                            current_sample_by != expected_sample_by)
+        schema_difference = (
+            current_primary_key != expected_primary_key
+            or current_order_by_key != expected_order_by_key
+            or not indexes_equal(current_indexes, expected_indexes)
+            or current_sample_by != expected_sample_by
+        )
 
         result.schema_difference = schema_difference
         result.schema_diff.current_primary_key = current_primary_key
@@ -655,15 +773,11 @@ class SchemaPlan:
         index_changes = []
 
         removed_indexes = [
-            idx
-            for idx in current_indexes
-            if idx[0] not in [e_idx[0] for e_idx in expected_indexes]
+            idx for idx in current_indexes if idx[0] not in [e_idx[0] for e_idx in expected_indexes]
         ]
 
         added_indexes = [
-            idx
-            for idx in expected_indexes
-            if idx[0] not in [c_idx[0] for c_idx in current_indexes]
+            idx for idx in expected_indexes if idx[0] not in [c_idx[0] for c_idx in current_indexes]
         ]
 
         changed_indexes = []
@@ -720,35 +834,21 @@ class SchemaPlan:
             report.append("=" * 40)
 
             if details["current_primary_key"] != details["expected_primary_key"]:
-                report.append(
-                    f"--Current Primary Key: {details['current_primary_key']}"
-                )
-                report.append(
-                    f"++Expected Primary Key: {details['expected_primary_key']} \n"
-                )
+                report.append(f"--Current Primary Key: {details['current_primary_key']}")
+                report.append(f"++Expected Primary Key: {details['expected_primary_key']} \n")
             else:
-                report.append(
-                    f"Primary Key: {details['current_primary_key']} (unchanged)\n"
-                )
+                report.append(f"Primary Key: {details['current_primary_key']} (unchanged)\n")
 
             if details["current_order_by_key"] != details["expected_order_by_key"]:
-                report.append(
-                    f"--Current Order By Key: {details['current_order_by_key']}"
-                )
-                report.append(
-                    f"++Expected Order By Key: {details['expected_order_by_key']} \n"
-                )
+                report.append(f"--Current Order By Key: {details['current_order_by_key']}")
+                report.append(f"++Expected Order By Key: {details['expected_order_by_key']} \n")
             else:
-                report.append(
-                    f"Order By Key: {details['current_order_by_key']} (unchanged)\n"
-                )
+                report.append(f"Order By Key: {details['current_order_by_key']} (unchanged)\n")
 
             if "current_sample_by" in details and "expected_sample_by" in details:
                 if details["current_sample_by"] != details["expected_sample_by"]:
                     current_sample_display = (
-                        '""'
-                        if details["current_sample_by"] == ""
-                        else details["current_sample_by"]
+                        '""' if details["current_sample_by"] == "" else details["current_sample_by"]
                     )
                     expected_sample_display = (
                         '""'
@@ -758,9 +858,7 @@ class SchemaPlan:
                     report.append(f"--Current Sample By: {current_sample_display}")
                     report.append(f"++Expected Sample By: {expected_sample_display} \n")
                 elif details["current_sample_by"]:
-                    report.append(
-                        f"Sample By: {details['current_sample_by']} (unchanged)\n"
-                    )
+                    report.append(f"Sample By: {details['current_sample_by']} (unchanged)\n")
 
             current_indexes = details["current_indexes"]
             expected_indexes = details["expected_indexes"]
@@ -861,14 +959,14 @@ class SchemaPlan:
                 return None
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            if parsed_error['type'] == 'database_not_found':
+            if parsed_error["type"] == "database_not_found":
                 logger.warning(f"Database {database_name} does not exist.")
-            elif parsed_error['type'] == 'table_not_found':
-                logger.warning(
-                    f"Table {table_name} in database {database_name} does not exist."
-                )
+            elif parsed_error["type"] == "table_not_found":
+                logger.warning(f"Table {table_name} in database {database_name} does not exist.")
             else:
-                logger.warning(f"Error getting schema DDL for table {table_name}: {parsed_error['user_message']}")
+                logger.warning(
+                    f"Error getting schema DDL for table {table_name}: {parsed_error['user_message']}"
+                )
             return None
 
     def check_table_records(self, database_name: str, table_name: str):
@@ -888,7 +986,9 @@ class SchemaPlan:
             return result
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            logger.error(f"Query execution failed: {parsed_error['user_message']} (Details: {parsed_error['message']})")
+            logger.error(
+                f"Query execution failed: {parsed_error['user_message']} (Details: {parsed_error['message']})"
+            )
             return None
 
     def _normalize_data_type(self, data_type: str) -> str:
@@ -903,49 +1003,52 @@ class SchemaPlan:
         """
         import re
 
-        type_equivalents = {
-            'Bool': 'Boolean',
-            'Boolean': 'Boolean'
-        }
+        type_equivalents = {"Bool": "Boolean", "Boolean": "Boolean"}
 
-        normalized = re.sub(r'\s*,\s*', ',', data_type)
-        normalized = re.sub(r'\(\s*', '(', normalized)
-        normalized = re.sub(r'\s*\)', ')', normalized)
+        normalized = re.sub(r"\s*,\s*", ",", data_type)
+        normalized = re.sub(r"\(\s*", "(", normalized)
+        normalized = re.sub(r"\s*\)", ")", normalized)
 
         return type_equivalents.get(normalized, normalized)
 
     def _get_columns_with_types_from_ddl(self, sql_command: str) -> dict:
         """
         Extract columns and their data types from DDL statement.
-        
+
         Args:
             sql_command (str): DDL statement
-            
+
         Returns:
             dict: Dictionary mapping column names to their data types
         """
         import re
+
         columns = {}
-        ddl_part = re.search(r'\((.*?)\)\s*ENGINE', sql_command, re.DOTALL)
+        ddl_part = re.search(r"\((.*?)\)\s*ENGINE", sql_command, re.DOTALL)
         if ddl_part:
             for line in ddl_part.group(1).splitlines():
                 line = line.strip()
-                if line and not line.startswith('--') and not line.startswith('INDEX') and not line.startswith('PROJECTION'):
+                if (
+                    line
+                    and not line.startswith("--")
+                    and not line.startswith("INDEX")
+                    and not line.startswith("PROJECTION")
+                ):
                     column_def = line.split()
                     if len(column_def) >= 2:
-                        column_name = column_def[0].strip('`')
-                        column_type = column_def[1].replace(' ', '').rstrip(',')
+                        column_name = column_def[0].strip("`")
+                        column_type = column_def[1].replace(" ", "").rstrip(",")
                         columns[column_name] = column_type
         return columns
 
     def _get_existing_columns_with_types(self, database_name: str, table_name: str) -> dict:
         """
         Get existing columns and their data types from the database.
-        
+
         Args:
             database_name (str): Name of the database
             table_name (str): Name of the table
-            
+
         Returns:
             dict: Dictionary mapping column names to their data types
         """
@@ -961,38 +1064,44 @@ class SchemaPlan:
                 columns[name] = column_type
         return columns
 
-    def _detect_data_type_changes(self, database_name: str, table_name: str, expected_schema_ddl: str) -> list:
+    def _detect_data_type_changes(
+        self, database_name: str, table_name: str, expected_schema_ddl: str
+    ) -> list:
         """
         Detect data type changes between existing and expected schema.
-        
+
         Args:
             database_name (str): Name of the database
             table_name (str): Name of the table
             expected_schema_ddl (str): Expected DDL statement
-            
+
         Returns:
             list: List of data type changes with before/after information
         """
         data_type_changes = []
-        
+
         try:
             expected_columns = self._get_columns_with_types_from_ddl(expected_schema_ddl)
             existing_columns = self._get_existing_columns_with_types(database_name, table_name)
-            
+
             for column, new_data_type in expected_columns.items():
                 if column in existing_columns:
                     existing_type = self._normalize_data_type(existing_columns[column])
                     new_type = self._normalize_data_type(new_data_type)
-                    
+
                     if existing_type != new_type:
-                        data_type_changes.append({
-                            "column": column,
-                            "current_type": existing_columns[column],
-                            "expected_type": new_data_type
-                        })
-                        
+                        data_type_changes.append(
+                            {
+                                "column": column,
+                                "current_type": existing_columns[column],
+                                "expected_type": new_data_type,
+                            }
+                        )
+
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            logger.error(f"Error detecting data type changes: {parsed_error['user_message']} (Details: {parsed_error['message']})")
-            
+            logger.error(
+                f"Error detecting data type changes: {parsed_error['user_message']} (Details: {parsed_error['message']})"
+            )
+
         return data_type_changes

@@ -51,13 +51,13 @@ class ClickHouseClientWrapper:
         Handles multi-statement queries by splitting on semicolons.
         """
         # Strip trailing semicolons and whitespace
-        query = query.strip().rstrip(';').strip()
+        query = query.strip().rstrip(";").strip()
 
         # Check if this is a multi-statement query
         # Simple heuristic: if there's a semicolon not inside quotes, split
-        if ';' in query:
+        if ";" in query:
             # Split and execute each statement
-            statements = [s.strip() for s in query.split(';') if s.strip()]
+            statements = [s.strip() for s in query.split(";") if s.strip()]
             result = None
             for stmt in statements:
                 result = self._execute_single(stmt, *args, **kwargs)
@@ -70,19 +70,38 @@ class ClickHouseClientWrapper:
         query_upper = query.strip().upper()
 
         # DESCRIBE, DESC, EXISTS, EXPLAIN, SHOW return data - use query()
-        if query_upper.startswith(('DESCRIBE', 'DESC', 'EXISTS', 'EXPLAIN', 'SHOW')):
+        if query_upper.startswith(("DESCRIBE", "DESC", "EXISTS", "EXPLAIN", "SHOW")):
             return self._client.query(query, *args, **kwargs).result_rows
 
         # INSERT with data - use insert() method
         # clickhouse-driver style: execute("INSERT INTO table (cols) VALUES", [(data, ...)])
-        if query_upper.startswith('INSERT') and args and isinstance(args[0], (list, tuple)):
+        if query_upper.startswith("INSERT") and args and isinstance(args[0], (list, tuple)):
             return self._handle_insert_with_data(query, args[0])
 
         # DDL/DML commands that don't return data go to command()
-        if query_upper.startswith(('CREATE', 'DROP', 'ALTER', 'TRUNCATE', 'RENAME',
-                                    'INSERT', 'DELETE', 'UPDATE', 'SET', 'USE',
-                                    'GRANT', 'REVOKE', 'ATTACH', 'DETACH', 'OPTIMIZE',
-                                    'EXCHANGE', 'SYSTEM', 'CHECK', 'KILL')):
+        if query_upper.startswith(
+            (
+                "CREATE",
+                "DROP",
+                "ALTER",
+                "TRUNCATE",
+                "RENAME",
+                "INSERT",
+                "DELETE",
+                "UPDATE",
+                "SET",
+                "USE",
+                "GRANT",
+                "REVOKE",
+                "ATTACH",
+                "DETACH",
+                "OPTIMIZE",
+                "EXCHANGE",
+                "SYSTEM",
+                "CHECK",
+                "KILL",
+            )
+        ):
             return self._client.command(query, *args, **kwargs)
 
         # SELECT queries return data
@@ -97,7 +116,7 @@ class ClickHouseClientWrapper:
 
         # Parse INSERT INTO table (columns) VALUES
         # Pattern: INSERT INTO [db.]table (col1, col2, ...) VALUES
-        pattern = r'INSERT\s+INTO\s+([^\s(]+)\s*\(\s*([^)]+)\s*\)\s*VALUES'
+        pattern = r"INSERT\s+INTO\s+([^\s(]+)\s*\(\s*([^)]+)\s*\)\s*VALUES"
         match = re.search(pattern, query, re.IGNORECASE)
 
         if not match:
@@ -106,7 +125,7 @@ class ClickHouseClientWrapper:
 
         table_name = match.group(1)
         columns_str = match.group(2)
-        column_names = [c.strip() for c in columns_str.split(',')]
+        column_names = [c.strip() for c in columns_str.split(",")]
 
         # Use clickhouse-connect's insert() method
         return self._client.insert(table_name, data, column_names=column_names)
@@ -166,14 +185,10 @@ class ClickHouseManager:
             return ClickHouseClientWrapper(self._client)
 
         except ConfigurationError as ce:
-            logger.error(
-                f"Configuration error: {ce}", exc_info=True, stack_info=True
-            )
+            logger.error(f"Configuration error: {ce}", exc_info=True, stack_info=True)
             raise
         except Exception as e:
-            logger.error(
-                f"An unexpected error occurred during client acquisition: {e}"
-            )
+            logger.error(f"An unexpected error occurred during client acquisition: {e}")
             raise
 
     def _initialize_client(self):

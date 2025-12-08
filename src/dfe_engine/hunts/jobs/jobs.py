@@ -23,9 +23,7 @@ class JobScheduler:
         self.active_jobs = []
         self.scheduler_started = False
         self.scheduled_start_time = None
-        self.scheduler.add_listener(
-            self.job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR
-        )
+        self.scheduler.add_listener(self.job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
     def job_listener(self, event):
         """
@@ -90,9 +88,7 @@ class JobScheduler:
                 replace_existing=False,
             )
             self.active_jobs.append(job)
-            logger.debug(
-                f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}"
-            )
+            logger.debug(f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}")
             return job
         except Exception as e:
             logger.error(f"Error adding job with cron job : {e}")
@@ -122,9 +118,7 @@ class JobScheduler:
                 replace_existing=False,
             )
             self.active_jobs.append(job)
-            logger.info(
-                f"Added interval job [{job_name}] with:\nInterval: {seconds} seconds"
-            )
+            logger.info(f"Added interval job [{job_name}] with:\nInterval: {seconds} seconds")
             return job
         except Exception as e:
             logger.error(f"Error adding job with interval: {e}")
@@ -147,9 +141,7 @@ class JobScheduler:
             self.scheduler.start()
             self.scheduler_started = True
             for job in self.scheduler.get_jobs():
-                logger.debug(
-                    f"Scheduled Job: {job.name}, Next Run Time: {job.next_run_time}"
-                )
+                logger.debug(f"Scheduled Job: {job.name}, Next Run Time: {job.next_run_time}")
             logger.info("Scheduler started.")
             return True
         elif not self.active_jobs:
