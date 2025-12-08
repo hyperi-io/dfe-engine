@@ -6,6 +6,9 @@ import time
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
+# These tests require a running ClickHouse instance
+pytestmark = pytest.mark.integration
+
 
 @pytest.fixture
 def setup_paths(tmp_path) -> dict:

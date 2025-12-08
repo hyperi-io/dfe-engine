@@ -11,6 +11,9 @@ import logging
 import yaml
 from pathlib import Path
 
+# These tests require a running ClickHouse instance
+pytestmark = pytest.mark.integration
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
