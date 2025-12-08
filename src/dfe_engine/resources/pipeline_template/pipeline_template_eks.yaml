@@ -515,7 +515,6 @@ transforms: {}
 # DEPRECATED. Use customConfig instead
 sinks: {}
 
-# TODO - Add Env variables here see reciever - don't need the secret shiiiit
 extraObjects:
   - apiVersion: v1
     kind: ConfigMap

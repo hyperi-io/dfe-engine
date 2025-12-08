@@ -21,23 +21,30 @@ class HuntValidator:
         :param hunt_data: A dictionary containing hunt configuration.
         :param env: A Jinja2 Environment instance for SQL template rendering.
         :param rule_repo_dir: The directory where rule templates are stored.
-        :param logger: A logging instance to log messages.
+        :param checkpoint_timestamp_field: The timestamp field for checkpointing.
         """
         logger.info("--- HUNT VALIDATOR STARTED ---")
         logger.info(f"Hunt Config:\n {hunt_data} ")
+
+        HuntValidator._validate_yaml_structure(hunt_data)
+        HuntValidator._validate_required_fields(hunt_data, checkpoint_timestamp_field)
+        customers = HuntValidator._validate_customers(hunt_data)
+        HuntValidator._validate_rules(hunt_data, env, rule_repo_dir)
+        HuntValidator._validate_customer_filters(hunt_data, customers)
+
+        logger.info("--- HUNT VALIDATOR COMPLETED ---")
+
+    @staticmethod
+    def _validate_yaml_structure(hunt_data: dict) -> None:
+        """Validate the YAML structure of hunt data."""
         try:
             yaml_load_string(yaml_dump_string(hunt_data))
         except YAMLError as e:
             raise ValueError(f"Invalid YAML structure: {e}") from e
 
-        # cron_expressions = hunt_data.get("cron", [])
-        # if not isinstance(cron_expressions, list):
-        #     raise ValueError(f"Cron expressions should be a list, but got {type(cron_expressions).__name__}")
-
-        # for cron_expression in cron_expressions:
-        #     if not croniter.croniter.is_valid(cron_expression):
-        #         raise ValueError(f"Invalid cron expression: {cron_expression}")
-
+    @staticmethod
+    def _validate_required_fields(hunt_data: dict, checkpoint_timestamp_field: str) -> None:
+        """Validate required fields in hunt configuration."""
         if "log_buffer" not in hunt_data:
             raise ValueError("Missing 'log_buffer' in hunt configuration.")
 
@@ -63,10 +70,17 @@ class HuntValidator:
                 "Invalid 'checkpoint_timestamp_field'. It should be a non-empty string."
             )
 
+    @staticmethod
+    def _validate_customers(hunt_data: dict) -> list:
+        """Validate customers list and return it."""
         customers = hunt_data.get("customers")
         if not customers or not isinstance(customers, list):
             raise ValueError("Customers list is missing or invalid.")
+        return customers
 
+    @staticmethod
+    def _validate_rules(hunt_data: dict, env: Environment, rule_repo_dir: str) -> None:
+        """Validate rules configuration and syntax."""
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
@@ -90,6 +104,9 @@ class HuntValidator:
                     f"Invalid 'initial_checkpoint_lookback_minutes' value: {initial_checkpoint_lookback_minutes}. It should be a positive integer."
                 )
 
+    @staticmethod
+    def _validate_customer_filters(hunt_data: dict, customers: list) -> None:
+        """Validate customer filters configuration."""
         customer_filters = hunt_data.get("customer_filters", {})
         if not isinstance(customer_filters, dict):
             raise ValueError("Customer filters should be a dictionary.")
@@ -108,8 +125,6 @@ class HuntValidator:
                     raise ValueError(
                         f"Invalid rule filter structure for customer '{customer}': {rule_filter}"
                     )
-
-        logger.info("--- HUNT VALIDATOR COMPLETED ---")
 
     @staticmethod
     def validate_rule_syntax(rule_path: str, env: Environment):

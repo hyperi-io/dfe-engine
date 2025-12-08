@@ -130,7 +130,6 @@ class Pipeline:
         Renders the template for the specified pipeline.
 
         Args:
-            pipeline_name (str): The name of the pipeline.
             env_vars (dict): A dictionary containing the environment variables.
             vector_env_vars (dict): A dictionary containing the environment variables specific to vector steps.
 
@@ -138,102 +137,21 @@ class Pipeline:
             str: The rendered template.
         """
         template = self.get_pipeline_template()
-        step_full_paths = []
-        for step in self.pipeline_config["steps"]:
-            # Form the full path using the step name, version, and file name
-            fully_qualified_step = (
-                step["id"]
-                if step["id"].endswith(".yml") or step["id"].endswith(".yaml")
-                else f"{step['id']}.yml"
-            )
+        step_full_paths = self._build_step_paths()
 
-            # Apply additional path modifications if needed
-            template_path = self.global_settings.get("ip_templates_path", "core_templates")
-            mount_path = self.global_settings.get("vector_config_mount_path", "/etc/vector")
-            fully_qualified_step = os.path.join(mount_path, template_path, fully_qualified_step)
-
-            step_full_paths.append(fully_qualified_step)
-
-        # for geoip files we need to provide the full path to the file
-        geoip_enrichment_path_key = "VECTOR_GEOIP_PATH"
-        if geoip_enrichment_path_key in env_vars:
-            vector_mount_path = self.global_settings.get("vector_config_mount_path", "/etc/vector")
-            geoip_path = self.global_settings.get("ip_config_geo_ip_path", "geoip_mappings")
-            if vector_mount_path not in env_vars[geoip_enrichment_path_key]:
-                env_vars[geoip_enrichment_path_key] = os.path.join(vector_mount_path, geoip_path)
-
-        # for vector enrichment files add the mount path if not already present
-        standard_enrichment_path_key = "VECTOR_ENRICHMENT_PATH"
-        vector_mount_path = self.global_settings.get("vector_config_mount_path", "/etc/vector")
-        enrichment_path = self.global_settings.get(
-            "ip_config_standard_enrichment_path", "standard_mappings"
-        )
-        if (
-            standard_enrichment_path_key in env_vars
-            and vector_mount_path not in env_vars[standard_enrichment_path_key]
-        ):
-            env_vars[standard_enrichment_path_key] = os.path.join(
-                vector_mount_path, enrichment_path
-            )
+        self._apply_enrichment_paths(env_vars)
 
         str_env_vars = self.convert_all_env_vars_to_str(env_vars)
+        self._remove_secrets(str_env_vars)
 
-        # Remove secrets from env_vars if they are in the SECRETS_VARS list
-        for key in list(str_env_vars.keys()):
-            if key in self.SECRETS_VARS:
-                str_env_vars.pop(key, None)
+        template_source = self._read_template_source()
+        variables_with_defaults = self._find_variables_with_defaults(template_source)
+        optional_variables = self._find_optional_variables(template_source)
 
-        # Gather all variables from the template
-        with open(self.pipeline_template, "r") as f:
-            template_source = f.read()
-        parsed_template = template.environment.parse(template_source)
-        all_variables = meta.find_undeclared_variables(parsed_template)
+        self._resolve_template_variables(
+            template, template_source, env_vars, variables_with_defaults, optional_variables
+        )
 
-        # Find variables with default values using regex
-        # Pattern to match variables with defaults anywhere in expressions
-        # Matches: VAR | default("value") or VAR | default(value, true)
-        default_patterns = [
-            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*\(\s*[\'"]?([^\'",\)]*)[\'"]?\s*\)',
-            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*\(\s*[\'"]?([^\'",\)]*)[\'"]?\s*,\s*[^)]*\)',
-            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*:\s*[\'"]?([^\'"\}]*)[\'"]?',
-        ]
-
-        variables_with_defaults = {}
-        for pattern in default_patterns:
-            for match in re.finditer(pattern, template_source):
-                var_name = match.group(1)
-                default_value = match.group(2)
-                variables_with_defaults[var_name] = default_value
-
-        # Find variables that are used conditionally (optional variables)
-        conditional_pattern = r"\{\%\s*if\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\%\}"
-        optional_variables = set()
-        for match in re.finditer(conditional_pattern, template_source):
-            var_name = match.group(1)
-            optional_variables.add(var_name)
-
-        # Also check for variables used with 'is defined' checks
-        defined_check_pattern = r"\{\%\s*if\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+is\s+defined\s*\%\}"
-        for match in re.finditer(defined_check_pattern, template_source):
-            var_name = match.group(1)
-            optional_variables.add(var_name)
-
-        for var in all_variables:
-            if var not in env_vars and var not in ("steps", "NAME", "env_vars", "config_maps"):
-                if var in self.global_settings:
-                    env_vars[var] = self.global_settings[var]
-                elif var in os.environ:
-                    env_vars[var] = os.environ[var]
-                elif var in variables_with_defaults:
-                    logger.debug(f"Using default value for {var}: {variables_with_defaults[var]}")
-                    # Don't set the variable - let Jinja handle the default
-                elif var in optional_variables:
-                    logger.debug(f"Skipping optional variable {var} - not defined")
-                    # Don't set the variable - it's optional and will be handled by template conditionals
-                else:
-                    raise PipelineSchemaError(
-                        f"Variable {var} is not defined in the pipeline or global settings or in the .env file."
-                    )
         rendered_template = template.render(
             NAME=self.name.lower().replace("_", "-"),
             env_vars={
@@ -250,6 +168,118 @@ class Pipeline:
             **env_vars,
         )
         return rendered_template
+
+    def _build_step_paths(self) -> list:
+        """Build fully qualified paths for all pipeline steps."""
+        step_full_paths = []
+        template_path = self.global_settings.get("ip_templates_path", "core_templates")
+        mount_path = self.global_settings.get("vector_config_mount_path", "/etc/vector")
+
+        for step in self.pipeline_config["steps"]:
+            fully_qualified_step = (
+                step["id"]
+                if step["id"].endswith(".yml") or step["id"].endswith(".yaml")
+                else f"{step['id']}.yml"
+            )
+            fully_qualified_step = os.path.join(mount_path, template_path, fully_qualified_step)
+            step_full_paths.append(fully_qualified_step)
+
+        return step_full_paths
+
+    def _apply_enrichment_paths(self, env_vars: dict) -> None:
+        """Apply mount paths to enrichment variables if needed."""
+        vector_mount_path = self.global_settings.get("vector_config_mount_path", "/etc/vector")
+
+        geoip_enrichment_path_key = "VECTOR_GEOIP_PATH"
+        if geoip_enrichment_path_key in env_vars:
+            geoip_path = self.global_settings.get("ip_config_geo_ip_path", "geoip_mappings")
+            if vector_mount_path not in env_vars[geoip_enrichment_path_key]:
+                env_vars[geoip_enrichment_path_key] = os.path.join(vector_mount_path, geoip_path)
+
+        standard_enrichment_path_key = "VECTOR_ENRICHMENT_PATH"
+        enrichment_path = self.global_settings.get(
+            "ip_config_standard_enrichment_path", "standard_mappings"
+        )
+        if (
+            standard_enrichment_path_key in env_vars
+            and vector_mount_path not in env_vars[standard_enrichment_path_key]
+        ):
+            env_vars[standard_enrichment_path_key] = os.path.join(
+                vector_mount_path, enrichment_path
+            )
+
+    def _remove_secrets(self, str_env_vars: dict) -> None:
+        """Remove secret variables from environment vars."""
+        for key in list(str_env_vars.keys()):
+            if key in self.SECRETS_VARS:
+                str_env_vars.pop(key, None)
+
+    def _read_template_source(self) -> str:
+        """Read the template source file."""
+        with open(self.pipeline_template, "r") as f:
+            return f.read()
+
+    def _find_variables_with_defaults(self, template_source: str) -> dict:
+        """Find variables with default values in the template."""
+        default_patterns = [
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*\(\s*[\'"]?([^\'",\)]*)[\'"]?\s*\)',
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*\(\s*[\'"]?([^\'",\)]*)[\'"]?\s*,\s*[^)]*\)',
+            r'([a-zA-Z_][a-zA-Z0-9_]*)\s*\|\s*default\s*:\s*[\'"]?([^\'"\}]*)[\'"]?',
+        ]
+
+        variables_with_defaults = {}
+        for pattern in default_patterns:
+            for match in re.finditer(pattern, template_source):
+                var_name = match.group(1)
+                default_value = match.group(2)
+                variables_with_defaults[var_name] = default_value
+
+        return variables_with_defaults
+
+    def _find_optional_variables(self, template_source: str) -> set:
+        """Find variables that are used conditionally."""
+        optional_variables = set()
+
+        conditional_pattern = r"\{\%\s*if\s+([a-zA-Z_][a-zA-Z0-9_]*)\s*\%\}"
+        for match in re.finditer(conditional_pattern, template_source):
+            optional_variables.add(match.group(1))
+
+        defined_check_pattern = r"\{\%\s*if\s+([a-zA-Z_][a-zA-Z0-9_]*)\s+is\s+defined\s*\%\}"
+        for match in re.finditer(defined_check_pattern, template_source):
+            optional_variables.add(match.group(1))
+
+        return optional_variables
+
+    def _resolve_template_variables(
+        self,
+        template,
+        template_source: str,
+        env_vars: dict,
+        variables_with_defaults: dict,
+        optional_variables: set,
+    ) -> None:
+        """Resolve all template variables from available sources."""
+        parsed_template = template.environment.parse(template_source)
+        all_variables = meta.find_undeclared_variables(parsed_template)
+
+        reserved_vars = ("steps", "NAME", "env_vars", "config_maps")
+
+        for var in all_variables:
+            if var in env_vars or var in reserved_vars:
+                continue
+
+            if var in self.global_settings:
+                env_vars[var] = self.global_settings[var]
+            elif var in os.environ:
+                env_vars[var] = os.environ[var]
+            elif var in variables_with_defaults:
+                logger.debug(f"Using default value for {var}: {variables_with_defaults[var]}")
+            elif var in optional_variables:
+                logger.debug(f"Skipping optional variable {var} - not defined")
+            else:
+                raise PipelineSchemaError(
+                    f"Variable {var} is not defined in the pipeline or global settings or in the .env file."
+                )
 
     def gather_env_variables_for_pipeline(self) -> Dict:
         """
