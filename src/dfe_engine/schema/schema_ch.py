@@ -57,7 +57,7 @@ class ClickHouseSchema:
         use_subsampling_feature: bool = False,
         use_shared_merge_tree: bool = True,
         ttl: int = 90,
-        logger: Optional[logging.Logger] = None,
+        logger = None,
     ):
         # Schema identification
         self.schema_name = name
@@ -68,7 +68,7 @@ class ClickHouseSchema:
         self.common_resource_path = common_resource_path
         self.derived_schema_full_path = derived_schema_full_path
         self.additional_fields_full_path = additional_fields_full_path
-        self.commons_variables_package = "dfecli.resources"
+        self.commons_variables_package = "dfe_engine.resources"
 
         # Schema configurations
         self.no_cluster_declarations_needed = no_cluster_declarations_needed
@@ -79,8 +79,7 @@ class ClickHouseSchema:
         self.ttl = ttl
 
         # Logger setup
-        self.logger = logger
-
+        
         # Internal state
         self.schema_output_path = os.path.join(dfe_output_path, self.schema_name)
 
@@ -99,9 +98,9 @@ class ClickHouseSchema:
         json_type_df = self.type_map_df[self.type_map_df["type"] == "json"]
         string_type_df = self.type_map_df[self.type_map_df["type"] == "string"]
         if not json_type_df.empty:
-            self.logger.info("JSON type found in type map.")
+            logger.info("JSON type found in type map.")
             if not self.use_json_feature:
-                self.logger.warning(
+                logger.warning(
                     "use_json_feature is False, using string type mapping for JSON."
                 )
                 if not string_type_df.empty:
@@ -116,13 +115,13 @@ class ClickHouseSchema:
                         self.type_map_df["type"] == "json", "clickhouse_type_index"
                     ] = json_clickhouse_type_index
                 else:
-                    self.logger.error(
+                    logger.error(
                         "No string type found in type map. Check your type_maps.csv."
                     )
             else:
-                self.logger.info("Using existing JSON type from the type map.")
+                logger.info("Using existing JSON type from the type map.")
         else:
-            self.logger.error(
+            logger.error(
                 "No JSON type found in type map. Check your type_maps.csv."
             )
 
@@ -298,7 +297,7 @@ class ClickHouseSchema:
                 self.type_map_df["type"] == column_type
             ]
             if type_match_df.empty:
-                self.logger.error(
+                logger.error(
                     f"ClickHouse Schema unable to match type: {column_type}"
                 )
                 raise SchemaValidationError(f"Invalid type: {column_type}")
@@ -358,7 +357,7 @@ class ClickHouseSchema:
             SchemaUtils.file_write(file_handle, ",\n")
 
         if index_type_length > 8:
-            self.logger.warning(
+            logger.warning(
                 f"A large number of indexes on a table while improving querying performance "
                 f"can impact ingest performance index_type length {index_type_length}"
             )
@@ -468,11 +467,11 @@ class ClickHouseSchema:
             for _, row in nullable_columns.iterrows():
                 column_name = row["column"]
                 clickhouse_type = row["clickhouse_type"]
-                self.logger.warning(
+                logger.warning(
                     f"Column '{column_name}' with nullable ClickHouse type '{clickhouse_type}' are defined in the ORDER BY and PRIMARY KEY in the {self.schema_name} schema."
                 )
 
-            self.logger.error(
+            logger.error(
                 f" Nullable Fields in {self.schema_name} please change the type of these fields or remove them from the {index_string}"
             )
 
@@ -572,7 +571,7 @@ class ClickHouseSchema:
                     header=True,
                 )
             except IOError as e:
-                self.logger.error(f"Error writing JSON field map CSV: {e}")
+                logger.error(f"Error writing JSON field map CSV: {e}")
                 raise SchemaExceptions.FileWriteError(
                     f"Failed to write JSON field map CSV: {e}"
                 )
@@ -584,14 +583,14 @@ class ClickHouseSchema:
         derived_schema_df = SchemaUtils.load_derived_schema(
             derived_schema_full_path=self.derived_schema_full_path,
             name=self.schema_name,
-            logger=self.logger,
+            logger=logger,
         )
         self.meta_schema_df = self.meta_schema_df.astype(object)
         self.meta_schema_df = (
             SchemaUtils.apply_derived_schema(
                 meta_schema_df=self.meta_schema_df,
                 derived_schema_df=derived_schema_df,
-                logger=self.logger,
+                logger=logger,
             )
             if derived_schema_df is not None
             else self.meta_schema_df
@@ -600,13 +599,13 @@ class ClickHouseSchema:
         additional_fields_df = SchemaUtils.load_additional_fields(
             additional_fields_full_path=self.additional_fields_full_path,
             name=self.schema_name,
-            logger=self.logger,
+            logger=logger,
         )
         self.meta_schema_df = (
             SchemaUtils.apply_additional_fields(
                 meta_schema_df=self.meta_schema_df,
                 additional_schema_df=additional_fields_df,
-                logger=self.logger,
+                logger=logger,
             )
             if additional_fields_df is not None
             else self.meta_schema_df
@@ -632,7 +631,7 @@ class ClickHouseSchema:
                 self.meta_schema_df,
                 self.common_header_schema_df,
                 ch_schema_filename,
-                self.logger,
+                logger,
                 is_ch_flag=True,
             )
         )
@@ -657,7 +656,7 @@ class ClickHouseSchema:
                 "ORDER BY",
                 file_handle,
             )
-            self.logger.info(
+            logger.info(
                 f"Sub sampling feature enabled: {self.use_subsampling_feature}"
             )
             if self.use_subsampling_feature:

@@ -1,8 +1,9 @@
-import logging
 import os
-import pandas as pd
 import re
 from typing import Optional
+
+import pandas as pd
+from hs_lib.logger import logger
 
 HUNT_TEMPLATE = """
     name: "{name}"
@@ -64,24 +65,8 @@ HUNT_TEMPLATE = """
 
 
 class HuntGenerator:
-    def __init__(self, output_directory: str, logger: Optional[logging.Logger] = None):
+    def __init__(self, output_directory: str):
         self.output_directory = output_directory
-        self.logger = logger if logger else self._setup_default_logger()
-
-    def _setup_default_logger(self) -> logging.Logger:
-        """
-        Sets up a default logger if one isn't provided.
-        """
-        logger = logging.getLogger("HuntGenerator")
-        logger.setLevel(logging.INFO)
-        if not logger.handlers:
-            ch = logging.StreamHandler()
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-            ch.setFormatter(formatter)
-            logger.addHandler(ch)
-        return logger
 
     def _map_schedule_to_cron(self, schedule: str):
         if "m" in schedule:
@@ -89,7 +74,7 @@ class HuntGenerator:
         elif "h" in schedule:
             return f"0 */{schedule[:-1]} * * *"
         else:
-            raise
+            raise ValueError(f"Invalid schedule format: {schedule}. Expected format like '5m' or '1h'")
 
     def _create_new_hunt_config(
         self,
@@ -112,7 +97,7 @@ class HuntGenerator:
 
         hunt_config = re.sub(r"^    ", "", hunt_config, flags=re.MULTILINE).strip()
 
-        self.logger.info(hunt_config)
+        logger.info(hunt_config)
 
     def _generate_and_write_hunt_configs(self, df: pd.DataFrame):
         """
@@ -126,7 +111,7 @@ class HuntGenerator:
                 device_types = row.get("device_types")
                 schedule_duration = row.get("schedule_duration")
                 if len(device_types) == 0 or len(schedule_duration) == 0:
-                    raise
+                    raise ValueError(f"Missing device_types or schedule_duration for rule: {rule_name}")
 
                 device_prefix = "_".join(device for device in device_types)
                 schedule_prefix = schedule_duration[0]
@@ -143,7 +128,7 @@ class HuntGenerator:
                     ]
                 )
 
-                self.logger.error(type(whitelisting))
+                logger.error(type(whitelisting))
 
                 if not (os.path.exists(hunt_filepath)):
                     self._create_new_hunt_config(
@@ -159,7 +144,7 @@ class HuntGenerator:
                     # Need to check customers line up
 
             except Exception as e:
-                self.logger.error(
+                logger.error(
                     f"Error processing watcher {row.get('filename', 'unknown')}: {e}",
                     exc_info=True,
                 )

@@ -1,9 +1,10 @@
-import pandas as pd
-import logging
 import re
-from typing import Optional
-import yaml
 import os
+from typing import Optional
+
+import pandas as pd
+import yaml
+from hs_lib.logger import logger
 from .watcher_parser import map_device_name
 
 
@@ -70,26 +71,9 @@ class WatcherConverter:
         self,
         output_directory: str,
         sort_by_device: bool = False,
-        logger: Optional[logging.Logger] = None,
     ):
         self.output_directory = output_directory
         self.sort_by_device = sort_by_device
-        self.logger = logger if logger else self._setup_default_logger()
-
-    def _setup_default_logger(self) -> logging.Logger:
-        """
-        Sets up a default logger if one isn't provided.
-        """
-        logger = logging.getLogger("WatcherConverter")
-        logger.setLevel(logging.INFO)
-        if not logger.handlers:
-            ch = logging.StreamHandler()
-            formatter = logging.Formatter(
-                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-            )
-            ch.setFormatter(formatter)
-            logger.addHandler(ch)
-        return logger
 
     def _write_to_yaml(self, sql_insert: str, filename: str):
         """
@@ -116,7 +100,7 @@ class WatcherConverter:
                 indent=4,
                 Dumper=yaml.SafeDumper,
             )
-        self.logger.info(f"SQL statement written to {filepath}")
+        logger.info(f"SQL statement written to {filepath}")
 
     def _write_to_file(self, sql_insert: str, filename: str):
         """
@@ -137,7 +121,7 @@ class WatcherConverter:
         )
         with open(filepath, "w") as file:
             file.write(sql_insert)
-        self.logger.info(f"SQL statement written to {filepath}")
+        logger.info(f"SQL statement written to {filepath}")
 
     def _get_where_condition(self, row):
         """Safely extract where condition from row data."""
@@ -153,7 +137,7 @@ class WatcherConverter:
         device_types = row.get("device_types", set())
 
         if not device_types:
-            self.logger.warning("No device types found for detection.")
+            logger.warning("No device types found for detection.")
             return None  # or some default value you would prefer
 
         source_table = "{{source_table_name}}"  # list(device_types)[0]
@@ -186,7 +170,7 @@ class WatcherConverter:
         
         for index, row in df.iterrows():
             try:
-                self.logger.info(f" values for sql template generation \n\n{row}\n\n")
+                logger.info(f" values for sql template generation \n\n{row}\n\n")
 
                 # Format and extract all event specific fields
                 select_fields = row.get("select_fields", [])
@@ -278,7 +262,7 @@ class WatcherConverter:
                     if map_device_name(device) not in unique_device_types:
                         unique_device_types.append(map_device_name(device))
                 if len(unique_device_types) > 1:
-                    self.logger.warning(
+                    logger.warning(
                         f"There are more than one device types in {(row.get('watcher_id', ''),)}. Will only use {unique_device_types[0]}."
                     )
                 device_name = unique_device_types[0]
@@ -293,7 +277,7 @@ class WatcherConverter:
 
             except Exception as e:
                 watcher_name = row.get('name', row.get('filename', 'unknown'))
-                self.logger.error(
+                logger.error(
                     f"Error processing watcher {watcher_name}: {e}",
                     exc_info=True,
                 )
@@ -303,15 +287,15 @@ class WatcherConverter:
                 })
                 # Continue processing other watchers instead of failing completely
                 continue
-        
+
         # Report summary
-        self.logger.info(f"Watcher conversion summary: {len(successful_watchers)} successful, {len(failed_watchers)} failed")
+        logger.info(f"Watcher conversion summary: {len(successful_watchers)} successful, {len(failed_watchers)} failed")
         if successful_watchers:
-            self.logger.info(f"Successfully converted: {successful_watchers}")
+            logger.info(f"Successfully converted: {successful_watchers}")
         if failed_watchers:
-            self.logger.error(f"Failed to convert: {[f['name'] for f in failed_watchers]}")
+            logger.error(f"Failed to convert: {[f['name'] for f in failed_watchers]}")
             for failed in failed_watchers:
-                self.logger.error(f"  - {failed['name']}: {failed['error']}")
+                logger.error(f"  - {failed['name']}: {failed['error']}")
 
     def convert_and_write_sql(self, df: pd.DataFrame, org_id: str = None):
         """

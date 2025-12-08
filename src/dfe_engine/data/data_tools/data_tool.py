@@ -1,14 +1,13 @@
 import json
-
 import datetime
+
 import pytz
-from clickhouse_driver import Client
-from clickhouse_driver.errors import Error as ClickHouseError
+from clickhouse_connect.driver import Client
+from clickhouse_connect.driver.exceptions import ClickHouseError
+from hs_lib.logger import logger
 
 
 class DataTool:
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.INFO)
 
     @staticmethod
     def handle_none(value):
@@ -31,15 +30,15 @@ class DataTool:
                     dt = dt.replace(tzinfo=pytz.UTC)
                 return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             except ValueError as e:
-                DataTool.logger.error(
+                logger.error(
                     f"Failed to parse datetime string: '{value}'. Error: {e}"
                 )
             except TypeError as e:
-                DataTool.logger.error(
+                logger.error(
                     f"Type error in datetime parsing: '{value}'. Error: {e}"
                 )
             except Exception as e:
-                DataTool.logger.error(
+                logger.error(
                     f"Unexpected error in datetime parsing: '{value}'. Error: {e}"
                 )
         elif isinstance(value, (int, float)):  # Handle Unix timestamps
@@ -47,15 +46,15 @@ class DataTool:
                 dt = datetime.datetime.fromtimestamp(value, tz=pytz.UTC)
                 return dt.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             except (ValueError, OSError) as e:
-                DataTool.logger.error(
+                logger.error(
                     f"Failed to parse timestamp: '{value}'. Error: {e}"
                 )
             except Exception as e:
-                DataTool.logger.error(
+                logger.error(
                     f"Unexpected error in timestamp parsing: '{value}'. Error: {e}"
                 )
         else:
-            DataTool.logger.warning(
+            logger.warning(
                 f"Unexpected value type for datetime parsing: {type(value)}"
             )
         return None  # Return None for unhandled cases
@@ -69,12 +68,12 @@ class DataTool:
             try:
                 return int(float(value))
             except ValueError:
-                DataTool.logger.info(f"Value conversion to int failed: {value}")
+                logger.info(f"Value conversion to int failed: {value}")
         elif expected_type == float and isinstance(value, (str, int)):
             try:
                 return float(value)
             except ValueError:
-                DataTool.logger.info(f"Value conversion to float failed: {value}")
+                logger.info(f"Value conversion to float failed: {value}")
         return None  # Return None for unhandled cases
 
     @staticmethod
@@ -178,14 +177,14 @@ class DataTool:
                     query = f"INSERT INTO {target_database}.{target_table} ({columns}) VALUES {values_placeholder}"
 
                     # Execute the query
-                    ch_client.execute(query)
-                    DataTool.logger.info(
+                    ch_client.command(query)
+                    logger.info(
                         f"Records inserted successfully for database {target_database} in table {target_table}."
                     )
                 else:
-                    DataTool.logger.info("No records found to insert.")
+                    logger.info("No records found to insert.")
 
         except (json.JSONDecodeError, ClickHouseError) as err:
-            DataTool.logger.error(f"Error occurred: {err}")
+            logger.error(f"Error occurred: {err}")
         except Exception as e:
-            DataTool.logger.error(f"An unexpected error occurred: {e}")
+            logger.error(f"An unexpected error occurred: {e}")

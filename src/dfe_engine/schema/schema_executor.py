@@ -1,12 +1,12 @@
 import os
-
-import json
 import re
+
 from jinja2 import Environment, FileSystemLoader
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from .schema_util import SchemaUtils
+from hs_lib.logger import logger
 
 
 class SchemaExecutor:
@@ -17,12 +17,11 @@ class SchemaExecutor:
         do_add_roles: bool = False,
         use_json_feature: bool = False,
         use_subsampling_feature: bool = False,
-        target_config_data: dict = None,
-        logger: logging.Logger = None,
-        schema_filter_list: str = None,
-        derived_schema_filter_list: str = None,
-        schema_filter_wildchar: str = None,
-        derived_schema_filter_wildchar: str = None,
+        target_config_data: Optional[dict] = None,
+        schema_filter_list: Optional[str] = None,
+        derived_schema_filter_list: Optional[str] = None,
+        schema_filter_wildchar: Optional[str] = None,
+        derived_schema_filter_wildchar: Optional[str] = None,
     ):
         """
         Initialize the SchemaExecutor instance.
@@ -31,15 +30,13 @@ class SchemaExecutor:
             dfe_output_directory (str): Path to the DFE output directory.
             organisations (Dictionary): Dictionary containing customer data.
             do_add_roles (bool, optional): Whether to add roles. Defaults to False.
-            logger (logging.Logger, optional): Logger instance. Defaults to None.
         """
         self.dfe_output_directory = dfe_output_directory
         self.organisations = organisations
         self.do_add_roles = do_add_roles
         self.target_config_data = target_config_data
-        self.logger = logger or logging.getLogger(__name__)
         self.clickhouse_manager = ClickHouseManager.get_instance(
-            self.logger, target_config_data=target_config_data
+            target_config_data=target_config_data
         )
         self.schema_filter_list = schema_filter_list
         self.derived_schema_filter_list = derived_schema_filter_list
@@ -59,7 +56,7 @@ class SchemaExecutor:
         Returns:
             str: Processed SQL command.
         """
-        env = Environment(loader=FileSystemLoader("/"), autoescape=False)
+        env = Environment(loader=FileSystemLoader("/"), autoescape=True)
         template = env.from_string(sql_template)
         return template.render(org_id=org_id)
 
@@ -73,7 +70,7 @@ class SchemaExecutor:
             Exception: If any error occurs during the execution of create roles statements.
         """
         try:
-            self.logger.info("Creating roles directly")
+            logger.info("Creating roles directly")
             
             roles_sql = []
             for organisation in self.organisations:
@@ -96,22 +93,22 @@ class SchemaExecutor:
                 ])
             
             sql_statements = [s.strip() for s in roles_sql if s.strip() and not s.strip().startswith('--')]
-            self.logger.debug(f"SQL role statements to run: {len(sql_statements)} statements found")
+            logger.debug(f"SQL role statements to run: {len(sql_statements)} statements found")
                 
             with self.clickhouse_manager.get_clickhouse_client() as ch_client:
                 for sql in sql_statements:
                     if sql:
                         try:
                             result = ch_client.execute(sql)
-                            self.logger.info(f"Executed role statement: {sql} \n Result: \n{json.dumps(result)}")
+                            logger.info(f"Executed role statement: {sql} \n Result: \n{result}")
                         except Exception as e:
-                            self.logger.warning(f"An error occurred while executing Roles in SQL: {sql}. Error: {e}")
+                            logger.warning(f"An error occurred while executing Roles in SQL: {sql}. Error: {e}")
                             continue
 
         except FileNotFoundError as e:
-            self.logger.error(f"File not found: {e}")
+            logger.error(f"File not found: {e}")
         except Exception as e:
-            self.logger.error(f"An error occurred while executing create roles statements: {e}")
+            logger.error(f"An error occurred while executing create roles statements: {e}")
             raise
     
     def run_create_database(self) -> None:
@@ -124,7 +121,7 @@ class SchemaExecutor:
             Exception: If any error occurs during the execution of create database statements.
         """
         try:
-            self.logger.info("Creating databases directly")
+            logger.info("Creating databases directly")
             
             create_database_statements = []
             for organisation in self.organisations:
@@ -139,7 +136,7 @@ class SchemaExecutor:
                     create_statement = f"CREATE DATABASE IF NOT EXISTS {org_id} ON CLUSTER {cluster_name};"
                 
                 create_database_statements.append(create_statement)
-                self.logger.info(f"Database statement prepared: {create_statement}")
+                logger.info(f"Database statement prepared: {create_statement}")
 
             with self.clickhouse_manager.get_clickhouse_client() as ch_client:
                 for sql in create_database_statements:
@@ -147,18 +144,18 @@ class SchemaExecutor:
                         db_name = sql.split("CREATE DATABASE IF NOT EXISTS ")[1].split(";")[0].split(" ")[0]
                         
                         result = ch_client.execute(sql)
-                        self.logger.info(f"Executed database statement: {sql} \n Result: {json.dumps(result)}")
+                        logger.info(f"Executed database statement: {sql} \n Result: {result}")
                         
                         verify_query = f"SELECT name FROM system.databases WHERE name = '{db_name}'"
                         verify_result = ch_client.execute(verify_query)
                         
                         if verify_result:
-                            self.logger.info(f"✅ Database '{db_name}' exists and is accessible.")
+                            logger.info(f"✅ Database '{db_name}' exists and is accessible.")
                         else:
-                            self.logger.warning(f"⚠️ Database '{db_name}' could not be verified after creation!")
+                            logger.warning(f"⚠️ Database '{db_name}' could not be verified after creation!")
 
         except Exception as e:
-            self.logger.error(f"An error occurred while executing create database statements: {e}")
+            logger.error(f"An error occurred while executing create database statements: {e}")
             raise
     
     def run_sql_scripts(self):
@@ -166,24 +163,24 @@ class SchemaExecutor:
         Orchestrates the execution of SQL scripts for creating databases, tables, and roles.
         """
         try:
-            self.logger.info("Starting SQL script execution.")
+            logger.info("Starting SQL script execution.")
             
-            self.logger.info("Step 1: Creating databases for all organizations")
+            logger.info("Step 1: Creating databases for all organizations")
             self.run_create_database()
             
-            self.logger.info("Step 2: Creating tables from SQL scripts")
+            logger.info("Step 2: Creating tables from SQL scripts")
             self.process_sql_scripts()
             
             if self.do_add_roles:
-                self.logger.info("Step 3: Creating and assigning roles")
+                logger.info("Step 3: Creating and assigning roles")
                 self.run_create_roles()
             else:
-                self.logger.info("Step 3: Skipped - Roles were not requested to be applied to ClickHouse.")
+                logger.info("Step 3: Skipped - Roles were not requested to be applied to ClickHouse.")
         except Exception as e:
-            self.logger.error(f"An error occurred during SQL script execution. {e}", exc_info=True)
+            logger.error(f"An error occurred during SQL script execution. {e}", exc_info=True)
         finally:
             self.clickhouse_manager.cleanup()
-            self.logger.debug("SQL script execution completed and resources cleaned up.")
+            logger.debug("SQL script execution completed and resources cleaned up.")
 
     def process_sql_scripts(self) -> None:
         """
@@ -191,11 +188,11 @@ class SchemaExecutor:
         """
         try:
             customer_data = SchemaUtils.read_customer_list(
-                organisations=self.organisations, logger=self.logger
+                organisations=self.organisations, logger=logger
             )
-            self.logger.info(f"customer data {customer_data}")
+            logger.info(f"customer data {customer_data}")
             schema_files = set(self.collect_schema_files(customer_data))
-            self.logger.info(f"schema files {schema_files}")
+            logger.info(f"schema files {schema_files}")
             # Execute SQL files concurrently
             with ThreadPoolExecutor() as executor:
                 futures = {
@@ -210,13 +207,13 @@ class SchemaExecutor:
                     sql_file = futures[future]
                     try:
                         future.result()
-                        self.logger.info(f"Successfully executed SQL file: {sql_file}")
+                        logger.info(f"Successfully executed SQL file: {sql_file}")
                     except Exception as exc:
-                        self.logger.error(
+                        logger.error(
                             f"SQL file {sql_file} generated an exception: {exc}"
                         )
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"An error occurred while processing the SQL scripts: {e}",
                 exc_info=True,
             )
@@ -236,8 +233,6 @@ class SchemaExecutor:
             for root, _, files in SchemaUtils.walk_schema_directory(
                 dfe_output_directory=self.dfe_output_directory
             ):
-                if "opensearch" in root:
-                    continue
                 schema_files.extend(
                     SchemaUtils.filter_schema_files(
                         org_id,
@@ -253,7 +248,7 @@ class SchemaExecutor:
         if not schema_files:
             return []
 
-        self.logger.info(f"Using the following list of schemas: '{schema_files}'.")
+        logger.info(f"Using the following list of schemas: '{schema_files}'.")
         return schema_files
 
     def parse_table_name(self, ddl: str) -> tuple:
@@ -294,12 +289,12 @@ class SchemaExecutor:
                     columns = [row[0] for row in describe_result]
                     return columns
                 except Exception as e:
-                    self.logger.warning(
+                    logger.warning(
                         f"Failed to describe table {database_name}.{table_name}: {e}"
                     )
                     return []
             else:
-                self.logger.info(
+                logger.info(
                     f"Table {database_name}.{table_name} does not exist."
                 )
                 return []
@@ -330,7 +325,7 @@ class SchemaExecutor:
             file_name (str): Name of the SQL file.
         """
         sql_file_path = os.path.join(root, file_name)
-        self.logger.debug(f"\n\n*** Executing SQL files for org_id: {org_id} ***\n\n")
+        logger.debug(f"\n\n*** Executing SQL files for org_id: {org_id} ***\n\n")
 
         try:
             with open(sql_file_path, "r", encoding="utf-8") as ddl_file:
@@ -341,9 +336,9 @@ class SchemaExecutor:
                     if self.use_json_feature:
                         set_json_type_command = "SET allow_experimental_json_type = 1;"
                         ch_client.execute(set_json_type_command)
-                        self.logger.debug(f"Executed: {set_json_type_command}")
+                        logger.debug(f"Executed: {set_json_type_command}")
                     else:
-                        self.logger.debug(
+                        logger.debug(
                             "Skipping experimental JSON feature, running apply-schema without it."
                         )
 
@@ -356,15 +351,15 @@ class SchemaExecutor:
                         )
 
                         if not schema_exists:
-                            self.logger.info(
+                            logger.info(
                                 f"Table {database_name}.{table_name} does not exist. Creating new table."
                             )
-                            self.logger.debug(
+                            logger.debug(
                                 f"Executing SQL: [{sql_command}] for org_id: {org_id}"
                             )
                             result = ch_client.execute(sql_command)
-                            self.logger.debug(
-                                f"Executed {sql_file_path}. Result: {json.dumps(result)}"
+                            logger.debug(
+                                f"Executed {sql_file_path}. Result: {result}"
                             )
                             
                             # Verify table was actually created
@@ -375,16 +370,16 @@ class SchemaExecutor:
                                 raise Exception(
                                     f"Table {database_name}.{table_name} was not created successfully despite successful SQL execution"
                                 )
-                            self.logger.info(
+                            logger.info(
                                 f"Table {database_name}.{table_name} created successfully."
                             )
                         else:
-                            self.logger.warning(
+                            logger.warning(
                                 f"Table {database_name}.{table_name} already exists. No action performed."
                             )
 
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"Failed to execute SQL from {sql_file_path} for org_id {org_id}. Error: {e}",
                 exc_info=True,
             )

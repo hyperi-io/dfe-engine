@@ -1,0 +1,16 @@
+{
+  "container.labels": {
+    "subobjects": false,
+    "type": "object"
+  },
+  "labels": {
+    "subobjects": false,
+    "type": "object"
+  },
+  "metrics.count": {
+    "type": "long"
+  },
+  "metrics.sum": {
+    "type": "double"
+  }
+}

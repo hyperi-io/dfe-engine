@@ -1,0 +1,47 @@
+{
+  "dll.code_signature.exists": {
+    "type": "boolean"
+  },
+  "dll.code_signature.subject_name": {
+    "type": "keyword"
+  },
+  "dll.code_signature.trusted": {
+    "type": "boolean"
+  },
+  "dll.name": {
+    "type": "keyword"
+  },
+  "dll.path": {
+    "type": "keyword"
+  },
+  "process.code_signature.digest_algorithm": {
+    "type": "keyword"
+  },
+  "process.code_signature.exists": {
+    "type": "boolean"
+  },
+  "process.code_signature.signing_id": {
+    "type": "keyword"
+  },
+  "process.code_signature.status": {
+    "type": "keyword"
+  },
+  "process.code_signature.subject_name": {
+    "type": "keyword"
+  },
+  "process.code_signature.team_id": {
+    "type": "keyword"
+  },
+  "process.code_signature.timestamp": {
+    "type": "date"
+  },
+  "process.code_signature.trusted": {
+    "type": "boolean"
+  },
+  "process.code_signature.valid": {
+    "type": "boolean"
+  },
+  "process.executable": {
+    "type": "keyword"
+  }
+}

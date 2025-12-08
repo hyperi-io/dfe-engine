@@ -1,0 +1,12 @@
+{
+  "distance": {
+    "type": "float"
+  },
+  "labels": {
+    "type": "flattened"
+  },
+  "route_length_miles": {
+    "path": "distance",
+    "type": "alias"
+  }
+}

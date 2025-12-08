@@ -1,12 +1,12 @@
 import os
 import sys
-
 from pathlib import Path
-import pandas as pd
 from importlib import resources
 from zipfile import ZipFile
+
+import pandas as pd
 from tabulate import tabulate
-from typing import List
+from typing import Any, List
 from hs_lib.logger import logger
 from ..config.config_loader import DFEConfigLoader
 from ..clickhouse.clickhouse_manager import ClickHouseManager
@@ -41,7 +41,6 @@ class SchemaController:
         args_derived_schema_filter_wildchar: str = None,
         verbose: bool = False,
         args_max_workers: int = 4,
-        opensearch_flag: bool = False,
     ) -> None:
         """
         Build schemas based on the given configuration.
@@ -65,11 +64,7 @@ class SchemaController:
             args_derived_schema_filter_wildchar (str): Filter the sub-schemas using wildchar.
             verbose (bool): For detailed logging.
             args_max_workers (int): Max number of workers for multithreading
-            opensearch_flag (bool): For OpenSearch Schemas
         """
-
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logger = logger
 
         with SchemaController.lock:
             try:
@@ -137,7 +132,6 @@ class SchemaController:
                     all=args_all,
                     only_beats=args_only_beats,
                     max_workers=args_max_workers,
-                    opensearch_flag=opensearch_flag,
                 )
                 schema_builder.build()
                 logger.debug(
@@ -182,9 +176,6 @@ class SchemaController:
         Returns:
             List: If is_api_call is True, returns a list of plan results. Otherwise returns None.
         """
-
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logger = logger
 
         try:
             DFEConfigLoader.print_target(
@@ -316,9 +307,6 @@ class SchemaController:
         Returns:
             list[dict]: If is_api_call is True, returns a list of modification results. Otherwise returns None.
         """
-
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logger = logger
 
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
@@ -472,9 +460,6 @@ class SchemaController:
             verbose (bool): For detailed logging.
         """
 
-        log_level = logging.DEBUG if verbose else logging.INFO
-        logger = logger
-
         with SchemaController.lock:
             try:
                 dfe_config = DFEConfigLoader.load_dfe_package(
@@ -564,7 +549,7 @@ class SchemaController:
         )
 
     @staticmethod
-    def get_resource_path(logger: logging.Logger, package: str, resource_path: str):
+    def get_resource_path(logger: Any, package: str, resource_path: str):
         """
         Gets the full path of the resource within a package.
         """
@@ -576,7 +561,7 @@ class SchemaController:
 
     @staticmethod
     def read_all_schemas_from_directory(
-        logger: logging.Logger, directory_path: Path
+        logger: Any, directory_path: Path
     ) -> List[dict[str, str]]:
         meta_schemas = []
 
@@ -613,7 +598,7 @@ class SchemaController:
 
     @staticmethod
     def read_common_types_from_package(
-        logger: logging.Logger, dfe_package_file_path: str
+        logger: Any, dfe_package_file_path: str
     ) -> List[dict[str, str]]:
         meta_schemas = []
 
@@ -661,7 +646,6 @@ class SchemaController:
     def download_meta_schemas(
         args_dfe_package_file_path: str, args_log_path: str, args_output_zip: str
     ) -> None:
-        logger = logger
 
         csv_files = []
 
@@ -704,7 +688,6 @@ class SchemaController:
         args_log_path: str,
         args_dfe_package_file_path: str,
     ) -> None:
-        logger = logger
 
         try:
             dfe_config_data = DFEConfigLoader.load_dfe_package(
@@ -757,7 +740,6 @@ class SchemaController:
     def describe_dfe_clickhouse_schema_types(
         args_log_path: str, args_dfe_package_file_path: str
     ) -> None:
-        logger = logger
         meta_schemas = SchemaController.read_common_types_from_package(
             logger=logger, dfe_package_file_path=args_dfe_package_file_path
         )
@@ -796,7 +778,6 @@ class SchemaController:
         args_template_version: str,
         args_log_path: str,
     ) -> None:
-        logger = logger
 
         try:
             dfe_config_data = DFEConfigLoader.load_dfe_package(
@@ -853,7 +834,6 @@ class SchemaController:
         Returns:
             bool value
         """
-        logger = logger
         with SchemaController.lock:
             try:
                 dfe_config = DFEConfigLoader.load_dfe_package(config_file_path=args_dfe_package_file_path)
@@ -864,7 +844,7 @@ class SchemaController:
 
         target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
         target_config_data = DFEConfigLoader.read_target_config(target_name="hypersec", targets_file_path=target_path)
-        clickhouse_manager = ClickHouseManager.get_instance(logger, target_config_data=target_config_data)
+        clickhouse_manager = ClickHouseManager.get_instance(target_config_data=target_config_data)
         query = f"SELECT name FROM system.tables WHERE database = '{database_name}' AND name = '{table_name}'"
         with clickhouse_manager.get_clickhouse_client() as ch_client:
             result = ch_client.execute(query)
