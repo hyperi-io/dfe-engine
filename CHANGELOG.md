@@ -1,3 +1,10 @@
+## [1.1.1](https://github.com/hypersec-io/dfe-engine/compare/v1.1.0...v1.1.1) (2025-12-08)
+
+
+### Bug Fixes
+
+* move ClickHouse integration tests to tests/integration ([7e6f28b](https://github.com/hypersec-io/dfe-engine/commit/7e6f28b6a4cea1db7a1985ec60af0e851b7f82fb))
+
 # [1.1.0](https://github.com/hypersec-io/dfe-engine/compare/v1.0.0...v1.1.0) (2025-12-08)
 
 
