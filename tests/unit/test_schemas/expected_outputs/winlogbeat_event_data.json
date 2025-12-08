@@ -1,0 +1,53 @@
+{
+  "winlog.channel": {
+    "type": "keyword"
+  },
+  "winlog.event_data.CommandLine": {
+    "type": "wildcard"
+  },
+  "winlog.event_data.CommandLine.text": {
+    "type": "text"
+  },
+  "winlog.event_data.IpAddress": {
+    "type": "ip"
+  },
+  "winlog.event_data.IpPort": {
+    "type": "long"
+  },
+  "winlog.event_data.LogonType": {
+    "type": "keyword"
+  },
+  "winlog.event_data.ProcessId": {
+    "type": "long"
+  },
+  "winlog.event_data.ProcessName": {
+    "type": "keyword"
+  },
+  "winlog.event_data.ProcessName.text": {
+    "type": "text"
+  },
+  "winlog.event_data.SubjectDomainName": {
+    "type": "keyword"
+  },
+  "winlog.event_data.SubjectUserName": {
+    "type": "keyword"
+  },
+  "winlog.event_data.SubjectUserSid": {
+    "type": "keyword"
+  },
+  "winlog.event_data.TargetDomainName": {
+    "type": "keyword"
+  },
+  "winlog.event_data.TargetUserName": {
+    "type": "keyword"
+  },
+  "winlog.event_id": {
+    "type": "keyword"
+  },
+  "winlog.provider_name": {
+    "type": "keyword"
+  },
+  "winlog.user_data": {
+    "type": "flattened"
+  }
+}

@@ -1,176 +1,95 @@
-# Project State
+# DFE Engine - Project State
 
 **Project:** DFE Engine
-**Purpose:** Core library for Data Fusion Engine - shared business logic for CLI, control plane, and other consumers
-**Status:** Initial Setup
+**Version:** 1.0.0
+**Status:** Active Development
 
 ---
 
-## Current Session (2025-12-05)
+## Current State
 
-### Session Goals
+### Completed Phases
 
-- [x] Create dfe-engine repository
-- [x] Attach CI and AI submodules
-- [ ] Copy business logic modules from dfe-cli-core
-- [ ] Apply remediation (hs-lib logger, security fixes)
+1. **Repository Setup** - Repository created with CI/AI submodules
+2. **Package Structure** - `src/dfe_engine/` with all core modules
+3. **Logging Migration** - All files using hs-lib logger
+4. **Settings Module** - Pydantic-based config with env cascade
+5. **YAML Consolidation** - All YAML ops using ruamel.yaml via yaml_utils
+6. **ClickHouse Migration** - Using clickhouse-connect with built-in pooling
+7. **Security Fixes** - B113 (timeouts), B701 (Jinja2 autoescape)
+8. **Docker Setup** - docker-compose.yml with profiles for dev/test
+9. **Environment Variables** - DFE_ prefix for K8s compatibility
+10. **psycopg3 Migration** - Updated from psycopg2 to psycopg3
 
-### Progress
+### Test Status
 
-**Completed:**
+| Test Suite | Passed | Failed | Notes |
+|------------|--------|--------|-------|
+| Schema Unit Tests | 67 | 19 | cityHash64 PRIMARY KEY tests need review |
+| Pipeline Tests | ✓ | - | Passing |
+| Sigma Tests | ✓ | - | Passing |
 
-- Repository created at github.com/hypersec-io/dfe-engine
-- CI submodule attached with Python workflows
-- AI submodule attached with Claude Code setup
-- Package structure created (src/dfe_engine/)
-- pyproject.toml configured with dependencies
+### Known Issues
 
-**In Progress:**
-
-- Migrating modules from dfe-cli-core
-
-**Blocked:**
-
-- None
+1. **cityHash64 in PRIMARY KEY** - Schema generation adds `cityHash64(timestamp_load)` to PRIMARY KEY. Tests expect the original keys without the hash. Need to verify if this is intentional behavior or a regression.
 
 ---
 
-## Project Overview
+## Module Status
 
-### Architecture
+| Module | Status | Notes |
+|--------|--------|-------|
+| `clickhouse/` | ✅ Ready | clickhouse-connect migration complete |
+| `config/` | ✅ Ready | Target management working |
+| `schema/` | ⚠️ Testing | 19 test failures to investigate |
+| `pipeline/` | ✅ Ready | Vector pipeline generation |
+| `sigma/` | ✅ Ready | Sigma rule conversion |
+| `hunts/` | ✅ Ready | Hunt scheduling |
+| `watcher_converter/` | ✅ Ready | Elastic Watcher conversion |
+| `opensearch/` | ✅ Ready | OpenSearch templates |
+| `settings.py` | ✅ Ready | Pydantic config cascade |
+| `yaml_utils.py` | ✅ Ready | Consolidated YAML operations |
 
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│                    Consuming Applications                        │
-├────────────────────────────┬────────────────────────────────────┤
-│       dfe-cli              │        dfe-control-plane           │
-│   (Click CLI wrapper)      │     (Control Plane Service)        │
-└─────────────┬──────────────┴──────────────┬─────────────────────┘
-              │                             │
-              └──────────────┬──────────────┘
-                             ▼
-              ┌─────────────────────────────┐
-              │         dfe-engine          │  ← THIS REPO
-              │   (Shared Library Package)  │
-              └──────────────┬──────────────┘
-                             │
-                             ▼
-              ┌─────────────────────────────┐
-              │          hs-lib             │
-              │   (Common Utilities)        │
-              └─────────────────────────────┘
+---
+
+## Dependencies
+
+### Runtime
+
+- `hs-lib>=2.12.3` - Logging and common utilities
+- `clickhouse-connect>=0.10.0` - ClickHouse client
+- `pandas>=2.2.3` - DataFrame operations
+- `ruamel-yaml>=0.18.6` - YAML parsing
+- `pysigma>=1.0.2` - Sigma rule conversion
+- `psycopg[binary]>=3.2.0` - PostgreSQL client
+
+### Development
+
+- `pytest>=8.3.0` - Testing framework
+- `pytest-xdist>=3.5.0` - Parallel test execution
+- `ruff>=0.8.0` - Linting
+
+---
+
+## Infrastructure
+
+### Docker Services
+
+```bash
+# Start for development/testing
+docker compose --profile test up -d
+
+# Services
+- dfe-clickhouse (ports 8123, 9000)
+- dfe-postgres (port 5432)
 ```
 
-### Key Components
+### Environment Variables
 
-1. **clickhouse/** - ClickHouse connection management
-2. **config/** - Configuration loading and validation
-3. **schema/** - Schema creation, versioning, deployment
-4. **pipeline/** - Vector pipeline generation
-5. **opensearch/** - OpenSearch integration and templates
-6. **sigma/** - Sigma rule conversion to ClickHouse
-7. **hunts/** - Hunt scheduling and execution
-8. **watcher_converter/** - Elastic Watcher conversion
-9. **data_tools/** - Data utilities
-
-### Tech Stack
-
-- **Language:** Python 3.12+
-- **Dependencies:** hs-lib (logging), pandas, clickhouse-driver, pysigma
-- **Build:** Hatch/UV
-- **Database:** ClickHouse, OpenSearch
+All use `DFE_` prefix:
+- `DFE_CLICKHOUSE_HOST`, `DFE_CLICKHOUSE_PORT`, etc.
+- `DFE_POSTGRES_HOST`, `DFE_POSTGRES_PORT`, etc.
 
 ---
 
-## Migration Source
-
-This library is being extracted from `dfe-cli-core` repository.
-
-**Source modules (dfe-cli-core/src/dfecli/):**
-
-| Source Module | Target Module |
-|---------------|---------------|
-| `dfe_clickhouse/` | `clickhouse/` |
-| `dfe_config/` | `config/` |
-| `dfe_schemabuilder/` | `schema/` |
-| `dfe_pipelinebuilder/` | `pipeline/` |
-| `dfe_opensearch/` | `opensearch/` |
-| `dfe_sigma/` | `sigma/` |
-| `dfe_async_hunts/` | `hunts/` |
-| `dfe_elastic_watcher_converter/` | `watcher_converter/` |
-| `data/data_tools/` | `data_tools/` |
-| `resources/` | `resources/` |
-
----
-
-## Remediation Required
-
-### 1. Logging Migration
-
-Replace all `DFELog` with `hs-lib` logger:
-
-```python
-# OLD
-from dfecli.dfe_logger.dfe_logger import DFELog
-log = DFELog.get_root_logger(...)
-
-# NEW
-from hs_lib.logger import logger
-```
-
-### 2. Security Fixes (Bandit)
-
-| Issue | Fix |
-|-------|-----|
-| B113 | Add `timeout=30` to requests calls |
-| B506 | Use `yaml.safe_load()` |
-| B701 | Use `autoescape=True` in Jinja2 |
-| B108 | Use `tempfile.mkdtemp()` |
-
-### 3. Dependency Modernization
-
-- Remove upper bounds on versions
-- Use `>=` constraints
-
----
-
-## Next Steps
-
-**Immediate (this session):**
-
-1. Copy modules from dfe-cli-core
-2. Rename module paths (dfe_* → dfe_engine.*)
-3. Replace DFELog with hs-lib logger
-
-**Short-term:**
-
-1. Fix security issues
-2. Add tests
-3. Verify >80% coverage
-4. Initial publish to JFrog
-
-**Long-term:**
-
-1. Update dfe-cli to use dfe-engine
-2. Update dfe-control-plane to use dfe-engine
-
----
-
-## Resources
-
-**Related Repositories:**
-
-- [dfe-cli-core](https://github.com/hypersec-io/dfe-cli-core) - Source (being deprecated)
-- [dfe-cli](https://github.com/hypersec-io/dfe-cli) - CLI consumer (to be created)
-- [dfe-control-plane](https://github.com/hypersec-io/dfe-control-plane) - Control plane consumer
-- [hs-lib](https://github.com/hypersec-io/hs-lib) - Common utilities
-
-**Documentation:**
-
-- [SCOPE.md in dfe-cli-core](../dfe-cli-core/SCOPE.md) - Full migration plan
-
----
-
-**Last Updated:** 2025-12-05
-**Version:** 0.1.0
-**Status:** Initial Setup
+**Last Updated:** 2025-12-08

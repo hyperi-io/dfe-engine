@@ -1,0 +1,48 @@
+{
+  "container.cpu.usage": {
+    "type": "double"
+  },
+  "container.disk.read.bytes": {
+    "type": "long"
+  },
+  "container.disk.write.bytes": {
+    "type": "long"
+  },
+  "container.id": {
+    "ignore_above": 1024,
+    "normalizer": "lowercase_normalizer",
+    "type": "keyword"
+  },
+  "container.image.name": {
+    "ignore_above": 1024,
+    "normalizer": "lowercase_normalizer",
+    "type": "keyword"
+  },
+  "container.image.tag": {
+    "ignore_above": 1024,
+    "normalizer": "lowercase_normalizer",
+    "type": "keyword"
+  },
+  "container.labels": {
+    "type": "object"
+  },
+  "container.memory.usage": {
+    "type": "double"
+  },
+  "container.name": {
+    "ignore_above": 1024,
+    "normalizer": "lowercase_normalizer",
+    "type": "keyword"
+  },
+  "container.network.egress.bytes": {
+    "type": "long"
+  },
+  "container.network.ingress.bytes": {
+    "type": "long"
+  },
+  "container.runtime": {
+    "ignore_above": 1024,
+    "normalizer": "lowercase_normalizer",
+    "type": "keyword"
+  }
+}

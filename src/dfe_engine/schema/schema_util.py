@@ -1,5 +1,6 @@
 """Schema utility functions for the DFE data engine."""
 
+from hs_lib.logger import logger
 from pathlib import Path
 import re
 import os
@@ -84,7 +85,6 @@ class SchemaUtils:
         "type",
         "clickhouse_type",
         "clickhouse_type_index",
-        "opensearch_type",
         "comment",
     ]
 
@@ -94,10 +94,9 @@ class SchemaUtils:
         "default",
         "index_order",
         "index_type",
-        "os_order",
         "comment",
     ]
-    COLUMNS_SUB_SCHEMA = ["column", "index_order", "os_order"]
+    COLUMNS_SUB_SCHEMA = ["column", "index_order"]
     COLUMNS_TYPE_MAPS_ES = ["es_type", "type"]
     COLUMNS_UNFIED_SCHEMA = [
         "source_device_schema",
@@ -139,14 +138,14 @@ class SchemaUtils:
 
     @staticmethod
     def read_customer_list(
-        organisations: List[Dict[str, str]], logger: logging.Logger
+        organisations: List[Dict[str, str]], logger: Any
     ) -> Dict[str, Dict[str, str]]:
         """
         Read the customer list from the input organisations list.
 
         Parameters:
             organisations (List[Dict[str, str]]): List of organisation dictionaries.
-            logger (logging.Logger): Logger instance for logging messages.
+            logger (Any): Logger instance for logging messages.
 
         Returns:
             Dict[str, Dict[str, str]]: Dictionary containing customer information.
@@ -421,7 +420,7 @@ class SchemaUtils:
         resource_path: str,
         column_names: List[str],
         dup_column: str,
-        logger: Optional[logging.Logger] = None,
+        logger: Optional[Any] = None,
     ) -> pd.DataFrame:
         """
         Load a type map CSV file from a resource package and validate its structure.
@@ -431,7 +430,7 @@ class SchemaUtils:
             resource_path (str): Resource name within the package.
             column_names (List[str]): List of expected column names in the CSV.
             dup_column (str): Column name to check for duplicates.
-            logger (Optional[logging.Logger]): Logger for logging messages.
+            logger (Optional[Any]): Logger for logging messages.
 
         Returns:
             pd.DataFrame: DataFrame containing the loaded CSV data.
@@ -473,7 +472,7 @@ class SchemaUtils:
 
     @staticmethod
     def load_derived_schema(
-        derived_schema_full_path: str, name: str, logger: logging.Logger
+        derived_schema_full_path: str, name: str, logger: Any
     ):
         """
         Load and validate the sub-schema.
@@ -518,7 +517,7 @@ class SchemaUtils:
 
     @staticmethod
     def load_additional_fields(
-        additional_fields_full_path: str, name: str, logger: logging.Logger
+        additional_fields_full_path: str, name: str, logger: Any
     ):
         """
         Load additional fields from the given path.
@@ -526,7 +525,7 @@ class SchemaUtils:
         Args:
             additional_fields_full_path (str): Path to the additional fields CSV file.
             name (str): The name used for logging.
-            logger (logging.Logger): Logger instance for logging messages.
+            logger (Any): Logger instance for logging messages.
 
         Returns:
             Union[pd.DataFrame, pd._libs.missing.NAType]: Loaded additional fields DataFrame or pd.NA if the file doesn't exist.
@@ -552,7 +551,7 @@ class SchemaUtils:
     def apply_additional_fields(
         meta_schema_df: pd.DataFrame,
         additional_schema_df: pd.DataFrame,
-        logger: logging.Logger,
+        logger: Any,
     ) -> pd.DataFrame:
         """
         Apply additional fields to the core schema.
@@ -560,7 +559,7 @@ class SchemaUtils:
         Args:
             meta_schema_df (pd.DataFrame): The core schema DataFrame.
             additional_schema_df (Union[pd.DataFrame, pd._libs.missing.NAType]): The additional fields DataFrame or pd.NA if not available.
-            logger (logging.Logger): Logger instance for logging messages.
+            logger (Any): Logger instance for logging messages.
 
         Returns:
             pd.DataFrame: Updated meta_schema_df with additional fields appended.
@@ -580,7 +579,7 @@ class SchemaUtils:
         return meta_schema_df
 
     @staticmethod
-    def apply_derived_schema(meta_schema_df: pd.DataFrame, derived_schema_df:pd.DataFrame, logger: logging.Logger):
+    def apply_derived_schema(meta_schema_df: pd.DataFrame, derived_schema_df: pd.DataFrame, logger: Any):
         """
         Apply the sub-schema to the core schema.
 
@@ -596,39 +595,50 @@ class SchemaUtils:
             logger.warning("No sub-schema to apply.")
             return meta_schema_df
 
-        field_set = set()
+        # Vectorized: Build field_set and parent_to_children mapping
+        all_columns = pd.concat([meta_schema_df['column'], derived_schema_df['column']], ignore_index=True)
+        field_set = set(all_columns)
+
+        # Vectorized: Extract parent fields (fields containing '.')
+        has_dot = all_columns.str.contains('.', regex=False)
+        dotted_columns = all_columns[has_dot]
+        parents = dotted_columns.str.split('.').str[0]
+
+        # Build parent_to_children using groupby
         parent_to_children = {}
-        for df in [meta_schema_df, derived_schema_df]:
-            for _, row in df.iterrows():
-                field = row['column']
-                field_set.add(field)
-                if '.' in field:
-                    parent = field.split('.')[0]
-                    if parent not in parent_to_children:
-                        parent_to_children[parent] = set()
-                    parent_to_children[parent].add(field)
+        if len(parents) > 0:
+            parent_child_df = pd.DataFrame({'parent': parents, 'child': dotted_columns})
+            for parent, group in parent_child_df.groupby('parent'):
+                parent_to_children[parent] = set(group['child'])
+
+        # Find fields to remove (parents with only one child that exist in field_set)
+        fields_to_remove = {
+            parent for parent, children in parent_to_children.items()
+            if parent in field_set and len(children) == 1
+        }
 
         result_df = meta_schema_df.copy()
-        fields_to_remove = set()
-        for parent, children in parent_to_children.items():
-            if parent in field_set and len(children) == 1:
-                fields_to_remove.add(parent)
-
         if fields_to_remove:
             result_df = result_df[~result_df['column'].isin(fields_to_remove)]
 
         meta_schema_df = result_df
-        wildcard_cols = [col.rstrip('*') for col in derived_schema_df['column'] if col.endswith('*')]
-        exact_cols = derived_schema_df['column'][~derived_schema_df['column'].str.endswith('*')]
-        meta_schema_df = meta_schema_df[
-            meta_schema_df['column'].isin(exact_cols) |
-            meta_schema_df['column'].str.startswith(tuple(wildcard_cols))
-        ]
-        has_valid_index_order = (
-            'index_order' in derived_schema_df.columns and 
-            derived_schema_df['index_order'].notna().any() and
-            derived_schema_df['index_order'].apply(lambda x: isinstance(x, (int, float))).any()
-        )
+
+        # Vectorized: Filter by wildcard and exact matches
+        wildcard_mask = derived_schema_df['column'].str.endswith('*')
+        wildcard_cols = derived_schema_df.loc[wildcard_mask, 'column'].str.rstrip('*').tolist()
+        exact_cols = set(derived_schema_df.loc[~wildcard_mask, 'column'])
+
+        # Build filter mask
+        in_exact = meta_schema_df['column'].isin(exact_cols)
+        starts_with_wildcard = meta_schema_df['column'].str.startswith(tuple(wildcard_cols)) if wildcard_cols else False
+        meta_schema_df = meta_schema_df[in_exact | starts_with_wildcard].copy()  # Make a copy to avoid SettingWithCopyWarning
+
+        # Vectorized: Check for valid index_order (numeric values)
+        has_valid_index_order = False
+        if 'index_order' in derived_schema_df.columns:
+            # Check if any non-null values exist that are numeric
+            idx_order = derived_schema_df['index_order']
+            has_valid_index_order = idx_order.notna().any() and pd.api.types.is_numeric_dtype(idx_order.dropna())
 
         if has_valid_index_order:
             logger.debug('Clearing base schema index_order for sub-schema override')
@@ -636,15 +646,10 @@ class SchemaUtils:
             meta_schema_df['index_order'] = meta_schema_df['index_order'].astype('Int64')
             meta_schema_df.loc[:, 'index_order'] = pd.NA
 
+            # Merge only 'column' and 'index_order' - other columns are handled via override lookup
             merge_columns = ['column']
             if 'index_order' in derived_schema_df.columns:
                 merge_columns.append('index_order')
-            if 'index_type' in derived_schema_df.columns:
-                merge_columns.append('index_type')
-            if 'type' in derived_schema_df.columns:
-                merge_columns.append('type')
-            if 'default' in derived_schema_df.columns:
-                merge_columns.append('default')
 
             meta_schema_df = meta_schema_df.merge(
                 derived_schema_df[merge_columns],
@@ -653,31 +658,46 @@ class SchemaUtils:
                 suffixes=('', '_sub')
             )
 
-            if 'index_order' in derived_schema_df.columns:
+            # Replace index_order with the merged values from derived schema
+            if 'index_order_sub' in meta_schema_df.columns:
                 meta_schema_df['index_order'] = meta_schema_df['index_order_sub']
                 meta_schema_df.drop(columns=['index_order_sub'], inplace=True)
-            
+
+            # Vectorized override: use derived_schema_df for lookups (not merged columns)
             for col in ['index_type', 'type', 'index_order', 'default']:
                 if col in derived_schema_df.columns:
-                    derived_map = derived_schema_df.set_index('column')[col].dropna().to_dict()
-                    def override_func(row, col=col, derived_map=derived_map):
-                        v = derived_map.get(row['column'], None)
-                        if v is not None and str(v).strip() != '':
-                            return v
-                        return row[col]
-                    meta_schema_df[col] = meta_schema_df.apply(override_func, axis=1)
+                    # Build mapping from column name to override value using original derived_schema_df
+                    derived_subset = derived_schema_df[['column', col]].dropna(subset=[col])
+                    # Filter out empty strings
+                    derived_subset = derived_subset[derived_subset[col].astype(str).str.strip() != '']
+                    if len(derived_subset) > 0:
+                        override_map = dict(zip(derived_subset['column'], derived_subset[col]))
+                        # Apply override using list comprehension (faster than apply, handles mixed types)
+                        original_values = meta_schema_df[col].tolist()
+                        column_names = meta_schema_df['column'].tolist()
+                        new_values = [
+                            override_map.get(col_name, orig_val)
+                            for col_name, orig_val in zip(column_names, original_values)
+                        ]
+                        meta_schema_df[col] = new_values
         else:
             logger.warning('No valid index_order values found in derived schema.')
 
+            # Vectorized override for non-index_order columns
             for col in ['index_type', 'type', 'default']:
                 if col in derived_schema_df.columns:
-                    derived_map = derived_schema_df.set_index('column')[col].dropna().to_dict()
-                    def override_func(row, col=col, derived_map=derived_map):
-                        v = derived_map.get(row['column'], None)
-                        if v is not None and str(v).strip() != '':
-                            return v
-                        return row[col]
-                    meta_schema_df[col] = meta_schema_df.apply(override_func, axis=1)
+                    derived_subset = derived_schema_df[['column', col]].dropna(subset=[col])
+                    derived_subset = derived_subset[derived_subset[col].astype(str).str.strip() != '']
+                    if len(derived_subset) > 0:
+                        override_map = dict(zip(derived_subset['column'], derived_subset[col]))
+                        # Apply override using list comprehension
+                        original_values = meta_schema_df[col].tolist()
+                        column_names = meta_schema_df['column'].tolist()
+                        new_values = [
+                            override_map.get(col_name, orig_val)
+                            for col_name, orig_val in zip(column_names, original_values)
+                        ]
+                        meta_schema_df[col] = new_values
 
         meta_schema_df.reset_index(drop=True, inplace=True)
         SchemaUtils.drop_duplicates(meta_schema_df)
@@ -776,7 +796,7 @@ class SchemaUtils:
 
     @staticmethod
     def load_pd_csv(
-        csv_filename: str, schema_name: str, logger: logging.Logger
+        csv_filename: str, schema_name: str, logger: Any
     ) -> pd.DataFrame:
         """
         Load a CSV file into a Pandas DataFrame.
@@ -833,18 +853,28 @@ class SchemaUtils:
         src_schema_columns: List[str],
         source_filename: str,
         type_map_df: pd.DataFrame,
-        logger: logging.Logger,
+        logger: Any,
     ) -> None:
-        schema_columns = sorted(src_schema_columns)
-        cols_df = sorted(df_to_check.columns.tolist())
+        required_columns = set(src_schema_columns)
+        actual_columns = set(df_to_check.columns.tolist())
 
-        if cols_df != schema_columns:
+        # Check for missing required columns (error)
+        missing_columns = required_columns - actual_columns
+        if missing_columns:
             msg = (
-                f"Schema CSV file is missing or has additional columns. Should contain: "
-                f"{', '.join(schema_columns)}; File: {source_filename}."
+                f"Schema CSV file is missing required columns: {', '.join(sorted(missing_columns))}; "
+                f"File: {source_filename}."
             )
             logger.error(msg)
             raise SchemaValidationError(msg)
+
+        # Check for extra columns (info only - for backward compatibility with OpenSearch fields like search_order)
+        extra_columns = actual_columns - required_columns
+        if extra_columns:
+            logger.info(
+                f"Schema CSV file '{source_filename}' contains extra columns that will be ignored: "
+                f"{', '.join(sorted(extra_columns))}. This is allowed for backward compatibility."
+            )
 
         df_to_check["type"] = df_to_check["type"].str.lower()
 
@@ -890,14 +920,15 @@ class SchemaUtils:
             logger.warning(warning)
 
     @staticmethod
-    def clean_es_properties(self, dict_obj):
+    def clean_es_properties(dict_obj):
+        """Remove non-dict entries from properties and recursively clean nested dicts."""
         if "properties" in dict_obj:
             for key in list(dict_obj.keys()):
                 if not isinstance(dict_obj[key], dict):
                     del dict_obj[key]
         for key in dict_obj:
             if isinstance(dict_obj[key], dict):
-                SchemaUtils.clean_es_properties(self, dict_obj[key])
+                SchemaUtils.clean_es_properties(dict_obj[key])
 
     @staticmethod
     def manage_nested_dict_action(
@@ -988,79 +1019,6 @@ class SchemaUtils:
         return dict1
 
     @staticmethod
-    def set_default_es_template(
-        schema_name: str, csv_file_path: str, version: str
-    ) -> Dict:
-        """
-        Set default OpenSearch template and load mappings from CSV.
-
-        Parameters:
-            schema_name (str): The schema name.
-            csv_file_path (str): Path to the CSV file.
-            version (str): Version of the schema.
-
-        Returns:
-            Dict: The OpenSearch template.
-        """
-        es_template = SchemaUtils._create_base_es_template(schema_name, version)
-        properties = es_template["template"]["mappings"]["properties"]
-
-        try:
-            df = pd.read_csv(csv_file_path)
-            for _, row in df.iterrows():
-                field_path = row["column"].split(".")
-                field_type = row["type"]
-                SchemaUtils._add_field_to_schema(properties, field_path, field_type)
-
-            logging.info("Elasticsearch/OpenSearch schema created from CSV")
-            return es_template
-        except Exception as e:
-            logging.error(f"Error processing CSV file {csv_file_path}: {e}")
-            raise
-
-    @staticmethod
-    def _create_base_es_template(schema_name: str, version: str) -> Dict:
-        """
-        Create the base Elasticsearch/OpenSearch template.
-
-        Parameters:
-            schema_name (str): The schema name.
-            version (str): Version of the schema.
-
-        Returns:
-            Dict: The base template.
-        """
-        return {
-            "_meta": {
-                "description": f"HyperSec {schema_name} OpenSearch ISM log streaming template. v{version}"
-            },
-            "composed_of": ["hypersec-log-component-template"],
-            "priority": "100",
-            "data_stream": {"timestamp_field": {"name": "@timestamp"}},
-            "index_patterns": [schema_name.replace("_", "-") + "*"],
-            "template": {"mappings": {"date_detection": False, "properties": {}}},
-        }
-
-    @staticmethod
-    def _add_field_to_schema(
-        properties: Dict, field_path: List[str], field_type: str
-    ) -> None:
-        """
-        Recursively add fields to the schema based on the field path.
-
-        Parameters:
-            properties (Dict): The properties dictionary to add fields to.
-            field_path (List[str]): The list of nested field names.
-            field_type (str): The type of the field.
-        """
-        for part in field_path[:-1]:
-            if part not in properties:
-                properties[part] = {"properties": {}}
-            properties = properties[part]["properties"]
-
-        properties[field_path[-1]] = {"type": field_type}
-
-    @staticmethod
     def df_col_not_empty(df: pd.DataFrame, col_name: str):
         if (col_name in df) and (len(df[col_name].value_counts()) > 0):
             return True
@@ -1071,7 +1029,7 @@ class SchemaUtils:
         meta_schema_df: pd.DataFrame,
         common_header_schema_df: pd.DataFrame,
         schema_name: str,
-        logger: logging.Logger,
+        logger: Any,
         is_ch_flag: bool,
     ) -> pd.DataFrame:
         """
@@ -1082,7 +1040,7 @@ class SchemaUtils:
             working_df (pd.DataFrame): The DataFrame containing schema configuration columns.
             common_header_schema_df (pd.DataFrame): The DataFrame containing common header schema columns.
             schema_name (str): Schema name for logging
-            logger (logging.Logger): Logger instance for logging warnings.
+            logger (Any): Logger instance for logging warnings.
 
         Returns:
             pd.DataFrame: The updated DataFrame with duplicate columns removed.
@@ -1153,14 +1111,22 @@ class SchemaUtils:
         parent_key: str = "",
         sep: str = ".",
         property_key: str = "properties",
+        include_multifields: bool = True,
     ) -> Dict[str, Any]:
         """
         Recursively flatten a nested dictionary starting at the "properties" key.
+
+        Supports Elasticsearch template structures for parsing input templates:
+        - Standard nested `properties` (e.g., {"user": {"properties": {"name": {"type": "keyword"}}}})
+        - Multi-fields via `fields` key (e.g., {"message": {"type": "text", "fields": {"keyword": {"type": "keyword"}}}})
+        - Pattern with `fields` containing `properties` (e.g., {"name": {"properties": {"fields": {"properties": {...}}}}})
 
         Args:
             properties (Dict[str, Any]): The dictionary containing nested properties to be flattened.
             parent_key (str): The base key used to create fully qualified field names (default is an empty string).
             sep (str): The separator used to concatenate nested keys (default is '.').
+            property_key (str): The key to look for nested properties (default is 'properties').
+            include_multifields (bool): Whether to also traverse 'fields' for Elastic multi-fields (default is True).
 
         Returns:
             Dict[str, Any]: A flattened dictionary where keys are the full field paths and values are the original nested values.
@@ -1170,13 +1136,54 @@ class SchemaUtils:
         for key, value in properties.items():
             new_key = f"{parent_key}{sep}{key}" if parent_key else key
 
-            if property_key in value:
+            if not isinstance(value, dict):
+                # Non-dict values are kept as-is
+                flattened_items[new_key] = value
+                continue
+
+            has_nested_properties = property_key in value
+            has_multifields = include_multifields and "fields" in value and isinstance(value.get("fields"), dict)
+
+            if has_nested_properties:
+                # Recurse into nested properties
                 flattened_items.update(
                     SchemaUtils.flatten_properties(
-                        value[property_key], new_key, sep=sep
+                        value[property_key], new_key, sep=sep, include_multifields=include_multifields
                     )
                 )
+            elif has_multifields:
+                # Handle multi-fields: add the parent field itself (without 'fields' key)
+                # then recurse into the multi-fields
+                parent_value = {k: v for k, v in value.items() if k != "fields"}
+                if parent_value:
+                    flattened_items[new_key] = parent_value
+
+                # Recurse into multi-fields
+                fields_dict = value["fields"]
+                # Check if fields contains 'properties' or direct type definitions
+                if "properties" in fields_dict:
+                    # Pattern: {"fields": {"properties": {"text": {...}}}}
+                    flattened_items.update(
+                        SchemaUtils.flatten_properties(
+                            fields_dict["properties"], f"{new_key}.fields", sep=sep, include_multifields=include_multifields
+                        )
+                    )
+                else:
+                    # Standard Elastic multi-fields: {"fields": {"keyword": {"type": "keyword"}}}
+                    for field_name, field_def in fields_dict.items():
+                        if isinstance(field_def, dict):
+                            multifield_key = f"{new_key}{sep}{field_name}"
+                            # Check if the multi-field itself has nested properties
+                            if "properties" in field_def:
+                                flattened_items.update(
+                                    SchemaUtils.flatten_properties(
+                                        field_def["properties"], multifield_key, sep=sep, include_multifields=include_multifields
+                                    )
+                                )
+                            else:
+                                flattened_items[multifield_key] = field_def
             else:
+                # Leaf field - no nested properties or multi-fields
                 flattened_items[new_key] = value
 
         return flattened_items

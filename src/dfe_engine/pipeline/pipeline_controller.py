@@ -1,22 +1,25 @@
 import os
-
-import httpx
-from hs_lib.logger import logger
-from ..config.config_loader import DFEConfigLoader
-from .pipeline_builder import PipelineBuilder
-from .pipeline_util import  merge_configs
-from typing import Optional
-from typing import List, Dict
+from typing import Optional, List, Dict
 from importlib import resources
-from tabulate import tabulate
 from zipfile import ZipFile
+
+from hs_lib.logger import logger
+from tabulate import tabulate
+
+from ..config.config_loader import DFEConfigLoader
+from ..settings import get_settings
+from ..storage import get_storage_backend, StorageError
+from .pipeline_builder import PipelineBuilder
+from .pipeline_util import merge_configs
+
+
 class PipelineBuilderController:
     @staticmethod
-    def get_resource_path(logger: logging.Logger, package: str, resource_path: str):
+    def get_resource_path(log, package: str, resource_path: str):
         try:
             return resources.files(package) / resource_path
         except FileNotFoundError:
-            logger.error(f"Resource does not exist: {package}/{resource_path}")
+            log.error(f"Resource does not exist: {package}/{resource_path}")
             return None
         
     @staticmethod
@@ -35,7 +38,6 @@ class PipelineBuilderController:
         Returns:
             Dict[str, List[str]]: A dictionary with template types as keys and lists of template names as values.
         """
-        logger = logger
         try:
             dfe_config_data = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path
@@ -117,9 +119,8 @@ class PipelineBuilderController:
             Exception: If there is an error loading or processing the dfe_package file.
             ValueError: If no ingestion pipelines are found in the dfe_package.
         """
-        logger = logger
         try:
-            print("Attempting to load default DFE package configuration...")
+            logger.debug("Attempting to load default DFE package configuration...")
             if not args_core_config:
                 args_core_config = os.path.join(
                     os.path.dirname(__file__), 'core_config.yaml'
@@ -139,7 +140,7 @@ class PipelineBuilderController:
 
         if not args_build_core:    
             default_dfe_config.pop("ingestion_pipelines")
-            print("Attempting to load DFE package configuration...")
+            logger.debug("Attempting to load DFE package configuration...")
             try:
                 dfe_config = DFEConfigLoader.load_dfe_package(
                     config_file_path=args_dfe_package_file_path
@@ -195,67 +196,62 @@ class PipelineBuilderController:
         args_username: Optional[str] = None,
         args_password: Optional[str] = None
     ) -> None:
-        logger = logger
-        output_path = os.path.join(args_output)
+        """
+        Download templates from storage backend (local, HTTP, or S3).
+
+        Auto-detects storage type from the URL/path:
+        - Local paths (/path, ./path): Copy from local filesystem (for on-prem/Rancher with PVC mounts)
+        - HTTP URLs: Download from Artifactory or HTTP server
+        - S3 URIs (s3://bucket/path): Download from S3
+
+        Args:
+            args_log_path: Path to log directory
+            args_output: Output directory for templates
+            args_repo_url: Repository URL/path (auto-detected type)
+            args_version: Template version
+            args_username: Username for HTTP auth
+            args_password: Password for HTTP auth
+        """
+        settings = get_settings()
+        output_path = os.path.abspath(args_output)
         os.makedirs(output_path, exist_ok=True)
-        # Download zip file from the repository
-        repo_url = args_repo_url or os.getenv("ARTIFACTORY_VECTOR_TEMPLATES")
-        username = args_username or os.getenv("ARTIFACTORY_USERNAME")
-        password = args_password or os.getenv("ARTIFACTORY_PASSWORD")
-        args_version = args_version or os.getenv("TEMPLATES_VERSION", "latest")
-        full_repo_url = f"{repo_url}/artefacts-{args_version}.zip"
-        output_filename = os.path.join(output_path, f"artefacts-{args_version}.zip")
-        if not all ([repo_url, username, password]):
-            logger.error(
-                "Repository URL, username, and password must be provided to download templates. Either pass them as arguments or set them as environment variables. ARTIFACTORY_VECTOR_TEMPLATES, ARTIFACTORY_USERNAME, and ARTIFACTORY_PASSWORD."
-            )
+
+        # Determine source URL/path - use settings cascade
+        repo_url = args_repo_url or settings.artifactory.url or settings.storage.path
+        username = args_username or settings.artifactory.username
+        password = args_password or settings.artifactory.password
+        version = args_version or settings.artifactory.templates_version
+
+        if not repo_url:
             raise ValueError(
-                "Repository URL, username, and password must be provided to download templates. Either pass them as arguments or set them as environment variables. ARTIFACTORY_VECTOR_TEMPLATES, ARTIFACTORY_USERNAME, and ARTIFACTORY_PASSWORD."
+                "No template source configured. Set DFE_ARTIFACTORY_URL (for HTTP), "
+                "DFE_STORAGE_PATH (for local/S3), or pass args_repo_url."
             )
+
+        # Get storage backend with auto-detection
+        backend = get_storage_backend(repo_url, username=username, password=password)
+
+        # Build remote path and local destination
+        remote_file = f"artefacts-{version}.zip"
+        output_filename = os.path.join(output_path, remote_file)
+
         try:
-            logger.info(
-                f"Downloading vector templates from {full_repo_url} to {output_filename}..."
-            )
-            with httpx.stream("GET", full_repo_url, auth=(username, password), follow_redirects=True, timeout=120.0) as response:
-                # Raise an exception if the request failed (e.g., 404 Not Found, 401 Unauthorized)
-                response.raise_for_status()
-        
-                # Open the output file in binary write mode ('wb')
-                with open(output_filename, "wb") as f:
-                    # Iterate over the response in chunks and write to the file
-                    for chunk in response.iter_bytes():
-                        f.write(chunk)
-    
-        except httpx.HTTPStatusError as e:
-            logger.error(f"Error: {e}", exc_info=True)
-            raise RuntimeError(
-                f"Failed to download the file from {full_repo_url}. "
-                f"HTTP Status: {e.response.status_code}, Reason: {e.response.reason_phrase}"
-            ) from e
-        except httpx.RequestError as e:
-            logger.error(f"Error: {e}", exc_info=True)
-            raise RuntimeError(
-                f"Failed to download the file from {full_repo_url}. "
-                f"Request error: {str(e)}"
-            ) from e
-        except Exception as e:
-            logger.error(f"Error: {e}", exc_info=True)
-            raise RuntimeError(
-                f"An unexpected error occurred while downloading the file from {full_repo_url}. "
-                f"Error: {str(e)}"
-            ) from e
-        logger.info(
-            f"Downloaded vector templates from {full_repo_url} to {output_filename}. Unzipping..."
-        )
-        try: 
+            logger.info(f"Fetching templates from {repo_url}/{remote_file}...")
+            backend.download(remote_file, output_filename)
+        except StorageError as e:
+            logger.error(f"Failed to download templates: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to download templates: {e}") from e
+
+        # Unzip the downloaded file
+        logger.info(f"Extracting templates to {output_path}...")
+        try:
             with ZipFile(output_filename, "r") as zip_ref:
                 zip_ref.extractall(output_path)
-            # remove the downloaded zip file after extraction
+            # Remove the zip file after extraction
             os.remove(output_filename)
-            logger.info(f"Unzipped files to {output_path}.")
+            logger.info(f"Templates extracted to {output_path}")
         except Exception as e:
-            logger.error(f"Error unzipping files: {e}", exc_info=True)
-            raise RuntimeError(
-                f"Failed to unzip the downloaded file {output_filename}. Error: {str(e)}"
-            ) from e
-        logger.info("Vector templates downloaded and extracted successfully.")
+            logger.error(f"Error extracting templates: {e}", exc_info=True)
+            raise RuntimeError(f"Failed to extract templates: {e}") from e
+
+        logger.info("Templates downloaded and extracted successfully.")

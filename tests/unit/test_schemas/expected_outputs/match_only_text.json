@@ -1,0 +1,18 @@
+{
+  "error.message": {
+    "type": "match_only_text"
+  },
+  "error.stack_trace": {
+    "type": "wildcard"
+  },
+  "error.stack_trace.text": {
+    "type": "match_only_text"
+  },
+  "log.original": {
+    "index": false,
+    "type": "match_only_text"
+  },
+  "message": {
+    "type": "match_only_text"
+  }
+}

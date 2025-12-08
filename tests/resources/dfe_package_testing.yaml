@@ -1,0 +1,42 @@
+apply_schemas:
+  do_add_columns: true
+  do_add_roles: false
+build_schemas:
+  no_cluster_declarations_needed: true
+  use_replicated_merge_tree: false
+  use_shared_merge_tree: false
+global_settings:
+  default_target: test_schemas
+  derived_schema_paths: tests/resources/test_schemas/stable_schemas
+  hunt_checkpoint_path: tests/tmp/.dfe_hunt_checkpoint
+  schema_common_version: v001.001.007
+  schema_output_path: tests/job_outputs/test_schema_output
+  target_path: /tmp/pytest-of-derek/pytest-85/test_targets0/dfe_targets.yaml
+  use_json_feature: false
+hunt_scheduler:
+  checkpoint_destination: clickhouse
+  hunt_config_path: tests/tmp/test_hunts
+  hunt_dir: tests/tmp/test_hunts
+  hunt_rules_path: tests/tmp/test_rules/executables
+  num_threads: 8
+  rule_repo_dir: tests/tmp/test_rules/executables
+organisations:
+- cluster_name: ''
+  org_id: rule_compilation_04212734
+  schemas:
+  - logs_alerts
+  - logs_omss_aws_guardduty
+schemas:
+  logs_alerts:
+    additional_fields_config: logs_alerts/logs_alerts_add.csv
+    derived_schema_file_path: logs_alerts/logs_alerts_sub.csv
+    meta_schema: logs_alerts.csv
+    meta_schema_version: v001.000.000
+    name: logs_alerts
+  logs_omss_aws_guardduty:
+    additional_fields_config: logs_omss_aws_guardduty/logs_omss_aws_guardduty_add.csv
+    derived_schema_file_path: null
+    derived_schema_ttl: 7
+    meta_schema: logs_base.csv
+    meta_schema_version: v001.000.000
+    name: logs_omss_aws_guardduty

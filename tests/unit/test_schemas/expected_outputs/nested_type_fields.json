@@ -1,0 +1,11 @@
+{
+  "nested_with_props.author": {
+    "type": "keyword"
+  },
+  "nested_with_props.text": {
+    "type": "text"
+  },
+  "simple_nested": {
+    "type": "nested"
+  }
+}

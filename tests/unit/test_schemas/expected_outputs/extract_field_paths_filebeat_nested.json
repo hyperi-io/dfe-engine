@@ -1,0 +1,14 @@
+[
+  "container.cpu.usage",
+  "container.disk.read.bytes",
+  "container.disk.write.bytes",
+  "container.id",
+  "container.image.name",
+  "container.image.tag",
+  "container.labels",
+  "container.memory.usage",
+  "container.name",
+  "container.network.egress.bytes",
+  "container.network.ingress.bytes",
+  "container.runtime"
+]

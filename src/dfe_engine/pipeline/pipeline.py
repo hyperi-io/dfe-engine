@@ -1,4 +1,3 @@
-import yaml
 import os
 import jinja2
 import re
@@ -8,7 +7,8 @@ from .pipeline_util import (
     PipelineSchemaError,
 )
 from typing import Dict
-
+from hs_lib.logger import logger
+from ..yaml_utils import yaml_load_string, YAMLError
 
 
 class Pipeline:
@@ -51,8 +51,7 @@ class Pipeline:
         """
         self.name = name.lower()
         self.output_dir = output_dir
-        self.logger = logger or logging.getLogger(__name__)
-        self.dfe_config = dfe_config
+                self.dfe_config = dfe_config
         self.global_settings = dfe_config.get("global_settings", {})
         self.default_env_vars = dfe_config.get(
             "default_env_vars", {}
@@ -103,18 +102,23 @@ class Pipeline:
             jinja2.Template: The loaded Jinja2 template object.
         """
         if not self.pipeline_template:
-            self.logger.error("No pipeline template provided using the default template")
+            logger.error("No pipeline template provided using the default template")
             self.pipeline_template = os.path.join(
                     os.path.dirname(__file__), 'pipeline_template.yaml'
                 )
-        print("Loading Pipeline Template from", self.pipeline_template)
+        logger.debug(f"Loading Pipeline Template from {self.pipeline_template}")
         # Get main template directory
         template_dir = os.path.dirname(self.pipeline_template)
 
         # Create a FileSystemLoader with all search paths
-        self.logger.info(f"Loading template from: {self.pipeline_template}")
+        logger.info(f"Loading template from: {self.pipeline_template}")
+        # autoescape is disabled for YAML templates - HTML escaping produces invalid YAML
+        # (e.g., & becomes &#38; which breaks YAML anchor/alias syntax)
+        # B701 is about XSS in HTML templates, not applicable for YAML generation
         env = Environment(
-            loader=FileSystemLoader(template_dir), undefined=jinja2.StrictUndefined
+            loader=FileSystemLoader(template_dir),
+            undefined=jinja2.StrictUndefined,
+            autoescape=False,
         )
         template = env.get_template(os.path.basename(self.pipeline_template))
         return template
@@ -218,10 +222,10 @@ class Pipeline:
                 elif var in os.environ:
                     env_vars[var] = os.environ[var]
                 elif var in variables_with_defaults:
-                    self.logger.debug(f"Using default value for {var}: {variables_with_defaults[var]}")
+                    logger.debug(f"Using default value for {var}: {variables_with_defaults[var]}")
                     # Don't set the variable - let Jinja handle the default
                 elif var in optional_variables:
-                    self.logger.debug(f"Skipping optional variable {var} - not defined")
+                    logger.debug(f"Skipping optional variable {var} - not defined")
                     # Don't set the variable - it's optional and will be handled by template conditionals
                 else:
                     raise PipelineSchemaError(
@@ -315,18 +319,22 @@ class Pipeline:
         # Write the rendered template to the output file and also validate if the written file is a valid YAML file
         with open(output_file, "w") as f:
             f.write(rendered_template)
-            self.logger.info(f"Pipeline configuration written to {output_file}")
+            logger.info(f"Pipeline configuration written to {output_file}")
 
         # Validate if the written file is a valid YAML file
+        # Vector configs use ${VAR} syntax which YAML parsers interpret as invalid anchors
+        # We temporarily escape these before validation
         with open(output_file, "r") as f:
+            content = f.read()
+            # Escape ${...} patterns so YAML parser doesn't treat them as anchors
+            escaped_content = re.sub(r'\$\{', r'__DOLLAR_BRACE__', content)
             try:
-                yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                error_msg = f"Error validating written pipeline configuration: {e}, something wrong with the config template or the rendered template"
-                self.logger.error(error_msg)
+                yaml_load_string(escaped_content)
+            except YAMLError as e:
+                error_msg = f"Error validating written pipeline configuration: {e}"
+                logger.error(error_msg)
                 raise PipelineSchemaError(error_msg)
-        #     yaml.safe_dump(yaml.safe_load(io.StringIO(rendered_template)), f)
-        self.logger.info(f"Pipeline configuration written to {output_file}")
+        logger.info(f"Pipeline configuration written to {output_file}")
 
     def build(self):
         """

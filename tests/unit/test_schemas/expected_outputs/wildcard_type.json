@@ -1,0 +1,29 @@
+{
+  "file.path": {
+    "type": "wildcard"
+  },
+  "file.path.text": {
+    "type": "match_only_text"
+  },
+  "file.target_path": {
+    "type": "wildcard"
+  },
+  "registry.path": {
+    "type": "wildcard"
+  },
+  "registry.value": {
+    "type": "keyword"
+  },
+  "url.full": {
+    "type": "wildcard"
+  },
+  "url.full.text": {
+    "type": "match_only_text"
+  },
+  "url.path": {
+    "type": "wildcard"
+  },
+  "url.query": {
+    "type": "keyword"
+  }
+}

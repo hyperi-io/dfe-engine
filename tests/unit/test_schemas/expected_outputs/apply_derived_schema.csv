@@ -1,0 +1,6 @@
+column,type,default,index_order,index_type,os_order,comment
+host.name,string,,,,,Hostname
+host.ip,ip_field,,,,,Host IP
+user.name,string,,,dimension,,Username
+event.category,string,,,dimension,,Event category
+source.ip,ip_field,,,dimension,,Source IP

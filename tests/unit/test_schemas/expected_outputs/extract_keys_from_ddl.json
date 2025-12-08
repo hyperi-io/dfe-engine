@@ -1,0 +1,15 @@
+{
+  "indexes": [
+    [
+      "idx_event_id",
+      "event_id TYPE tokenbf_v1 GRANULARITY 1"
+    ]
+  ],
+  "order_by": "timestamp, org_id",
+  "partition_by": "toYYYYMMDD(timestamp)",
+  "primary_key": "timestamp, org_id",
+  "projection": null,
+  "sample_by": null,
+  "settings": "index_granularity = 2048",
+  "ttl": "90"
+}

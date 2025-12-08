@@ -1,0 +1,18 @@
+{
+  "document.keyword_features": {
+    "type": "rank_features"
+  },
+  "document.relevance_score": {
+    "type": "rank_feature"
+  },
+  "pagerank": {
+    "type": "rank_feature"
+  },
+  "topics": {
+    "type": "rank_features"
+  },
+  "url_length": {
+    "positive_score_impact": false,
+    "type": "rank_feature"
+  }
+}

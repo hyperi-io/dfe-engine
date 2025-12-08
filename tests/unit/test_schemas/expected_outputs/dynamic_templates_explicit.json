@@ -1,0 +1,17 @@
+{
+  "labels": {
+    "dynamic": true,
+    "type": "object"
+  },
+  "message": {
+    "type": "match_only_text"
+  },
+  "metadata": {
+    "depth_limit": 5,
+    "type": "flattened"
+  },
+  "tags": {
+    "ignore_above": 1024,
+    "type": "keyword"
+  }
+}

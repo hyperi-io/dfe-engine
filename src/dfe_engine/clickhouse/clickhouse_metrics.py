@@ -9,7 +9,7 @@ class ClickHouseMetrics:
 
     def __init__(self, target_config_data: dict = None):
         """Initialize with target configuration data."""
-        self.ch_manager = ClickHouseManager.get_instance(logger, target_config_data)
+        self.ch_manager = ClickHouseManager.get_instance(target_config_data)
 
     def get_hunt_metrics(self, hunt_name: str) -> Dict:
         """

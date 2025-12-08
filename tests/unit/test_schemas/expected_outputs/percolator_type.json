@@ -1,0 +1,17 @@
+{
+  "alert_name": {
+    "type": "keyword"
+  },
+  "alert_rules.rule_name": {
+    "type": "keyword"
+  },
+  "alert_rules.rule_query": {
+    "type": "percolator"
+  },
+  "alert_rules.severity": {
+    "type": "keyword"
+  },
+  "query": {
+    "type": "percolator"
+  }
+}

@@ -1,57 +1,54 @@
-# TODO - [Project Name]
+# DFE Engine - TODO
 
-**Project Goal:** [Main project goal]
-
-**Target:** [Deliverables and timeline]
+**Project Goal:** Production-ready core library for Data Fusion Engine
 
 ---
 
-## Current Tasks
+## Current Priority
 
 ### High Priority
 
-- [ ] [Critical task 1]
-- [ ] [Critical task 2]
+- [ ] Investigate cityHash64 PRIMARY KEY test failures (19 failures in schema tests)
+- [ ] Review if cityHash64 addition is intentional behavior or regression
+- [ ] Update test expectations or fix schema generation logic
 
 ### Medium Priority
 
-- [ ] [Important task 1]
-- [ ] [Important task 2]
+- [ ] Add SPDX-compliant headers to all source files
+- [ ] Complete integration test coverage for schema module
+- [ ] Document schema generation behavior (cityHash64, ORDER BY rules)
 
 ### Low Priority
 
-- [ ] [Nice-to-have task 1]
-- [ ] [Nice-to-have task 2]
-
----
-
-## Completed
-
-- [x] [Completed task] - [Date]
-- [x] [Another completed task] - [Date]
-
----
-
-## Blocked
-
-- [ ] [Blocked task] - **Blocked by:** [Reason]
+- [ ] Hunt scheduler smart query staggering (use EXPLAIN for cost estimation)
+- [ ] Query cost tracking in PostgreSQL for scheduling optimization
+- [ ] Performance benchmarks for schema operations
 
 ---
 
 ## Backlog
 
-- [ ] [Future enhancement]
-- [ ] [Feature idea]
+### Future Enhancements
+
+- [ ] Storage abstraction layer (local, S3, HTTP)
+- [ ] Async ClickHouse operations
+- [ ] Schema diff visualization
+- [ ] Hunt execution metrics dashboard
+
+### Technical Debt
+
+- [ ] Increase test coverage to 90%+
+- [ ] Add type hints to all public APIs
+- [ ] Performance profiling for large schema operations
 
 ---
 
 ## Notes
 
-- Keep this file updated as you work
-- Move completed tasks to "Completed" section
-- Archive old completed tasks to CHANGELOG.md during releases
-- Use GitHub issues for detailed tracking if needed
+- Use `uv run pytest` for all test runs
+- Docker containers persist between test runs
+- See STATE.md for current project status
 
 ---
 
-**Last Updated:** [Date]
+**Last Updated:** 2025-12-08
