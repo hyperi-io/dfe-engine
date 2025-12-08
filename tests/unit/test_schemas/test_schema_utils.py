@@ -1,4 +1,5 @@
 import logging
+import os
 import pytest
 import pandas as pd
 from dfe_engine.schema.schema_util import SchemaUtils, SchemaValidationError
@@ -16,9 +17,7 @@ def es_schema_dict():
     return {
         "template": {
             "settings": {"index": {"query": {"default_field": "some_default_field"}}},
-            "mappings": {
-                "properties": {"common_field": {}, "@timestamp": {}, "timestamp": {}}
-            },
+            "mappings": {"properties": {"common_field": {}, "@timestamp": {}, "timestamp": {}}},
         },
         "_meta": "meta_value",
         "analyzer": "analyzer_value",
@@ -100,10 +99,8 @@ def test_dict_remove_key_recursively_search_analyzer(es_schema_dict):
     assert "search_analyzer" not in es_schema_dict
 
 
-def test_remove_overlap_fields_with_common_header(
-    es_schema_dict, common_header_schema_df
-):
-    for index, row in common_header_schema_df.iterrows():
+def test_remove_overlap_fields_with_common_header(es_schema_dict, common_header_schema_df):
+    for _index, row in common_header_schema_df.iterrows():
         header_col = row["column"]
         if header_col in es_schema_dict["template"]["mappings"]["properties"]:
             del es_schema_dict["template"]["mappings"]["properties"][header_col]
@@ -178,7 +175,7 @@ def test_sql_replacement():
     assert actual_sql_column == expected_sql_column
 
 
-def test_remove_overlap_fields_with_common_header():
+def test_remove_overlap_fields_with_common_header_dataframe():
     add_fields_df = pd.DataFrame(
         {
             "column": ["o365.audit.Severity", "timestamp"],
@@ -203,9 +200,7 @@ def test_remove_overlap_fields_with_common_header():
         "Test failed: The overlapping 'timestamp' column was not removed correctly from additional fields."
     )
 
-    removed_comment = add_fields_df.loc[
-        add_fields_df["column"] == "timestamp", "comment"
-    ].values[0]
+    removed_comment = add_fields_df.loc[add_fields_df["column"] == "timestamp", "comment"].values[0]
     assert removed_comment == "timestamp duplicate", (
         "Test failed: The removed 'timestamp' column comment was not correct."
     )
@@ -237,9 +232,7 @@ def test_remove_overlap_fields_with_common_header():
                 "level1": {
                     "properties": {
                         "level2": {
-                            "properties": {
-                                "level3": {"properties": {"field": {"type": "keyword"}}}
-                            }
+                            "properties": {"level3": {"properties": {"field": {"type": "keyword"}}}}
                         }
                     }
                 }
@@ -253,9 +246,7 @@ def test_remove_overlap_fields_with_common_header():
         ),
     ],
 )
-def test_flatten_properties(
-    input_properties: Dict[str, Any], expected_output: Dict[str, Any]
-):
+def test_flatten_properties(input_properties: Dict[str, Any], expected_output: Dict[str, Any]):
     """
     Test the flatten_properties function with various inputs to ensure it correctly flattens nested dictionaries.
 
@@ -320,9 +311,7 @@ def test_flatten_properties_with_custom_property_key():
                 "level1": {
                     "properties": {
                         "level2": {
-                            "properties": {
-                                "level3": {"properties": {"field": {"type": "keyword"}}}
-                            }
+                            "properties": {"level3": {"properties": {"field": {"type": "keyword"}}}}
                         }
                     }
                 }
@@ -336,9 +325,7 @@ def test_flatten_properties_with_custom_property_key():
         ),
     ],
 )
-def test_extract_field_paths(
-    input_properties: Dict[str, Any], expected_output: Set[str]
-):
+def test_extract_field_paths(input_properties: Dict[str, Any], expected_output: Set[str]):
     """
     Test the extract_field_paths function with various inputs to ensure it correctly extracts all nested field paths.
 
@@ -367,12 +354,6 @@ def test_extract_field_paths_with_different_separator():
     assert result == expected_output, f"Expected {expected_output}, but got {result}"
 
 
-
-from dfe_engine.schema.schema_update import SchemaModifier
-import os
-import tempfile
-
-
 @pytest.fixture(scope="session")
 def test_database_name_unit():
     """Generate a unique test database name for unit tests."""
@@ -381,14 +362,9 @@ def test_database_name_unit():
 
 def test_schema_utils_basic_functionality():
     """Test basic SchemaUtils functionality that doesn't require ClickHouse."""
-    
+
     input_properties = {
-        "user": {
-            "properties": {
-                "id": {"type": "integer"},
-                "name": {"type": "keyword"}
-            }
-        }
+        "user": {"properties": {"id": {"type": "integer"}, "name": {"type": "keyword"}}}
     }
     expected_output = {"user.id", "user.name"}
     result = SchemaUtils.extract_field_paths(input_properties)

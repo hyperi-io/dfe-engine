@@ -16,7 +16,6 @@ import multiprocessing
 import time
 
 
-
 class HuntController:
     @staticmethod
     def process_hunt(
@@ -116,12 +115,8 @@ class HuntController:
             )
             raise
 
-        hunt_config_path = hunt_config_path or target_config_data.get(
-            "hunt_config_path", None
-        )
-        hunt_rules_path = hunt_rules_path or target_config_data.get(
-            "hunt_rules_path", None
-        )
+        hunt_config_path = hunt_config_path or target_config_data.get("hunt_config_path", None)
+        hunt_rules_path = hunt_rules_path or target_config_data.get("hunt_rules_path", None)
 
         if not targets_file_path:
             logger.error("Target file path is missing.")
@@ -183,7 +178,7 @@ class HuntController:
         #  4. In test mode, exceptions will propagate directly to the caller, making it easier
         #     to detect and debug issues during testing
 
-        for hunt_dir, rule_dir in zip(hunt_dirs, rule_dirs):
+        for hunt_dir, rule_dir in zip(hunt_dirs, rule_dirs, strict=False):
             logger.info(
                 f"Starting scheduler for paired hunt directory: {hunt_dir} and rule directory: {rule_dir}"
             )
@@ -230,9 +225,7 @@ class HuntController:
                 while True:
                     time.sleep(1)
             except KeyboardInterrupt:
-                logger.info(
-                    "Exiting main process. Hunt scheduler daemons will continue running."
-                )
+                logger.info("Exiting main process. Hunt scheduler daemons will continue running.")
 
     @staticmethod
     def _run_scheduler(
@@ -290,11 +283,7 @@ class HuntController:
         Returns:
         - Any: Resolved configuration value.
         """
-        return (
-            arg_value
-            if arg_value is not None
-            else config.get(section, {}).get(key, default)
-        )
+        return arg_value if arg_value is not None else config.get(section, {}).get(key, default)
 
     @staticmethod
     def list_hunts(
@@ -319,25 +308,19 @@ class HuntController:
             )
 
         try:
-            config = DFEConfigLoader.load_dfe_package(
-                require_config=False, logger=logger
-            )
+            config = DFEConfigLoader.load_dfe_package(require_config=False, logger=logger)
         except FileNotFoundError as error:
             logger.error(f"Error loading DFE package: {error}")
             return
 
-        tmp_logs = args_log_path or config.get("global_settings", {}).get(
+        args_log_path or config.get("global_settings", {}).get(
             "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
         )
-        hunt_log_file_path = os.path.join(
-            args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
-        )
+        hunt_log_file_path = os.path.join(args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG)
 
         start_time = datetime.now(timezone.utc) - timedelta(hours=args_look_back_hours)
         end_time = datetime.now(timezone.utc)
-        log_entries = HuntController.parse_logs(
-            hunt_log_file_path, start_time, end_time
-        )
+        log_entries = HuntController.parse_logs(hunt_log_file_path, start_time, end_time)
 
         if log_entries:
             df = pd.DataFrame(log_entries)
@@ -347,22 +330,16 @@ class HuntController:
             )
 
             df["process_info"] = (
-                df["pid"]
-                .astype(int)
-                .apply(lambda pid: HuntController.get_process_info(pid) or {})
+                df["pid"].astype(int).apply(lambda pid: HuntController.get_process_info(pid) or {})
             )
             df["status"] = df["process_info"].apply(
-                lambda info: info.get("status", "stopped")
-                if isinstance(info, dict)
-                else "stopped"
+                lambda info: info.get("status", "stopped") if isinstance(info, dict) else "stopped"
             )
             df["status"] = df["status"].map(
                 lambda x: "running" if x in ["sleeping", "running", "started"] else x
             )
             df["num_threads"] = df["process_info"].apply(
-                lambda info: info.get("num_threads", "0")
-                if isinstance(info, dict)
-                else "0"
+                lambda info: info.get("num_threads", "0") if isinstance(info, dict) else "0"
             )
 
             display_df = df[
@@ -376,14 +353,11 @@ class HuntController:
                     "num_threads",
                 ]
             ]
-            table_str = tabulate(
-                display_df, headers="keys", tablefmt="grid", showindex=False
-            )
+            table_str = tabulate(display_df, headers="keys", tablefmt="grid", showindex=False)
             formatted_templates = []
             headers = []
             logger.info(
-                f"\n\n{table_str}"
-                + tabulate(formatted_templates, headers=headers, tablefmt="grid")
+                f"\n\n{table_str}" + tabulate(formatted_templates, headers=headers, tablefmt="grid")
             )
         else:
             logger.warning("PID not found")
@@ -410,21 +384,17 @@ class HuntController:
             )
 
         try:
-            config = DFEConfigLoader.load_dfe_package(
-                require_config=False, logger=logger
-            )
+            config = DFEConfigLoader.load_dfe_package(require_config=False, logger=logger)
         except FileNotFoundError as error:
             logger.error(f"Error loading DFE package: {error}")
             return
 
-        tmp_logs = args_log_path or config.get("global_settings", {}).get(
+        args_log_path or config.get("global_settings", {}).get(
             "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
         )
         pids = [args_pid] if not isinstance(args_pid, list) else args_pid
 
-        hunt_log_file_path = os.path.join(
-            args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
-        )
+        hunt_log_file_path = os.path.join(args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG)
         data = []
 
         try:
@@ -442,13 +412,9 @@ class HuntController:
             df["pid"] = df["pid"].astype(int)
             df["timestamp"] = pd.to_datetime(df["timestamp"])
             df.sort_values(by="timestamp", ascending=False, inplace=True)
-            df.drop_duplicates(
-                subset=["timestamp", "pid", "hunt_file"], keep="first", inplace=True
-            )
+            df.drop_duplicates(subset=["timestamp", "pid", "hunt_file"], keep="first", inplace=True)
 
-            process_info_series = (
-                df["pid"].apply(HuntController.get_process_info).apply(pd.Series)
-            )
+            process_info_series = df["pid"].apply(HuntController.get_process_info).apply(pd.Series)
             if (
                 "status" in process_info_series.columns
                 and "num_threads" in process_info_series.columns
@@ -456,9 +422,7 @@ class HuntController:
                 df = pd.concat([df, process_info_series], axis=1)
                 df["status"] = df["status"].fillna("stopped")
                 df["status"] = df["status"].map(
-                    lambda x: "running"
-                    if x in ["sleeping", "running", "started"]
-                    else x
+                    lambda x: "running" if x in ["sleeping", "running", "started"] else x
                 )
                 df["num_threads"] = df["num_threads"].fillna("unknown").astype("Int64")
 
@@ -476,9 +440,7 @@ class HuntController:
                             "num_threads",
                         ]
                     ].to_dict(orient="records")
-                    tabulated_output = tabulate(
-                        data_list, headers="keys", tablefmt="grid"
-                    )
+                    tabulated_output = tabulate(data_list, headers="keys", tablefmt="grid")
                     logger.info(f"\n\n{tabulated_output}")
             else:
                 logger.warn("PID not found")
@@ -509,21 +471,13 @@ class HuntController:
                 config_file_path=args_dfe_package_file_path,
                 require_config=False,
             )
-            dfe_config_target_path = dfe_config["global_settings"].get(
-                "target_path", None
-            )
+            dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
         except FileNotFoundError as error:
-            logger.error(
-                f"Error: Was not able to load the dfe_package.yaml:\n{error}"
-            )
+            logger.error(f"Error: Was not able to load the dfe_package.yaml:\n{error}")
             return
 
         try:
-            target_path = (
-                args_target_file_path
-                if args_target_file_path
-                else dfe_config_target_path
-            )
+            target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=args_target, targets_file_path=target_path
             )
@@ -597,9 +551,7 @@ class HuntController:
                             os.kill(pid_part, signal.SIGTERM)
                             logger.info(f"Terminated process with PID: {pid_part}")
                         except ValueError:
-                            logger.error(
-                                f"Invalid PID format in line: {line.strip()}"
-                            )
+                            logger.error(f"Invalid PID format in line: {line.strip()}")
                         except ProcessLookupError:
                             logger.error(f"No process found with PID: {pid_part}")
 
@@ -635,9 +587,9 @@ class HuntController:
             logger.error(f"Error loading DFE package: {error}")
             return
 
-        args_log_path = args_log_path or dfe_package_config.get(
-            "global_settings", {}
-        ).get("tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/"))
+        args_log_path = args_log_path or dfe_package_config.get("global_settings", {}).get(
+            "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
+        )
 
         DFEConfigLoader.print_default_target(logger=logger)
 
@@ -683,9 +635,7 @@ class HuntController:
         with open(log_file_path, "r") as log_file:
             for line in log_file:
                 log_entry = HuntController.parse_log_entry(line)
-                log_date = datetime.strptime(
-                    log_entry["timestamp"], "%Y-%m-%d %H:%M:%S"
-                )
+                log_date = datetime.strptime(log_entry["timestamp"], "%Y-%m-%d %H:%M:%S")
                 log_date = log_date.replace(tzinfo=timezone.utc)
                 if start_time <= log_date <= end_time:
                     log_entries.append(log_entry)

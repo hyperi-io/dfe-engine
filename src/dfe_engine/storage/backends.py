@@ -4,12 +4,10 @@ Storage backend implementations for DFE Engine.
 Supports local filesystem, HTTP, and S3 storage backends with auto-sensing.
 """
 
-import os
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import urlparse
 
 import httpx
 from hs_lib.logger import logger
@@ -112,7 +110,7 @@ class LocalStorageBackend(StorageBackend):
                 shutil.copy2(source, dest)
             logger.info(f"Copied {source} to {dest}")
         except Exception as e:
-            raise StorageError(f"Failed to copy {source} to {dest}: {e}", cause=e)
+            raise StorageError(f"Failed to copy {source} to {dest}: {e}", cause=e) from e
 
     def list_files(self, prefix: str = "") -> List[str]:
         """List files in the storage directory."""
@@ -131,7 +129,7 @@ class LocalStorageBackend(StorageBackend):
                     files.append(str(item.relative_to(self.base_path)))
             return files
         except Exception as e:
-            raise StorageError(f"Failed to list files in {search_path}: {e}", cause=e)
+            raise StorageError(f"Failed to list files in {search_path}: {e}", cause=e) from e
 
     def exists(self, path: str) -> bool:
         """Check if a file exists."""
@@ -205,7 +203,7 @@ class HTTPStorageBackend(StorageBackend):
         except httpx.RequestError as e:
             raise StorageError(f"Request error downloading {url}: {e}", cause=e)
         except Exception as e:
-            raise StorageError(f"Failed to download {url}: {e}", cause=e)
+            raise StorageError(f"Failed to download {url}: {e}", cause=e) from e
 
     def list_files(self, prefix: str = "") -> List[str]:
         """
@@ -279,9 +277,7 @@ class S3StorageBackend(StorageBackend):
             self.client.download_file(self.bucket, key, str(dest))
             logger.info(f"Downloaded s3://{self.bucket}/{key} to {dest}")
         except Exception as e:
-            raise StorageError(
-                f"Failed to download s3://{self.bucket}/{key}: {e}", cause=e
-            )
+            raise StorageError(f"Failed to download s3://{self.bucket}/{key}: {e}", cause=e)
 
     def list_files(self, prefix: str = "") -> List[str]:
         """List files in S3 bucket with prefix."""

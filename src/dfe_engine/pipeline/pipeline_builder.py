@@ -18,17 +18,17 @@ class PipelineBuilder:
         dfe_config: dict,
         ingestion_output_path: Path = None,
         ingestion_pipeline_template_path: Path = None,
-        logger = None,
+        logger=None,
         # Optional extra configuration for ingestion pipelines
-        extra_config: dict = {},
+        extra_config: dict = None,
     ):
-                self.dfe_config = dfe_config
+        if extra_config is None:
+            extra_config = {}
+        self.dfe_config = dfe_config
         self.ingestion_output_path = (
             ingestion_output_path
             if ingestion_output_path is not None
-            else dfe_config.get("global_settings", {}).get(
-                "output"
-            )
+            else dfe_config.get("global_settings", {}).get("output")
         )
         self.ingestion_pipeline_template_path = ingestion_pipeline_template_path
         self.extra_config = extra_config
@@ -45,6 +45,6 @@ class PipelineBuilder:
                 output_dir=self.ingestion_output_path,
                 logger=logger,
                 ingestion_pipeline_template_path=self.ingestion_pipeline_template_path,
-                extra_config=self.extra_config
+                extra_config=self.extra_config,
             )
             pipeline.build()

@@ -9,7 +9,7 @@ Tests cover:
 5. Multiple PROJECTION blocks
 6. Complex real-world scenarios
 
-Bug Context: 
+Bug Context:
 Schema plan was showing empty ORDER BY because the parser was matching
 ORDER BY inside PROJECTION instead of the table-level ORDER BY.
 """
@@ -29,7 +29,7 @@ class TestOrderByExtractionBasics:
 
     def test_order_by_with_parentheses_multiple_columns(self):
         """Test ORDER BY with parentheses and multiple columns."""
-        ddl = '''CREATE TABLE test_org.multi_col
+        ddl = """CREATE TABLE test_org.multi_col
 (
     `timestamp_load` DateTime64(3, 'UTC'),
     `col1` String,
@@ -38,48 +38,52 @@ class TestOrderByExtractionBasics:
 )
 ENGINE = MergeTree()
 PRIMARY KEY (timestamp_load, col1, col2)
-ORDER BY (timestamp_load, col1, col2)'''
+ORDER BY (timestamp_load, col1, col2)"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
-        assert pk == "timestamp_load, col1, col2", f"Expected 'timestamp_load, col1, col2', got '{pk}'"
-        assert ob == "timestamp_load, col1, col2", f"Expected 'timestamp_load, col1, col2', got '{ob}'"
+
+        assert pk == "timestamp_load, col1, col2", (
+            f"Expected 'timestamp_load, col1, col2', got '{pk}'"
+        )
+        assert ob == "timestamp_load, col1, col2", (
+            f"Expected 'timestamp_load, col1, col2', got '{ob}'"
+        )
 
     def test_order_by_with_parentheses_single_column(self):
         """Test ORDER BY with parentheses and single column."""
-        ddl = '''CREATE TABLE test_org.single_col_paren
+        ddl = """CREATE TABLE test_org.single_col_paren
 (
     `timestamp_load` DateTime64(3, 'UTC'),
     `data` String
 )
 ENGINE = MergeTree()
 PRIMARY KEY (timestamp_load)
-ORDER BY (timestamp_load)'''
+ORDER BY (timestamp_load)"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         assert pk == "timestamp_load", f"Expected 'timestamp_load', got '{pk}'"
         assert ob == "timestamp_load", f"Expected 'timestamp_load', got '{ob}'"
 
     def test_order_by_without_parentheses_single_column(self):
         """Test ORDER BY without parentheses (single column)."""
-        ddl = '''CREATE TABLE test_org.no_paren
+        ddl = """CREATE TABLE test_org.no_paren
 (
     `timestamp_load` DateTime64(3, 'UTC'),
     `data` String
 )
 ENGINE = MergeTree()
 PRIMARY KEY timestamp_load
-ORDER BY timestamp_load'''
+ORDER BY timestamp_load"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         assert pk == "timestamp_load", f"Expected 'timestamp_load', got '{pk}'"
         assert ob == "timestamp_load", f"Expected 'timestamp_load', got '{ob}'"
 
     def test_order_by_without_parentheses_with_ttl(self):
         """Test ORDER BY without parentheses followed by TTL."""
-        ddl = '''CREATE TABLE test_org.with_ttl
+        ddl = """CREATE TABLE test_org.with_ttl
 (
     `timestamp` DateTime64(3, 'UTC'),
     `timestamp_load` DateTime64(3, 'UTC')
@@ -88,16 +92,16 @@ ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY timestamp_load
 ORDER BY timestamp_load
-TTL toDateTime(timestamp) + toIntervalDay(90)'''
+TTL toDateTime(timestamp) + toIntervalDay(90)"""
 
         pk, ob, ttl_val, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)[0:3]
-        
+
         assert pk == "timestamp_load", f"Expected 'timestamp_load', got '{pk}'"
         assert ob == "timestamp_load", f"Expected 'timestamp_load', got '{ob}'"
 
     def test_empty_order_by_with_parentheses(self):
         """Test empty ORDER BY: ORDER BY ()"""
-        ddl = '''CREATE TABLE test_org.empty_order
+        ddl = """CREATE TABLE test_org.empty_order
 (
     `event_id` Int32,
     `timestamp` DateTime
@@ -105,10 +109,10 @@ TTL toDateTime(timestamp) + toIntervalDay(90)'''
 ENGINE = MergeTree()
 PRIMARY KEY (event_id, timestamp)
 ORDER BY ()
-TTL toDateTime(timestamp) + toIntervalDay(30)'''
+TTL toDateTime(timestamp) + toIntervalDay(30)"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         assert pk == "event_id, timestamp", f"Expected 'event_id, timestamp', got '{pk}'"
         # Empty ORDER BY should return None or empty string
         assert ob is None or ob == "", f"Empty ORDER BY should be None or '', got '{ob}'"
@@ -119,7 +123,7 @@ class TestOrderByExtractionWithProjection:
 
     def test_order_by_with_single_projection_parentheses(self):
         """Test ORDER BY with parentheses + single PROJECTION - should extract table ORDER BY."""
-        ddl = '''CREATE TABLE test_org.logs_alerts
+        ddl = """CREATE TABLE test_org.logs_alerts
 (
     `timestamp` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
     `timestamp_load` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
@@ -137,19 +141,21 @@ PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY (timestamp_load, source_table, detection_time)
 ORDER BY (timestamp_load, source_table, detection_time)
 TTL toDateTime(timestamp) + toIntervalDay(180)
-SETTINGS index_granularity = 2048'''
+SETTINGS index_granularity = 2048"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         # BUG: This was extracting "timestamp" from PROJECTION instead of table-level ORDER BY
-        assert pk == "timestamp_load, source_table, detection_time", \
+        assert pk == "timestamp_load, source_table, detection_time", (
             f"PRIMARY KEY failed: expected 'timestamp_load, source_table, detection_time', got '{pk}'"
-        assert ob == "timestamp_load, source_table, detection_time", \
+        )
+        assert ob == "timestamp_load, source_table, detection_time", (
             f"ORDER BY failed: expected 'timestamp_load, source_table, detection_time', got '{ob}' (PROJECTION ORDER BY extracted by mistake?)"
+        )
 
     def test_order_by_with_single_projection_no_parentheses(self):
         """Test ORDER BY without parentheses + single PROJECTION."""
-        ddl = '''CREATE TABLE test_org.logs_beats_filebeat
+        ddl = """CREATE TABLE test_org.logs_beats_filebeat
 (
     `timestamp` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
     `timestamp_load` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
@@ -166,16 +172,18 @@ PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY timestamp_load
 ORDER BY timestamp_load
 TTL toDateTime(timestamp) + toIntervalDay(90)
-SETTINGS index_granularity = 2048'''
+SETTINGS index_granularity = 2048"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         assert pk == "timestamp_load", f"Expected 'timestamp_load', got '{pk}'"
-        assert ob == "timestamp_load", f"Expected 'timestamp_load', got '{ob}' (PROJECTION ORDER BY extracted by mistake?)"
+        assert ob == "timestamp_load", (
+            f"Expected 'timestamp_load', got '{ob}' (PROJECTION ORDER BY extracted by mistake?)"
+        )
 
     def test_order_by_with_multiple_projections(self):
         """Test ORDER BY with multiple PROJECTION blocks."""
-        ddl = '''CREATE TABLE test_org.multi_projection
+        ddl = """CREATE TABLE test_org.multi_projection
 (
     `timestamp` DateTime64(3, 'UTC'),
     `timestamp_load` DateTime64(3, 'UTC'),
@@ -203,14 +211,16 @@ PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY (timestamp_load, event_type, user_id)
 ORDER BY (timestamp_load, event_type, user_id)
 SAMPLE BY cityHash64(user_id)
-TTL toDateTime(timestamp) + toIntervalDay(90)'''
+TTL toDateTime(timestamp) + toIntervalDay(90)"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
-        assert pk == "timestamp_load, event_type, user_id", \
+
+        assert pk == "timestamp_load, event_type, user_id", (
             f"Expected 'timestamp_load, event_type, user_id', got '{pk}'"
-        assert ob == "timestamp_load, event_type, user_id", \
+        )
+        assert ob == "timestamp_load, event_type, user_id", (
             f"Expected 'timestamp_load, event_type, user_id', got '{ob}' (one of the PROJECTION ORDER BYs extracted by mistake?)"
+        )
 
 
 class TestRealWorldScenarios:
@@ -218,7 +228,7 @@ class TestRealWorldScenarios:
 
     def test_real_world_logs_alerts_full(self):
         """Test with the exact real-world logs_alerts schema that was failing."""
-        ddl = '''CREATE TABLE test_org_08102025.logs_alerts
+        ddl = """CREATE TABLE test_org_08102025.logs_alerts
 (
     `timestamp` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
     `timestamp_collector` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
@@ -264,17 +274,21 @@ PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY (timestamp_load, source_table, detection_time)
 ORDER BY (timestamp_load, source_table, detection_time)
 TTL toDateTime(timestamp) + toIntervalDay(180) WHERE timestamp IS NOT NULL, toDateTime(timestamp_load) + toIntervalDay(180) WHERE timestamp_load IS NOT NULL
-SETTINGS index_granularity = 2048, ttl_only_drop_parts = 1'''
+SETTINGS index_granularity = 2048, ttl_only_drop_parts = 1"""
 
-        pk, ob, indexes, ttl, sample_by, partition_by, projection, settings = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
-        # THE BUG: ORDER BY was being extracted as "timestamp" (from PROJECTION) 
+        pk, ob, indexes, ttl, sample_by, partition_by, projection, settings = (
+            SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
+        )
+
+        # THE BUG: ORDER BY was being extracted as "timestamp" (from PROJECTION)
         # instead of "timestamp_load, source_table, detection_time" (from table level)
-        assert pk == "timestamp_load, source_table, detection_time", \
+        assert pk == "timestamp_load, source_table, detection_time", (
             f"PRIMARY KEY failed: expected 'timestamp_load, source_table, detection_time', got '{pk}'"
-        assert ob == "timestamp_load, source_table, detection_time", \
+        )
+        assert ob == "timestamp_load, source_table, detection_time", (
             f"ORDER BY failed: expected 'timestamp_load, source_table, detection_time', got '{ob}' - PROJECTION ORDER BY was extracted instead!"
-        
+        )
+
         # Verify other extractions still work
         assert partition_by == "toYYYYMMDD(timestamp_load)"
         assert len(indexes) == 1
@@ -284,7 +298,7 @@ SETTINGS index_granularity = 2048, ttl_only_drop_parts = 1'''
 
     def test_real_world_logs_beats_filebeat_full(self):
         """Test with real-world logs_beats_filebeat schema."""
-        ddl = '''CREATE TABLE test_org_08102025.logs_beats_filebeat
+        ddl = """CREATE TABLE test_org_08102025.logs_beats_filebeat
 (
     `timestamp` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
     `timestamp_collector` DateTime64(3, 'UTC') CODEC(DoubleDelta, LZ4),
@@ -313,12 +327,14 @@ PARTITION BY toYYYYMMDD(timestamp_load)
 PRIMARY KEY timestamp_load
 ORDER BY timestamp_load
 TTL toDateTime(timestamp) + toIntervalDay(90) WHERE timestamp IS NOT NULL, toDateTime(timestamp_load) + toIntervalDay(90) WHERE timestamp_load IS NOT NULL
-SETTINGS index_granularity = 2048, ttl_only_drop_parts = 1'''
+SETTINGS index_granularity = 2048, ttl_only_drop_parts = 1"""
 
         pk, ob, *_ = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl)
-        
+
         assert pk == "timestamp_load", f"Expected 'timestamp_load', got '{pk}'"
-        assert ob == "timestamp_load", f"Expected 'timestamp_load', got '{ob}' - PROJECTION ORDER BY was extracted instead!"
+        assert ob == "timestamp_load", (
+            f"Expected 'timestamp_load', got '{ob}' - PROJECTION ORDER BY was extracted instead!"
+        )
 
 
 if __name__ == "__main__":

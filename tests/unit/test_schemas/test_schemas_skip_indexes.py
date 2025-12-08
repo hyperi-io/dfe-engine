@@ -96,9 +96,7 @@ def test_derived_schema_precedence(dfe_config_fixtures, create_schema, use_subsa
     add_fields_df = pd.DataFrame(
         columns=["column", "type", "index_type", "index_order", "os_order", "comment"]
     )
-    log_schema_config(
-        meta_schema_df, derived_schema_df, "test_derived_schema_precedence - Before"
-    )
+    log_schema_config(meta_schema_df, derived_schema_df, "test_derived_schema_precedence - Before")
     schema = create_schema(
         meta_schema_df,
         derived_schema_df,
@@ -113,14 +111,14 @@ def test_derived_schema_precedence(dfe_config_fixtures, create_schema, use_subsa
     logger.debug("\nGenerated SQL:")
     logger.debug("\n" + sql_content)
     assert "INDEX idx_category category TYPE set(0) GRANULARITY 4" in sql_content
-    
+
     lines = sql_content.split("\n")
     order_by_line = None
     for line in lines:
         if "ORDER BY" in line and "PROJECTION" not in line:
             order_by_line = line
             break
-    
+
     assert order_by_line is not None, "No main ORDER BY clause found"
     assert "category" in order_by_line
 
@@ -133,9 +131,7 @@ def test_derived_schema_precedence(dfe_config_fixtures, create_schema, use_subsa
 
 
 @pytest.mark.parametrize("use_subsampling", [False, True])
-def test_invalid_index_order_handling(
-    dfe_config_fixtures, create_schema, use_subsampling
-):
+def test_invalid_index_order_handling(dfe_config_fixtures, create_schema, use_subsampling):
     meta_schema_df = pd.DataFrame(
         [
             {
@@ -202,7 +198,7 @@ def test_invalid_index_order_handling(
         if "ORDER BY" in line and "PROJECTION" not in line:
             order_by_line = line
             break
-    
+
     assert order_by_line is not None, "No main ORDER BY clause found"
     assert "category" in order_by_line
 
@@ -254,9 +250,7 @@ def test_range_index_creation(dfe_config_fixtures, create_schema, use_subsamplin
         columns=["column", "type", "index_type", "index_order", "os_order", "comment"]
     )
 
-    log_schema_config(
-        meta_schema_df, derived_schema_df, "test_range_index_creation - Before"
-    )
+    log_schema_config(meta_schema_df, derived_schema_df, "test_range_index_creation - Before")
 
     schema = create_schema(
         meta_schema_df,
@@ -327,9 +321,7 @@ def test_range_index_creation_column_name_correct(
         columns=["column", "type", "index_type", "index_order", "os_order", "comment"]
     )
 
-    log_schema_config(
-        meta_schema_df, derived_schema_df, "test_range_index_creation - Before"
-    )
+    log_schema_config(meta_schema_df, derived_schema_df, "test_range_index_creation - Before")
 
     schema = create_schema(
         meta_schema_df,
@@ -421,7 +413,7 @@ def test_order_by_precedence(dfe_config_fixtures, create_schema, use_subsampling
         if "ORDER BY" in line and "PROJECTION" not in line:
             order_by_line = line
             break
-    
+
     assert order_by_line is not None, "No main ORDER BY clause found"
     order_by_clause = order_by_line.split("ORDER BY")[1].strip()
     order_by_columns_raw = order_by_clause[1:-1].strip()
@@ -449,9 +441,7 @@ def test_order_by_precedence(dfe_config_fixtures, create_schema, use_subsampling
         assert order_by_columns[0] == "cityHash64(timestamp_load)", (
             "cityHash64(timestamp_load) must be first in ORDER BY when subsampling is enabled"
         )
-        assert order_by_columns[1] == "timestamp_load", (
-            "timestamp_load must be second in ORDER BY"
-        )
+        assert order_by_columns[1] == "timestamp_load", "timestamp_load must be second in ORDER BY"
         assert order_by_columns[2:] == ["event_id", "category"], (
             "User-defined columns should follow timestamp_load in correct order"
         )

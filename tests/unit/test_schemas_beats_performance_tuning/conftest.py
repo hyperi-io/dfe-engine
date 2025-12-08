@@ -18,9 +18,7 @@ def dfe_config_fixtures():
                     "ingestion_pipeline_enrichment_standard_custom",
                 ],
                 "geoip": ["ingestion_pipeline_enrichment_geoip"],
-            },
-            "vector_files": {
-                "vector": ["ingestion_pipeline_templates"]
+                "vector": ["ingestion_pipeline_templates"],
             },
             "derived_schema_paths": "tests/resources/test_schemas/filebeats_schemas",
             "meta_schema_paths": "../post_build_artefacts/dfe_meta_schemas_package",

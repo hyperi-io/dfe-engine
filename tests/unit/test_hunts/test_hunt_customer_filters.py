@@ -243,7 +243,7 @@ def test_customer_filters_processing(
         target_config_data=target_config_data,
         checkpoint_destination="clickhouse",
         hunt_checkpoint_path=str(setup_paths[4]),
-            )
+    )
 
     hunt.convert_yaml_to_sql(env, org_id=org_id, customer_filters=customer_filters)
     assert len(hunt.queries_by_customer) == 1, (
@@ -273,9 +273,7 @@ def test_customer_filters_processing(
         )
 
 
-def test_multiline_filter_clause_processing(
-    template_dir_filters, setup_paths, target_config_data
-):
+def test_multiline_filter_clause_processing(template_dir_filters, setup_paths, target_config_data):
     """Test specifically for multiline filter clauses."""
     env = Environment(loader=FileSystemLoader(template_dir_filters))
     org_id = "detectionlab"
@@ -286,9 +284,7 @@ def test_multiline_filter_clause_processing(
     OR field3='value3'
     """
 
-    customer_filters = {
-        org_id: {"rules": [{"name": rule_name, "filter_clause": multiline_filter}]}
-    }
+    customer_filters = {org_id: {"rules": [{"name": rule_name, "filter_clause": multiline_filter}]}}
 
     hunt = Hunt(
         name="Test Multiline Filter",
@@ -305,7 +301,7 @@ def test_multiline_filter_clause_processing(
         target_config_data=target_config_data,
         checkpoint_destination="clickhouse",
         hunt_checkpoint_path=str(setup_paths[4]),
-            )
+    )
 
     hunt.convert_yaml_to_sql(env, org_id=org_id, customer_filters=customer_filters)
     assert len(hunt.queries_by_customer) == 1
@@ -319,7 +315,9 @@ def test_multiline_filter_clause_processing(
         f"Unprocessed placeholder found in SQL: {generated_sql}"
     )
 
-    expected_multiline_pattern = r"\(field1='value1'\s*\n\s*OR field2='value2'\s*\n\s*OR field3='value3'\s*\n\s*\)"
+    expected_multiline_pattern = (
+        r"\(field1='value1'\s*\n\s*OR field2='value2'\s*\n\s*OR field3='value3'\s*\n\s*\)"
+    )
     assert re.search(expected_multiline_pattern, generated_sql, re.DOTALL), (
         f"Expected multiline pattern not found in SQL: {generated_sql}"
     )
@@ -340,9 +338,7 @@ def test_multiline_filter_clause_with_comments(
     -- comment here 
     """
 
-    customer_filters = {
-        org_id: {"rules": [{"name": rule_name, "filter_clause": multiline_filter}]}
-    }
+    customer_filters = {org_id: {"rules": [{"name": rule_name, "filter_clause": multiline_filter}]}}
 
     hunt = Hunt(
         name="Test Multiline Filter with Comments",
@@ -359,7 +355,7 @@ def test_multiline_filter_clause_with_comments(
         target_config_data=target_config_data,
         checkpoint_destination="clickhouse",
         hunt_checkpoint_path=str(setup_paths[4]),
-            )
+    )
 
     hunt.convert_yaml_to_sql(env, org_id=org_id, customer_filters=customer_filters)
     assert len(hunt.queries_by_customer) == 1
@@ -379,18 +375,14 @@ def test_multiline_filter_clause_with_comments(
     )
 
 
-def test_multiple_spaces_limitation(
-    template_dir_filters, setup_paths, target_config_data
-):
+def test_multiple_spaces_limitation(template_dir_filters, setup_paths, target_config_data):
     """Test to document the limitation in handling placeholders with multiple spaces."""
     env = Environment(loader=FileSystemLoader(template_dir_filters))
     org_id = "detectionlab"
     rule_name = "multi_space_filters"
     filter_clause = "field='test'"
 
-    customer_filters = {
-        org_id: {"rules": [{"name": rule_name, "filter_clause": filter_clause}]}
-    }
+    customer_filters = {org_id: {"rules": [{"name": rule_name, "filter_clause": filter_clause}]}}
 
     hunt = Hunt(
         name="Test Multiple Spaces Limitation",
@@ -407,7 +399,7 @@ def test_multiple_spaces_limitation(
         target_config_data=target_config_data,
         checkpoint_destination="clickhouse",
         hunt_checkpoint_path=str(setup_paths[4]),
-            )
+    )
 
     template = env.get_template(f"{rule_name}.jinja2")
     template_content = template.render(
@@ -438,11 +430,9 @@ def test_multiple_spaces_limitation(
         "Multiple spaces like {   customer_filters   } are not supported and will not be processed."
     )
     logger.warning(warning_message)
-    warnings.warn(warning_message, UserWarning)
+    warnings.warn(warning_message, UserWarning, stacklevel=2)
 
-    expected_sql = generated_sql.replace(
-        "{   customer_filters   }", f"({filter_clause})"
-    )
+    expected_sql = generated_sql.replace("{   customer_filters   }", f"({filter_clause})")
     logger.info(f"EXPECTED SQL IF IMPLEMENTED CORRECTLY:\n{expected_sql}")
 
     assert "{   customer_filters   }" in generated_sql, (

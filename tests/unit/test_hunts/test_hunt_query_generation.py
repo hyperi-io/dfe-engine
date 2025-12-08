@@ -7,8 +7,6 @@ from pathlib import Path
 import shutil
 import tempfile
 
-from hs_lib.logger import logger
-
 
 def load_config(file_path: Path) -> dict:
     with open(file_path, "r") as f:
@@ -40,7 +38,8 @@ def template_dir():
 
 @pytest.fixture(scope="session")
 def file_and_folder_paths(tmp_path_factory):
-    Path(__file__).resolve().parent.parent
+    # Parent directory path - currently unused but kept for potential future use
+    _ = Path(__file__).resolve().parent.parent
     output_test_dir = tmp_path_factory.mktemp("output_test_dir")
 
     paths = {
@@ -64,9 +63,7 @@ def hunt_instance(request, file_and_folder_paths, template_dir):
     hunt_data = request.param
 
     hunt_data["hunt_log_path"] = str(file_and_folder_paths["hunt_log_path"])
-    hunt_data["hunt_checkpoint_path"] = str(
-        file_and_folder_paths["hunt_checkpoint_path"]
-    )
+    hunt_data["hunt_checkpoint_path"] = str(file_and_folder_paths["hunt_checkpoint_path"])
 
     hunt = Hunt(**hunt_data)
     return hunt, env
@@ -78,9 +75,7 @@ def hunt_inputs(request, file_and_folder_paths, template_dir):
     hunt_data = request.param
 
     hunt_data["hunt_log_path"] = str(file_and_folder_paths["hunt_log_path"])
-    hunt_data["hunt_checkpoint_path"] = str(
-        file_and_folder_paths["hunt_checkpoint_path"]
-    )
+    hunt_data["hunt_checkpoint_path"] = str(file_and_folder_paths["hunt_checkpoint_path"])
 
     return hunt_data, env
 
@@ -134,9 +129,7 @@ def test_sql_query_building_without_table_settings(
             mock_template.render.return_value = expected_render_output
             mock_get_template.return_value = mock_template
 
-            result_queries = hunt.convert_yaml_to_sql(
-                env, org_id, hunt.customer_filters
-            )
+            result_queries = hunt.convert_yaml_to_sql(env, org_id, hunt.customer_filters)
 
             for query in result_queries:
                 assert expected_in_query in query

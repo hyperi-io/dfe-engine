@@ -3,7 +3,6 @@ import pytest
 from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
 from dfe_engine.config.config_loader import DFEConfigLoader
 import time
-from hs_lib.logger import logger as hs_logger
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
@@ -54,10 +53,8 @@ def test_ensure_table_exists(
     log_prefix, unique_names, ensure_kwargs, expected_result, ch_client, setup_paths
 ):
     database_name, table_name = unique_names
-    dfe_root_log_path = setup_paths["tmp/logs"]
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    setup_paths["tmp/logs"]
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     max_retries = 3
     retries = 0
     success = False
@@ -93,9 +90,7 @@ def test_ensure_table_exists(
 @pytest.mark.parametrize("hunt_name, rule_name", [("test_hunt", "pc_posh_test_rule")])
 def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
         customer = "detectionlab"
         generated_query_id = str(uuid.uuid4())
@@ -106,12 +101,8 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
         end_time = datetime.now(timezone.utc)
         scheduled_start_time = datetime.now(timezone.utc)
         execution_time_ms = (end_time - execution_time).total_seconds() * 1000
-        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(
-            seconds=log_buffer
-        )
-        last_success_time = scheduled_start_time - timedelta(
-            seconds=query_window_seconds
-        )
+        scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
+        last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
 
         manager.ensure_table_exists(
             ch_client, create_missing_database=True, no_cluster_declarations_needed=True
@@ -126,12 +117,8 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
             execution_time_str=execution_time.strftime("%Y-%m-%d %H:%M:%S"),
             execution_time_ms=execution_time_ms,
             end_time_str=end_time.strftime("%Y-%m-%d %H:%M:%S"),
-            previous_successful_checkpoint_str=last_success_time.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-            query_checkpoint_time_str=scheduled_start_time_w_buffer.strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
+            previous_successful_checkpoint_str=last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
+            query_checkpoint_time_str=scheduled_start_time_w_buffer.strftime("%Y-%m-%d %H:%M:%S"),
             query_id=generated_query_id,
             query_schedule_time_str=scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
         )
@@ -151,13 +138,9 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
 
 
 @pytest.mark.parametrize("num_records", [10, 100, 20000])
-def test_create_batch_checkpoint(
-    num_records: int, ch_client, setup_paths, unique_names
-):
+def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, unique_names):
     database_name, table_name = unique_names
-    manager = HuntCheckpointManager(
-        database_name=database_name, table_name=table_name
-    )
+    manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
     try:
         customer = "detectionlab"
         log_buffer = 60
@@ -176,12 +159,8 @@ def test_create_batch_checkpoint(
             end_time = now + timedelta(milliseconds=500)
             scheduled_start_time = now + timedelta(seconds=10)
             execution_time_ms = (end_time - execution_time).total_seconds() * 1000
-            scheduled_start_time_w_buffer = scheduled_start_time - timedelta(
-                seconds=log_buffer
-            )
-            last_success_time = scheduled_start_time - timedelta(
-                seconds=query_window_seconds
-            )
+            scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
+            last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
 
             checkpoint = {
                 "customer_name": customer,
@@ -189,14 +168,10 @@ def test_create_batch_checkpoint(
                 "hunt_name": "test_hunt_batch" + str(generated_query_id),
                 "query_id": generated_query_id,
                 "log_buffer": log_buffer,
-                "query_schedule_time": scheduled_start_time.strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "query_schedule_time": scheduled_start_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "execution_time": execution_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "end_time": end_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "previous_successful_checkpoint": last_success_time.strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "previous_successful_checkpoint": last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "query_checkpoint_time": scheduled_start_time_w_buffer.strftime(
                     "%Y-%m-%d %H:%M:%S"
                 ),
@@ -215,7 +190,7 @@ def test_create_batch_checkpoint(
                 hunt_name=checkpoint["hunt_name"],
                 rule_name=checkpoint["rule_name"],
                 customer=customer,
-                )
+            )
             assert query_checkpoint_time is not None
 
     finally:

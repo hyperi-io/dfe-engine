@@ -17,10 +17,8 @@ async def run_schedule_with_hunts(dfe_config_fixtures, setup_paths, thread_id):
         rule_repo_dir=dfe_config_fixtures["hunt_scheduler"]["rule_repo_dir"],
         hunt_cron_task_timeout=70,
         checkpoint_destination="clickhouse",
-        hunt_checkpoint_path=dfe_config_fixtures["global_settings"][
-            "hunt_checkpoint_path"
-        ],
-                hunt_log_path=setup_paths[1],
+        hunt_checkpoint_path=dfe_config_fixtures["global_settings"]["hunt_checkpoint_path"],
+        hunt_log_path=setup_paths[1],
         checkpoint_timestamp_field="timestamp",
         target_config_data=DFEConfigLoader.read_target_config(
             dfe_config_fixtures["global_settings"]["default_target"],
@@ -40,9 +38,7 @@ async def run_schedule_with_hunts_threadpool(dfe_config_fixtures, setup_paths):
     threads_info = []
 
     async def run_schedule_with_hunts_async(thread_id):
-        return await run_schedule_with_hunts(
-            dfe_config_fixtures, setup_paths, thread_id
-        )
+        return await run_schedule_with_hunts(dfe_config_fixtures, setup_paths, thread_id)
 
     tasks = [
         run_schedule_with_hunts_async(thread_id)
@@ -59,12 +55,8 @@ async def run_schedule_with_hunts_threadpool(dfe_config_fixtures, setup_paths):
 
 
 @pytest.mark.asyncio
-async def test_async_run_schedule_with_hunts_threadpool(
-    dfe_config_fixtures, setup_paths
-):
-    threads_info = await run_schedule_with_hunts_threadpool(
-        dfe_config_fixtures, setup_paths
-    )
+async def test_async_run_schedule_with_hunts_threadpool(dfe_config_fixtures, setup_paths):
+    threads_info = await run_schedule_with_hunts_threadpool(dfe_config_fixtures, setup_paths)
     logger.info("Summary:")
     logger.info(f"Total threads used: {len(threads_info)}")
     for thread_info in threads_info:
@@ -83,21 +75,15 @@ async def test_thread_analysis_benchmark(dfe_config_fixtures, setup_paths):
 
     logger.info("Starting benchmark analysis...")
 
-    threads_info = await run_schedule_with_hunts_threadpool(
-        dfe_config_fixtures, setup_paths
-    )
+    threads_info = await run_schedule_with_hunts_threadpool(dfe_config_fixtures, setup_paths)
     total_threads = len(threads_info)
-    total_execution_time = sum(
-        thread_info["execution_time"] for thread_info in threads_info
-    )
+    total_execution_time = sum(thread_info["execution_time"] for thread_info in threads_info)
     average_execution_time = total_execution_time / (total_threads)
 
     logger.info("Benchmark analysis completed .")
     logger.info(f"Total threads used: {total_threads}")
     logger.info(f"Total execution time: {total_execution_time} seconds")
-    logger.info(
-        f"Average execution time per thread: {average_execution_time} seconds"
-    )
+    logger.info(f"Average execution time per thread: {average_execution_time} seconds")
 
     params = dfe_config_fixtures["hunt_scheduler"]
     assert total_threads == params["num_threads"]

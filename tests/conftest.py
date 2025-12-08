@@ -38,6 +38,7 @@ import pytest
 # Load .env file if present (before any other imports that might use settings)
 try:
     from dotenv import load_dotenv
+
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
@@ -48,6 +49,7 @@ except ImportError:
 # Reset settings to pick up dotenv values
 try:
     from dfe_engine.settings import reset_settings
+
     reset_settings()
 except ImportError:
     pass
@@ -133,7 +135,9 @@ def _start_docker_services(profile: str = "test") -> bool:
         return False
 
 
-def _wait_for_container_healthy(container_name: str, timeout: int = CONTAINER_STARTUP_TIMEOUT) -> bool:
+def _wait_for_container_healthy(
+    container_name: str, timeout: int = CONTAINER_STARTUP_TIMEOUT
+) -> bool:
     """Wait for a container to become healthy."""
     start_time = time.time()
     while time.time() - start_time < timeout:

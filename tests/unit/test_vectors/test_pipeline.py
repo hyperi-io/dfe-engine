@@ -154,14 +154,12 @@ sinks:
 def sample_dfe_config(temp_dir, sample_vector_template):
     return {
         "global_settings": {
-            "helm_template": os.path.join(
-                temp_dir, "templates", "pipeline_template.yaml"
-            ),
+            "helm_template": os.path.join(temp_dir, "templates", "pipeline_template.yaml"),
             "output": os.path.join(temp_dir, "output"),
             "vector_files": {
                 "core": os.path.join(temp_dir, "templates"),
             },
-            "vector_config_mount_path": "/etc/vector_config/src"
+            "vector_config_mount_path": "/etc/vector_config/src",
         },
         "default_env_vars": {
             "PROMETHEUS_EXPORTER": "0.0.0.0:9090",
@@ -186,7 +184,7 @@ def sample_dfe_config(temp_dir, sample_vector_template):
                 "meta": {
                     "EXPECTED_EPS": 1000,
                     "MIN_REPLICAS": 1,
-                }
+                },
             },
             "test-pipeline-2": {
                 "steps": [
@@ -205,7 +203,7 @@ def sample_dfe_config(temp_dir, sample_vector_template):
                 "meta": {
                     "EXPECTED_EPS": 2000,
                     "MIN_REPLICAS": 2,
-                }
+                },
             },
         },
     }
@@ -222,10 +220,8 @@ def sample_pipeline_config():
             {"id": "201-sink-clickhouse-saas.yml"},
         ],
         "env": {"KAFKA_CONSUMER_GROUP": "test-group"},
-        "meta": {"EXPECTED_EPS": 1000}
+        "meta": {"EXPECTED_EPS": 1000},
     }
-
-
 
 
 def test_pipeline_initialization(sample_dfe_config, sample_pipeline_config, temp_dir):
@@ -240,9 +236,7 @@ def test_pipeline_initialization(sample_dfe_config, sample_pipeline_config, temp
     assert pipeline.pipeline_config == sample_pipeline_config
 
 
-def test_pipeline_env_vars_combination(
-    sample_dfe_config, sample_pipeline_config, temp_dir
-):
+def test_pipeline_env_vars_combination(sample_dfe_config, sample_pipeline_config, temp_dir):
     pipeline = Pipeline(
         name="test-pipeline",
         dfe_config=sample_dfe_config,
@@ -292,9 +286,7 @@ def test_pipeline_build_complete_flow(sample_dfe_config, sample_steps, temp_dir)
         assert len(content["args"]) == len(pipeline.pipeline_config["steps"]) * 2 + 2
 
 
-def test_pipeline_with_missing_required_env_var(
-    sample_dfe_config, sample_steps, temp_dir
-):
+def test_pipeline_with_missing_required_env_var(sample_dfe_config, sample_steps, temp_dir):
     # Remove required env var
     del sample_dfe_config["default_env_vars"]["VECTOR_DATA_DIR"]
 
@@ -373,14 +365,12 @@ def test_build_all_pipelines(sample_dfe_config, sample_steps, temp_dir):
     """Critical test to ensure env vars don't bleed across pipelines"""
     output_dir = os.path.join(temp_dir, "output")
     os.makedirs(output_dir, exist_ok=True)
-    for pipeline_name, pipeline_config in sample_dfe_config[
-        "ingestion_pipelines"
-    ].items():
+    for pipeline_name, pipeline_config in sample_dfe_config["ingestion_pipelines"].items():
         pipeline = Pipeline(
             name=pipeline_name,
             dfe_config=sample_dfe_config,
             pipeline_config=pipeline_config,
-                output_dir=output_dir,
+            output_dir=output_dir,
         )
         pipeline.build()
 
@@ -392,54 +382,66 @@ def test_build_all_pipelines(sample_dfe_config, sample_steps, temp_dir):
         content = yaml.safe_load(f)
         assert content["env"] is not None
         # assert correct env vars
-        assert len(content["args"]) == len(sample_dfe_config["ingestion_pipelines"]["test-pipeline"]["steps"]) * 2 + 2
+        assert (
+            len(content["args"])
+            == len(sample_dfe_config["ingestion_pipelines"]["test-pipeline"]["steps"]) * 2 + 2
+        )
         # Check config map data - should contain pipeline-specific vars only
         config_data = content["extraObjects"][0]["data"]
         assert "NEW_ENV_VAR" not in config_data.keys(), "Pipeline 1 should not have NEW_ENV_VAR"
         assert "SOME_ENV_VAR" in config_data.keys(), "Pipeline 1 should have SOME_ENV_VAR"
         assert "EXPECTED_EPS" in config_data.keys(), "Pipeline 1 should have meta vars"
-        
+
         # Verify default env vars are present
-        assert any("PROMETHEUS_EXPORTER" in key for key in config_data.keys()), "Should have PROMETHEUS_EXPORTER"
+        assert any("PROMETHEUS_EXPORTER" in key for key in config_data.keys()), (
+            "Should have PROMETHEUS_EXPORTER"
+        )
 
     with open(os.path.join(output_dir, "test-pipeline-2.yaml")) as f:
         content = yaml.safe_load(f)
         assert content["env"] is not None
         # assert correct env vars
-        assert len(content["args"]) == len(sample_dfe_config["ingestion_pipelines"]["test-pipeline-2"]["steps"]) * 2 + 2
+        assert (
+            len(content["args"])
+            == len(sample_dfe_config["ingestion_pipelines"]["test-pipeline-2"]["steps"]) * 2 + 2
+        )
 
         # Check config map data - ensure no variable bleeding
         config_data = content["extraObjects"][0]["data"]
         assert "NEW_ENV_VAR" in config_data.keys(), "Pipeline 2 should have NEW_ENV_VAR"
         assert "SOME_ENV_VAR" not in config_data.keys(), "Pipeline 2 should NOT have SOME_ENV_VAR"
         assert "EXPECTED_EPS" in config_data.keys(), "Pipeline 2 should have meta vars"
-        
+
         # Check that override values are correct
         topic_list_key = [key for key in config_data.keys() if "KAFKA_SOURCE_TOPIC_LIST" in key]
         if topic_list_key:
-            assert "override_topic" in str(config_data[topic_list_key[0]]), "Should have overridden topic list"
+            assert "override_topic" in str(config_data[topic_list_key[0]]), (
+                "Should have overridden topic list"
+            )
 
 
-def test_pipeline_renders_with_missing_secret_env_vars(
-    sample_dfe_config, sample_steps, temp_dir
-):
+def test_pipeline_renders_with_missing_secret_env_vars(sample_dfe_config, sample_steps, temp_dir):
     """Test that pipeline can render even when secret environment variables are missing."""
     # Remove all secret environment variables from config
     secrets_to_remove = [
-        "CLICKHOUSE_AUTH_USER", "CLICKHOUSE_AUTH_PASSWORD", "CLICKHOUSE_ENDPOINT",
-        "KAFKA_BROKERS_SASL_SCRAM", "KAFKA_SASL_USERNAME", "KAFKA_SASL_PASSWORD"
+        "CLICKHOUSE_AUTH_USER",
+        "CLICKHOUSE_AUTH_PASSWORD",
+        "CLICKHOUSE_ENDPOINT",
+        "KAFKA_BROKERS_SASL_SCRAM",
+        "KAFKA_SASL_USERNAME",
+        "KAFKA_SASL_PASSWORD",
     ]
-    
+
     for secret in secrets_to_remove:
         sample_dfe_config["default_env_vars"].pop(secret, None)
-    
+
     pipeline = Pipeline(
         name="test-pipeline",
         dfe_config=sample_dfe_config,
         pipeline_config=sample_dfe_config["ingestion_pipelines"]["test-pipeline"],
         output_dir=os.path.join(temp_dir, "output"),
     )
-    
+
     # Pipeline should build successfully even without secret vars
     # because they are handled by Kubernetes secrets at runtime
     try:
@@ -456,23 +458,21 @@ def test_pipeline_renders_with_missing_secret_env_vars(
         assert "KAFKA_SASL_PASSWORD" not in str(e)
 
 
-def test_pipeline_fails_with_missing_non_secret_env_vars(
-    sample_dfe_config, sample_steps, temp_dir
-):
+def test_pipeline_fails_with_missing_non_secret_env_vars(sample_dfe_config, sample_steps, temp_dir):
     """Test that pipeline fails when required non-secret environment variables are missing."""
     # Remove a required non-secret environment variable
     del sample_dfe_config["default_env_vars"]["VECTOR_DATA_DIR"]
-    
+
     pipeline = Pipeline(
         name="test-pipeline",
         dfe_config=sample_dfe_config,
         pipeline_config=sample_dfe_config["ingestion_pipelines"]["test-pipeline"],
         output_dir=os.path.join(temp_dir, "output"),
     )
-    
+
     # Pipeline should fail when non-secret required vars are missing
     with pytest.raises(PipelineSchemaError) as exc_info:
         pipeline.build()
-    
+
     # Verify the error mentions the missing non-secret variable
     assert "VECTOR_DATA_DIR" in str(exc_info.value)

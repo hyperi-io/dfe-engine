@@ -30,7 +30,6 @@ Example:
 import logging
 import os
 import json
-import hashlib
 from pathlib import Path
 from typing import Any, Optional
 import pytest
@@ -103,14 +102,18 @@ def compare_dataframes(df1: pd.DataFrame, df2: pd.DataFrame, name: str) -> bool:
             # This handles Int64, float64, and object columns uniformly
             col_values = df[col].astype(object)
             # Replace various forms of "empty" with empty string
-            col_values = col_values.fillna('')  # Replace NaN/pd.NA/None with ''
-            col_values = col_values.replace('nan', '')  # Replace string 'nan'
+            col_values = col_values.fillna("")  # Replace NaN/pd.NA/None with ''
+            col_values = col_values.replace("nan", "")  # Replace string 'nan'
             # Convert to string for consistent comparison
             col_values = col_values.astype(str)
-            col_values = col_values.replace('nan', '')  # Handle any remaining nan strings
-            col_values = col_values.replace('<NA>', '')  # Handle pd.NA string representation
+            col_values = col_values.replace("nan", "")  # Handle any remaining nan strings
+            col_values = col_values.replace("<NA>", "")  # Handle pd.NA string representation
             # Normalize numeric strings: '1.0' -> '1', '2.0' -> '2'
-            col_values = col_values.apply(lambda x: str(int(float(x))) if x and x.replace('.', '').replace('-', '').isdigit() else x)
+            col_values = col_values.apply(
+                lambda x: str(int(float(x)))
+                if x and x.replace(".", "").replace("-", "").isdigit()
+                else x
+            )
             df[col] = col_values
 
     # Sort both by column to ensure consistent comparison
@@ -149,32 +152,32 @@ class TestSchemaUtilOutputValidation:
         """
         from dfe_engine.schema.schema_util import SchemaUtils
 
-        meta_schema_df = pd.DataFrame({
-            "column": ["custom_field", "timestamp", "org_id"],
-            "type": ["string", "datetime", "string"],
-            "default": ["", "", ""],
-            "index_order": ["", "", ""],
-            "index_type": ["", "", ""],
-            "os_order": ["", "", ""],
-            "comment": ["Custom", "Duplicate", "Duplicate"],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": ["custom_field", "timestamp", "org_id"],
+                "type": ["string", "datetime", "string"],
+                "default": ["", "", ""],
+                "index_order": ["", "", ""],
+                "index_type": ["", "", ""],
+                "os_order": ["", "", ""],
+                "comment": ["Custom", "Duplicate", "Duplicate"],
+            }
+        )
 
-        common_header_df = pd.DataFrame({
-            "column": ["timestamp", "org_id", "timestamp_load"],
-            "type": ["datetime", "string", "datetime"],
-            "default": ["", "", ""],
-            "index_order": ["", "", ""],
-            "index_type": ["", "", ""],
-            "os_order": ["", "", ""],
-            "comment": ["Time", "Org", "Load time"],
-        })
+        common_header_df = pd.DataFrame(
+            {
+                "column": ["timestamp", "org_id", "timestamp_load"],
+                "type": ["datetime", "string", "datetime"],
+                "default": ["", "", ""],
+                "index_order": ["", "", ""],
+                "index_type": ["", "", ""],
+                "os_order": ["", "", ""],
+                "comment": ["Time", "Org", "Load time"],
+            }
+        )
 
         result_df = SchemaUtils.strip_duplicate_config_columns_from_non_common_df(
-            meta_schema_df.copy(),
-            common_header_df.copy(),
-            "test_schema",
-            logger,
-            is_ch_flag=True
+            meta_schema_df.copy(), common_header_df.copy(), "test_schema", logger, is_ch_flag=True
         )
 
         test_name = "strip_duplicate_columns"
@@ -187,8 +190,9 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert compare_dataframes(result_df, baseline, test_name), \
-            f"strip_duplicate_columns output changed!"
+        assert compare_dataframes(result_df, baseline, test_name), (
+            "strip_duplicate_columns output changed!"
+        )
 
     def test_flatten_properties_output(self):
         """
@@ -219,7 +223,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"flatten_properties output changed!"
+        assert result == baseline, "flatten_properties output changed!"
 
     def test_extract_field_paths_output(self):
         """
@@ -236,7 +240,7 @@ class TestSchemaUtilOutputValidation:
                         "properties": {
                             "avatar": {"type": "text"},
                         }
-                    }
+                    },
                 }
             },
             "timestamp": {"type": "date"},
@@ -255,7 +259,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == set(baseline), f"extract_field_paths output changed!"
+        assert result == set(baseline), "extract_field_paths output changed!"
 
     def test_sql_column_fix_name_output(self):
         """
@@ -284,7 +288,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert results == baseline, f"sql_column_fix_name output changed!"
+        assert results == baseline, "sql_column_fix_name output changed!"
 
     def test_dict_merge_output(self):
         """
@@ -308,7 +312,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"dict_merge output changed!"
+        assert result == baseline, "dict_merge output changed!"
 
     def test_extract_keys_and_indexes_from_ddl(self):
         """
@@ -358,7 +362,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result_dict == baseline, f"extract_keys_and_indexes_from_ddl output changed!"
+        assert result_dict == baseline, "extract_keys_and_indexes_from_ddl output changed!"
 
     def test_normalize_dot_version(self):
         """Test version normalization for schema versioning."""
@@ -377,7 +381,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert results == baseline, f"normalize_dot_version output changed!"
+        assert results == baseline, "normalize_dot_version output changed!"
 
     def test_flatten_properties_deeply_nested_filebeat(self):
         """
@@ -405,69 +409,45 @@ class TestSchemaUtilOutputValidation:
                             "name": {
                                 "type": "keyword",
                                 "ignore_above": 1024,
-                                "normalizer": "lowercase_normalizer"
+                                "normalizer": "lowercase_normalizer",
                             },
                             "tag": {
                                 "type": "keyword",
                                 "ignore_above": 1024,
-                                "normalizer": "lowercase_normalizer"
-                            }
+                                "normalizer": "lowercase_normalizer",
+                            },
                         }
                     },
                     "disk": {
                         "properties": {
-                            "read": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            },
-                            "write": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            }
+                            "read": {"properties": {"bytes": {"type": "long"}}},
+                            "write": {"properties": {"bytes": {"type": "long"}}},
                         }
                     },
-                    "memory": {
-                        "properties": {
-                            "usage": {"type": "double"}
-                        }
-                    },
+                    "memory": {"properties": {"usage": {"type": "double"}}},
                     "name": {
                         "type": "keyword",
                         "ignore_above": 1024,
-                        "normalizer": "lowercase_normalizer"
+                        "normalizer": "lowercase_normalizer",
                     },
                     "runtime": {
                         "type": "keyword",
                         "ignore_above": 1024,
-                        "normalizer": "lowercase_normalizer"
+                        "normalizer": "lowercase_normalizer",
                     },
-                    "cpu": {
-                        "properties": {
-                            "usage": {"type": "double"}
-                        }
-                    },
+                    "cpu": {"properties": {"usage": {"type": "double"}}},
                     "id": {
                         "type": "keyword",
                         "ignore_above": 1024,
-                        "normalizer": "lowercase_normalizer"
+                        "normalizer": "lowercase_normalizer",
                     },
                     "labels": {"type": "object"},
                     "network": {
                         "properties": {
-                            "ingress": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            },
-                            "egress": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            }
+                            "ingress": {"properties": {"bytes": {"type": "long"}}},
+                            "egress": {"properties": {"bytes": {"type": "long"}}},
                         }
-                    }
+                    },
                 }
             }
         }
@@ -484,7 +464,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"flatten_properties_filebeat_nested output changed!"
+        assert result == baseline, "flatten_properties_filebeat_nested output changed!"
 
     def test_extract_field_paths_deeply_nested_filebeat(self):
         """
@@ -500,53 +480,26 @@ class TestSchemaUtilOutputValidation:
             "container": {
                 "properties": {
                     "image": {
-                        "properties": {
-                            "name": {"type": "keyword"},
-                            "tag": {"type": "keyword"}
-                        }
+                        "properties": {"name": {"type": "keyword"}, "tag": {"type": "keyword"}}
                     },
                     "disk": {
                         "properties": {
-                            "read": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            },
-                            "write": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            }
+                            "read": {"properties": {"bytes": {"type": "long"}}},
+                            "write": {"properties": {"bytes": {"type": "long"}}},
                         }
                     },
-                    "memory": {
-                        "properties": {
-                            "usage": {"type": "double"}
-                        }
-                    },
+                    "memory": {"properties": {"usage": {"type": "double"}}},
                     "name": {"type": "keyword"},
                     "runtime": {"type": "keyword"},
-                    "cpu": {
-                        "properties": {
-                            "usage": {"type": "double"}
-                        }
-                    },
+                    "cpu": {"properties": {"usage": {"type": "double"}}},
                     "id": {"type": "keyword"},
                     "labels": {"type": "object"},
                     "network": {
                         "properties": {
-                            "ingress": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            },
-                            "egress": {
-                                "properties": {
-                                    "bytes": {"type": "long"}
-                                }
-                            }
+                            "ingress": {"properties": {"bytes": {"type": "long"}}},
+                            "egress": {"properties": {"bytes": {"type": "long"}}},
                         }
-                    }
+                    },
                 }
             }
         }
@@ -563,7 +516,7 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == set(baseline), f"extract_field_paths_filebeat_nested output changed!"
+        assert result == set(baseline), "extract_field_paths_filebeat_nested output changed!"
 
     def test_apply_derived_schema_output(self):
         """
@@ -582,42 +535,124 @@ class TestSchemaUtilOutputValidation:
 
         # Create a realistic meta schema (parent schema)
         # Note: index_order must be nullable int (pd.NA for empty), not empty string
-        meta_schema_df = pd.DataFrame({
-            "column": [
-                "timestamp", "org_id", "host", "host.name", "host.ip",
-                "user", "user.name", "user.id", "event", "event.category",
-                "event.action", "source", "source.ip", "source.port",
-                "destination", "destination.ip", "destination.port"
-            ],
-            "type": [
-                "datetime", "string", "object", "string", "ip_field",
-                "object", "string", "string", "object", "string",
-                "string", "object", "ip_field", "integer",
-                "object", "ip_field", "integer"
-            ],
-            "default": [""] * 17,
-            "index_order": pd.array([1, 2, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA, pd.NA], dtype="Int64"),
-            "index_type": ["dimension", "dimension", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""],
-            "os_order": [""] * 17,
-            "comment": ["Time", "Organization", "Host object", "Hostname", "Host IP",
-                       "User object", "Username", "User ID", "Event object", "Event category",
-                       "Event action", "Source object", "Source IP", "Source port",
-                       "Dest object", "Dest IP", "Dest port"],
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": [
+                    "timestamp",
+                    "org_id",
+                    "host",
+                    "host.name",
+                    "host.ip",
+                    "user",
+                    "user.name",
+                    "user.id",
+                    "event",
+                    "event.category",
+                    "event.action",
+                    "source",
+                    "source.ip",
+                    "source.port",
+                    "destination",
+                    "destination.ip",
+                    "destination.port",
+                ],
+                "type": [
+                    "datetime",
+                    "string",
+                    "object",
+                    "string",
+                    "ip_field",
+                    "object",
+                    "string",
+                    "string",
+                    "object",
+                    "string",
+                    "string",
+                    "object",
+                    "ip_field",
+                    "integer",
+                    "object",
+                    "ip_field",
+                    "integer",
+                ],
+                "default": [""] * 17,
+                "index_order": pd.array(
+                    [
+                        1,
+                        2,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                        pd.NA,
+                    ],
+                    dtype="Int64",
+                ),
+                "index_type": [
+                    "dimension",
+                    "dimension",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                    "",
+                ],
+                "os_order": [""] * 17,
+                "comment": [
+                    "Time",
+                    "Organization",
+                    "Host object",
+                    "Hostname",
+                    "Host IP",
+                    "User object",
+                    "Username",
+                    "User ID",
+                    "Event object",
+                    "Event category",
+                    "Event action",
+                    "Source object",
+                    "Source IP",
+                    "Source port",
+                    "Dest object",
+                    "Dest IP",
+                    "Dest port",
+                ],
+            }
+        )
 
         # Create a sub-schema that filters and overrides
-        derived_schema_df = pd.DataFrame({
-            "column": ["host.*", "user.name", "event.category", "source.ip"],
-            "index_order": [pd.NA, 3, 4, 5],
-            "index_type": ["", "dimension", "dimension", "dimension"],
-            "type": ["", "", "", ""],
-            "default": ["", "", "", ""],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["host.*", "user.name", "event.category", "source.ip"],
+                "index_order": [pd.NA, 3, 4, 5],
+                "index_type": ["", "dimension", "dimension", "dimension"],
+                "type": ["", "", "", ""],
+                "default": ["", "", "", ""],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
-            meta_schema_df.copy(),
-            derived_schema_df.copy(),
-            logger
+            meta_schema_df.copy(), derived_schema_df.copy(), logger
         )
 
         test_name = "apply_derived_schema"
@@ -630,8 +665,9 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert compare_dataframes(result_df, baseline, test_name), \
-            f"apply_derived_schema output changed!"
+        assert compare_dataframes(result_df, baseline, test_name), (
+            "apply_derived_schema output changed!"
+        )
 
     def test_apply_derived_schema_large_scale(self):
         """
@@ -645,7 +681,16 @@ class TestSchemaUtilOutputValidation:
         # Generate a moderately large schema (500 rows to keep test fast)
         columns = []
         types = []
-        for prefix in ["host", "user", "event", "source", "destination", "network", "process", "file"]:
+        for prefix in [
+            "host",
+            "user",
+            "event",
+            "source",
+            "destination",
+            "network",
+            "process",
+            "file",
+        ]:
             for i in range(60):
                 columns.append(f"{prefix}.field_{i}")
                 types.append("string" if i % 3 == 0 else ("integer" if i % 3 == 1 else "ip_field"))
@@ -656,30 +701,32 @@ class TestSchemaUtilOutputValidation:
 
         # Build index_order with proper nullable Int64 type
         index_order_values = [pd.NA] * len(columns)
-        meta_schema_df = pd.DataFrame({
-            "column": columns,
-            "type": types,
-            "default": [""] * len(columns),
-            "index_order": pd.array(index_order_values, dtype="Int64"),
-            "index_type": [""] * len(columns),
-            "os_order": [""] * len(columns),
-            "comment": [""] * len(columns),
-        })
+        meta_schema_df = pd.DataFrame(
+            {
+                "column": columns,
+                "type": types,
+                "default": [""] * len(columns),
+                "index_order": pd.array(index_order_values, dtype="Int64"),
+                "index_type": [""] * len(columns),
+                "os_order": [""] * len(columns),
+                "comment": [""] * len(columns),
+            }
+        )
         # Set first two as indexed
-        meta_schema_df.loc[meta_schema_df['column'] == 'timestamp', 'index_order'] = 1
-        meta_schema_df.loc[meta_schema_df['column'] == 'org_id', 'index_order'] = 2
+        meta_schema_df.loc[meta_schema_df["column"] == "timestamp", "index_order"] = 1
+        meta_schema_df.loc[meta_schema_df["column"] == "org_id", "index_order"] = 2
 
         # Sub-schema filters to specific prefixes with wildcards
-        derived_schema_df = pd.DataFrame({
-            "column": ["host.*", "user.*", "event.*", "timestamp", "org_id"],
-            "index_order": [pd.NA, pd.NA, pd.NA, 1, 2],
-            "index_type": ["", "", "", "dimension", "dimension"],
-        })
+        derived_schema_df = pd.DataFrame(
+            {
+                "column": ["host.*", "user.*", "event.*", "timestamp", "org_id"],
+                "index_order": [pd.NA, pd.NA, pd.NA, 1, 2],
+                "index_type": ["", "", "", "dimension", "dimension"],
+            }
+        )
 
         result_df = SchemaUtils.apply_derived_schema(
-            meta_schema_df.copy(),
-            derived_schema_df.copy(),
-            logger
+            meta_schema_df.copy(), derived_schema_df.copy(), logger
         )
 
         test_name = "apply_derived_schema_large"
@@ -692,8 +739,9 @@ class TestSchemaUtilOutputValidation:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert compare_dataframes(result_df, baseline, test_name), \
-            f"apply_derived_schema_large output changed!"
+        assert compare_dataframes(result_df, baseline, test_name), (
+            "apply_derived_schema_large output changed!"
+        )
 
 
 class TestElasticEdgeCases:
@@ -745,7 +793,7 @@ class TestElasticEdgeCases:
                                             "text": {
                                                 "type": "keyword",
                                                 "ignore_above": 1024,
-                                                "normalizer": "lowercase_normalizer"
+                                                "normalizer": "lowercase_normalizer",
                                             }
                                         }
                                     }
@@ -769,7 +817,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"fields_with_properties_pattern output changed!"
+        assert result == baseline, "fields_with_properties_pattern output changed!"
 
     def test_standard_multifields(self):
         """
@@ -797,19 +845,11 @@ class TestElasticEdgeCases:
             "message": {
                 "type": "text",
                 "fields": {
-                    "keyword": {
-                        "type": "keyword",
-                        "ignore_above": 256
-                    },
-                    "english": {
-                        "type": "text",
-                        "analyzer": "english"
-                    }
-                }
+                    "keyword": {"type": "keyword", "ignore_above": 256},
+                    "english": {"type": "text", "analyzer": "english"},
+                },
             },
-            "host": {
-                "type": "keyword"
-            }
+            "host": {"type": "keyword"},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -824,7 +864,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"standard_multifields output changed!"
+        assert result == baseline, "standard_multifields output changed!"
 
     def test_nested_type_fields(self):
         """
@@ -851,16 +891,11 @@ class TestElasticEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "simple_nested": {
-                "type": "nested"
-            },
+            "simple_nested": {"type": "nested"},
             "nested_with_props": {
                 "type": "nested",
-                "properties": {
-                    "author": {"type": "keyword"},
-                    "text": {"type": "text"}
-                }
-            }
+                "properties": {"author": {"type": "keyword"}, "text": {"type": "text"}},
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -875,7 +910,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"nested_type_fields output changed!"
+        assert result == baseline, "nested_type_fields output changed!"
 
     def test_copy_to_and_enabled_fields(self):
         """
@@ -895,21 +930,10 @@ class TestElasticEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "first_name": {
-                "type": "text",
-                "copy_to": "full_name"
-            },
-            "last_name": {
-                "type": "text",
-                "copy_to": "full_name"
-            },
-            "full_name": {
-                "type": "text"
-            },
-            "raw_data": {
-                "type": "object",
-                "enabled": False
-            }
+            "first_name": {"type": "text", "copy_to": "full_name"},
+            "last_name": {"type": "text", "copy_to": "full_name"},
+            "full_name": {"type": "text"},
+            "raw_data": {"type": "object", "enabled": False},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -924,7 +948,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"copy_to_and_enabled_fields output changed!"
+        assert result == baseline, "copy_to_and_enabled_fields output changed!"
 
     def test_alias_and_flattened_types(self):
         """
@@ -943,16 +967,9 @@ class TestElasticEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "distance": {
-                "type": "float"
-            },
-            "route_length_miles": {
-                "type": "alias",
-                "path": "distance"
-            },
-            "labels": {
-                "type": "flattened"
-            }
+            "distance": {"type": "float"},
+            "route_length_miles": {"type": "alias", "path": "distance"},
+            "labels": {"type": "flattened"},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -967,7 +984,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"alias_and_flattened_types output changed!"
+        assert result == baseline, "alias_and_flattened_types output changed!"
 
     def test_complex_combined_structure(self):
         """
@@ -984,15 +1001,8 @@ class TestElasticEdgeCases:
         properties = {
             "user": {
                 "properties": {
-                    "name": {
-                        "type": "text",
-                        "fields": {
-                            "keyword": {"type": "keyword"}
-                        }
-                    },
-                    "email": {
-                        "type": "keyword"
-                    },
+                    "name": {"type": "text", "fields": {"keyword": {"type": "keyword"}}},
+                    "email": {"type": "keyword"},
                     "roles": {
                         "type": "nested",
                         "properties": {
@@ -1001,29 +1011,21 @@ class TestElasticEdgeCases:
                                 "type": "nested",
                                 "properties": {
                                     "action": {"type": "keyword"},
-                                    "resource": {"type": "keyword"}
-                                }
-                            }
-                        }
-                    }
+                                    "resource": {"type": "keyword"},
+                                },
+                            },
+                        },
+                    },
                 }
             },
             "event": {
                 "properties": {
                     "message": {
-                        "properties": {
-                            "fields": {
-                                "properties": {
-                                    "text": {"type": "keyword"}
-                                }
-                            }
-                        }
+                        "properties": {"fields": {"properties": {"text": {"type": "keyword"}}}}
                     },
-                    "category": {
-                        "type": "keyword"
-                    }
+                    "category": {"type": "keyword"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1038,7 +1040,7 @@ class TestElasticEdgeCases:
         if baseline is None:
             pytest.skip(f"No baseline found for {test_name}. Run with GENERATE_BASELINE=true")
 
-        assert result == baseline, f"complex_combined_structure output changed!"
+        assert result == baseline, "complex_combined_structure output changed!"
 
 
 class TestRealWorldNastyEdgeCases:
@@ -1087,19 +1089,15 @@ class TestRealWorldNastyEdgeCases:
                                 "dims": 768,
                                 "index": True,
                                 "similarity": "cosine",
-                                "index_options": {
-                                    "type": "hnsw",
-                                    "m": 16,
-                                    "ef_construction": 100
-                                }
+                                "index_options": {"type": "hnsw", "m": 16, "ef_construction": 100},
                             },
                             "quantized_embedding": {
                                 "type": "dense_vector",
                                 "dims": 384,
                                 "element_type": "byte",
                                 "index": True,
-                                "similarity": "dot_product"
-                            }
+                                "similarity": "dot_product",
+                            },
                         }
                     }
                 }
@@ -1131,16 +1129,12 @@ class TestRealWorldNastyEdgeCases:
         properties = {
             "event": {
                 "properties": {
-                    "duration_ms": {
-                        "type": "long"
-                    },
+                    "duration_ms": {"type": "long"},
                     "duration_sec": {
                         "type": "runtime",
                         "runtime_type": "double",
-                        "script": {
-                            "source": "emit(doc['event.duration_ms'].value / 1000.0)"
-                        }
-                    }
+                        "script": {"source": "emit(doc['event.duration_ms'].value / 1000.0)"},
+                    },
                 }
             },
             "day_of_week": {
@@ -1148,8 +1142,8 @@ class TestRealWorldNastyEdgeCases:
                 "runtime_type": "keyword",
                 "script": {
                     "source": "emit(doc['@timestamp'].value.dayOfWeekEnum.getDisplayName(TextStyle.FULL, Locale.ROOT))"
-                }
-            }
+                },
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1177,17 +1171,10 @@ class TestRealWorldNastyEdgeCases:
         properties = {
             "my_join_field": {
                 "type": "join",
-                "relations": {
-                    "question": ["answer", "comment"],
-                    "answer": "vote"
-                }
+                "relations": {"question": ["answer", "comment"], "answer": "vote"},
             },
-            "question_text": {
-                "type": "text"
-            },
-            "answer_text": {
-                "type": "text"
-            }
+            "question_text": {"type": "text"},
+            "answer_text": {"type": "text"},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1216,27 +1203,21 @@ class TestRealWorldNastyEdgeCases:
             "location": {
                 "type": "geo_point",
                 "ignore_malformed": True,
-                "null_value": {"lat": 0, "lon": 0}
+                "null_value": {"lat": 0, "lon": 0},
             },
             "service_area": {
                 "type": "geo_shape",
                 "strategy": "recursive",
                 "orientation": "counterclockwise",
-                "ignore_malformed": True
+                "ignore_malformed": True,
             },
             "city": {
                 "properties": {
-                    "center": {
-                        "type": "geo_point"
-                    },
-                    "boundary": {
-                        "type": "geo_shape"
-                    },
-                    "name": {
-                        "type": "keyword"
-                    }
+                    "center": {"type": "geo_point"},
+                    "boundary": {"type": "geo_shape"},
+                    "name": {"type": "keyword"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1268,27 +1249,11 @@ class TestRealWorldNastyEdgeCases:
                 "preserve_position_increments": True,
                 "max_input_length": 50,
                 "contexts": [
-                    {
-                        "name": "category",
-                        "type": "category",
-                        "path": "category_field"
-                    },
-                    {
-                        "name": "location",
-                        "type": "geo",
-                        "path": "pin",
-                        "precision": "100m"
-                    }
-                ]
+                    {"name": "category", "type": "category", "path": "category_field"},
+                    {"name": "location", "type": "geo", "path": "pin", "precision": "100m"},
+                ],
             },
-            "title": {
-                "type": "text",
-                "fields": {
-                    "suggest": {
-                        "type": "completion"
-                    }
-                }
-            }
+            "title": {"type": "text", "fields": {"suggest": {"type": "completion"}}},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1316,26 +1281,15 @@ class TestRealWorldNastyEdgeCases:
         properties = {
             "content": {
                 "type": "text",
-                "fields": {
-                    "length": {
-                        "type": "token_count",
-                        "analyzer": "standard"
-                    }
-                }
+                "fields": {"length": {"type": "token_count", "analyzer": "standard"}},
             },
-            "latency_histogram": {
-                "type": "histogram"
-            },
+            "latency_histogram": {"type": "histogram"},
             "metrics": {
                 "properties": {
-                    "response_time": {
-                        "type": "histogram"
-                    },
-                    "request_count": {
-                        "type": "long"
-                    }
+                    "response_time": {"type": "histogram"},
+                    "request_count": {"type": "long"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1360,30 +1314,19 @@ class TestRealWorldNastyEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "allowed_ip_ranges": {
-                "type": "ip_range"
-            },
+            "allowed_ip_ranges": {"type": "ip_range"},
             "expected_delivery": {
                 "type": "date_range",
-                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis"
+                "format": "yyyy-MM-dd HH:mm:ss||yyyy-MM-dd||epoch_millis",
             },
-            "age_bracket": {
-                "type": "integer_range"
-            },
-            "price_range": {
-                "type": "float_range",
-                "coerce": True
-            },
+            "age_bracket": {"type": "integer_range"},
+            "price_range": {"type": "float_range", "coerce": True},
             "network": {
                 "properties": {
-                    "source_cidr": {
-                        "type": "ip_range"
-                    },
-                    "dest_cidr": {
-                        "type": "ip_range"
-                    }
+                    "source_cidr": {"type": "ip_range"},
+                    "dest_cidr": {"type": "ip_range"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1409,26 +1352,15 @@ class TestRealWorldNastyEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "pagerank": {
-                "type": "rank_feature"
-            },
-            "url_length": {
-                "type": "rank_feature",
-                "positive_score_impact": False
-            },
-            "topics": {
-                "type": "rank_features"
-            },
+            "pagerank": {"type": "rank_feature"},
+            "url_length": {"type": "rank_feature", "positive_score_impact": False},
+            "topics": {"type": "rank_features"},
             "document": {
                 "properties": {
-                    "relevance_score": {
-                        "type": "rank_feature"
-                    },
-                    "keyword_features": {
-                        "type": "rank_features"
-                    }
+                    "relevance_score": {"type": "rank_feature"},
+                    "keyword_features": {"type": "rank_features"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1453,25 +1385,15 @@ class TestRealWorldNastyEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "query": {
-                "type": "percolator"
-            },
-            "alert_name": {
-                "type": "keyword"
-            },
+            "query": {"type": "percolator"},
+            "alert_name": {"type": "keyword"},
             "alert_rules": {
                 "properties": {
-                    "rule_query": {
-                        "type": "percolator"
-                    },
-                    "rule_name": {
-                        "type": "keyword"
-                    },
-                    "severity": {
-                        "type": "keyword"
-                    }
+                    "rule_query": {"type": "percolator"},
+                    "rule_name": {"type": "keyword"},
+                    "severity": {"type": "keyword"},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1506,7 +1428,7 @@ class TestRealWorldNastyEdgeCases:
                                 "properties": {
                                     "atomic": {"type": "keyword"},
                                     "field": {"type": "keyword"},
-                                    "type": {"type": "keyword"}
+                                    "type": {"type": "keyword"},
                                 }
                             },
                             "indicator": {
@@ -1516,7 +1438,7 @@ class TestRealWorldNastyEdgeCases:
                                     "url": {
                                         "properties": {
                                             "full": {"type": "wildcard"},
-                                            "domain": {"type": "keyword"}
+                                            "domain": {"type": "keyword"},
                                         }
                                     },
                                     "file": {
@@ -1524,23 +1446,23 @@ class TestRealWorldNastyEdgeCases:
                                             "hash": {
                                                 "properties": {
                                                     "md5": {"type": "keyword"},
-                                                    "sha256": {"type": "keyword"}
+                                                    "sha256": {"type": "keyword"},
                                                 }
                                             }
                                         }
                                     },
                                     "first_seen": {"type": "date"},
-                                    "last_seen": {"type": "date"}
+                                    "last_seen": {"type": "date"},
                                 }
-                            }
-                        }
+                            },
+                        },
                     },
                     "indicator": {
                         "properties": {
                             "confidence": {"type": "keyword"},
-                            "provider": {"type": "keyword"}
+                            "provider": {"type": "keyword"},
                         }
-                    }
+                    },
                 }
             }
         }
@@ -1575,16 +1497,13 @@ class TestRealWorldNastyEdgeCases:
                     "executable": {"type": "keyword"},
                     "command_line": {"type": "wildcard"},
                     "hash": {
-                        "properties": {
-                            "md5": {"type": "keyword"},
-                            "sha256": {"type": "keyword"}
-                        }
+                        "properties": {"md5": {"type": "keyword"}, "sha256": {"type": "keyword"}}
                     },
                     "parent": {
                         "properties": {
                             "pid": {"type": "long"},
                             "name": {"type": "keyword"},
-                            "executable": {"type": "keyword"}
+                            "executable": {"type": "keyword"},
                         }
                     },
                     "group_leader": {
@@ -1594,9 +1513,9 @@ class TestRealWorldNastyEdgeCases:
                             "user": {
                                 "properties": {
                                     "id": {"type": "keyword"},
-                                    "name": {"type": "keyword"}
+                                    "name": {"type": "keyword"},
                                 }
-                            }
+                            },
                         }
                     },
                     "session_leader": {
@@ -1605,13 +1524,9 @@ class TestRealWorldNastyEdgeCases:
                             "parent": {
                                 "properties": {
                                     "pid": {"type": "long"},
-                                    "session_leader": {
-                                        "properties": {
-                                            "pid": {"type": "long"}
-                                        }
-                                    }
+                                    "session_leader": {"properties": {"pid": {"type": "long"}}},
                                 }
-                            }
+                            },
                         }
                     },
                     "entry_leader": {
@@ -1619,16 +1534,12 @@ class TestRealWorldNastyEdgeCases:
                             "pid": {"type": "long"},
                             "entry_meta": {
                                 "properties": {
-                                    "source": {
-                                        "properties": {
-                                            "ip": {"type": "ip"}
-                                        }
-                                    },
-                                    "type": {"type": "keyword"}
+                                    "source": {"properties": {"ip": {"type": "ip"}}},
+                                    "type": {"type": "keyword"},
                                 }
-                            }
+                            },
                         }
-                    }
+                    },
                 }
             }
         }
@@ -1660,10 +1571,7 @@ class TestRealWorldNastyEdgeCases:
                 "properties": {
                     "name": {"type": "keyword"},
                     "hash": {
-                        "properties": {
-                            "md5": {"type": "keyword"},
-                            "sha256": {"type": "keyword"}
-                        }
+                        "properties": {"md5": {"type": "keyword"}, "sha256": {"type": "keyword"}}
                     },
                     "elf": {
                         "properties": {
@@ -1671,28 +1579,24 @@ class TestRealWorldNastyEdgeCases:
                             "byte_order": {"type": "keyword"},
                             "cpu_type": {"type": "keyword"},
                             "creation_date": {"type": "date"},
-                            "exports": {
-                                "type": "flattened"
-                            },
-                            "imports": {
-                                "type": "flattened"
-                            },
+                            "exports": {"type": "flattened"},
+                            "imports": {"type": "flattened"},
                             "sections": {
                                 "type": "nested",
                                 "properties": {
                                     "name": {"type": "keyword"},
                                     "physical_size": {"type": "long"},
                                     "virtual_size": {"type": "long"},
-                                    "entropy": {"type": "float"}
-                                }
+                                    "entropy": {"type": "float"},
+                                },
                             },
                             "segments": {
                                 "type": "nested",
                                 "properties": {
                                     "type": {"type": "keyword"},
-                                    "sections": {"type": "keyword"}
-                                }
-                            }
+                                    "sections": {"type": "keyword"},
+                                },
+                            },
                         }
                     },
                     "pe": {
@@ -1705,9 +1609,9 @@ class TestRealWorldNastyEdgeCases:
                                 "properties": {
                                     "name": {"type": "keyword"},
                                     "entropy": {"type": "float"},
-                                    "physical_size": {"type": "long"}
-                                }
-                            }
+                                    "physical_size": {"type": "long"},
+                                },
+                            },
                         }
                     },
                     "macho": {
@@ -1718,11 +1622,11 @@ class TestRealWorldNastyEdgeCases:
                                 "type": "nested",
                                 "properties": {
                                     "name": {"type": "keyword"},
-                                    "physical_size": {"type": "long"}
-                                }
-                            }
+                                    "physical_size": {"type": "long"},
+                                },
+                            },
                         }
-                    }
+                    },
                 }
             }
         }
@@ -1761,10 +1665,10 @@ class TestRealWorldNastyEdgeCases:
                             "team_id": {"type": "keyword"},
                             "timestamp": {"type": "date"},
                             "trusted": {"type": "boolean"},
-                            "valid": {"type": "boolean"}
+                            "valid": {"type": "boolean"},
                         }
                     },
-                    "executable": {"type": "keyword"}
+                    "executable": {"type": "keyword"},
                 }
             },
             "dll": {
@@ -1776,11 +1680,11 @@ class TestRealWorldNastyEdgeCases:
                         "properties": {
                             "exists": {"type": "boolean"},
                             "subject_name": {"type": "keyword"},
-                            "trusted": {"type": "boolean"}
+                            "trusted": {"type": "boolean"},
                         }
-                    }
-                }
-            }
+                    },
+                },
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1808,21 +1712,10 @@ class TestRealWorldNastyEdgeCases:
         # Note: dynamic_templates are usually at mappings level, not properties level
         # This test ensures we handle properties correctly even with extra keys
         properties = {
-            "labels": {
-                "type": "object",
-                "dynamic": True
-            },
-            "message": {
-                "type": "match_only_text"
-            },
-            "tags": {
-                "type": "keyword",
-                "ignore_above": 1024
-            },
-            "metadata": {
-                "type": "flattened",
-                "depth_limit": 5
-            }
+            "labels": {"type": "object", "dynamic": True},
+            "message": {"type": "match_only_text"},
+            "tags": {"type": "keyword", "ignore_above": 1024},
+            "metadata": {"type": "flattened", "depth_limit": 5},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1850,50 +1743,33 @@ class TestRealWorldNastyEdgeCases:
         properties = {
             "host": {
                 "properties": {
-                    "name": {
-                        "type": "keyword",
-                        "fields": {
-                            "text": {"type": "match_only_text"}
-                        }
-                    },
+                    "name": {"type": "keyword", "fields": {"text": {"type": "match_only_text"}}},
                     "os": {
                         "properties": {
                             "name": {
                                 "type": "keyword",
-                                "fields": {
-                                    "text": {"type": "match_only_text"}
-                                }
+                                "fields": {"text": {"type": "match_only_text"}},
                             },
                             "full": {
                                 "type": "keyword",
-                                "fields": {
-                                    "text": {"type": "match_only_text"}
-                                }
+                                "fields": {"text": {"type": "match_only_text"}},
                             },
-                            "version": {
-                                "type": "keyword"
-                            }
+                            "version": {"type": "keyword"},
                         }
                     },
                     "user": {
                         "properties": {
                             "name": {
                                 "type": "keyword",
-                                "fields": {
-                                    "text": {"type": "match_only_text"}
-                                }
+                                "fields": {"text": {"type": "match_only_text"}},
                             },
                             "full": {
                                 "type": "keyword",
-                                "fields": {
-                                    "text": {"type": "match_only_text"}
-                                }
+                                "fields": {"text": {"type": "match_only_text"}},
                             },
-                            "domain": {
-                                "type": "keyword"
-                            }
+                            "domain": {"type": "keyword"},
                         }
-                    }
+                    },
                 }
             }
         }
@@ -1921,26 +1797,13 @@ class TestRealWorldNastyEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "labels": {
-                "type": "object",
-                "subobjects": False
-            },
+            "labels": {"type": "object", "subobjects": False},
             "metrics": {
                 "type": "object",
                 "subobjects": False,
-                "properties": {
-                    "count": {"type": "long"},
-                    "sum": {"type": "double"}
-                }
+                "properties": {"count": {"type": "long"}, "sum": {"type": "double"}},
             },
-            "container": {
-                "properties": {
-                    "labels": {
-                        "type": "object",
-                        "subobjects": False
-                    }
-                }
-            }
+            "container": {"properties": {"labels": {"type": "object", "subobjects": False}}},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -1966,30 +1829,17 @@ class TestRealWorldNastyEdgeCases:
         from dfe_engine.schema.schema_util import SchemaUtils
 
         properties = {
-            "message": {
-                "type": "match_only_text"
-            },
+            "message": {"type": "match_only_text"},
             "error": {
                 "properties": {
-                    "message": {
-                        "type": "match_only_text"
-                    },
+                    "message": {"type": "match_only_text"},
                     "stack_trace": {
                         "type": "wildcard",
-                        "fields": {
-                            "text": {"type": "match_only_text"}
-                        }
-                    }
+                        "fields": {"text": {"type": "match_only_text"}},
+                    },
                 }
             },
-            "log": {
-                "properties": {
-                    "original": {
-                        "type": "match_only_text",
-                        "index": False
-                    }
-                }
-            }
+            "log": {"properties": {"original": {"type": "match_only_text", "index": False}}},
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -2016,43 +1866,20 @@ class TestRealWorldNastyEdgeCases:
         properties = {
             "url": {
                 "properties": {
-                    "full": {
-                        "type": "wildcard",
-                        "fields": {
-                            "text": {"type": "match_only_text"}
-                        }
-                    },
-                    "path": {
-                        "type": "wildcard"
-                    },
-                    "query": {
-                        "type": "keyword"
-                    }
+                    "full": {"type": "wildcard", "fields": {"text": {"type": "match_only_text"}}},
+                    "path": {"type": "wildcard"},
+                    "query": {"type": "keyword"},
                 }
             },
             "file": {
                 "properties": {
-                    "path": {
-                        "type": "wildcard",
-                        "fields": {
-                            "text": {"type": "match_only_text"}
-                        }
-                    },
-                    "target_path": {
-                        "type": "wildcard"
-                    }
+                    "path": {"type": "wildcard", "fields": {"text": {"type": "match_only_text"}}},
+                    "target_path": {"type": "wildcard"},
                 }
             },
             "registry": {
-                "properties": {
-                    "path": {
-                        "type": "wildcard"
-                    },
-                    "value": {
-                        "type": "keyword"
-                    }
-                }
-            }
+                "properties": {"path": {"type": "wildcard"}, "value": {"type": "keyword"}}
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -2080,21 +1907,13 @@ class TestRealWorldNastyEdgeCases:
             "host": {
                 "properties": {
                     "cpu": {
-                        "properties": {
-                            "usage": {
-                                "type": "scaled_float",
-                                "scaling_factor": 1000
-                            }
-                        }
+                        "properties": {"usage": {"type": "scaled_float", "scaling_factor": 1000}}
                     },
                     "disk": {
                         "properties": {
                             "used": {
                                 "properties": {
-                                    "pct": {
-                                        "type": "scaled_float",
-                                        "scaling_factor": 1000
-                                    }
+                                    "pct": {"type": "scaled_float", "scaling_factor": 1000}
                                 }
                             }
                         }
@@ -2103,29 +1922,20 @@ class TestRealWorldNastyEdgeCases:
                         "properties": {
                             "used": {
                                 "properties": {
-                                    "pct": {
-                                        "type": "scaled_float",
-                                        "scaling_factor": 1000
-                                    },
-                                    "bytes": {"type": "long"}
+                                    "pct": {"type": "scaled_float", "scaling_factor": 1000},
+                                    "bytes": {"type": "long"},
                                 }
                             }
                         }
-                    }
+                    },
                 }
             },
             "transaction": {
                 "properties": {
-                    "price": {
-                        "type": "scaled_float",
-                        "scaling_factor": 100
-                    },
-                    "discount_pct": {
-                        "type": "scaled_float",
-                        "scaling_factor": 10000
-                    }
+                    "price": {"type": "scaled_float", "scaling_factor": 100},
+                    "discount_pct": {"type": "scaled_float", "scaling_factor": 10000},
                 }
-            }
+            },
         }
 
         result = SchemaUtils.flatten_properties(properties)
@@ -2168,22 +1978,16 @@ class TestRealWorldNastyEdgeCases:
                             "IpPort": {"type": "long"},
                             "ProcessName": {
                                 "type": "keyword",
-                                "fields": {
-                                    "text": {"type": "text"}
-                                }
+                                "fields": {"text": {"type": "text"}},
                             },
                             "ProcessId": {"type": "long"},
                             "CommandLine": {
                                 "type": "wildcard",
-                                "fields": {
-                                    "text": {"type": "text"}
-                                }
-                            }
+                                "fields": {"text": {"type": "text"}},
+                            },
                         }
                     },
-                    "user_data": {
-                        "type": "flattened"
-                    }
+                    "user_data": {"type": "flattened"},
                 }
             }
         }
@@ -2390,7 +2194,9 @@ class TestRealWorldECSTemplates:
 
         # ECS process.json is massive - should have many fields
         field_count = len(result)
-        assert field_count >= 100, f"Expected at least 100 fields from ECS process, got {field_count}"
+        assert field_count >= 100, (
+            f"Expected at least 100 fields from ECS process, got {field_count}"
+        )
 
         # Verify some known deep fields exist
         expected_fields = [
@@ -2431,6 +2237,7 @@ class TestRealWorldECSTemplates:
 
 if __name__ == "__main__":
     import sys
+
     if "--generate-baseline" in sys.argv:
         os.environ["GENERATE_BASELINE"] = "true"
     pytest.main([__file__, "-v"])

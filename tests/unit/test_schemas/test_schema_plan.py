@@ -14,6 +14,10 @@ from dfe_engine.schema.schema_util import SchemaUtils
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.config.config_loader import DFEConfigLoader
 
+# These tests require a running ClickHouse instance with specific databases
+# Skip by default in CI - run with: pytest -m integration
+pytestmark = pytest.mark.integration
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 handler = logging.StreamHandler()
@@ -40,9 +44,7 @@ def schema_plan(dfe_config_fixtures):
     )
     test_orgs = [{"org_id": "org321", "cluster_name": ""}]
     plan = SchemaPlan(
-        dfe_output_directory=dfe_config_fixtures["global_settings"][
-            "schema_output_path"
-        ],
+        dfe_output_directory=dfe_config_fixtures["global_settings"]["schema_output_path"],
         organisations=test_orgs,
         target_config_data=config,
         logger=logger,
@@ -93,9 +95,7 @@ def test_build_and_plan_schema(dfe_config_fixtures, dfe_package, setup_paths, te
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=dfe_config_fixtures["global_settings"].get(
                 "use_subsampling_feature", False
             ),
@@ -112,9 +112,7 @@ def test_build_and_plan_schema(dfe_config_fixtures, dfe_package, setup_paths, te
             / "logs_alerts"
             / "logs_alerts.sql"
         )
-        assert expected_schema_path.is_file(), (
-            f"Schema file not found: {expected_schema_path}"
-        )
+        assert expected_schema_path.is_file(), f"Schema file not found: {expected_schema_path}"
 
         SchemaController.plan_schemas(
             args_dfe_package_file_path=dfe_package,
@@ -129,9 +127,7 @@ def test_build_and_plan_schema(dfe_config_fixtures, dfe_package, setup_paths, te
         pytest.fail(f"Build and plan schema failed: {e}")
 
 
-def test_direct_schema_planning_no_db(
-    dfe_config_fixtures, dfe_package, schema_plan, test_org
-):
+def test_direct_schema_planning_no_db(dfe_config_fixtures, dfe_package, schema_plan, test_org):
     try:
         schema_plan.ch_client.execute(f"DROP DATABASE IF EXISTS {test_org}")
 
@@ -164,9 +160,7 @@ def test_direct_schema_planning_no_db(
         pytest.fail(f"Direct schema planning failed: {e}")
 
 
-def test_direct_schema_planning_with_db(
-    ch_client, dfe_config_fixtures, schema_plan, test_org
-):
+def test_direct_schema_planning_with_db(ch_client, dfe_config_fixtures, schema_plan, test_org):
     try:
         ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {test_org}")
 
@@ -264,22 +258,35 @@ def test_parse_columns_from_ddl_excludes_projections(schema_plan):
 
     expected_columns = [
         "timestamp",
-        "timestamp_load", 
+        "timestamp_load",
         "event_hash",
         "logoriginal",
     ]
-    
+
     # Ensure projections are NOT parsed as columns
     assert columns == expected_columns
-    
+
     # Ensure no projection-related content leaks into columns
-    forbidden_words = ['timestamp_optimized', 'complex_multiline', 'PROJECTION', 
-                      'SELECT', 'FROM', 'WHERE', 'GROUP', 'ORDER', 'event_count', 
-                      'max_ts', 'some_table', 'toStartOfDay']
-    
+    forbidden_words = [
+        "timestamp_optimized",
+        "complex_multiline",
+        "PROJECTION",
+        "SELECT",
+        "FROM",
+        "WHERE",
+        "GROUP",
+        "ORDER",
+        "event_count",
+        "max_ts",
+        "some_table",
+        "toStartOfDay",
+    ]
+
     for word in forbidden_words:
-        assert word not in columns, f"Projection-related word '{word}' should not be in columns: {columns}"
-    
+        assert word not in columns, (
+            f"Projection-related word '{word}' should not be in columns: {columns}"
+        )
+
 
 def test_detect_schema_differences(ch_client, schema_plan, test_org):
     try:
@@ -442,9 +449,7 @@ def test_process_sql_scripts(schema_plan, test_org, tmp_path):
     original_collect = schema_plan.collect_schema_files
     original_execute = schema_plan.execute_schema_files
 
-    schema_plan.collect_schema_files = lambda x: [
-        (test_org, str(schema_dir), "process_table.sql")
-    ]
+    schema_plan.collect_schema_files = lambda x: [(test_org, str(schema_dir), "process_table.sql")]
     execute_called = False
 
     def spy_execute(schema_files, is_api_call=False):
@@ -488,9 +493,7 @@ def test_validate_parts_creation(ch_client, schema_plan, test_org):
         """)
 
         schema_plan.execute_query = MagicMock()
-        schema_plan.execute_query.return_value = [
-            (datetime.now(), test_org, "parts_table", 100, 1)
-        ]
+        schema_plan.execute_query.return_value = [(datetime.now(), test_org, "parts_table", 100, 1)]
 
         result = schema_plan.validate_parts_creation(test_org, "parts_table")
         assert result is not None
@@ -618,9 +621,7 @@ def test_add_columns_to_existing_table(ch_client, schema_plan, test_org):
             return original_execute_query(query)
 
         def mock_capture_table_size(db, table):
-            return TableStats(
-                table_name=table, size_bytes=0, total_rows=0, rows_by_day=[]
-            )
+            return TableStats(table_name=table, size_bytes=0, total_rows=0, rows_by_day=[])
 
         schema_plan.execute_query = mock_execute_query
         schema_plan.capture_current_table_size = mock_capture_table_size
@@ -629,27 +630,19 @@ def test_add_columns_to_existing_table(ch_client, schema_plan, test_org):
             schema_plan.plan_schemas(updated_schema, test_org, "columns_test")
 
             columns_detected = any(
-                msg.find("Columns to add:") >= 0
-                and "created_at" in msg
-                and "status" in msg
+                msg.find("Columns to add:") >= 0 and "created_at" in msg and "status" in msg
                 for msg in log_records
             )
             assert columns_detected, "New columns were not detected for addition"
 
-            ch_client.execute(
-                f"ALTER TABLE {test_org}.columns_test ADD COLUMN created_at DateTime"
-            )
-            ch_client.execute(
-                f"ALTER TABLE {test_org}.columns_test ADD COLUMN status String"
-            )
+            ch_client.execute(f"ALTER TABLE {test_org}.columns_test ADD COLUMN created_at DateTime")
+            ch_client.execute(f"ALTER TABLE {test_org}.columns_test ADD COLUMN status String")
 
             columns = schema_plan.fetch_existing_columns(test_org, "columns_test")
             assert "created_at" in columns, (
                 "New column 'created_at' was not found after manual addition"
             )
-            assert "status" in columns, (
-                "New column 'status' was not found after manual addition"
-            )
+            assert "status" in columns, "New column 'status' was not found after manual addition"
 
         finally:
             schema_plan.execute_query = original_execute_query
@@ -709,9 +702,7 @@ def test_modify_primary_key(ch_client, schema_plan, test_org):
         original_capture_table_size = schema_plan.capture_current_table_size
 
         def mock_capture_table_size(db, table):
-            return TableStats(
-                table_name=table, size_bytes=0, total_rows=0, rows_by_day=[]
-            )
+            return TableStats(table_name=table, size_bytes=0, total_rows=0, rows_by_day=[])
 
         schema_plan.capture_current_table_size = mock_capture_table_size
 
@@ -723,15 +714,10 @@ def test_modify_primary_key(ch_client, schema_plan, test_org):
             )
 
             assert "primary_key_test" in schema_plan.schema_update_map
-            assert (
-                schema_plan.schema_update_map["primary_key_test"]["current_primary_key"]
-                == "id"
-            )
+            assert schema_plan.schema_update_map["primary_key_test"]["current_primary_key"] == "id"
             assert (
                 "timestamp, id"
-                in schema_plan.schema_update_map["primary_key_test"][
-                    "expected_primary_key"
-                ]
+                in schema_plan.schema_update_map["primary_key_test"]["expected_primary_key"]
             )
         finally:
             schema_plan.capture_current_table_size = original_capture_table_size
@@ -780,12 +766,8 @@ def test_add_and_remove_indexes(ch_client, schema_plan, test_org):
         expected_indexes = [idx[0] for idx in diff_result.schema_diff.expected_indexes]
 
         assert "idx_value" in current_indexes, "Current index 'idx_value' not found"
-        assert "idx_timestamp" in expected_indexes, (
-            "Expected index 'idx_timestamp' not found"
-        )
-        assert "idx_value" not in expected_indexes, (
-            "Index 'idx_value' should be removed"
-        )
+        assert "idx_timestamp" in expected_indexes, "Expected index 'idx_timestamp' not found"
+        assert "idx_value" not in expected_indexes, "Index 'idx_value' should be removed"
 
         ch_client.execute(f"DROP DATABASE IF EXISTS {test_org}")
     except Exception as e:
@@ -805,9 +787,16 @@ def test_extract_keys_from_ddl_without_subsampling(schema_plan):
     ORDER BY (timestamp_load, id)
     """
 
-    primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings = (
-        SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
-    )
+    (
+        primary_key,
+        order_by_key,
+        indexes,
+        ttl_value,
+        sample_by,
+        partition_by,
+        projection,
+        table_settings,
+    ) = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
 
     assert primary_key == "timestamp_load, id"
     assert order_by_key == "timestamp_load, id"
@@ -829,9 +818,16 @@ def test_extract_keys_from_ddl_with_subsampling(schema_plan):
     SAMPLE BY cityHash64(timestamp_load)
     """
 
-    primary_key, order_by_key, indexes, ttl_value, sample_by, partition_by, projection, table_settings = (
-        SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
-    )
+    (
+        primary_key,
+        order_by_key,
+        indexes,
+        ttl_value,
+        sample_by,
+        partition_by,
+        projection,
+        table_settings,
+    ) = SchemaUtils.extract_keys_and_indexes_from_ddl(ddl_statement)
 
     assert primary_key == "cityHash64(timestamp_load), timestamp_load, id"
     assert order_by_key == "cityHash64(timestamp_load), timestamp_load, id"
@@ -840,9 +836,7 @@ def test_extract_keys_from_ddl_with_subsampling(schema_plan):
     assert sample_by == "cityHash64(timestamp_load)"
 
 
-def test_schema_difference_detection_without_subsampling(
-    ch_client, schema_plan, test_org
-):
+def test_schema_difference_detection_without_subsampling(ch_client, schema_plan, test_org):
     """Test schema difference detection without subsampling enabled"""
     try:
         ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {test_org}")
@@ -874,9 +868,7 @@ def test_schema_difference_detection_without_subsampling(
         ORDER BY (timestamp_load, id)
         """
 
-        current_schema_ddl = schema_plan.get_existing_schema_ddl(
-            test_org, "subsampling_test"
-        )
+        current_schema_ddl = schema_plan.get_existing_schema_ddl(test_org, "subsampling_test")
 
         diff_result = schema_plan.detect_schema_differences(
             test_org, "subsampling_test", current_schema_ddl, expected_ddl
@@ -922,9 +914,7 @@ def test_schema_difference_detection_with_subsampling(ch_client, schema_plan, te
         SAMPLE BY cityHash64(timestamp_load)
         """
 
-        current_schema_ddl = schema_plan.get_existing_schema_ddl(
-            test_org, "subsampling_test"
-        )
+        current_schema_ddl = schema_plan.get_existing_schema_ddl(test_org, "subsampling_test")
 
         diff_result = schema_plan.detect_schema_differences(
             test_org, "subsampling_test", current_schema_ddl, expected_ddl
@@ -940,9 +930,7 @@ def test_schema_difference_detection_with_subsampling(ch_client, schema_plan, te
         pytest.fail(f"Schema difference detection with subsampling failed: {e}")
 
 
-def test_build_with_subsampling_enabled(
-    dfe_config_fixtures, dfe_package, setup_paths, test_org
-):
+def test_build_with_subsampling_enabled(dfe_config_fixtures, dfe_package, setup_paths, test_org):
     """Test building schemas with subsampling enabled"""
     try:
         # Use deepcopy to avoid mutating the session-scoped fixture
@@ -963,9 +951,7 @@ def test_build_with_subsampling_enabled(
             args_use_replicated_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_replicated_merge_tree"
             ],
-            args_use_json_feature=dfe_config_fixtures["global_settings"][
-                "use_json_feature"
-            ],
+            args_use_json_feature=dfe_config_fixtures["global_settings"]["use_json_feature"],
             args_use_subsampling_feature=True,  # Explicitly enable subsampling
             args_use_shared_merge_tree=dfe_config_fixtures["build_schemas"][
                 "use_shared_merge_tree"
@@ -980,9 +966,7 @@ def test_build_with_subsampling_enabled(
             / "logs_alerts"
             / "logs_alerts.sql"
         )
-        assert expected_schema_path.is_file(), (
-            f"Schema file not found: {expected_schema_path}"
-        )
+        assert expected_schema_path.is_file(), f"Schema file not found: {expected_schema_path}"
 
         with open(expected_schema_path, "r") as f:
             sql_content = f.read()
@@ -1071,11 +1055,13 @@ def test_data_type_change_detection(schema_plan, ch_client, test_org):
         """
 
         # Test data type change detection
-        data_type_changes = schema_plan._detect_data_type_changes(test_org, "dtype_test", expected_ddl)
-        
+        data_type_changes = schema_plan._detect_data_type_changes(
+            test_org, "dtype_test", expected_ddl
+        )
+
         # Debug: print what we got
         print(f"Data type changes detected: {data_type_changes}")
-        
+
         # For now, just check that the method runs without error
         assert isinstance(data_type_changes, list)
 
@@ -1093,14 +1079,14 @@ def test_data_type_normalization(schema_plan):
     assert schema_plan._normalize_data_type("Boolean") == "Boolean"
     assert schema_plan._normalize_data_type("String") == "String"
     assert schema_plan._normalize_data_type("UnknownType") == "UnknownType"
-    
+
     # Test whitespace normalization around commas and parentheses
     assert schema_plan._normalize_data_type("DateTime64(3, 'UTC')") == "DateTime64(3,'UTC')"
     assert schema_plan._normalize_data_type("DateTime64( 3 , 'UTC' )") == "DateTime64(3,'UTC')"
     assert schema_plan._normalize_data_type("Array( String )") == "Array(String)"
     assert schema_plan._normalize_data_type("Tuple( Int32 , String )") == "Tuple(Int32,String)"
     assert schema_plan._normalize_data_type("Map( String , Int32 )") == "Map(String,Int32)"
-    
+
     # Test combination of equivalents and whitespace
     assert schema_plan._normalize_data_type("Bool") == "Boolean"
 
@@ -1182,7 +1168,7 @@ def test_plan_schemas_error_handling(ch_client, schema_plan, test_org):
     """Test error handling in plan_schemas"""
     # Create the database first so we reach the parsing logic
     ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {test_org}")
-    
+
     # Test with invalid DDL
     invalid_ddl = "INVALID SQL STATEMENT"
 
@@ -1191,7 +1177,7 @@ def test_plan_schemas_error_handling(ch_client, schema_plan, test_org):
 
     # Should return None for CLI calls (not API calls)
     assert result is None
-    
+
     # Clean up
     ch_client.execute(f"DROP DATABASE IF EXISTS {test_org}")
 
@@ -1200,9 +1186,11 @@ def test_empty_schema_files_collection(schema_plan):
     """Test handling of empty schema files collection"""
     # Mock collect_schema_files to return empty list
     original_collect = schema_plan.collect_schema_files
+
     def mock_collect(customer_data):
         schema_plan.logger.info("Using the following list of schemas: '[]'.")
         return []
+
     schema_plan.collect_schema_files = mock_collect
 
     test_logger = logging.getLogger("test_logger")

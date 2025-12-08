@@ -1,7 +1,12 @@
 import pytest
+from unittest.mock import patch
 
 # Skip all tests in this module - CLI tests belong to dfe-cli, not dfe-engine library
 pytestmark = pytest.mark.skip(reason="CLI tests belong to dfe-cli package, not dfe-engine library")
+
+# Placeholder imports for skipped tests - actual implementations are in dfe-cli
+CliRunner = None
+cli = None
 
 
 @pytest.fixture
@@ -140,9 +145,6 @@ WHERE {{{{timestamp_condition}}}} AND event_id = '{i}'
             mock_process_hunt.assert_called_once()
             assert mock_process_hunt.call_args[1]["test_mode"]
             assert mock_process_hunt.call_args[1]["arg_hunt_dir"] == hunt_dirs_str
-            assert (
-                mock_process_hunt.call_args[1]["arg_hunt_rule_repo_dir"]
-                == rule_dirs_str
-            )
+            assert mock_process_hunt.call_args[1]["arg_hunt_rule_repo_dir"] == rule_dirs_str
 
     assert result.exit_code == 0, f"CLI command failed with error: {result.output}"

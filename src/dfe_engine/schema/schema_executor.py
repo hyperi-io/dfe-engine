@@ -63,7 +63,7 @@ class SchemaExecutor:
     def run_create_roles(self) -> None:
         """
         Executes SQL statements to create roles in ClickHouse directly without creating a file.
-        
+
         If any exceptions occur during the execution, they are logged, and the method raises an error.
 
         Raises:
@@ -71,30 +71,34 @@ class SchemaExecutor:
         """
         try:
             logger.info("Creating roles directly")
-            
+
             roles_sql = []
             for organisation in self.organisations:
-                org_id = organisation.get('org_id', 'default_orgid')
-                roles_sql.extend([
-                    f"-- Roles for {org_id}",
-                    "CREATE ROLE IF NOT EXISTS read_only_role;",
-                    f"GRANT SHOW, SELECT ON {org_id}.* TO read_only_role;",
-                    "CREATE ROLE IF NOT EXISTS read_write_role;",
-                    f"GRANT SHOW, SELECT, INSERT, OPTIMIZE ON {org_id}.* TO read_write_role;",
-                    "CREATE ROLE IF NOT EXISTS loader_role;",
-                    f"GRANT INSERT ON {org_id}.* TO loader_role;",
-                    "CREATE ROLE IF NOT EXISTS detections_role;",
-                    f"GRANT SELECT ON {org_id}.* TO detections_role;",
-                    f"GRANT INSERT ON {org_id}.logs_alerts TO detections_role;",
-                    "REVOKE INSERT, ALTER ON system.* FROM detections_role;",
-                    "GRANT CREATE, ALTER ON xdr_audit.* TO detections_role;",
-                    "GRANT INSERT, UPDATE, DELETE ON xdr_audit.* TO detections_role;",
-                    ""
-                ])
-            
-            sql_statements = [s.strip() for s in roles_sql if s.strip() and not s.strip().startswith('--')]
+                org_id = organisation.get("org_id", "default_orgid")
+                roles_sql.extend(
+                    [
+                        f"-- Roles for {org_id}",
+                        "CREATE ROLE IF NOT EXISTS read_only_role;",
+                        f"GRANT SHOW, SELECT ON {org_id}.* TO read_only_role;",
+                        "CREATE ROLE IF NOT EXISTS read_write_role;",
+                        f"GRANT SHOW, SELECT, INSERT, OPTIMIZE ON {org_id}.* TO read_write_role;",
+                        "CREATE ROLE IF NOT EXISTS loader_role;",
+                        f"GRANT INSERT ON {org_id}.* TO loader_role;",
+                        "CREATE ROLE IF NOT EXISTS detections_role;",
+                        f"GRANT SELECT ON {org_id}.* TO detections_role;",
+                        f"GRANT INSERT ON {org_id}.logs_alerts TO detections_role;",
+                        "REVOKE INSERT, ALTER ON system.* FROM detections_role;",
+                        "GRANT CREATE, ALTER ON xdr_audit.* TO detections_role;",
+                        "GRANT INSERT, UPDATE, DELETE ON xdr_audit.* TO detections_role;",
+                        "",
+                    ]
+                )
+
+            sql_statements = [
+                s.strip() for s in roles_sql if s.strip() and not s.strip().startswith("--")
+            ]
             logger.debug(f"SQL role statements to run: {len(sql_statements)} statements found")
-                
+
             with self.clickhouse_manager.get_clickhouse_client() as ch_client:
                 for sql in sql_statements:
                     if sql:
@@ -102,7 +106,9 @@ class SchemaExecutor:
                             result = ch_client.execute(sql)
                             logger.info(f"Executed role statement: {sql} \n Result: \n{result}")
                         except Exception as e:
-                            logger.warning(f"An error occurred while executing Roles in SQL: {sql}. Error: {e}")
+                            logger.warning(
+                                f"An error occurred while executing Roles in SQL: {sql}. Error: {e}"
+                            )
                             continue
 
         except FileNotFoundError as e:
@@ -110,11 +116,11 @@ class SchemaExecutor:
         except Exception as e:
             logger.error(f"An error occurred while executing create roles statements: {e}")
             raise
-    
+
     def run_create_database(self) -> None:
         """
         Executes SQL statements to create databases in ClickHouse directly without creating a file.
-        
+
         If any exceptions occur during the execution, they are logged, and the method raises an error.
 
         Raises:
@@ -122,60 +128,72 @@ class SchemaExecutor:
         """
         try:
             logger.info("Creating databases directly")
-            
+
             create_database_statements = []
             for organisation in self.organisations:
-                org_id = organisation.get('org_id', 'default_orgid')
-                cluster_name = organisation.get('cluster_name', 'default_cluster')
-                
-                no_cluster_declarations_needed = self.target_config_data.get('no_cluster_declarations_needed', True)
-                
+                org_id = organisation.get("org_id", "default_orgid")
+                cluster_name = organisation.get("cluster_name", "default_cluster")
+
+                no_cluster_declarations_needed = self.target_config_data.get(
+                    "no_cluster_declarations_needed", True
+                )
+
                 if no_cluster_declarations_needed:
                     create_statement = f"CREATE DATABASE IF NOT EXISTS {org_id};"
                 else:
-                    create_statement = f"CREATE DATABASE IF NOT EXISTS {org_id} ON CLUSTER {cluster_name};"
-                
+                    create_statement = (
+                        f"CREATE DATABASE IF NOT EXISTS {org_id} ON CLUSTER {cluster_name};"
+                    )
+
                 create_database_statements.append(create_statement)
                 logger.info(f"Database statement prepared: {create_statement}")
 
             with self.clickhouse_manager.get_clickhouse_client() as ch_client:
                 for sql in create_database_statements:
                     if sql:
-                        db_name = sql.split("CREATE DATABASE IF NOT EXISTS ")[1].split(";")[0].split(" ")[0]
-                        
+                        db_name = (
+                            sql.split("CREATE DATABASE IF NOT EXISTS ")[1]
+                            .split(";")[0]
+                            .split(" ")[0]
+                        )
+
                         result = ch_client.execute(sql)
                         logger.info(f"Executed database statement: {sql} \n Result: {result}")
-                        
+
                         verify_query = f"SELECT name FROM system.databases WHERE name = '{db_name}'"
                         verify_result = ch_client.execute(verify_query)
-                        
+
                         if verify_result:
                             logger.info(f"✅ Database '{db_name}' exists and is accessible.")
                         else:
-                            logger.warning(f"⚠️ Database '{db_name}' could not be verified after creation!")
+                            logger.warning(
+                                f"⚠️ Database '{db_name}' could not be verified after creation!"
+                            )
 
         except Exception as e:
             logger.error(f"An error occurred while executing create database statements: {e}")
             raise
-    
+
     def run_sql_scripts(self):
         """
         Orchestrates the execution of SQL scripts for creating databases, tables, and roles.
         """
         try:
             logger.info("Starting SQL script execution.")
-            
+
             logger.info("Step 1: Creating databases for all organizations")
             self.run_create_database()
-            
+
             logger.info("Step 2: Creating tables from SQL scripts")
             self.process_sql_scripts()
-            
+
             if self.do_add_roles:
                 logger.info("Step 3: Creating and assigning roles")
                 self.run_create_roles()
             else:
-                logger.info("Step 3: Skipped - Roles were not requested to be applied to ClickHouse.")
+                logger.info(
+                    "Step 3: Skipped - Roles were not requested to be applied to ClickHouse."
+                )
         except Exception as e:
             logger.error(f"An error occurred during SQL script execution. {e}", exc_info=True)
         finally:
@@ -209,9 +227,7 @@ class SchemaExecutor:
                         future.result()
                         logger.info(f"Successfully executed SQL file: {sql_file}")
                     except Exception as exc:
-                        logger.error(
-                            f"SQL file {sql_file} generated an exception: {exc}"
-                        )
+                        logger.error(f"SQL file {sql_file} generated an exception: {exc}")
         except Exception as e:
             logger.error(
                 f"An error occurred while processing the SQL scripts: {e}",
@@ -229,7 +245,7 @@ class SchemaExecutor:
             List[Tuple[str, str, str]]: List of tuples containing (org_id, root, file_name).
         """
         schema_files = []
-        for org_id, data in customer_data.items():
+        for org_id, _data in customer_data.items():
             for root, _, files in SchemaUtils.walk_schema_directory(
                 dfe_output_directory=self.dfe_output_directory
             ):
@@ -289,14 +305,10 @@ class SchemaExecutor:
                     columns = [row[0] for row in describe_result]
                     return columns
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to describe table {database_name}.{table_name}: {e}"
-                    )
+                    logger.warning(f"Failed to describe table {database_name}.{table_name}: {e}")
                     return []
             else:
-                logger.info(
-                    f"Table {database_name}.{table_name} does not exist."
-                )
+                logger.info(f"Table {database_name}.{table_name} does not exist.")
                 return []
 
     def table_exists(self, database_name: str, table_name: str) -> bool:
@@ -346,33 +358,23 @@ class SchemaExecutor:
                         result = ch_client.execute(sql_command)
                     else:
                         database_name, table_name = self.parse_table_name(sql_command)
-                        schema_exists = self.schema_existence_check(
-                            database_name, table_name
-                        )
+                        schema_exists = self.schema_existence_check(database_name, table_name)
 
                         if not schema_exists:
                             logger.info(
                                 f"Table {database_name}.{table_name} does not exist. Creating new table."
                             )
-                            logger.debug(
-                                f"Executing SQL: [{sql_command}] for org_id: {org_id}"
-                            )
+                            logger.debug(f"Executing SQL: [{sql_command}] for org_id: {org_id}")
                             result = ch_client.execute(sql_command)
-                            logger.debug(
-                                f"Executed {sql_file_path}. Result: {result}"
-                            )
-                            
+                            logger.debug(f"Executed {sql_file_path}. Result: {result}")
+
                             # Verify table was actually created
-                            table_created = self.table_exists(
-                                database_name, table_name
-                            )
+                            table_created = self.table_exists(database_name, table_name)
                             if not table_created:
                                 raise Exception(
                                     f"Table {database_name}.{table_name} was not created successfully despite successful SQL execution"
                                 )
-                            logger.info(
-                                f"Table {database_name}.{table_name} created successfully."
-                            )
+                            logger.info(f"Table {database_name}.{table_name} created successfully.")
                         else:
                             logger.warning(
                                 f"Table {database_name}.{table_name} already exists. No action performed."

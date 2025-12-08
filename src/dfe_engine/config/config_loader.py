@@ -62,9 +62,10 @@ class DFEConfigLoader:
                 )
                 raise ConfigurationError(
                     f"Unable to create dfe_targets.yaml file: {error_msg}"
-                )
+                ) from error
 
         return DFEConfigLoader.get_config_dir() / "dfe_targets.yaml"
+
     @staticmethod
     def read_target_config_file(targets_file_path: Optional[str] = None) -> Path:
         """Get the path to the configuration file."""
@@ -96,8 +97,6 @@ class DFEConfigLoader:
                 raise ConfigurationError(error_msg)
             return path_obj
 
-    
-    
     @staticmethod
     def read_target_config(
         target_name: str = None, targets_file_path: Optional[str] = None
@@ -137,15 +136,15 @@ class DFEConfigLoader:
             target_config["target_name"] = target_name
             return target_config
 
-        except FileNotFoundError:
-            raise ConfigurationError(
-                f"Configuration file {targets_file_path} not found."
-            )
-        except YAMLError:
-            raise ConfigurationError("Failed to parse the configuration file.")
+        except FileNotFoundError as err:
+            raise ConfigurationError(f"Configuration file {targets_file_path} not found.") from err
+        except YAMLError as err:
+            raise ConfigurationError("Failed to parse the configuration file.") from err
 
     @staticmethod
-    def read_clickhouse_config(target_name: str = None, targets_file_path: str = None) -> Dict[str, Any]:
+    def read_clickhouse_config(
+        target_name: str = None, targets_file_path: str = None
+    ) -> Dict[str, Any]:
         """
         Get ClickHouse configuration using settings cascade.
 
@@ -179,7 +178,6 @@ class DFEConfigLoader:
         logger.info("Using ClickHouse configuration from targets file")
         return target_config
 
-  
     @staticmethod
     def list_targets(targets_file_path: str = None) -> None:
         """List all targets available in the configuration."""
@@ -198,12 +196,12 @@ class DFEConfigLoader:
                     logger.info(f"- {target}")
             else:
                 logger.info("No targets found in configuration.")
-        except FileNotFoundError:
+        except FileNotFoundError as err:
             logger.error(f"Configuration file {config_file} not found.")
-            raise ConfigurationError(f"Configuration file {config_file} not found.")
+            raise ConfigurationError(f"Configuration file {config_file} not found.") from err
         except Exception as e:
             logger.error(f"Failed to list targets: {e}")
-            raise ConfigurationError(f"Failed to list targets: {e}")
+            raise ConfigurationError(f"Failed to list targets: {e}") from e
 
     @staticmethod
     def print_default_target(targets_file_path: str = None) -> None:
@@ -223,14 +221,11 @@ class DFEConfigLoader:
 
             # Check if settings override was applied
             has_env_override = (
-                settings.clickhouse.host != "localhost"
-                or settings.clickhouse.port != 9000
+                settings.clickhouse.host != "localhost" or settings.clickhouse.port != 9000
             )
             config_source = "environment/settings" if has_env_override else "dfe_targets.yaml file"
 
-            target_name = default_target_data.get(
-                "target_name", "No target name specified"
-            )
+            target_name = default_target_data.get("target_name", "No target name specified")
             host = default_target_data.get("ch_host", "No host specified")
             port = default_target_data.get("ch_port", "No port specified")
             username = default_target_data.get("ch_username", "No username specified")
@@ -271,14 +266,11 @@ class DFEConfigLoader:
 
             # Check if settings override was applied
             has_env_override = (
-                settings.clickhouse.host != "localhost"
-                or settings.clickhouse.port != 9000
+                settings.clickhouse.host != "localhost" or settings.clickhouse.port != 9000
             )
             config_source = "environment/settings" if has_env_override else "dfe_targets.yaml file"
 
-            file_target_name = target_config_data.get(
-                "target_name", "No target name specified"
-            )
+            file_target_name = target_config_data.get("target_name", "No target name specified")
             host = target_config_data.get("ch_host", "No host specified")
             port = target_config_data.get("ch_port", "No port specified")
             username = target_config_data.get("ch_username", "No username specified")
@@ -307,9 +299,7 @@ class DFEConfigLoader:
         :return: The text with placeholders replaced by corresponding environment variable values.
         """
         pattern = re.compile(r"\$\{(\w+)\}")
-        return pattern.sub(
-            lambda match: env_vars.get(match.group(1), match.group(0)), text
-        )
+        return pattern.sub(lambda match: env_vars.get(match.group(1), match.group(0)), text)
 
     def get_core_package_config(config_data: dict, section: str, keys: list) -> dict:
         """
@@ -336,9 +326,7 @@ class DFEConfigLoader:
             if not init_file.exists():
                 init_file.touch()
             sys.path.insert(0, str(dfe_core_config_dir.parent))
-            logger.info(
-                f"Using core_dfe_config directory as package: {dfe_core_config_dir}"
-            )
+            logger.info(f"Using core_dfe_config directory as package: {dfe_core_config_dir}")
         else:
             raise FileNotFoundError(
                 f"Core DFE config path {dfe_core_config_dir} is not a valid directory"
@@ -357,9 +345,7 @@ class DFEConfigLoader:
         :return: Parsed configuration dictionary or an empty dictionary if require_config is False and the file is not found.
         """
         config_file_path = (
-            Path(config_file_path)
-            if config_file_path
-            else Path.cwd() / "dfe_package.yaml"
+            Path(config_file_path) if config_file_path else Path.cwd() / "dfe_package.yaml"
         )
 
         if not config_file_path.exists():
@@ -368,18 +354,14 @@ class DFEConfigLoader:
                     f"Configuration file [{config_file_path}] not found in the current directory: {config_file_path.parent}"
                 )
             else:
-                logger.warning(
-                    f"Configuration file [{config_file_path}] not found."
-                )
+                logger.warning(f"Configuration file [{config_file_path}] not found.")
                 return {}
 
         try:
             # Environment variables are loaded via settings module
             env_vars = {**os.environ}
             config_content = config_file_path.read_text()
-            config_content = DFEConfigLoader.replace_env_variables(
-                config_content, env_vars
-            )
+            config_content = DFEConfigLoader.replace_env_variables(config_content, env_vars)
             config = yaml_load_string(config_content)
         except YAMLError as e:
             error_msg = f"Failed to parse [{config_file_path}]. Ensure it is correctly formatted. Error: {e}"
@@ -387,8 +369,6 @@ class DFEConfigLoader:
             raise RuntimeError(error_msg) from e
 
         if config is None and require_config:
-            raise ValueError(
-                f"The configuration file [{config_file_path}] is empty or invalid."
-            )
+            raise ValueError(f"The configuration file [{config_file_path}] is empty or invalid.")
 
         return config or {}
