@@ -8,9 +8,7 @@
 
 ### High Priority
 
-- [ ] Investigate cityHash64 PRIMARY KEY test failures (19 failures in schema tests)
-- [ ] Review if cityHash64 addition is intentional behavior or regression
-- [ ] Update test expectations or fix schema generation logic
+- [x] ~~Investigate cityHash64 PRIMARY KEY test failures~~ (resolved - all 413 tests passing)
 
 ### Medium Priority
 
@@ -40,6 +38,9 @@
 - [ ] Increase test coverage to 90%+
 - [ ] Add type hints to all public APIs
 - [ ] Performance profiling for large schema operations
+- [ ] Add schema version support to dfe_package (schema_builder.py uses hardcoded version="1")
+- [ ] Evaluate Liquibase alternative for schema versioning (schema_version_manager.py)
+- [ ] Implement watcher converter split_logic_whitelist handling
 
 ---
 

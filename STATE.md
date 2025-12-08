@@ -23,15 +23,13 @@
 
 ### Test Status
 
-| Test Suite | Passed | Failed | Notes |
-|------------|--------|--------|-------|
-| Schema Unit Tests | 67 | 19 | cityHash64 PRIMARY KEY tests need review |
-| Pipeline Tests | ✓ | - | Passing |
-| Sigma Tests | ✓ | - | Passing |
+| Test Suite | Passed | Failed | Skipped | Notes |
+|------------|--------|--------|---------|-------|
+| All Tests | 413 | 0 | 32 | All passing |
 
 ### Known Issues
 
-1. **cityHash64 in PRIMARY KEY** - Schema generation adds `cityHash64(timestamp_load)` to PRIMARY KEY. Tests expect the original keys without the hash. Need to verify if this is intentional behavior or a regression.
+None currently.
 
 ---
 
@@ -41,7 +39,7 @@
 |--------|--------|-------|
 | `clickhouse/` | ✅ Ready | clickhouse-connect migration complete |
 | `config/` | ✅ Ready | Target management working |
-| `schema/` | ⚠️ Testing | 19 test failures to investigate |
+| `schema/` | ✅ Ready | All tests passing |
 | `pipeline/` | ✅ Ready | Vector pipeline generation |
 | `sigma/` | ✅ Ready | Sigma rule conversion |
 | `hunts/` | ✅ Ready | Hunt scheduling |
@@ -87,6 +85,7 @@ docker compose --profile test up -d
 ### Environment Variables
 
 All use `DFE_` prefix:
+
 - `DFE_CLICKHOUSE_HOST`, `DFE_CLICKHOUSE_PORT`, etc.
 - `DFE_POSTGRES_HOST`, `DFE_POSTGRES_PORT`, etc.
 

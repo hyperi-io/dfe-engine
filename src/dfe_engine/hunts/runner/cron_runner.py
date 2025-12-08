@@ -151,8 +151,6 @@ class CronRunner:
             while True:
                 if self.hunt_cron_task_timeout and self.hunt_cron_task_timeout > 0:
                     elapsed_time = time.time() - start_time
-                    self.hunt_cron_task_timeout - elapsed_time
-                    # self.logger.info(f"Timeout set, this scheduler will stop in: {int(time_left)} seconds. PID: [{self.daemon_pid}]")
 
                 if (
                     self.hunt_cron_task_timeout

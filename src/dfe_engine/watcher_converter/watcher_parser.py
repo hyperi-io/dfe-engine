@@ -821,9 +821,6 @@ class WatcherParser:
                     )
 
                     for mapped_field in mapped_fields:
-                        # TODO
-                        # if (re.match(r"^\d+%$", sql_like)):
-                        # If find type of mapped field is string do below else CAST it
                         exists_clause_sublist.append(
                             f"({mapped_field} IS NOT NULL AND {mapped_field} != '')"
                         )
@@ -1366,7 +1363,7 @@ class WatcherParser:
         # if "sort" in es_query.keys():
         #     es_query.pop("sort")
         if "aggs" in es_query.keys():
-            es_query.pop("aggs")  # TODO - need to remove this
+            es_query.pop("aggs")
 
         # check if there are any unhandled clauses left
         if len(es_query) > 0:
@@ -1402,7 +1399,6 @@ class WatcherParser:
             "where": sql_clause_str,
             "customers": customer_output,
             "split_logic_whitelist": whitelist_data["split_logic_whitelist"],
-            # TODO do something with the split logic flag
         }
 
     def _check_for_hit(self, a, count):
