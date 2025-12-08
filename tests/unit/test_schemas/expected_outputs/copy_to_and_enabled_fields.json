@@ -1,0 +1,17 @@
+{
+  "first_name": {
+    "copy_to": "full_name",
+    "type": "text"
+  },
+  "full_name": {
+    "type": "text"
+  },
+  "last_name": {
+    "copy_to": "full_name",
+    "type": "text"
+  },
+  "raw_data": {
+    "enabled": false,
+    "type": "object"
+  }
+}

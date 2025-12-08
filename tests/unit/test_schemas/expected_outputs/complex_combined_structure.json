@@ -1,0 +1,26 @@
+{
+  "event.category": {
+    "type": "keyword"
+  },
+  "event.message.fields.text": {
+    "type": "keyword"
+  },
+  "user.email": {
+    "type": "keyword"
+  },
+  "user.name": {
+    "type": "text"
+  },
+  "user.name.keyword": {
+    "type": "keyword"
+  },
+  "user.roles.name": {
+    "type": "keyword"
+  },
+  "user.roles.permissions.action": {
+    "type": "keyword"
+  },
+  "user.roles.permissions.resource": {
+    "type": "keyword"
+  }
+}

@@ -3,51 +3,47 @@ name = "dfe-engine"
 version = "1.0.0"
 description = "DFE Engine - Core library for Data Fusion Engine"
 authors = [{ name = "HyperSec", email = "engineering@hypersec.io" }]
+license = { text = "LicenseRef-HyperSec-EULA" }
 requires-python = ">=3.12.0,<4"
 readme = "README.md"
 
 dependencies = [
     # hs-lib for logging and common utilities
-    "hs-lib>=0.1.0",
+    "hs-lib>=2.12.3",
     # Data processing
-    "pyarrow>=15.0.0",
-    "pandas>=2.2",
-    "numpy>=1.26.2",
+    "pyarrow>=22.0.0",
+    "pandas>=2.2.3",
+    "numpy>=2.3.5",
     # Database connections
-    "clickhouse-connect>=0.6.4",
-    "clickhouse-driver>=0.2.6",
-    "clickhouse-pool>=0.5.3",
+    "clickhouse-connect>=0.10.0",
     "sqlalchemy>=2.0.43",
     # Configuration and parsing
-    "PyYAML>=6.0.3",
     "ruamel-yaml>=0.18.6",
-    "python-dotenv>=1.0.1",
-    "pydantic>=2.9.0",
-    "sqlparse>=0.5.0",
+    "pydantic>=2.12.0",
+    "sqlparse>=0.5.4",
     # AWS
-    "boto3>=1.34.108",
+    "boto3>=1.42.4",
     # Scheduling
-    "apscheduler>=3.10.4",
-    "aiocron>=1.8",
-    "croniter>=2.0.5",
-    # OpenSearch / HTTP
+    "apscheduler>=3.11.1",
+    "aiocron>=2.1",
+    "croniter>=6.0.0",
+    # HTTP clients
     "httpx>=0.28.1",
-    "urllib3>=2.2.2",
+    "requests>=2.32.5",
+    "urllib3>=2.6.0",
     # Templating
-    "Jinja2>=3.1.2",
+    "Jinja2>=3.1.6",
     # Sigma rules
-    "pysigma>=0.11.19",
+    "pysigma>=1.0.2",
     "valhallaapi>=0.6.0",
     # Utilities
-    "python-dateutil>=2.8.2",
+    "python-dateutil>=2.9.0",
     "tabulate>=0.9.0",
-    "pyparsing>=3.1.4",
-    "platformdirs>=3.11.0",
-    "psutil>=5.9.8",
-    "importlib-metadata>=8.4.0",
-    "gitpython>=3.1.44",
-    # Kafka
-    "confluent-kafka>=2.11.0",
+    "pyparsing>=3.2.5",
+    "platformdirs>=4.5.1",
+    "psutil>=7.1.3",
+    "importlib-metadata>=8.7.0",
+    "gitpython>=3.1.45",
 ]
 
 [project.urls]
@@ -62,17 +58,20 @@ packages = ["src/dfe_engine"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-asyncio>=0.23.6",
-    "pytest-benchmark>=4.0.0",
+    "pytest>=8.3.0",
+    "pytest-cov>=6.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-benchmark>=5.1.0",
     "pytest-mock>=3.14.0",
-    "coverage>=7.0.0",
-    "requests>=2.28.1",
+    "pytest-xdist>=3.5.0",
+    "coverage>=7.6.0",
     "defusedxml>=0.7.1",
     "moto[s3]>=5.0.7",
-    "ruff>=0.4.4",
-    "Faker>=19.1.0",
+    "ruff>=0.8.0",
+    "Faker>=33.0.0",
+    "types-requests>=2.32.0",
+    "psycopg[binary]>=3.2.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [tool.pytest.ini_options]
@@ -81,8 +80,14 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv --cov=src/dfe_engine --cov-report=term --cov-report=xml:cov.xml"
+addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term --cov-report=xml:cov.xml"
 testpaths = ["tests"]
+markers = [
+    "unit: Unit tests (no external dependencies)",
+    "integration: Integration tests (require ClickHouse/OpenSearch)",
+    "e2e: End-to-end tests",
+    "slow: Slow running tests",
+]
 
 [tool.ruff]
 line-length = 100

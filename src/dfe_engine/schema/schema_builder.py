@@ -1,5 +1,12 @@
+#  Project:      dfe-engine
+#  File:         schema_builder.py
+#  Purpose:      Schema building and generation for ClickHouse
+#  Language:     Python
+#
+#  License:      LicenseRef-HyperSec-EULA
+#  Copyright:    (c) 2025 HyperSec
+
 from .schema_ch import ClickHouseSchema
-from .schema_os import OpenSearchTemplate
 import importlib.resources as pkg_resources
 from pydantic import BaseModel, Field
 from typing import List, Dict, Any, Optional
@@ -47,12 +54,12 @@ class SchemaBuilder:
             "logs_beats_packetbeat",
         ]
     )
-    COMMON_RESOURES_PACKAGE_NAME = "dfecli.resources"
+    COMMON_RESOURES_PACKAGE_NAME = "dfe_engine.resources"
 
     def __init__(
         self,
         derived_schema_path: Path,
-        logger: logging.Logger = None,
+        logger = None,
         no_cluster_declarations_needed: bool = True,
         use_replicated_merge_tree: bool = True,
         use_json_feature: bool = False,
@@ -66,11 +73,8 @@ class SchemaBuilder:
         all=False,
         only_beats=False,
         max_workers: int = 4,
-        opensearch_flag=False,
     ):
-        self.logger = logger
         self.config = config
-
         self.derived_schema_path = derived_schema_path
 
         self.no_cluster_declarations_needed = no_cluster_declarations_needed
@@ -85,8 +89,6 @@ class SchemaBuilder:
         self.only_beats = only_beats
 
         self.max_workers = max_workers
-
-        self.opensearch_flag = opensearch_flag
 
         self.organisations = config.get("organisations", [])
 
@@ -144,13 +146,13 @@ class SchemaBuilder:
             with open(file_path, "wb") as file:
                 file.write(updated_content)
         except IOError as e:
-            self.logger.error(f"Error processing file {file_path}: {e.strerror}")
+            logger.error(f"Error processing file {file_path}: {e.strerror}")
             exit(1)
 
     def _check_directory_exists(self, directory: Path):
         """Ensure the given directory exists, creating it if necessary."""
         if directory is None:
-            self.logger.error(
+            logger.error(
                 "Provided directory path is None. Please provide a valid directory path.",
                 stack_info=True,
             )
@@ -158,9 +160,9 @@ class SchemaBuilder:
 
         if not directory.is_dir():
             directory.mkdir(parents=True, exist_ok=True)
-            self.logger.info(f"Directory '{directory}' created.")
+            logger.info(f"Directory '{directory}' created.")
         else:
-            self.logger.info(f"Directory '{directory}' already exists.")
+            logger.info(f"Directory '{directory}' already exists.")
 
     def _check_file_exists(self, file_path: Path):
         if not file_path.is_file():
@@ -216,54 +218,6 @@ class SchemaBuilder:
         )
         return schema_paths
 
-    def _write_opensearch_framework(self) -> None:
-        if not self.opensearch_flag:
-            self.logger.warning(
-                "OpenSearch framework is not enabled. Operation will be skipped."
-            )
-            return
-
-        opensearch_dest = self.dfe_output_path / "opensearch" / "HyperSec_Framework"
-        self.logger.debug("Copying common OpenSearch Framework")
-
-        # Initialize resource_path to avoid undefined variable error
-        resource_path = None
-        
-        try:
-            # Iterate over all JSON files in the resource path
-            resource_path = (
-                resources.files(SchemaBuilder.COMMON_RESOURES_PACKAGE_NAME)
-                / self.common_resource_path
-            )
-            for resource_rel_path in resource_path.glob("*.json"):
-                dest_path = opensearch_dest
-
-                dest_path.mkdir(parents=True, exist_ok=True)
-                dest_file_path = dest_path / resource_rel_path.name
-
-                with resource_rel_path.open("r") as f:
-                    os_template_str = f.read()
-
-                parsed_json = json.loads(os_template_str)
-                with open(dest_file_path, "w") as f:
-                    json.dump(parsed_json, f, indent=4)
-
-                self.logger.debug(
-                    f"Copied {self.common_resource_path}/{resource_rel_path.name} to {dest_file_path}"
-                )
-
-        except Exception as error:
-            error_msg = getattr(error, "strerror", str(error))
-            path_info = resource_path if resource_path is not None else f"common/{self.common_resource_path}"
-            self.logger.error(
-                f"Unable to copy OpenSearch templates in package with path [{path_info}] error message {error_msg}"
-            )
-            exit(1)
-        # Usage example
-        # Assuming `self.common_path` and `self.dfe_output_path` are defined as Path objects and `self.logger` is defined.
-        self.__dos2unix(self.dfe_output_path)
-        self.logger.debug("Generating done")
-
     def _validate_package_resource(
         self, package: str, resource_path: str, schema_name: str, version: str
     ):
@@ -304,7 +258,7 @@ class SchemaBuilder:
             if not parsed_sql:
                 raise ValueError(f"Failed to parse SQL file: {sql_file}")
 
-            self.logger.info(
+            logger.info(
                 f"DDL Validation for SQL {sql_file} Completed Successfully."
             )
         except Exception as e:
@@ -322,7 +276,7 @@ class SchemaBuilder:
                 try:
                     future.result()
                 except Exception as e:
-                    self.logger.error(f"Error validating {sql_file}: {e}")
+                    logger.error(f"Error validating {sql_file}: {e}")
 
     def check_all_sql_files(self, output_path: Path):
         sql_files = output_path.glob("**/*.sql")
@@ -356,7 +310,7 @@ class SchemaBuilder:
                     self._validate_schema_paths(schema_paths)
                     extracted_schemas[schema_name] = schema_paths
                 except SchemaBuilderException:
-                    self.logger.error(
+                    logger.error(
                         f"Validation failed for schema {schema_name}", stack_info=True
                     )
 
@@ -366,26 +320,16 @@ class SchemaBuilder:
                     for schema_paths in extracted_schemas.values()
                 ]
 
-                os_futures = []
-                if self.opensearch_flag:
-                    os_futures = [
-                        executor.submit(
-                            self._process_opensearch_templates, schema_paths
-                        )
-                        for schema_paths in extracted_schemas.values()
-                    ]
-
-                self._wait_for_futures(ch_futures + os_futures)
+                self._wait_for_futures(ch_futures)
 
             self.check_all_sql_files(self.dfe_output_path)
-            self._write_opensearch_framework()
 
         except SchemaValidationError as e:
-            self.logger.error(
+            logger.error(
                 f"Schema validation failed in build process: {e}", stack_info=True
             )
         except Exception as e:
-            self.logger.error(f"Error in build process: {str(e)}", stack_info=True)
+            logger.error(f"Error in build process: {str(e)}", stack_info=True)
 
     def _wait_for_futures(self, futures):
         """Wait for futures to complete."""
@@ -393,15 +337,15 @@ class SchemaBuilder:
             try:
                 future.result()
             except SchemaValidationError as e:
-                self.logger.error(
+                logger.error(
                     f"Critical schema validation error during processing: {e}"
                 )
-                print(
+                logger.error(
                     "Build process stopped due to critical schema validation errors. Please fix the errors and try again."
                 )
                 raise SystemExit(1)  # Re-raise to ensure the error stops the process
             except Exception as e:
-                self.logger.error(
+                logger.error(
                     f"Unexpected error during processing: {str(e)}", stack_info=True
                 )
                 raise SystemExit(
@@ -415,7 +359,7 @@ class SchemaBuilder:
             lines.append(f"  {field_name}: {value}")
         lines.append("-------------------\n")
         log_message = "\n".join(lines)
-        self.logger.info(log_message)
+        logger.info(log_message)
 
     def _process_clickhouse_schema(self, schema_info: SchemaInfo):
         """Process an individual ClickHouse schema."""
@@ -434,93 +378,20 @@ class SchemaBuilder:
                 use_subsampling_feature=self.use_subsampling_feature,
                 use_shared_merge_tree=self.use_shared_merge_tree,
                 ttl=schema_info.derived_schema_ttl,
-                logger=self.logger,
+                logger=logger,
             )
             schema_gen_ch.build_clickhouse_schema()
             del schema_gen_ch
         except SchemaValidationError as e:
-            self.logger.error(f"Schema validation failed: {e}")
+            logger.error(f"Schema validation failed: {e}")
             SystemExit(1)
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"Error processing ClickHouse schemas for {schema_info.name}: {e}"
             )
             SystemExit(1)
         finally:
-            self.logger.info(f"ClickHouse Schema Built {schema_info.name}")
-
-    def _process_opensearch_templates(self, schema_info: SchemaInfo):
-        """Process an individual OpenSearch template."""
-        try:
-            self._pretty_print_schema_info(schema_info)
-            schema_gen_os = OpenSearchTemplate(
-                name=schema_info.name,
-                version="1",  # TODO: Fix this
-                meta_schema_file_path=schema_info.meta_schema_file_path,
-                common_resource_path=self.common_resource_path,
-                derived_schema_full_path=schema_info.derived_schema_file_path,
-                additional_fields_full_path=schema_info.additional_fields_file_path,
-                dfe_output_path=os.path.join(self.dfe_output_path, "opensearch"),
-                logger=self.logger,
-            )
-            schema_gen_os.build_opensearch_template()
-
-            self._write_cm_template(
-                schema_info,
-                Path(self.dfe_output_path)
-                / "opensearch"
-                / schema_info.meta_schema_no_extension,
-            )
-
-            del schema_gen_os
-        except Exception as e:
-            self.logger.error(
-                f"Error processing OpenSearch template for schema {schema_info.name}: {e}",
-                stack_info=True,
-            )
-
-    # TODO: We need to look at Dereks new frameworks and maybe just pull all json from the resource template folder.
-    def _write_cm_template(self, schema_paths: SchemaInfo, output_path: Path):
-        """Write compatibility mode template to the specified output path."""
-
-        if not schema_paths.meta_schema_dir_path:
-            self.logger.warning(
-                f"No meta schema directory path found for {schema_paths.name}"
-            )
-            return
-
-        if schema_paths.meta_schema_dir_path.is_dir():
-            cm_file = next(
-                schema_paths.meta_schema_dir_path.glob(f"{schema_paths.name}_cm.json"),
-                None,
-            )
-
-            if cm_file and cm_file.is_file():
-                try:
-                    with cm_file.open("r") as f:
-                        cm_template_str = f.read()
-
-                    cm_file_path = output_path / cm_file.name
-                    with open(cm_file_path, "w") as f:
-                        json.dump(json.loads(cm_template_str), f, indent=4)
-
-                    self.logger.info(
-                        f"Copied compatibility mode template from {cm_file} to {cm_file_path}"
-                    )
-                except Exception as e:
-                    self.logger.warning(
-                        f"Failed to write compatibility mode template for {schema_paths.name}: {e}"
-                    )
-
-            else:
-                self.logger.warning(
-                    f"No compatibility mode JSON file found in {schema_paths.meta_schema_dir_path}"
-                )
-
-        else:
-            self.logger.warning(
-                f"The provided compatibility mode template path '{schema_paths.meta_schema_dir_path}' is not a directory."
-            )
+            logger.info(f"ClickHouse Schema Built {schema_info.name}")
 
     def _find_matching_schemas(self, schemas):
         """

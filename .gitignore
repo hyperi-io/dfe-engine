@@ -1,0 +1,78 @@
+# =============================================================================
+# Core (from ci/templates/gitignore/core.gitignore)
+# =============================================================================
+
+# Editor/IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment/secrets
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Build outputs
+dist/
+dist-bin/
+build/
+out/
+
+# Test/coverage
+test-results/
+coverage/
+
+# =============================================================================
+# Python (from ci/templates/gitignore/python.gitignore)
+# =============================================================================
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*.so
+
+# Virtual environments
+.venv/
+venv/
+
+# Packaging
+*.egg-info/
+*.egg
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Type checking
+.mypy_cache/
+
+# Linting
+.ruff_cache/
+
+# =============================================================================
+# Project-specific
+# =============================================================================
+
+# Test artifacts
+cov.xml
+tests/job_outputs/
+tests/test_logs/
+tests/tmp/
+
+# Generated config files
+dfe_package_testing.yaml
+meta_schemas.zip
+
+# Docker
+docker-compose.yml

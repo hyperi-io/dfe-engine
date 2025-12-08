@@ -1,7 +1,7 @@
 import os
-import yaml
 from jinja2 import Environment, TemplateSyntaxError
-from yaml.parser import ParserError
+from ...yaml_utils import yaml_dump_string, yaml_load_string, YAMLError
+from hs_lib.logger import logger
 
 
 
@@ -14,7 +14,6 @@ class HuntValidator:
         hunt_data: dict,
         env: Environment,
         rule_repo_dir: str,
-        logger: logging.Logger,
         checkpoint_timestamp_field: str,
     ):
         """
@@ -28,8 +27,8 @@ class HuntValidator:
         logger.info("--- HUNT VALIDATOR STARTED ---")
         logger.info(f"Hunt Config:\n {hunt_data} ")
         try:
-            yaml.safe_load(yaml.dump(hunt_data))
-        except ParserError as e:
+            yaml_load_string(yaml_dump_string(hunt_data))
+        except YAMLError as e:
             raise ValueError(f"Invalid YAML structure: {e}")
 
         # cron_expressions = hunt_data.get("cron", [])

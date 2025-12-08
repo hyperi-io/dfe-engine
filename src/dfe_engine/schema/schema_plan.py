@@ -3,12 +3,13 @@ from typing import List, Tuple, Optional
 import re
 import os
 import json
-
 from pathlib import Path
+from datetime import datetime
+
+from hs_lib.logger import logger
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from ..clickhouse.clickhouse_errors_mapping import ClickHouseErrorHandler
 from .schema_util import SchemaUtils
-from datetime import datetime
 
 
 class TableStats(BaseModel):
@@ -56,7 +57,7 @@ class SchemaPlan:
         schema_filter_wildchar: str = None,
         derived_schema_filter_wildchar: str = None,
         target_config_data: dict = None,
-        logger: logging.Logger = None,
+        logger = None,
     ):
         """
         Initialize the SchemaPlan with required parameters.
@@ -69,9 +70,8 @@ class SchemaPlan:
         self.derived_schema_filter_wildchar = derived_schema_filter_wildchar
         self.schema_update_map = {}
         self.target_config_data = target_config_data
-        self.logger = logger or logging.getLogger(__name__)
         self.clickhouse_manager = ClickHouseManager.get_instance(
-            self.logger, target_config_data=target_config_data
+            target_config_data=target_config_data
         )
         self.ch_client = self.clickhouse_manager.get_clickhouse_client()
 
@@ -87,13 +87,13 @@ class SchemaPlan:
         """
         try:
             customer_data = SchemaUtils.read_customer_list(
-                organisations=self.organisations, logger=self.logger
+                organisations=self.organisations, logger=logger
             )
             schema_files = self.collect_schema_files(customer_data)
             return self.execute_schema_files(schema_files, is_api_call=is_api_call)
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(
+            logger.error(
                 f"An error occurred while processing the SQL scripts: {parsed_error['user_message']}",
                 exc_info=True,
             )
@@ -116,8 +116,6 @@ class SchemaPlan:
             for root, _, files in SchemaUtils.walk_schema_directory(
                 dfe_output_directory=self.dfe_output_directory
             ):
-                if "opensearch" in root:
-                    continue
                 schema_files.extend(
                     SchemaUtils.filter_schema_files(
                         org_id,
@@ -131,10 +129,10 @@ class SchemaPlan:
                 )
 
         if not schema_files:
-            self.logger.info(f"Using the following list of schemas: '{schema_files}'.")
+            logger.info(f"Using the following list of schemas: '{schema_files}'.")
             return []
 
-        self.logger.info(f"Using the following list of schemas: '{schema_files}'.")
+        logger.info(f"Using the following list of schemas: '{schema_files}'.")
         return schema_files
 
     def execute_schema_files(self, schema_files: List[Tuple[str, str, str]], is_api_call: bool) -> List[dict]:
@@ -156,7 +154,7 @@ class SchemaPlan:
             with open(sql_file_path, "r", encoding="utf-8") as ddl_file:
                 ddl_content = ddl_file.read()
                 if SchemaUtils.is_view(ddl_content):
-                    self.logger.warning(
+                    logger.warning(
                         f"This is a View {table_name} so it will be skipped from processing"
                     )
                     continue
@@ -250,12 +248,12 @@ class SchemaPlan:
                     return columns
                 except Exception as e:
                     parsed_error = ClickHouseErrorHandler.parse_error(e)
-                    self.logger.warning(
+                    logger.warning(
                         f"Failed to describe table {database_name}.{table_name}: {parsed_error['user_message']}"
                     )
                     return []
             else:
-                self.logger.warning(
+                logger.warning(
                     f"Table {database_name}.{table_name} does not exist."
                 )
                 return []
@@ -303,14 +301,14 @@ class SchemaPlan:
             }
 
         target_name = self.target_config_data.get('target_name', 'No target name specified')
-        self.logger.info(f"\n\nPlanning schema for table: {table_name} @ in target [{target_name}]")
+        logger.info(f"\n\nPlanning schema for table: {table_name} @ in target [{target_name}]")
 
         try:
             databases = self.ch_client.execute(f"SHOW DATABASES LIKE '{database_name}'")
-            self.logger.info(f" found databases [{databases}]")
+            logger.info(f" found databases [{databases}]")
 
             if database_name not in {db[0] for db in databases}:
-                self.logger.info(f"+++ new database to create [{database_name}]")
+                logger.info(f"+++ new database to create [{database_name}]")
                 if is_api_call:
                     api_result["status"] = "new_table"
                     api_result["differences"]["has_changes"] = True
@@ -326,7 +324,7 @@ class SchemaPlan:
                     return
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error checking databases: {parsed_error['message']}")
+            logger.error(f"Error checking databases: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
                 api_result["error_message"] = parsed_error['user_message']
@@ -353,7 +351,7 @@ class SchemaPlan:
                     return
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error checking tables in database {database_name}: {parsed_error['message']}")
+            logger.error(f"Error checking tables in database {database_name}: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
                 api_result["error_message"] = parsed_error['user_message']
@@ -364,13 +362,13 @@ class SchemaPlan:
 
         current_schema_ddl = self.get_existing_schema_ddl(database_name, table_name)
 
-        self.logger.debug(f"**** Current Schema DDL in {current_schema_ddl} /n")
-        self.logger.debug(f"**** Expected Schema DDL in {ddl_statement} /n")
+        logger.debug(f"**** Current Schema DDL in {current_schema_ddl} /n")
+        logger.debug(f"**** Expected Schema DDL in {ddl_statement} /n")
         
         expected_schema_ddl = ddl_statement
 
         if not current_schema_ddl and not expected_schema_ddl:
-            self.logger.warning(f"Both current and expected schemas are not available for table {table_name}.")
+            logger.warning(f"Both current and expected schemas are not available for table {table_name}.")
             if is_api_call:
                 api_result["status"] = "error"
                 api_result["error_message"] = f"Both current and expected schemas are not available for table {table_name}."
@@ -382,15 +380,15 @@ class SchemaPlan:
             existing_columns = self.fetch_existing_columns(database_name, table_name)
         
             columns_to_add = list(set(new_columns) - set(existing_columns))
-            self.logger.info(f"Columns to add: {columns_to_add}")
+            logger.info(f"Columns to add: {columns_to_add}")
             
             
             data_type_changes = self._detect_data_type_changes(database_name, table_name, expected_schema_ddl)
             if data_type_changes:
-                self.logger.info(f"Data type changes detected: {data_type_changes}")
+                logger.info(f"Data type changes detected: {data_type_changes}")
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error analyzing columns: {parsed_error['message']}")
+            logger.error(f"Error analyzing columns: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
                 api_result["error_message"] = parsed_error['user_message']
@@ -403,7 +401,7 @@ class SchemaPlan:
             diff_result = self.detect_schema_differences(database_name, table_name, current_schema_ddl, expected_schema_ddl)
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error detecting schema differences: {parsed_error['message']}")
+            logger.error(f"Error detecting schema differences: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error"
                 api_result["error_message"] = parsed_error['user_message']
@@ -413,7 +411,7 @@ class SchemaPlan:
             return
         
         if not current_schema_ddl:
-            self.logger.info(f"Schema for table {table_name} does not exist. New schema will be created.")
+            logger.info(f"Schema for table {table_name} does not exist. New schema will be created.")
             if is_api_call:
                 api_result["status"] = "new_table"
                 api_result["differences"]["has_changes"] = True
@@ -423,7 +421,7 @@ class SchemaPlan:
             table_size_info = self.capture_current_table_size(database_name, table_name)
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error capturing table size: {parsed_error['message']}")
+            logger.error(f"Error capturing table size: {parsed_error['message']}")
             if is_api_call:
                 api_result["status"] = "error" 
                 api_result["error_message"] = parsed_error['user_message']
@@ -438,7 +436,7 @@ class SchemaPlan:
         report = []
 
         if diff_result.schema_difference or columns_to_add or data_type_changes:
-            self.logger.info(f"module.{database_name}.{table_name}: Refreshing schema... [id={table_name}]")
+            logger.info(f"module.{database_name}.{table_name}: Refreshing schema... [id={table_name}]")
 
             report.append("\n*******************TABLE STATISTICS******************************\n")
             report.append(f"- Table Size: {table_size_info.size_bytes} bytes")
@@ -524,7 +522,7 @@ class SchemaPlan:
                 api_result["differences"]["change_summary"] = "; ".join(change_summaries)
                     
         else:
-            self.logger.info(f"\nmodule.{database_name}.{table_name}: No schema changes detected [id={table_name}]\n")
+            logger.info(f"\nmodule.{database_name}.{table_name}: No schema changes detected [id={table_name}]\n")
             report.append("\nNo changes detected in schema.\n")
             if is_api_call:
                 api_result["status"] = "no_changes"
@@ -542,7 +540,7 @@ class SchemaPlan:
         report.append("\n*************************************************\n")
 
         report_output = "\n".join(report)
-        self.logger.info(report_output)
+        logger.info(report_output)
         
         if is_api_call:
             return api_result
@@ -577,7 +575,7 @@ class SchemaPlan:
         )
 
         report_output = "\n".join(report)
-        self.logger.info(report_output)
+        logger.info(report_output)
 
     def detect_schema_differences(self, database_name, table_name, current_schema_ddl, expected_schema_ddl):
         """
@@ -786,7 +784,7 @@ class SchemaPlan:
             report.append("\n")
 
         report_output = "\n".join(report)
-        self.logger.info(report_output)
+        logger.info(report_output)
 
     def capture_current_table_size(self, database_name, table_name):
         """
@@ -853,24 +851,24 @@ class SchemaPlan:
         """
         try:
             query = f"SHOW CREATE TABLE {database_name}.{table_name}"
-            self.logger.warning(f"Showing Table {database_name}.{table_name}\n")
+            logger.warning(f"Showing Table {database_name}.{table_name}\n")
 
             result = self.ch_client.execute(query)
             if result:
                 return result[0][0]
             else:
-                self.logger.error(f"Table: {table_name} do not exists.")
+                logger.error(f"Table: {table_name} do not exists.")
                 return None
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
             if parsed_error['type'] == 'database_not_found':
-                self.logger.warning(f"Database {database_name} does not exist.")
+                logger.warning(f"Database {database_name} does not exist.")
             elif parsed_error['type'] == 'table_not_found':
-                self.logger.warning(
+                logger.warning(
                     f"Table {table_name} in database {database_name} does not exist."
                 )
             else:
-                self.logger.warning(f"Error getting schema DDL for table {table_name}: {parsed_error['user_message']}")
+                logger.warning(f"Error getting schema DDL for table {table_name}: {parsed_error['user_message']}")
             return None
 
     def check_table_records(self, database_name: str, table_name: str):
@@ -890,7 +888,7 @@ class SchemaPlan:
             return result
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Query execution failed: {parsed_error['user_message']} (Details: {parsed_error['message']})")
+            logger.error(f"Query execution failed: {parsed_error['user_message']} (Details: {parsed_error['message']})")
             return None
 
     def _normalize_data_type(self, data_type: str) -> str:
@@ -995,6 +993,6 @@ class SchemaPlan:
                         
         except Exception as e:
             parsed_error = ClickHouseErrorHandler.parse_error(e)
-            self.logger.error(f"Error detecting data type changes: {parsed_error['user_message']} (Details: {parsed_error['message']})")
+            logger.error(f"Error detecting data type changes: {parsed_error['user_message']} (Details: {parsed_error['message']})")
             
         return data_type_changes

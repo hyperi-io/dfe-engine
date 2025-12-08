@@ -1,0 +1,59 @@
+# DFE Engine Default Configuration
+# This file provides default values for all configuration options.
+# Values can be overridden via environment variables or config files.
+# Environment variables take precedence: ENV > config file > defaults
+
+# ClickHouse connection settings
+clickhouse:
+  host: "localhost"
+  port: 9000
+  username: "default"
+  password: ""
+  database: "default"
+  secure: true
+  verify: false
+  connections_min: 10
+  connections_max: 300
+
+# Hunt scheduler settings
+hunts:
+  log_path: "hunt_log_path"
+  checkpoint_path: ""
+  cron_task_timeout: 300
+
+# Artifactory settings for downloading templates
+artifactory:
+  url: ""
+  username: ""
+  password: ""
+  templates_version: "latest"
+
+# PostgreSQL connection settings
+postgres:
+  host: "localhost"
+  port: 5432
+  username: "postgres"
+  password: ""
+  database: "dfe_engine"
+
+# Kafka connection settings
+kafka:
+  bootstrap_servers: "localhost:9092"
+  security_protocol: "PLAINTEXT"
+
+# Storage settings for artifacts and templates
+# Supports local filesystem, S3, and HTTP backends
+# Type is auto-detected from path if set to "auto":
+#   - s3://bucket/path -> S3 backend
+#   - http(s)://... -> HTTP backend
+#   - /path or ./path -> Local filesystem
+storage:
+  type: "auto"
+  path: "./artifacts"
+  s3_bucket: ""
+  s3_region: ""
+
+# Logging settings (handled by hs-lib)
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

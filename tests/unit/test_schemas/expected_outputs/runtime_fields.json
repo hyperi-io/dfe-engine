@@ -1,0 +1,19 @@
+{
+  "day_of_week": {
+    "runtime_type": "keyword",
+    "script": {
+      "source": "emit(doc['@timestamp'].value.dayOfWeekEnum.getDisplayName(TextStyle.FULL, Locale.ROOT))"
+    },
+    "type": "runtime"
+  },
+  "event.duration_ms": {
+    "type": "long"
+  },
+  "event.duration_sec": {
+    "runtime_type": "double",
+    "script": {
+      "source": "emit(doc['event.duration_ms'].value / 1000.0)"
+    },
+    "type": "runtime"
+  }
+}

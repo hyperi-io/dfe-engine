@@ -1,10 +1,11 @@
 import os
 import json
-import pandas as pd
 import re
-import logging
 import glob
 from typing import List, Dict, Any, Set
+
+import pandas as pd
+from hs_lib.logger import logger
 from copy import deepcopy
 from . import cte_templates
 
@@ -353,10 +354,8 @@ class WatcherParser:
     def __init__(
         self,
         schema_map_path: str = "elastic_watcher_converter/mapping_detections_schemas/hypercol",
-        logger: logging.Logger = None,
         native_fields: bool = False,
     ):
-        self.logger = logger
         self.unique_fields = set()
         self.raise_on_error = True
         self.native_fields = native_fields
@@ -364,10 +363,10 @@ class WatcherParser:
         if native_fields and schema_map_path.split("/")[-1] == "hypercol":
             schema_map_path = f"{'/'.join(schema_map_path.split('/')[:-1])}/openmss"
 
-        self.logger.info(f"Schema mapping directory: '{schema_map_path}'")
+        logger.info(f"Schema mapping directory: '{schema_map_path}'")
 
         self.schema_maps = self._build_schema_maps(schema_map_path)
-        self.logger.info(f"Built schema maps: {self.schema_maps}")
+        logger.info(f"Built schema maps: {self.schema_maps}")
 
     def _build_schema_maps(self, schema_path: str) -> dict:
         """Builds mapping for select and where clauses from CSVs in schema directories.
@@ -386,7 +385,7 @@ class WatcherParser:
             if "mapping_for_where_fields.csv" in source_schema_path:
                 continue
             elif not os.path.isdir(source_schema_path):
-                self.logger.info(
+                logger.info(
                     f"Skipping config file or unrelated directory {source_schema_path}."
                 )
                 continue
@@ -405,7 +404,7 @@ class WatcherParser:
                     )
 
                 if not os.path.exists(select_csv_path):
-                    self.logger.error(
+                    logger.error(
                         f"CSV files missing in {source_schema_path}. Skipping this directory."
                     )
                     raise
@@ -429,18 +428,18 @@ class WatcherParser:
                 )
 
             except pd.errors.EmptyDataError as e:
-                self.logger.error(
+                logger.error(
                     f"Empty Data {select_csv_path}: {str(e)}", exc_info=True
                 )
                 raise e
             except pd.errors.ParserError as e:
-                self.logger.error(
+                logger.error(
                     f"CSV parsing failed in  {select_csv_path} or {where_csv_path}: {str(e)}",
                     exc_info=True,
                 )
                 raise e
             except Exception as e:
-                self.logger.error(
+                logger.error(
                     f"Unhandled error when parsing CSVs: {str(e)}", exc_info=True
                 )
                 raise e
@@ -454,7 +453,7 @@ class WatcherParser:
         if self.raise_on_error:
             raise NotImplementedError(f"{msg} is not implemented")
         else:
-            self.logger.warning(
+            logger.warning(
                 f"Skipping {watcher_name} due to: {msg} is not implemented"
             )
 
@@ -610,7 +609,7 @@ class WatcherParser:
                 json_data = json.load(file)
                 return self._flatten_json_query(json_data, filename)
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"An error occurred while processing file {filename}: {repr(e)}"
             )
             raise
@@ -626,12 +625,12 @@ class WatcherParser:
                 ]
                 data.extend([self._process_file(fn) for fn in filenames])
             except Exception as e:
-                self.logger.error(
+                logger.error(
                     f"An error occurred while processing directory {path}: {e}"
                 )
                 continue
         if len(data) == 0:
-            self.logger.error(f"There is no watchers in the paths provided[{paths}]")
+            logger.error(f"There is no watchers in the paths provided[{paths}]")
 
         return pd.DataFrame(data)
 
@@ -660,7 +659,7 @@ class WatcherParser:
                 ]:
                     yield from self._extract_terms_fields(value)
                 elif key == "script":
-                    self.logger.error(
+                    logger.error(
                         "A script block has been identified whilst extracting terms. This will be skipped."
                     )
                 else:
@@ -695,8 +694,8 @@ class WatcherParser:
         # Iterate over each row in the DataFrame
         for index, script in df[column_name].items():
             if script is None or not isinstance(script, str):
-                print(
-                    f"Warning: Missing or invalid 'action_transform_script' at row {df.loc[index, 'filename']}"
+                logger.warning(
+                    f"Missing or invalid 'action_transform_script' at row {df.loc[index, 'filename']}"
                 )
                 # Append None or a default value for each new column for this row
                 for key in new_columns.keys():
@@ -858,7 +857,7 @@ class WatcherParser:
         es_query: Dict[str, Any],
         file_name: str = None,
         field_mappings: Dict[str, str] = None,
-        logger: logging.Logger = None,
+        logger: Any = None,
     ) -> str:
         """Convert Elasticsearch query DSL to SQL WHERE clause."""
 
@@ -1981,7 +1980,7 @@ class WatcherParser:
                 and input["minimum_should_match"] > 1
             ):
                 msg = f"Modified minimum_should_match. This logic is immature. Manually check the output. ({self.detection_name})"
-                self.logger.warn(msg)
+                logger.warn(msg)
                 input["minimum_should_match"] -= 1
 
             found_tenant_whitelist = True
@@ -2065,12 +2064,12 @@ class WatcherParser:
         if "minimum_should_match" in input_copy.keys():
             if input_copy["minimum_should_match"] > 1:
                 msg = f"Modified minimum_should_match. This logic is immature. Manually check the output. ({self.detection_name})"
-                self.logger.warn(msg)
+                logger.warn(msg)
                 # decrement
                 input_copy["minimum_should_match"] -= 1
             if input_copy["minimum_should_match"] > len(input_copy["should"]):
                 msg = f"Modified minimum_should_match. This logic is immature. Manually check the output. ({self.detection_name})"
-                self.logger.warn(msg)
+                logger.warn(msg)
                 # in case we had to move extras
                 input_copy["minimum_should_match"] = len(input_copy["should"])
 
@@ -2100,7 +2099,7 @@ class WatcherParser:
             field_mappings=row[
                 "where_fields"
             ],  # The field mappings for the where clause
-            logger=self.logger,
+            logger=logger,
         )
 
     def compute_cte_with_clause(self, row):
@@ -2118,7 +2117,7 @@ class WatcherParser:
                     row["where_clause"]["where"],
                     row["all_terms"],
                     field_mappings=row["where_fields"],
-                    logger=self.logger,
+                    logger=logger,
                 )
             )
         return pd.Series(
@@ -2183,7 +2182,7 @@ class WatcherParser:
         generated_where_clause: str,
         all_terms: list,
         field_mappings: Dict[str, str] = None,
-        logger: logging.Logger = None,
+        logger: Any = None,
     ):
         """Convert Elasticsearch aggs blocks to SQL CTE blocks"""
 
@@ -2310,7 +2309,7 @@ class WatcherParser:
             ],
             ignore_index=True,
         )
-        self.logger.info(f"CTE dataframe created:\n{df}")
+        logger.info(f"CTE dataframe created:\n{df}")
 
         # Takes the all_terms argument passed in and finds the associated mapping value add adds it to a list of new_terms if it is not aggregated on
         new_terms = []
@@ -2563,16 +2562,16 @@ class WatcherParser:
         return cte_with_clause, detection_template, main_table_name, cte_where_condition
 
     def parse_watchers(self, watcher_path: str) -> pd.DataFrame:
-        self.logger.info(f"Parsing Watchers from this Directory: {watcher_path}")
+        logger.info(f"Parsing Watchers from this Directory: {watcher_path}")
         watcher_directories = self._return_watchers_directories(watcher_path)
 
-        self.logger.info(f"Parsed watcher_directories: {watcher_directories}")
+        logger.info(f"Parsed watcher_directories: {watcher_directories}")
 
         raw_df = self._process_directories(watcher_directories)
 
-        self.logger.info(f"Number of Rows: {raw_df.shape[0]}")
-        self.logger.info(f"Number of Cols: {raw_df.shape[1]}")
-        self.logger.info(f"Cols: {raw_df.columns}")
+        logger.info(f"Number of Rows: {raw_df.shape[0]}")
+        logger.info(f"Number of Cols: {raw_df.shape[1]}")
+        logger.info(f"Cols: {raw_df.columns}")
 
         es_watchers_dsl_df = raw_df.applymap(
             lambda x: x.strip() if type(x) == str else x
@@ -2654,14 +2653,14 @@ class WatcherParser:
             es_watchers_dsl_df, "action_transform_script"
         )
 
-        self.logger.info(
+        logger.info(
             f"es_watchers_dsl_df Number of Rows: {es_watchers_dsl_df.shape[0]}"
         )
-        self.logger.info(
+        logger.info(
             f"es_watchers_dsl_df Number of Cols: {es_watchers_dsl_df.shape[1]}"
         )
-        self.logger.info(f"es_watchers_dsl_df Cols: {es_watchers_dsl_df.columns}")
-        self.logger.info(
+        logger.info(f"es_watchers_dsl_df Cols: {es_watchers_dsl_df.columns}")
+        logger.info(
             f"es_watchers_dsl_df - where fields Elastic detections:{self.unique_fields} \n"
         )
 

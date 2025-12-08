@@ -1,32 +1,13 @@
 import os
-import yaml
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any
 
 import re
-from dotenv import load_dotenv
-import colorlog
+from hs_lib.logger import logger
 
-# Configure colorlog
-handler = colorlog.StreamHandler()
-handler.setFormatter(
-    colorlog.ColoredFormatter(
-        "%(log_color)s%(asctime)s %(log_color)s%(levelname)-8s%(reset)s | %(log_color)s%(message)s%(reset)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        log_colors={
-            "DEBUG": "cyan",
-            "INFO": "green",
-            "WARNING": "yellow",
-            "ERROR": "red",
-            "CRITICAL": "bold_red",
-        },
-    )
-)
-
-logger = colorlog.getLogger("color_logger")
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+from ..settings import get_settings
+from ..yaml_utils import yaml_load, yaml_load_string, YAMLError
 
 
 class ConfigurationError(Exception):
@@ -42,13 +23,6 @@ class DFEConfigLoader:
         parts = version.split(".")
         normalized_parts = [part.zfill(3) for part in parts]
         return "".join(normalized_parts)
-
-    @staticmethod
-    def get_env_or_default(var_name: str, default: str) -> str:
-        """
-        Retrieve a value from environment variables if it exists, otherwise return default.
-        """
-        return os.getenv(var_name, default)
 
     @staticmethod
     def get_config_dir() -> Path:
@@ -92,44 +66,6 @@ class DFEConfigLoader:
 
         return DFEConfigLoader.get_config_dir() / "dfe_targets.yaml"
     @staticmethod
-    def read_target_config(target_name: str = None, targets_file_path: Optional[str] = None) -> Dict[str, Any]:
-        try:
-            config_file = DFEConfigLoader.read_target_config_file(targets_file_path=targets_file_path)
-            with open(config_file, 'r') as file:
-                config_data = yaml.safe_load(file) or {}
-
-            target_name = target_name or config_data.get('default_target')
-
-            if target_name not in config_data.get('targets', {}):
-                raise ConfigurationError(f"Target '{target_name}' specified but not found in configuration.")
-
-            target_config = config_data['targets'][target_name]
-            
-            # First try DFE_ prefixed variables (new style)
-            env_overrides = {
-                'ch_host': os.getenv('DFE_CH_HOST'),
-                'ch_port': os.getenv('DFE_CH_PORT'),
-                'ch_username': os.getenv('DFE_CH_USERNAME'),
-                'ch_password': os.getenv('DFE_CH_PASSWORD'),
-                'database': os.getenv('DFE_CH_DATABASE')
-            }
-            # Update target config with any non-None environment variables
-            target_config.update({k: v for k, v in env_overrides.items() if v is not None})
-
-            if any(env_overrides.values()):
-                logger.info("Using overridden configuration from environment variables.")
-                logger.debug("Environment overrides:", extra={"env_overrides": {k: "***" if "password" in k else v for k, v in env_overrides.items()}})
-            else:
-                logger.info("Using default configuration from dfe_targets.yaml file.")
-
-            target_config['target_name'] = target_name  # Add the target name to the configuration
-            return target_config
-        except FileNotFoundError:
-            raise ConfigurationError(f"Configuration file {targets_file_path} not found.")
-        except yaml.YAMLError:
-            raise ConfigurationError("Failed to parse the configuration file.")
-    
-    @staticmethod
     def read_target_config_file(targets_file_path: Optional[str] = None) -> Path:
         """Get the path to the configuration file."""
 
@@ -166,12 +102,18 @@ class DFEConfigLoader:
     def read_target_config(
         target_name: str = None, targets_file_path: Optional[str] = None
     ) -> Dict[str, Any]:
+        """
+        Read target configuration from file with settings cascade override.
+
+        Settings priority: Environment variables > Config file > defaults.yaml
+        """
+        settings = get_settings()
+
         try:
             config_file = DFEConfigLoader.read_target_config_file(
                 targets_file_path=targets_file_path
             )
-            with open(config_file, "r") as file:
-                config_data = yaml.safe_load(file) or {}
+            config_data = yaml_load(config_file) or {}
 
             target_name = target_name or config_data.get("default_target")
 
@@ -181,64 +123,65 @@ class DFEConfigLoader:
                 )
 
             target_config = config_data["targets"][target_name]
-            env_overrides = {
-                "ch_host": os.getenv("DFE_CH_HOST"),
-                "ch_port": os.getenv("DFE_CH_PORT"),
-                "ch_username": os.getenv("DFE_CH_USERNAME"),
-                "ch_password": os.getenv("DFE_CH_PASSWORD"),
-            }
 
-            target_config.update(
-                {k: v for k, v in env_overrides.items() if v is not None}
-            )
+            # Apply settings cascade overrides (env vars take precedence via settings module)
+            if settings.clickhouse.host != "localhost":
+                target_config["ch_host"] = settings.clickhouse.host
+            if settings.clickhouse.port != 9000:
+                target_config["ch_port"] = settings.clickhouse.port
+            if settings.clickhouse.username != "default":
+                target_config["ch_username"] = settings.clickhouse.username
+            if settings.clickhouse.password:
+                target_config["ch_password"] = settings.clickhouse.password
 
-            if any(env_overrides.values()):
-                logger.info(
-                    "Using overridden configuration from environment variables."
-                )
-                logger.debug("Environment overrides:", extra={"env_overrides": {k: "***" if "password" in k else v for k, v in env_overrides.items()}})
-            else:
-                logger.info("Using default configuration from dfe_targets.yaml file.")
-
-            target_config["target_name"] = (
-                target_name  # Add the target name to the configuration
-            )
-
+            target_config["target_name"] = target_name
             return target_config
 
         except FileNotFoundError:
             raise ConfigurationError(
                 f"Configuration file {targets_file_path} not found."
             )
-        except yaml.YAMLError:
+        except YAMLError:
             raise ConfigurationError("Failed to parse the configuration file.")
 
     @staticmethod
     def read_clickhouse_config(target_name: str = None, targets_file_path: str = None) -> Dict[str, Any]:
-        # First try XDE_CP_ prefixed variables (new style)
-        env_config = {
-            'ch_host': os.getenv('DFE_CH_HOST'),
-            'ch_port': os.getenv('DFE_CH_PORT'),
-            'ch_username': os.getenv('DFE_CH_USERNAME'),  
-            'ch_password': os.getenv('DFE_CH_PASSWORD')
-        }
+        """
+        Get ClickHouse configuration using settings cascade.
 
-        # If any environment variables are set, use those
-        if any(env_config.values()):
-            logger.info("Using ClickHouse configuration from environment variables")
-            logger.debug("Environment config:", extra={"env_config": {k: "***" if "password" in k else v for k, v in env_config.items()}})
-            return {k: v for k, v in env_config.items() if v is not None}
+        Settings priority: Environment variables > Config file > defaults.yaml
+        """
+        settings = get_settings()
+
+        # Check if env vars were set (non-default values)
+        has_env_override = (
+            settings.clickhouse.host != "localhost"
+            or settings.clickhouse.port != 9000
+            or settings.clickhouse.username != "default"
+            or settings.clickhouse.password != ""
+        )
+
+        if has_env_override:
+            logger.info("Using ClickHouse configuration from environment/settings")
+            return {
+                "ch_host": settings.clickhouse.host,
+                "ch_port": settings.clickhouse.port,
+                "ch_username": settings.clickhouse.username,
+                "ch_password": settings.clickhouse.password,
+                "ch_secure": settings.clickhouse.secure,
+                "ch_verify": settings.clickhouse.verify,
+            }
 
         # Otherwise read from the targets file
-        target_config = DFEConfigLoader.read_target_config(target_name=target_name, targets_file_path=targets_file_path)
+        target_config = DFEConfigLoader.read_target_config(
+            target_name=target_name, targets_file_path=targets_file_path
+        )
         logger.info("Using ClickHouse configuration from targets file")
         return target_config
 
   
     @staticmethod
-    def list_targets(
-        logger: logging.Logger = None, targets_file_path: str = None
-    ) -> None:
+    def list_targets(targets_file_path: str = None) -> None:
         """List all targets available in the configuration."""
         try:
             config_file = DFEConfigLoader.read_target_config_file(
@@ -247,15 +190,14 @@ class DFEConfigLoader:
             if not config_file.exists():
                 raise FileNotFoundError(f"Configuration file {config_file} not found.")
 
-            with open(config_file, "r") as file:
-                config_data = yaml.safe_load(file)
-                targets = config_data.get("targets", {})
-                if targets:
-                    print("Available targets:")
-                    for target in targets:
-                        print(f"- {target}")
-                else:
-                    print("No targets found in configuration.")
+            config_data = yaml_load(config_file)
+            targets = config_data.get("targets", {}) if config_data else {}
+            if targets:
+                logger.info("Available targets:")
+                for target in targets:
+                    logger.info(f"- {target}")
+            else:
+                logger.info("No targets found in configuration.")
         except FileNotFoundError:
             logger.error(f"Configuration file {config_file} not found.")
             raise ConfigurationError(f"Configuration file {config_file} not found.")
@@ -264,27 +206,27 @@ class DFEConfigLoader:
             raise ConfigurationError(f"Failed to list targets: {e}")
 
     @staticmethod
-    def print_default_target(
-        logger: logging.Logger = None, targets_file_path: str = None
-    ) -> None:
+    def print_default_target(targets_file_path: str = None) -> None:
         """Prints the default target's host, port, and username from the configuration."""
+        settings = get_settings()
+
         try:
-            logger.info(f" getting target from the [{targets_file_path}]")
+            logger.info(f"Getting target from the [{targets_file_path}]")
             default_target_data = DFEConfigLoader.read_target_config(
                 targets_file_path=targets_file_path
             )
 
-            # Debug: Ensure the returned data is a dict
             if not isinstance(default_target_data, dict):
                 raise TypeError(
                     f"read_target_config() returned unexpected type: {type(default_target_data)}"
                 )
 
-            config_source = (
-                "environment variables"
-                if os.getenv("DFE_CH_HOST") and os.getenv("DFE_CH_PORT")
-                else "dfe_targets.yaml file"
+            # Check if settings override was applied
+            has_env_override = (
+                settings.clickhouse.host != "localhost"
+                or settings.clickhouse.port != 9000
             )
+            config_source = "environment/settings" if has_env_override else "dfe_targets.yaml file"
 
             target_name = default_target_data.get(
                 "target_name", "No target name specified"
@@ -293,32 +235,30 @@ class DFEConfigLoader:
             port = default_target_data.get("ch_port", "No port specified")
             username = default_target_data.get("ch_username", "No username specified")
 
-            if logger:
-                logger.info(
-                    f"Default [{target_name}] Target Configuration (from {config_source}):\n\tHost: {host}\n\tPort: {port}\n\tUsername: {username}"
-                )
+            logger.info(
+                f"Default [{target_name}] Target Configuration (from {config_source}):\n\tHost: {host}\n\tPort: {port}\n\tUsername: {username}"
+            )
 
         except ConfigurationError as ce:
-            if logger:
-                logger.error(
-                    f"Failed to print default target configuration: {ce} with targets_file_path {targets_file_path}"
-                )
+            logger.error(
+                f"Failed to print default target configuration: {ce} with targets_file_path {targets_file_path}"
+            )
         except Exception as e:
-            if logger:
-                logger.error(f"Unexpected error occurred: {e}")
+            logger.error(f"Unexpected error occurred: {e}")
             raise ConfigurationError(
                 "An unexpected error occurred while printing default target configuration."
             )
 
     @staticmethod
     def print_target(
-        logger: logging.Logger = None,
         targets_file_path: str = None,
         target_name: str = None,
+        **kwargs,  # Accept and ignore extra kwargs for backward compatibility
     ) -> None:
         """Prints the specified target's host, port, and username from the configuration."""
+        settings = get_settings()
+
         try:
-            logger = logger or logging.getLogger("dfe_engine")
             logger.info(f"Getting target from the [{targets_file_path}]")
             target_config_data = DFEConfigLoader.read_target_config(
                 target_name=target_name, targets_file_path=targets_file_path
@@ -329,11 +269,12 @@ class DFEConfigLoader:
                     f"read_target_config() returned unexpected type: {type(target_config_data)}"
                 )
 
-            config_source = (
-                "environment variables"
-                if os.getenv("DFE_CH_HOST") and os.getenv("DFE_CH_PORT")
-                else "dfe_targets.yaml file"
+            # Check if settings override was applied
+            has_env_override = (
+                settings.clickhouse.host != "localhost"
+                or settings.clickhouse.port != 9000
             )
+            config_source = "environment/settings" if has_env_override else "dfe_targets.yaml file"
 
             file_target_name = target_config_data.get(
                 "target_name", "No target name specified"
@@ -342,19 +283,16 @@ class DFEConfigLoader:
             port = target_config_data.get("ch_port", "No port specified")
             username = target_config_data.get("ch_username", "No username specified")
 
-            if logger:
-                logger.info(
-                    f"Requested {target_name} Configuration (from {config_source}):\nTarget Name: {file_target_name}\n\tHost: {host}\n\tPort: {port}\n\tUsername: {username}"
-                )
+            logger.info(
+                f"Requested {target_name} Configuration (from {config_source}):\nTarget Name: {file_target_name}\n\tHost: {host}\n\tPort: {port}\n\tUsername: {username}"
+            )
 
         except ConfigurationError as ce:
-            if logger:
-                logger.error(
-                    f"Failed to print {target_name} configuration: {ce} with targets_file_path {targets_file_path}"
-                )
+            logger.error(
+                f"Failed to print {target_name} configuration: {ce} with targets_file_path {targets_file_path}"
+            )
         except Exception as e:
-            if logger:
-                logger.error(f"Unexpected error occurred: {e}")
+            logger.error(f"Unexpected error occurred: {e}")
             raise ConfigurationError(
                 "An unexpected error occurred while printing target configuration."
             )
@@ -390,9 +328,7 @@ class DFEConfigLoader:
         return paths
 
     @staticmethod
-    def _add_external_directory_as_package(
-        dfe_core_config_path: str, logger: logging.Logger
-    ):
+    def _add_external_directory_as_package(dfe_core_config_path: str):
         """Adds the external dfe_core_config directory to sys.path to make it a loadable package."""
         dfe_core_config_dir = Path(dfe_core_config_path).resolve()
         if dfe_core_config_dir.is_dir():
@@ -412,14 +348,12 @@ class DFEConfigLoader:
     def load_dfe_package(
         config_file_path: Optional[str] = None,
         require_config: bool = True,
-        logger: logging.Logger = None,
     ) -> Dict[str, Any]:
         """
         Load the configuration file. Raises an error if not found or invalid, except when require_config is False.
 
         :param config_file_path: Path to the configuration file.
         :param require_config: Flag indicating whether the config is required.
-        :param logger: Logger for logging warnings and errors.
         :return: Parsed configuration dictionary or an empty dictionary if require_config is False and the file is not found.
         """
         config_file_path = (
@@ -435,19 +369,19 @@ class DFEConfigLoader:
                 )
             else:
                 logger.warning(
-                    f"Warning: Configuration file [{config_file_path}] not found."
+                    f"Configuration file [{config_file_path}] not found."
                 )
                 return {}
 
         try:
-            load_dotenv()
+            # Environment variables are loaded via settings module
             env_vars = {**os.environ}
             config_content = config_file_path.read_text()
             config_content = DFEConfigLoader.replace_env_variables(
                 config_content, env_vars
             )
-            config = yaml.safe_load(config_content)
-        except yaml.YAMLError as e:
+            config = yaml_load_string(config_content)
+        except YAMLError as e:
             error_msg = f"Failed to parse [{config_file_path}]. Ensure it is correctly formatted. Error: {e}"
             logger.error(error_msg)
             raise RuntimeError(error_msg) from e

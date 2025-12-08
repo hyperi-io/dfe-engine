@@ -6,9 +6,11 @@ from apscheduler.triggers.interval import IntervalTrigger
 from typing import Callable, Any, List, Optional, Dict
 from datetime import datetime
 
+from hs_lib.logger import logger
+
 
 class JobScheduler:
-    def __init__(self, logger: logging.Logger = None):
+    def __init__(self):
         """
         Initialize the job scheduler with APScheduler and staggering support.
 
@@ -17,7 +19,6 @@ class JobScheduler:
         2. Maintains list of active jobs for stagger calculation
         3. Provides job execution monitoring via listener
         """
-        self.logger = logger
         self.scheduler = AsyncIOScheduler()
         self.active_jobs = []
         self.scheduler_started = False
@@ -41,7 +42,7 @@ class JobScheduler:
         )
 
         if event.exception:
-            self.logger.error(
+            logger.error(
                 f"The job {job.name} (ID: {job.id}) crashed: {event.exception}",
                 exc_info=True,
             )
@@ -63,7 +64,7 @@ class JobScheduler:
                     f"Hunt Name: {result.get('hunt_name')}. "
                 )
 
-            self.logger.debug(details)
+            logger.debug(details)
 
     async def add_job_with_cron(
         self, job_function: Callable, cron_expression: str, job_name: str
@@ -72,7 +73,7 @@ class JobScheduler:
         Add a job to the scheduler based on a cron expression.
         """
         if self.active_jobs is None:
-            self.logger.warning("No active jobs list available. Skipping job addition.")
+            logger.warning("No active jobs list available. Skipping job addition.")
             return
 
         try:
@@ -89,12 +90,12 @@ class JobScheduler:
                 replace_existing=False,
             )
             self.active_jobs.append(job)
-            self.logger.debug(
+            logger.debug(
                 f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}"
             )
             return job
         except Exception as e:
-            self.logger.error(f"Error adding job with cron job : {e}")
+            logger.error(f"Error adding job with cron job : {e}")
             raise
 
     async def add_job_with_interval(
@@ -104,7 +105,7 @@ class JobScheduler:
         Add a job to the scheduler to run at a regular interval in seconds.
         """
         if self.active_jobs is None:
-            self.logger.warning("No active jobs list available. Skipping job addition.")
+            logger.warning("No active jobs list available. Skipping job addition.")
             return
 
         try:
@@ -121,12 +122,12 @@ class JobScheduler:
                 replace_existing=False,
             )
             self.active_jobs.append(job)
-            self.logger.info(
+            logger.info(
                 f"Added interval job [{job_name}] with:\nInterval: {seconds} seconds"
             )
             return job
         except Exception as e:
-            self.logger.error(f"Error adding job with interval: {e}")
+            logger.error(f"Error adding job with interval: {e}")
             raise
 
     async def start_scheduler(self) -> Optional[bool]:
@@ -146,16 +147,16 @@ class JobScheduler:
             self.scheduler.start()
             self.scheduler_started = True
             for job in self.scheduler.get_jobs():
-                self.logger.debug(
+                logger.debug(
                     f"Scheduled Job: {job.name}, Next Run Time: {job.next_run_time}"
                 )
-            self.logger.info("Scheduler started.")
+            logger.info("Scheduler started.")
             return True
         elif not self.active_jobs:
-            self.logger.warning("No jobs to run. Scheduler not started.")
+            logger.warning("No jobs to run. Scheduler not started.")
             return False
         else:
-            self.logger.warning("Scheduler is already running.")
+            logger.warning("Scheduler is already running.")
             return False
 
     async def stop_all_jobs(self) -> List[str]:
@@ -189,9 +190,9 @@ class JobScheduler:
         if jobs:
             for job in jobs:
                 job_info = self.get_job_info(job)
-                self.logger.info(f"Job Info: {job_info}")
+                logger.info(f"Job Info: {job_info}")
         else:
-            self.logger.info("No scheduled jobs to display.")
+            logger.info("No scheduled jobs to display.")
 
     def get_job_info(self, job) -> Dict[str, Any]:
         """

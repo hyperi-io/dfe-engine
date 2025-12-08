@@ -1,0 +1,16 @@
+{
+  "host": {
+    "type": "keyword"
+  },
+  "message": {
+    "type": "text"
+  },
+  "message.english": {
+    "analyzer": "english",
+    "type": "text"
+  },
+  "message.keyword": {
+    "ignore_above": 256,
+    "type": "keyword"
+  }
+}

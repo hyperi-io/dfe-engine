@@ -1,7 +1,26 @@
-import os
+#  Project:      dfe-engine
+#  File:         clickhouse_manager.py
+#  Purpose:      ClickHouse connection management using clickhouse-connect
+#  Language:     Python
+#
+#  License:      LicenseRef-HyperSec-EULA
+#  Copyright:    (c) 2025 HyperSec
+
+"""
+ClickHouse connection management using clickhouse-connect.
+
+Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
+"""
 
 from threading import Lock
-from clickhouse_pool import ChPool
+from typing import Optional
+
+import clickhouse_connect
+from clickhouse_connect.driver import Client
+from clickhouse_connect.driver import httputil
+from hs_lib.logger import logger
+
+from ..settings import get_settings
 
 
 class ConfigurationError(Exception):
@@ -10,122 +29,240 @@ class ConfigurationError(Exception):
     pass
 
 
+class ClickHouseClientWrapper:
+    """
+    Wrapper around clickhouse-connect Client to provide backward-compatible execute() method.
+
+    clickhouse-connect uses:
+    - command() for DDL/DML statements (CREATE, DROP, ALTER, INSERT without data)
+    - query() for SELECT statements that return data
+
+    This wrapper provides execute() that auto-routes to the appropriate method.
+    """
+
+    def __init__(self, client: Client):
+        self._client = client
+
+    def execute(self, query: str, *args, **kwargs):
+        """
+        Execute a query, routing to command() or query() based on query type.
+
+        For backward compatibility with clickhouse-driver style code.
+        Handles multi-statement queries by splitting on semicolons.
+        """
+        # Strip trailing semicolons and whitespace
+        query = query.strip().rstrip(';').strip()
+
+        # Check if this is a multi-statement query
+        # Simple heuristic: if there's a semicolon not inside quotes, split
+        if ';' in query:
+            # Split and execute each statement
+            statements = [s.strip() for s in query.split(';') if s.strip()]
+            result = None
+            for stmt in statements:
+                result = self._execute_single(stmt, *args, **kwargs)
+            return result
+
+        return self._execute_single(query, *args, **kwargs)
+
+    def _execute_single(self, query: str, *args, **kwargs):
+        """Execute a single query statement."""
+        query_upper = query.strip().upper()
+
+        # DESCRIBE, DESC, EXISTS, EXPLAIN, SHOW return data - use query()
+        if query_upper.startswith(('DESCRIBE', 'DESC', 'EXISTS', 'EXPLAIN', 'SHOW')):
+            return self._client.query(query, *args, **kwargs).result_rows
+
+        # INSERT with data - use insert() method
+        # clickhouse-driver style: execute("INSERT INTO table (cols) VALUES", [(data, ...)])
+        if query_upper.startswith('INSERT') and args and isinstance(args[0], (list, tuple)):
+            return self._handle_insert_with_data(query, args[0])
+
+        # DDL/DML commands that don't return data go to command()
+        if query_upper.startswith(('CREATE', 'DROP', 'ALTER', 'TRUNCATE', 'RENAME',
+                                    'INSERT', 'DELETE', 'UPDATE', 'SET', 'USE',
+                                    'GRANT', 'REVOKE', 'ATTACH', 'DETACH', 'OPTIMIZE',
+                                    'EXCHANGE', 'SYSTEM', 'CHECK', 'KILL')):
+            return self._client.command(query, *args, **kwargs)
+
+        # SELECT queries return data
+        return self._client.query(query, *args, **kwargs).result_rows
+
+    def _handle_insert_with_data(self, query: str, data: list):
+        """Handle INSERT statements with data using clickhouse-connect's insert() method.
+
+        Converts clickhouse-driver style INSERT calls to clickhouse-connect format.
+        """
+        import re
+
+        # Parse INSERT INTO table (columns) VALUES
+        # Pattern: INSERT INTO [db.]table (col1, col2, ...) VALUES
+        pattern = r'INSERT\s+INTO\s+([^\s(]+)\s*\(\s*([^)]+)\s*\)\s*VALUES'
+        match = re.search(pattern, query, re.IGNORECASE)
+
+        if not match:
+            # Fallback: try to execute as raw query (may fail)
+            raise ValueError(f"Cannot parse INSERT query for data insertion: {query[:100]}...")
+
+        table_name = match.group(1)
+        columns_str = match.group(2)
+        column_names = [c.strip() for c in columns_str.split(',')]
+
+        # Use clickhouse-connect's insert() method
+        return self._client.insert(table_name, data, column_names=column_names)
+
+    def __getattr__(self, name):
+        """Delegate all other attributes to the underlying client."""
+        return getattr(self._client, name)
+
+    def __enter__(self):
+        """Support context manager protocol."""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """Support context manager protocol."""
+        return False
+
+
 class ClickHouseManager:
+    """
+    Manages ClickHouse connections using clickhouse-connect.
+
+    Uses built-in HTTP connection pooling via urllib3.
+    Pool configuration is managed via settings.clickhouse.connections_max.
+    """
+
     _instance = None  # Singleton instance
 
     @classmethod
-    def get_instance(cls, logger: logging.Logger, target_config_data: dict = None):
+    def get_instance(cls, target_config_data: Optional[dict] = None):
         if cls._instance is None:
-            cls._instance = cls(logger, target_config_data)
+            cls._instance = cls(target_config_data)
         return cls._instance
 
-    def __init__(self, logger: logging.Logger, target_config_data: dict = None):
-        self.logger = logger
-        self.lock = Lock()  # Lock for thread safety
-        self.target_config_data = target_config_data
-        self.connections_min = int(os.environ.get("CH_CONNECTIONS_MIN", 10))
-        self.connections_max = int(os.environ.get("CH_CONNECTIONS_MAX", 300))
-        self.pool = None
+    @classmethod
+    def reset_instance(cls):
+        """Reset the singleton instance (useful for testing)."""
+        if cls._instance is not None:
+            cls._instance.cleanup()
+            cls._instance = None
 
-    def get_clickhouse_client(self):
+    def __init__(self, target_config_data: Optional[dict] = None):
+        self.lock = Lock()
+        self.target_config_data = target_config_data or {}
+        settings = get_settings()
+        self.connections_max = settings.clickhouse.connections_max
+        self._client: Optional[Client] = None
+        self._pool_manager = None
+
+    def get_clickhouse_client(self) -> ClickHouseClientWrapper:
+        """Get a ClickHouse client with connection pooling.
+
+        Returns a wrapper that provides backward-compatible execute() method.
+        """
         try:
-            if self.pool is None or self.pool.closed:
-                self._initialize_pool()
-
-            with self.lock:
-                with self.pool.get_client() as client:
-                    return client
+            if self._client is None:
+                self._initialize_client()
+            return ClickHouseClientWrapper(self._client)
 
         except ConfigurationError as ce:
-            self.logger.error(
+            logger.error(
                 f"Configuration error: {ce}", exc_info=True, stack_info=True
             )
             raise
         except Exception as e:
-            self.logger.error(
+            logger.error(
                 f"An unexpected error occurred during client acquisition: {e}"
             )
             raise
 
-    def _initialize_pool(self):
+    def _initialize_client(self):
+        """Initialize the ClickHouse client with connection pooling."""
         try:
-            host = self.target_config_data.get("ch_host", None)
-            port = self.target_config_data.get("ch_port", None)
-            user = self.target_config_data.get(
-                "ch_username", None
-            )  # Default to None if not provided
-            password = self.target_config_data.get("ch_password", None)
-            secure = self.target_config_data.get(
-                "ch_secure", True
-            )  # Default Setting we don't want the user to touch.
-            verify = self.target_config_data.get(
-                "ch_verify", False
-            )  # Default Setting we don't want the user to touch.
+            host = self.target_config_data.get("ch_host", "localhost")
+            port = self.target_config_data.get("ch_port", 8123)
+            user = self.target_config_data.get("ch_username")
+            password = self.target_config_data.get("ch_password")
+            secure = self.target_config_data.get("ch_secure", True)
+            verify = self.target_config_data.get("ch_verify", False)
 
             is_password_set = password is not None
 
-            self.logger.info(
-                f"Passed in Parameters for user=[{user}] on host[{host}] and port {port} is password set [{is_password_set}]"
+            logger.info(
+                f"Initializing ClickHouse client for user=[{user}] on host=[{host}] port=[{port}] secure=[{secure}] password_set=[{is_password_set}]"
             )
 
-            connection_params = {"host": host, "port": port}
-            if user is not None and password is not None:
-                connection_params["user"] = user
-                connection_params["password"] = password
-                connection_params["port"] = (
-                    port  # only use supplied port for clickhouse on minikube
-                )
-                connection_params["secure"] = secure
-                connection_params["verify"] = verify
+            # Create a custom pool manager for connection pooling
+            # clickhouse-connect uses urllib3 under the hood
+            self._pool_manager = httputil.get_pool_manager(
+                maxsize=self.connections_max,
+                num_pools=10,
+            )
+
+            # Build connection parameters
+            connect_params = {
+                "host": host,
+                "port": port,
+                "pool_mgr": self._pool_manager,
+            }
+
+            # Add authentication if provided
+            if user is not None:
+                connect_params["username"] = user
+            if password is not None:
+                connect_params["password"] = password
+
+            # Configure HTTPS
+            if secure:
+                connect_params["secure"] = True
+                connect_params["verify"] = verify
 
             if host == "localhost" and (user is not None or password is not None):
-                self.logger.warning(
-                    "Ensure you have a local cluster that has the correct user auth setup or the connection will fail."
+                logger.warning(
+                    "Connecting to localhost with authentication. "
+                    "Ensure your local cluster has proper auth configured."
                 )
 
-            if user is not None and password is not None:
-                connection_params_no_password = connection_params.copy()
-                del connection_params_no_password["password"]
-                self.logger.info(
-                    f"intialising cloud service or auth service connection with {connection_params_no_password}"
-                )
-                self.pool = ChPool(
-                    connections_min=self.connections_min,
-                    connections_max=self.connections_max,
-                    **connection_params,
-                )
-            else:
-                self.logger.info(
-                    f"intialising local host connection with {connection_params}"
-                )
-                self.pool = ChPool(
-                    host=host,
-                    connections_min=self.connections_min,
-                    connections_max=self.connections_max,
-                )
+            # Log connection params (without password)
+            log_params = {k: v for k, v in connect_params.items() if k != "password"}
+            log_params.pop("pool_mgr", None)  # Don't log pool manager object
+            logger.info(f"Creating clickhouse-connect client with: {log_params}")
+
+            with self.lock:
+                self._client = clickhouse_connect.get_client(**connect_params)
+
+            logger.info("ClickHouse client initialized successfully")
 
         except Exception as e:
-            self.logger.warning(
-                f"If you have a localhost running it assumes there is no Auth needed, do not set username and password in the targets file: {e}"
-            )
-            self.logger.error(f"Failed to initialize ClickHouse connection pool: {e}")
+            logger.error(f"Failed to initialize ClickHouse client: {e}")
+            if host == "localhost":
+                logger.warning(
+                    "If using localhost, ensure ClickHouse is running and accessible. "
+                    "For local dev without auth, do not set username/password in targets file."
+                )
             raise
 
     def cleanup(self):
+        """Clean up the ClickHouse client and pool."""
         try:
-            if self.pool and not self.pool.closed:
-                # Check if the pool exists and is not closed
-                self.pool.cleanup()
-                self.logger.info("ClickHouse connection pool cleaned up successfully.")
+            if self._client is not None:
+                self._client.close()
+                self._client = None
+                logger.info("ClickHouse client closed successfully.")
+            if self._pool_manager is not None:
+                self._pool_manager.clear()
+                self._pool_manager = None
+                logger.info("ClickHouse connection pool cleared successfully.")
         except Exception as e:
-            self.logger.error(f"Failed to cleanup ClickHouse connection pool: {e}")
+            logger.error(f"Failed to cleanup ClickHouse client: {e}")
 
     def teardown_test_databases(self, test_databases):
+        """Drop test databases."""
         client = self.get_clickhouse_client()
         try:
             for db in test_databases:
-                self.logger.info(f"Dropping database {db}")
-                client.execute(f"DROP DATABASE IF EXISTS {db}")
-            self.logger.info("All test databases dropped successfully.")
+                logger.info(f"Dropping database {db}")
+                client.command(f"DROP DATABASE IF EXISTS {db}")
+            logger.info("All test databases dropped successfully.")
         except Exception as e:
-            self.logger.error(f"Failed to drop test databases: {e}")
+            logger.error(f"Failed to drop test databases: {e}")

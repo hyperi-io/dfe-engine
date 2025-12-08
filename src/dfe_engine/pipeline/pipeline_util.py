@@ -1,10 +1,8 @@
 from enum import Enum
 import re
-import yaml
 import os
 
-
-logger = logging.getLogger(__name__)
+from hs_lib.logger import logger
 
 
 class VectorStepType(Enum):
@@ -75,16 +73,20 @@ def get_vector_step_type(vector_step: str, package_config: dict) -> str:
     
 
 
-def read_vector_step_config(vector_step: str, package_config: dict) -> dict:
+def read_vector_step_config(vector_step: str, package_config: dict) -> str:
     """
     Reads the configuration for a given vector step from the specified package configuration.
+
+    Vector config files contain shell-style variable substitution (${VAR}) which is not
+    valid YAML. This function returns the raw text content for regex-based extraction
+    of environment variables.
 
     Args:
         vector_step (str): The name of the vector step to read the configuration for.
         package_config (dict): The package configuration dictionary containing global settings and paths.
 
     Returns:
-        dict: The configuration dictionary for the specified vector step.
+        str: The raw text content of the vector step configuration.
 
     Raises:
         PipelineSchemaError: If the base path for the vector type is not found in the package configuration.
@@ -106,8 +108,9 @@ def read_vector_step_config(vector_step: str, package_config: dict) -> dict:
         raise PipelineSchemaError(
             f"Vector config file {full_path} not found. Make sure the template exists or you are using the correct version"
         )
-    vector_config = yaml.safe_load(open(full_path, "r"))
-    return vector_config
+    # Read as raw text - Vector configs contain ${VAR} syntax that isn't valid YAML
+    with open(full_path, "r") as f:
+        return f.read()
 
 
 def get_required_env_vars(vector_step: str, package_config: dict) -> dict:

@@ -1,0 +1,18 @@
+{
+  "content": {
+    "type": "text"
+  },
+  "content.length": {
+    "analyzer": "standard",
+    "type": "token_count"
+  },
+  "latency_histogram": {
+    "type": "histogram"
+  },
+  "metrics.request_count": {
+    "type": "long"
+  },
+  "metrics.response_time": {
+    "type": "histogram"
+  }
+}

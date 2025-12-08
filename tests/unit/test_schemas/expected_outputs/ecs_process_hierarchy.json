@@ -1,0 +1,59 @@
+{
+  "process.command_line": {
+    "type": "wildcard"
+  },
+  "process.entry_leader.entry_meta.source.ip": {
+    "type": "ip"
+  },
+  "process.entry_leader.entry_meta.type": {
+    "type": "keyword"
+  },
+  "process.entry_leader.pid": {
+    "type": "long"
+  },
+  "process.executable": {
+    "type": "keyword"
+  },
+  "process.group_leader.name": {
+    "type": "keyword"
+  },
+  "process.group_leader.pid": {
+    "type": "long"
+  },
+  "process.group_leader.user.id": {
+    "type": "keyword"
+  },
+  "process.group_leader.user.name": {
+    "type": "keyword"
+  },
+  "process.hash.md5": {
+    "type": "keyword"
+  },
+  "process.hash.sha256": {
+    "type": "keyword"
+  },
+  "process.name": {
+    "type": "keyword"
+  },
+  "process.parent.executable": {
+    "type": "keyword"
+  },
+  "process.parent.name": {
+    "type": "keyword"
+  },
+  "process.parent.pid": {
+    "type": "long"
+  },
+  "process.pid": {
+    "type": "long"
+  },
+  "process.session_leader.parent.pid": {
+    "type": "long"
+  },
+  "process.session_leader.parent.session_leader.pid": {
+    "type": "long"
+  },
+  "process.session_leader.pid": {
+    "type": "long"
+  }
+}

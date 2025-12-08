@@ -11,6 +11,7 @@ from hs_lib.logger import logger
 from .hunts_scheduler import HuntScheduler
 from ..runner.cron_runner import CronRunner
 from ...config.config_loader import DFEConfigLoader
+from ...settings import get_settings
 import multiprocessing
 import time
 
@@ -33,9 +34,6 @@ class HuntController:
         test_mode: bool = False,
         verbose: bool = False,
     ) -> None:
-        logger = logger
-        if verbose:
-            logger.setLevel(logging.DEBUG)
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
                 arg_dfe_config_path, require_config=False, logger=logger
@@ -167,9 +165,9 @@ class HuntController:
                 raise Exception(f"Rules repository directory [{rule_dir}] not found.")
 
         if not hunt_log_path:
-            hunt_log_path = os.getenv(
-                "HUNT_LOG_PATH",
-                os.path.join(os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH),
+            settings = get_settings()
+            hunt_log_path = settings.hunts.log_path or os.path.join(
+                os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
 
         processes = []
@@ -314,12 +312,10 @@ class HuntController:
             args_hunt_log_path (Optional[str]): Path to the hunt files directory for log files.
         """
 
-        logger = logger
-
         if not args_hunt_log_path:
-            args_hunt_log_path = os.getenv(
-                "HUNT_LOG_PATH",
-                os.path.join(os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH),
+            settings = get_settings()
+            args_hunt_log_path = settings.hunts.log_path or os.path.join(
+                os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
 
         try:
@@ -327,13 +323,12 @@ class HuntController:
                 require_config=False, logger=logger
             )
         except FileNotFoundError as error:
-            print(f"Error: {error}")
+            logger.error(f"Error loading DFE package: {error}")
             return
 
         tmp_logs = args_log_path or config.get("global_settings", {}).get(
             "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
         )
-        logger = logger
         hunt_log_file_path = os.path.join(
             args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
         )
@@ -408,12 +403,10 @@ class HuntController:
             args_hunt_log_path (Optional[str]): Path to the hunt files directory for log files.
         """
 
-        logger = logger
-
         if not args_hunt_log_path:
-            args_hunt_log_path = os.getenv(
-                "HUNT_LOG_PATH",
-                os.path.join(os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH),
+            settings = get_settings()
+            args_hunt_log_path = settings.hunts.log_path or os.path.join(
+                os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
 
         try:
@@ -421,15 +414,13 @@ class HuntController:
                 require_config=False, logger=logger
             )
         except FileNotFoundError as error:
-            print(f"Error: {error}")
+            logger.error(f"Error loading DFE package: {error}")
             return
 
         tmp_logs = args_log_path or config.get("global_settings", {}).get(
             "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
         )
         pids = [args_pid] if not isinstance(args_pid, list) else args_pid
-
-        logger = logger
 
         hunt_log_file_path = os.path.join(
             args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG
@@ -443,7 +434,7 @@ class HuntController:
                     if int(log_entry["pid"]) in pids:
                         data.append(log_entry)
         except FileNotFoundError:
-            print(f"Log file not found: {hunt_log_file_path}")
+            logger.warning(f"Log file not found: {hunt_log_file_path}")
             return
 
         if data:
@@ -512,13 +503,11 @@ class HuntController:
             args_target (Optional[str]): The name of the target environment.
             args_target_file_path (Optional[str]): The location of the dfe_target file.
         """
-        logger = logger
 
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
                 config_file_path=args_dfe_package_file_path,
                 require_config=False,
-                logger=logger,
             )
             dfe_config_target_path = dfe_config["global_settings"].get(
                 "target_path", None
@@ -550,8 +539,9 @@ class HuntController:
         dfe_package_rule_repo_dir = dfe_config["hunt_scheduler"]["rule_repo_dir"]
 
         if not args_hunt_log_path:
-            args_hunt_log_path = os.getenv(
-                "HUNT_LOG_PATH", os.path.join(os.getcwd(), "default_hunt_log_path")
+            settings = get_settings()
+            args_hunt_log_path = settings.hunts.log_path or os.path.join(
+                os.getcwd(), "default_hunt_log_path"
             )
 
         hunt_configuration_settings = {
@@ -590,11 +580,11 @@ class HuntController:
             args_log_path (str): Path to the DFE log directory.
             args_hunt_log_path (Optional[str]): Path to the hunt logs directory.
         """
-        logger = logger
 
         if not args_hunt_log_path:
-            args_hunt_log_path = os.getenv(
-                "HUNT_LOG_PATH", os.path.join(os.getcwd(), "default_hunt_log_path")
+            settings = get_settings()
+            args_hunt_log_path = settings.hunts.log_path or os.path.join(
+                os.getcwd(), "default_hunt_log_path"
             )
 
         thread_tracking_file_path = Path(args_hunt_log_path) / "thread_tracking.log"
@@ -637,16 +627,12 @@ class HuntController:
             args_log_path (Optional[str]): Path to the common directory for log files.
         """
 
-        logger = logger
         try:
             dfe_package_config = DFEConfigLoader.load_dfe_package(
                 args_dfe_package_file_path, require_config=False, logger=logger
             )
         except FileNotFoundError as error:
-            logger = logger, "tmp/logs/"),
-                log_file_prefix="dfe-hunt-cli",
-            )
-            logger.error(f"Error: {error}")
+            logger.error(f"Error loading DFE package: {error}")
             return
 
         args_log_path = args_log_path or dfe_package_config.get(

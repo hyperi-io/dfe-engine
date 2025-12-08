@@ -1,10 +1,10 @@
 import os
 import csv
-import yaml
 from pathlib import Path
 from typing import Dict, Tuple, List, Any, Set
 from hs_lib.logger import logger
 from sqlalchemy import text
+from ..yaml_utils import yaml_load
 
 def resolve_schema_path(config: dict, schema_name: str, schema_version: str = None, is_meta: bool = True) -> str:
     """Resolve the path to a schema file."""
@@ -36,17 +36,15 @@ def read_csv_mappings(schema_path: str) -> Dict[str, str]:
 
 class FieldMappingService:
     """Service for handling field mappings between Sigma rules and schema fields."""
-    
-    def __init__(self, config: dict, logger) -> None:
+
+    def __init__(self, config: dict) -> None:
         """
         Initialize the field mapping service.
-        
+
         Args:
             config: The DFE configuration dictionary
-            logger: Logger instance for logging
         """
         self.config = config
-        self.logger = logger
         self.rules_input_dir = config.get('global_settings', {}).get('sigma_rules_input_dir', '../.dfe_sigma_rules_output')
         
     def _load_included_sigma_rules(self, include_path: str) -> dict:
@@ -68,28 +66,27 @@ class FieldMappingService:
                 base_dir = os.path.dirname(os.path.abspath(self.config.get('dfe_package_file_path', '')))
                 full_path = os.path.abspath(os.path.join(base_dir, include_path))
                 
-            with open(full_path, 'r') as file:
-                included_config = yaml.safe_load(file)
-                if not included_config or 'sigma_rules' not in included_config:
-                    return {}
-                    
-                rules_config = included_config['sigma_rules']
-                if 'rules' in rules_config and isinstance(rules_config['rules'], dict):
-                    device_types = list(rules_config['rules'].keys())
-                    if device_types:
-                        device_type = device_types[0]  
-                        rules_config['rules'] = rules_config['rules'][device_type]
-                        if isinstance(rules_config['rules'], list):
-                            for i, rule in enumerate(rules_config['rules']):
-                                if isinstance(rule, dict):
-                                    rule['path'] = f"{device_type}/{rule['path']}"
-                                else:
-                                    rules_config['rules'][i] = f"{device_type}/{rule}"
-                                    
-                return rules_config
-                
+            included_config = yaml_load(full_path)
+            if not included_config or 'sigma_rules' not in included_config:
+                return {}
+
+            rules_config = included_config['sigma_rules']
+            if 'rules' in rules_config and isinstance(rules_config['rules'], dict):
+                device_types = list(rules_config['rules'].keys())
+                if device_types:
+                    device_type = device_types[0]
+                    rules_config['rules'] = rules_config['rules'][device_type]
+                    if isinstance(rules_config['rules'], list):
+                        for i, rule in enumerate(rules_config['rules']):
+                            if isinstance(rule, dict):
+                                rule['path'] = f"{device_type}/{rule['path']}"
+                            else:
+                                rules_config['rules'][i] = f"{device_type}/{rule}"
+
+            return rules_config
+
         except Exception as e:
-            self.logger.error(f"Error loading included sigma rules from {include_path}: {e}")
+            logger.error(f"Error loading included sigma rules from {include_path}: {e}")
             
         return {}
 
@@ -264,7 +261,7 @@ class FieldMappingService:
         for field in source_fields:
             if field not in mappings:
                 schema_info = f" in schema '{schema_name}'" if schema_name else ""
-                self.logger.warning(f"Missing mapping for Sigma field: {field}{schema_info}")
+                logger.warning(f"Missing mapping for Sigma field: {field}{schema_info}")
                 missing_mappings.append(field)
             else:
                 schema_field = mappings[field]
@@ -308,7 +305,7 @@ class FieldMappingService:
         
         for field in duplicate_mappings:
             schema_info = f" in schema '{schema_name}'" if schema_name else ""
-            self.logger.warning(f"Duplicate mapping to schema field: {field}{schema_info}")
+            logger.warning(f"Duplicate mapping to schema field: {field}{schema_info}")
             
         return missing_mappings
 
@@ -335,11 +332,11 @@ class FieldMappingService:
             
             for row in result:
                 mappings[row.sigma_field] = row.schema_field
-                
-            self.logger.info(f"Loaded {len(mappings)} field mappings from database for device '{device}'")
-                
+
+            logger.info(f"Loaded {len(mappings)} field mappings from database for device '{device}'")
+
         except Exception as e:
-            self.logger.error(f"Error fetching field mappings from database: {e}")
+            logger.error(f"Error fetching field mappings from database: {e}")
             
         return mappings
 
@@ -361,26 +358,25 @@ class FieldMappingService:
         try:
             result = db_session.execute(
                 text("""
-                    SELECT column_name, column_type, index_order, os_order
+                    SELECT column_name, column_type, index_order
                     FROM meta_schemas
                     WHERE name = :schema_name
                     ORDER BY index_order
-                """), 
+                """),
                 {"schema_name": schema_name}
             )
-            
+
             for row in result:
                 schema_metadata[row.column_name] = {
                     "type": row.column_type,
                     "index_type": "text_search" if row.column_type == "text" else "",
                     "index_order": row.index_order,
-                    "os_order": row.os_order
                 }
-                
-            self.logger.info(f"Loaded meta schema '{schema_name}' from database with {len(schema_metadata)} columns")
-                
+
+            logger.info(f"Loaded meta schema '{schema_name}' from database with {len(schema_metadata)} columns")
+
         except Exception as e:
-            self.logger.error(f"Error fetching meta schema from database: {e}")
+            logger.error(f"Error fetching meta schema from database: {e}")
             
         return schema_metadata
 
@@ -402,26 +398,25 @@ class FieldMappingService:
         try:
             result = db_session.execute(
                 text("""
-                    SELECT column_name, column_type, index_order, os_order
+                    SELECT column_name, column_type, index_order
                     FROM derived_schemas
                     WHERE name = :schema_name
                     ORDER BY index_order
-                """), 
+                """),
                 {"schema_name": schema_name}
             )
-            
+
             for row in result:
                 schema_metadata[row.column_name] = {
                     "type": row.column_type,
                     "index_type": "text_search" if row.column_type == "text" else "",
                     "index_order": row.index_order,
-                    "os_order": row.os_order
                 }
-                
-            self.logger.info(f"Loaded derived schema additions for '{schema_name}' from database with {len(schema_metadata)} columns")
-                
+
+            logger.info(f"Loaded derived schema additions for '{schema_name}' from database with {len(schema_metadata)} columns")
+
         except Exception as e:
-            self.logger.error(f"Error fetching derived schema additions from database: {e}")
+            logger.error(f"Error fetching derived schema additions from database: {e}")
             
         return schema_metadata
 
@@ -441,10 +436,10 @@ class FieldMappingService:
             
         excluded_columns = set()
         try:
-            self.logger.info(f"No column overrides available for derived schema '{schema_name}' in unified table structure")
-                
+            logger.info(f"No column overrides available for derived schema '{schema_name}' in unified table structure")
+
         except Exception as e:
-            self.logger.error(f"Error fetching derived schema overrides from database: {e}")
+            logger.error(f"Error fetching derived schema overrides from database: {e}")
             
         return excluded_columns
 
@@ -466,11 +461,11 @@ class FieldMappingService:
         
         if db_session:
             mappings = self.get_db_schema_mappings(device, db_session)
-            self.logger.info(f"Using database-based mappings with {len(mappings)} entries for device '{device}'")
+            logger.info(f"Using database-based mappings with {len(mappings)} entries for device '{device}'")
             return mappings
-            
+
         file_mappings, _ = self.get_schema_mappings(schema_config, rule_name)
-        self.logger.info(f"Using file-based mappings with {len(file_mappings)} entries")
+        logger.info(f"Using file-based mappings with {len(file_mappings)} entries")
         return file_mappings
         
     def get_schema_mappings(self, schema_config: dict, rule_name: str) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
@@ -559,7 +554,7 @@ class FieldMappingService:
                 import json
                 rule = json.loads(rule)
             except (json.JSONDecodeError, TypeError):
-                self.logger.error(f"Failed to parse rule content: {rule[:100] if isinstance(rule, str) else type(rule)}...")
+                logger.error(f"Failed to parse rule content: {rule[:100] if isinstance(rule, str) else type(rule)}...")
                 return []
                 
         fields = set()
