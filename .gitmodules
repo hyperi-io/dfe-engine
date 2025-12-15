@@ -1,6 +1,8 @@
 [submodule "ci"]
 	path = ci
 	url = https://github.com/hypersec-io/ci.git
+	update = none
 [submodule "ai"]
 	path = ai
 	url = https://github.com/hypersec-io/ai.git
+	update = none

@@ -112,8 +112,7 @@ ignore = [
 
 [[tool.uv.index]]
 name = "hypersec-repo"
-url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple"
-publish-url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local"
+url = "https://pypi.repo.hypersec.io/simple/"
 explicit = true
 
 [tool.uv.sources]
