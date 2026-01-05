@@ -9,11 +9,16 @@ def init_clickhouse_error_handler():
 
 def test_parse_error(init_clickhouse_error_handler, test_clickhouse_errors_mapping):
     error_code = test_clickhouse_errors_mapping["error_code"]
-    error = Exception(test_clickhouse_errors_mapping["error_message"])
+    error_type = test_clickhouse_errors_mapping["error_type"]
+    error_message = test_clickhouse_errors_mapping["error_message"]
+    error_actionable = test_clickhouse_errors_mapping["is_actionable"]
+
+    error = Exception(error_message)
+
     result = init_clickhouse_error_handler.parse_error(error)
 
     assert(result["code"] == error_code)
-    assert(result["type"] == init_clickhouse_error_handler.ERROR_MAPPINGS[error_code]["type"])
-    assert(result["message"] == test_clickhouse_errors_mapping["error_message"])
-    assert(result["user_message"] == init_clickhouse_error_handler.ERROR_MAPPINGS[error_code]["message"])
-    assert(result["actionable"] == test_clickhouse_errors_mapping["is_actionable"])
+    assert(result["type"] == error_type)
+    assert(result["message"] == error_message)
+    assert(result["user_message"] == error_message)
+    assert(result["actionable"] == error_actionable)

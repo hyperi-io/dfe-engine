@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 
 import re
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 from ..settings import get_settings
 from ..yaml_utils import yaml_load, yaml_load_string, YAMLError

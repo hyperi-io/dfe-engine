@@ -7,7 +7,7 @@ from .pipeline_util import (
     PipelineSchemaError,
 )
 from typing import Dict
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from ..yaml_utils import yaml_load_string, YAMLError
 
 

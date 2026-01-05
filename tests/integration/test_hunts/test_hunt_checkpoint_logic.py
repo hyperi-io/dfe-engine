@@ -4,7 +4,7 @@ from pytz import utc
 from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
 from dfe_engine.config.config_loader import DFEConfigLoader
 import time
-from hs_lib.logger import logger as hs_logger
+from hs_pylib.logger import logger as hs_logger
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 import logging

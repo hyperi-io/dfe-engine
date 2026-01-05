@@ -196,7 +196,7 @@ All configuration uses environment variables with the `DFE_` prefix.
 Use hs-lib logger everywhere:
 
 ```python
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 logger.info("Processing started")
 logger.error(f"Failed: {e}")

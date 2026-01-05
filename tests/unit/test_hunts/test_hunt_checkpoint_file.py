@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
-from hs_lib.logger import logger as hs_logger
+from hs_pylib.logger import logger as hs_logger
 import shutil
 
 logger = logging.getLogger(__name__)
@@ -91,5 +91,5 @@ def test_create_update_checkpoint(
         f"Expected last_success_time to be not None, but got {last_success_time}. "
         f"File: {file_path}, Content: {file_path.read_text(errors='ignore')}"
     )
-    # Note: hs_lib logger (structlog) doesn't write to pytest caplog,
+    # Note: hs_pylib logger (structlog) doesn't write to pytest caplog,
     # so we verify success by checking last_success_time is not None above
