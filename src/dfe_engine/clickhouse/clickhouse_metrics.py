@@ -1,6 +1,6 @@
 from typing import Dict
 
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 from .clickhouse_manager import ClickHouseManager
 

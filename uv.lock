@@ -1,6 +1,6 @@
 version = 1
 revision = 3
-requires-python = ">=3.12.0, <4"
+requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
     "python_full_version < '3.14'",
@@ -436,7 +436,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.1.0"
+version = "1.1.2"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },
@@ -445,7 +445,7 @@ dependencies = [
     { name = "clickhouse-connect" },
     { name = "croniter" },
     { name = "gitpython" },
-    { name = "hs-lib" },
+    { name = "hs-pylib" },
     { name = "httpx" },
     { name = "importlib-metadata" },
     { name = "jinja2" },
@@ -493,7 +493,7 @@ requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.10.0" },
     { name = "croniter", specifier = ">=6.0.0" },
     { name = "gitpython", specifier = ">=3.1.45" },
-    { name = "hs-lib", specifier = ">=2.12.3", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" },
+    { name = "hs-pylib", specifier = ">=2.13.7", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "importlib-metadata", specifier = ">=8.7.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
@@ -657,8 +657,8 @@ wheels = [
 ]
 
 [[package]]
-name = "hs-lib"
-version = "2.12.3"
+name = "hs-pylib"
+version = "2.13.7"
 source = { registry = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" }
 dependencies = [
     { name = "dynaconf" },
@@ -669,9 +669,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-lib/2.12.3/hs_lib-2.12.3.tar.gz", hash = "sha256:88d1bf85f4831ab03381ffdb052fc6f00d68c9a673fd1c125b68cd0510b705b7" }
+sdist = { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7.tar.gz", hash = "sha256:024e4110185ad4169e2ebdc10d09330fa62a5db502a906d96cb2a06d0188e73e" }
 wheels = [
-    { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-lib/2.12.3/hs_lib-2.12.3-py3-none-any.whl", hash = "sha256:37242b921889416a7cae3aeaa3f3b82c55cb8841bbf71ed4df3f0595e019446e" },
+    { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7-py3-none-any.whl", hash = "sha256:f5c7feb13017ad238392e9488fdcaebc7f8ea364166564c7c80e0c4fc49cdc44" },
 ]
 
 [[package]]

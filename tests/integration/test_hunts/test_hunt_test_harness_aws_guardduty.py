@@ -15,7 +15,7 @@ import pytest
 import shutil
 import yaml
 
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration

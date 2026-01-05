@@ -2,7 +2,7 @@ import os
 import csv
 from pathlib import Path
 from typing import Dict, Tuple, List, Any, Set
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from sqlalchemy import text
 from ..yaml_utils import yaml_load
 
