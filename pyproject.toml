@@ -8,7 +8,7 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    # hs-lib for logging and common utilities
+    # hs-pylib for logging and common utilities
     "hs-pylib>=2.13.7",
     # Data processing
     "pyarrow>=22.0.0",

@@ -48,7 +48,7 @@ print(f"ClickHouse: {settings.clickhouse.host}:{settings.clickhouse.port}")
                              │
                              ▼
               ┌─────────────────────────────┐
-              │          hs-lib             │
+              │          hs-pylib             │
               │   (Common Utilities)        │
               └─────────────────────────────┘
 ```
@@ -193,7 +193,7 @@ All configuration uses environment variables with the `DFE_` prefix.
 
 ### Logging
 
-Use hs-lib logger everywhere:
+Use hs-pylib logger everywhere:
 
 ```python
 from hs_pylib.logger import logger
@@ -228,7 +228,7 @@ yaml_dump(data, Path("output.yaml"))
 
 - [dfe-cli](https://github.com/hypersec-io/dfe-cli) - CLI wrapper
 - [dfe-control-plane](https://github.com/hypersec-io/dfe-control-plane) - Control plane service
-- [hs-lib](https://github.com/hypersec-io/hs-lib) - Common utilities
+- [hs-pylib](https://github.com/hypersec-io/hs-pylib) - Common utilities
 
 ## License
 
