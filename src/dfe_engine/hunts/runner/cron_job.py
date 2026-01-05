@@ -12,7 +12,7 @@ from ..jobs.jobs import JobScheduler
 from ..hunts.hunts import Hunt
 from ..hunts.hunts_validator import HuntValidator
 import croniter
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from ...yaml_utils import yaml_load, YAMLError
 
 

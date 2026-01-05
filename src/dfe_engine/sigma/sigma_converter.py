@@ -4,7 +4,7 @@ from sqlalchemy import text
 from ..sigma.sigma_pipelines import SigmaPipeline
 from ..sigma.sigma_backend_clickhouse import SqlBackend
 from sigma.collection import SigmaCollection
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from ..sigma.field_mapping_service import FieldMappingService
 from ..yaml_utils import yaml_load, yaml_dump
 
