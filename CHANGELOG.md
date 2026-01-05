@@ -1,3 +1,10 @@
+## [1.1.3](https://github.com/hypersec-io/dfe-engine/compare/v1.1.2...v1.1.3) (2025-12-16)
+
+
+### Bug Fixes
+
+* update ci/tooling submodule with auto-update config ([1ae4cc6](https://github.com/hypersec-io/dfe-engine/commit/1ae4cc6c12bd3555ddb4e2009e24dacac7753755))
+
 ## [1.1.2](https://github.com/hypersec-io/dfe-engine/compare/v1.1.1...v1.1.2) (2025-12-08)
 
 

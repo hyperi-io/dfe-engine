@@ -1,6 +1,10 @@
 [submodule "ci"]
 	path = ci
 	url = https://github.com/hypersec-io/ci.git
+	update = rebase
+	fetchRecurseSubmodules = true
 [submodule "ai"]
 	path = ai
 	url = https://github.com/hypersec-io/ai.git
+	update = rebase
+	fetchRecurseSubmodules = true
