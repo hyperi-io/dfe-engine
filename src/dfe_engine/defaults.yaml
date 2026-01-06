@@ -53,7 +53,7 @@ storage:
   s3_bucket: ""
   s3_region: ""
 
-# Logging settings (handled by hs-lib)
+# Logging settings (handled by hs-pylib)
 logging:
   level: "INFO"
   format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

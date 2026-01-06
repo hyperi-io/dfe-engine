@@ -4,12 +4,12 @@ version = "1.1.3"
 description = "DFE Engine - Core library for Data Fusion Engine"
 authors = [{ name = "HyperSec", email = "engineering@hypersec.io" }]
 license = { text = "LicenseRef-HyperSec-EULA" }
-requires-python = ">=3.12.0,<4"
+requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    # hs-lib for logging and common utilities
-    "hs-lib>=2.12.3",
+    # hs-pylib for logging and common utilities
+    "hs-pylib>=2.13.7",
     # Data processing
     "pyarrow>=22.0.0",
     "pandas>=2.2.3",
@@ -116,7 +116,7 @@ url = "https://pypi.repo.hypersec.io/simple/"
 explicit = true
 
 [tool.uv.sources]
-hs-lib = { index = "hypersec-repo" }
+hs-pylib = { index = "hypersec-repo" }
 
 [tool.bandit]
 # Skip B608 (hardcoded SQL) - This is a database library that generates SQL queries.

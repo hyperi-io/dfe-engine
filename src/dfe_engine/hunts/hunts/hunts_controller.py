@@ -7,7 +7,7 @@ import pandas as pd
 from tabulate import tabulate
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from .hunts_scheduler import HuntScheduler
 from ..runner.cron_runner import CronRunner
 from ...config.config_loader import DFEConfigLoader

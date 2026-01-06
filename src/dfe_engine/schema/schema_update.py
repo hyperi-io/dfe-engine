@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import List, Tuple, Dict, Optional
 import uuid
 
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from ..clickhouse.clickhouse_errors_mapping import ClickHouseErrorHandler
 from ..schema.schema_util import SchemaUtils

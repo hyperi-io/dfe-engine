@@ -12,7 +12,7 @@
 
 1. **Repository Setup** - Repository created with CI/AI submodules
 2. **Package Structure** - `src/dfe_engine/` with all core modules
-3. **Logging Migration** - All files using hs-lib logger
+3. **Logging Migration** - All files using hs-pylib logger
 4. **Settings Module** - Pydantic-based config with env cascade
 5. **YAML Consolidation** - All YAML ops using ruamel.yaml via yaml_utils
 6. **ClickHouse Migration** - Using clickhouse-connect with built-in pooling
@@ -54,7 +54,7 @@ None currently.
 
 ### Runtime
 
-- `hs-lib>=2.12.3` - Logging and common utilities
+- `hs-pylib>=2.12.3` - Logging and common utilities
 - `clickhouse-connect>=0.10.0` - ClickHouse client
 - `pandas>=2.2.3` - DataFrame operations
 - `ruamel-yaml>=0.18.6` - YAML parsing
