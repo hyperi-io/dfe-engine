@@ -18,7 +18,7 @@ from typing import Optional
 import clickhouse_connect
 from clickhouse_connect.driver import Client
 from clickhouse_connect.driver import httputil
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 from ..settings import get_settings
 

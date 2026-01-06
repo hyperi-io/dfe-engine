@@ -3,7 +3,7 @@ from typing import Optional, List, Dict
 from importlib import resources
 from zipfile import ZipFile
 
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 from tabulate import tabulate
 
 from ..config.config_loader import DFEConfigLoader

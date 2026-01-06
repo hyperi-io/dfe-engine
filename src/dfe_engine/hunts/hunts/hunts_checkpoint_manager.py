@@ -2,7 +2,7 @@ import os
 from typing import Any, Dict, List, Optional
 from datetime import datetime
 from enum import Enum
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 import json
 
