@@ -12,7 +12,7 @@ from .schema_util import (
     SchemaNameConflictError,
     generate_norm_column_sql,
 )
-from hs_lib.logger import logger
+from hs_pylib.logger import logger
 
 
 class ClickHouseSchema:
