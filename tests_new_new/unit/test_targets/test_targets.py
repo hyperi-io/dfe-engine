@@ -1,0 +1,174 @@
+import pytest
+
+from dfe_engine.targets.custom_exceptions import *
+from dfe_engine.targets.targets import Targets
+from pathlib import Path
+
+@pytest.fixture
+def init_targets_obj(tmp_path):
+    targets_file_dir = tmp_path
+    targets_file_name = "targets.yaml"
+
+    yield Targets(
+        targets_file_dir = targets_file_dir,
+        targets_file_name = targets_file_name
+    )
+
+@pytest.fixture
+def init_targets_file(init_targets_obj):
+    result = init_targets_obj.targets_file_create()
+    assert(result == init_targets_obj.targets_file_path)
+
+@pytest.fixture
+def init_targets_file_with_target(init_targets_obj, init_targets_file):
+    target_name = "test_target_1"
+    target_data = {
+        "test_key_1": "test_value_1"
+    }
+    init_targets_obj.target_add(
+        target_name = target_name,
+        target_data = target_data
+    )
+    yield target_name
+
+@pytest.fixture
+def init_targets_file_with_two_targets(init_targets_obj, init_targets_file):
+    target_name_1 = "test_target_1"
+    target_data = {
+        "test_key_1": "test_value_1"
+    }
+    init_targets_obj.target_add(
+        target_name = target_name_1,
+        target_data = target_data
+    )
+
+    target_name_2 = "test_target_2"
+    init_targets_obj.target_add(
+        target_name = target_name_2,
+        target_data = target_data
+    )
+    yield {
+        "target_name_1": target_name_1,
+        "target_name_2": target_name_2
+    }
+
+def test_targets_file_not_exists(init_targets_obj):
+    assert(not init_targets_obj.targets_file_exists())
+
+def test_targets_file_exists(init_targets_obj, init_targets_file):
+    assert(init_targets_obj.targets_file_exists())
+
+def test_target_exists(init_targets_obj, init_targets_file):
+    target_name = "test_target_1"
+    assert(not init_targets_obj.target_exists(
+        target_name = target_name
+    ))
+
+def test_target_add_initial(init_targets_obj, init_targets_file_with_target):
+    assert(init_targets_obj.target_exists(
+        target_name = init_targets_file_with_target
+    ))
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_target
+    ))
+
+def test_target_add_with_existing(init_targets_obj, init_targets_file_with_two_targets):
+    assert(init_targets_obj.target_exists(
+        target_name = init_targets_file_with_two_targets["target_name_2"]
+    ))
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_two_targets["target_name_1"]
+    ))
+
+def test_target_add_with_existing_using_set_default(init_targets_obj, init_targets_file_with_target):
+    new_target_name = "test_target_2"
+    new_target_data = {
+        "test_key_1": "test_value_1"
+    }
+
+    init_targets_obj.target_add(
+        target_name = new_target_name,
+        target_data = new_target_data,
+        set_to_default = True
+    )
+    assert(init_targets_obj.target_exists(
+        target_name = new_target_name
+    ))
+    assert(init_targets_obj.target_is_default(
+        target_name = new_target_name
+    ))
+
+def test_target_delete(init_targets_obj, init_targets_file_with_target):
+    assert(init_targets_obj.target_exists(
+        target_name = init_targets_file_with_target
+    ))
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_target
+    ))
+
+    init_targets_obj.target_delete(init_targets_file_with_target)
+    assert(not init_targets_obj.target_exists(
+        target_name = init_targets_file_with_target
+    ))
+
+def test_targets_list(init_targets_obj, init_targets_file_with_two_targets):
+    assert(init_targets_obj.targets_file_list() == [init_targets_file_with_two_targets["target_name_1"], init_targets_file_with_two_targets["target_name_2"]])
+
+def test_targets_file_default_target(init_targets_obj, init_targets_file_with_target):
+    assert(init_targets_obj.targets_file_default_target() == init_targets_file_with_target)
+
+def test_target_exists_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_exists(
+            target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_is_default_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_is_default(
+            target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_add_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+    target_data = {
+        "test_key_1": "test_value_1"
+    }
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_add(
+            target_name = target_name,
+            target_data = target_data
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_delete_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_delete(
+            target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_targets_list_missing_file(init_targets_obj):
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.targets_file_list()
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_targets_file_default_target_missing_file(init_targets_obj):
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.targets_file_default_target()
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
