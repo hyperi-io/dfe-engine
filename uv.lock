@@ -436,7 +436,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.1.2"
+version = "1.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },
@@ -493,7 +493,7 @@ requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.10.0" },
     { name = "croniter", specifier = ">=6.0.0" },
     { name = "gitpython", specifier = ">=3.1.45" },
-    { name = "hs-pylib", specifier = ">=2.13.7", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" },
+    { name = "hs-pylib", specifier = ">=2.13.7", index = "https://pypi.repo.hypersec.io/simple/" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "importlib-metadata", specifier = ">=8.7.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
@@ -659,7 +659,7 @@ wheels = [
 [[package]]
 name = "hs-pylib"
 version = "2.13.7"
-source = { registry = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" }
+source = { registry = "https://pypi.repo.hypersec.io/simple/" }
 dependencies = [
     { name = "dynaconf" },
     { name = "loguru" },
@@ -669,9 +669,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7.tar.gz", hash = "sha256:024e4110185ad4169e2ebdc10d09330fa62a5db502a906d96cb2a06d0188e73e" }
+sdist = { url = "https://pypi.repo.hypersec.io/hs-pylib/2.13.7/hs_pylib-2.13.7.tar.gz", hash = "sha256:024e4110185ad4169e2ebdc10d09330fa62a5db502a906d96cb2a06d0188e73e" }
 wheels = [
-    { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7-py3-none-any.whl", hash = "sha256:f5c7feb13017ad238392e9488fdcaebc7f8ea364166564c7c80e0c4fc49cdc44" },
+    { url = "https://pypi.repo.hypersec.io/hs-pylib/2.13.7/hs_pylib-2.13.7-py3-none-any.whl", hash = "sha256:f5c7feb13017ad238392e9488fdcaebc7f8ea364166564c7c80e0c4fc49cdc44" },
 ]
 
 [[package]]
