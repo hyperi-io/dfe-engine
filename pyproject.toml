@@ -80,13 +80,19 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term --cov-report=xml:cov.xml -m 'not integration'"
+addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration'"
 testpaths = ["tests"]
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse/OpenSearch)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "except Exception as e:",  # Exclude generic exception handlers
 ]
 
 [tool.ruff]
