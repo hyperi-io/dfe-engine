@@ -58,6 +58,8 @@ jobs:
           fetch-depth: 0
           submodules: recursive
           token: ${{ steps.token.outputs.token }}
+      - name: Create ClickHouse Container
+        run: ./.github/workflows/scripts/clickhouse_container_setup.sh
       - uses: ./ci/actions/jobs/test
         with:
           language: python
