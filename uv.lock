@@ -436,7 +436,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.1.2"
+version = "1.1.3"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },
@@ -493,7 +493,7 @@ requires-dist = [
     { name = "clickhouse-connect", specifier = ">=0.10.0" },
     { name = "croniter", specifier = ">=6.0.0" },
     { name = "gitpython", specifier = ">=3.1.45" },
-    { name = "hs-pylib", specifier = ">=2.13.7", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" },
+    { name = "hs-pylib", specifier = ">=2.14.0", index = "https://pypi.repo.hypersec.io/simple/" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "importlib-metadata", specifier = ">=8.7.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
@@ -658,8 +658,8 @@ wheels = [
 
 [[package]]
 name = "hs-pylib"
-version = "2.13.7"
-source = { registry = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/simple" }
+version = "2.14.0"
+source = { registry = "https://pypi.repo.hypersec.io/simple/" }
 dependencies = [
     { name = "dynaconf" },
     { name = "loguru" },
@@ -669,9 +669,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7.tar.gz", hash = "sha256:024e4110185ad4169e2ebdc10d09330fa62a5db502a906d96cb2a06d0188e73e" }
+sdist = { url = "https://pypi.repo.hypersec.io/hs-pylib/2.14.0/hs_pylib-2.14.0.tar.gz", hash = "sha256:3785325854f3f80d6f2ccea72b8d00db58758a39da03e3ee598f5fb2e66b8804" }
 wheels = [
-    { url = "https://hypersec.jfrog.io/artifactory/api/pypi/hypersec-pypi-local/hs-pylib/2.13.7/hs_pylib-2.13.7-py3-none-any.whl", hash = "sha256:f5c7feb13017ad238392e9488fdcaebc7f8ea364166564c7c80e0c4fc49cdc44" },
+    { url = "https://pypi.repo.hypersec.io/hs-pylib/2.14.0/hs_pylib-2.14.0-py3-none-any.whl", hash = "sha256:f3ddc94dd695b1dcd39147a2899150915163ee682f5f049aff73cdd4fa9918d3" },
 ]
 
 [[package]]
@@ -1790,11 +1790,11 @@ wheels = [
 
 [[package]]
 name = "urllib3"
-version = "2.6.0"
+version = "2.6.3"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/1c/43/554c2569b62f49350597348fc3ac70f786e3c32e7f19d266e19817812dd3/urllib3-2.6.0.tar.gz", hash = "sha256:cb9bcef5a4b345d5da5d145dc3e30834f58e8018828cbc724d30b4cb7d4d49f1", size = 432585, upload-time = "2025-12-05T15:08:47.885Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/24/5f1b3bdffd70275f6661c76461e25f024d5a38a46f04aaca912426a2b1d3/urllib3-2.6.3.tar.gz", hash = "sha256:1b62b6884944a57dbe321509ab94fd4d3b307075e0c2eae991ac71ee15ad38ed", size = 435556, upload-time = "2026-01-07T16:24:43.925Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/1a/9ffe814d317c5224166b23e7c47f606d6e473712a2fad0f704ea9b99f246/urllib3-2.6.0-py3-none-any.whl", hash = "sha256:c90f7a39f716c572c4e3e58509581ebd83f9b59cced005b7db7ad2d22b0db99f", size = 131083, upload-time = "2025-12-05T15:08:45.983Z" },
+    { url = "https://files.pythonhosted.org/packages/39/08/aaaad47bc4e9dc8c725e68f9d04865dbcb2052843ff09c97b08904852d84/urllib3-2.6.3-py3-none-any.whl", hash = "sha256:bf272323e553dfb2e87d9bfd225ca7b0f467b919d7bbd355436d3fd37cb0acd4", size = 131584, upload-time = "2026-01-07T16:24:42.685Z" },
 ]
 
 [[package]]
@@ -1813,14 +1813,14 @@ wheels = [
 
 [[package]]
 name = "werkzeug"
-version = "3.1.4"
+version = "3.1.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "markupsafe" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/ea/b0f8eeb287f8df9066e56e831c7824ac6bab645dd6c7a8f4b2d767944f9b/werkzeug-3.1.4.tar.gz", hash = "sha256:cd3cd98b1b92dc3b7b3995038826c68097dcb16f9baa63abe35f20eafeb9fe5e", size = 864687, upload-time = "2025-11-29T02:15:22.841Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/70/1469ef1d3542ae7c2c7b72bd5e3a4e6ee69d7978fa8a3af05a38eca5becf/werkzeug-3.1.5.tar.gz", hash = "sha256:6a548b0e88955dd07ccb25539d7d0cc97417ee9e179677d22c7041c8f078ce67", size = 864754, upload-time = "2026-01-08T17:49:23.247Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/2f/f9/9e082990c2585c744734f85bec79b5dae5df9c974ffee58fe421652c8e91/werkzeug-3.1.4-py3-none-any.whl", hash = "sha256:2ad50fb9ed09cc3af22c54698351027ace879a0b60a3b5edf5730b2f7d876905", size = 224960, upload-time = "2025-11-29T02:15:21.13Z" },
+    { url = "https://files.pythonhosted.org/packages/ad/e4/8d97cca767bcc1be76d16fb76951608305561c6e056811587f36cb1316a8/werkzeug-3.1.5-py3-none-any.whl", hash = "sha256:5111e36e91086ece91f93268bb39b4a35c1e6f1feac762c9c822ded0a4e322dc", size = 225025, upload-time = "2026-01-08T17:49:21.859Z" },
 ]
 
 [[package]]
