@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/hypersec-io/dfe-engine/compare/v1.2.0...v1.3.0) (2026-01-16)
+
+
+### Features
+
+* add pagination, storage adapters, and documentation diagrams ([879ce4b](https://github.com/hypersec-io/dfe-engine/commit/879ce4b53815ee2cd3c2592d07adfbd88a19a5c4))
+
 # [1.2.0](https://github.com/hypersec-io/dfe-engine/compare/v1.1.3...v1.2.0) (2026-01-16)
 
 
