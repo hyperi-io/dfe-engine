@@ -110,15 +110,13 @@ class DatasourceAdapter(ABC):
         timeout_seconds: int,
     ) -> tuple[pa.Table, ExplainPlan]:
         """Execute query and EXPLAIN in parallel using threads."""
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from concurrent.futures import ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             query_future: Future[pa.Table] = executor.submit(
                 self.execute, query, params, timeout_seconds
             )
-            explain_future: Future[ExplainPlan] = executor.submit(
-                self.explain, query, params
-            )
+            explain_future: Future[ExplainPlan] = executor.submit(self.explain, query, params)
 
             # Wait for both to complete
             table = query_future.result(timeout=timeout_seconds + 5)
@@ -136,7 +134,7 @@ class DatasourceAdapter(ABC):
         """
         pass
 
-    def close(self) -> None:
+    def close(self) -> None:  # noqa: B027
         """Close any open connections. Override if needed."""
         pass
 
@@ -176,9 +174,7 @@ def get_adapter(datasource: str) -> DatasourceAdapter:
 
     if scheme not in _adapters:
         available = ", ".join(_adapters.keys())
-        raise ValueError(
-            f"Unknown datasource scheme: {scheme}. Available: {available}"
-        )
+        raise ValueError(f"Unknown datasource scheme: {scheme}. Available: {available}")
 
     return _adapters[scheme](target)
 
@@ -190,6 +186,7 @@ def list_adapters() -> list[str]:
 
 # Import adapters to trigger registration
 from dfe_engine.query.datasources import clickhouse  # noqa: F401, E402
+from dfe_engine.query.datasources import storage  # noqa: F401, E402
 
 # Future: postgres, prometheus
 # from dfe_engine.query.datasources import postgres  # noqa: F401, E402

@@ -49,9 +49,7 @@ async def execute_query(
 
     options = request.options or {}
     timeout = options.timeout_seconds if hasattr(options, "timeout_seconds") else 30
-    include_explain = (
-        options.include_explain if hasattr(options, "include_explain") else False
-    )
+    include_explain = options.include_explain if hasattr(options, "include_explain") else False
     parallel = options.parallel if hasattr(options, "parallel") else False
 
     start = time.perf_counter()

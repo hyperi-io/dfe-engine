@@ -1,16 +1,23 @@
 """
 Query API client for consuming the DFE Query API.
+
+Clients reference queries by label and pass parameters.
+SQL is never exposed to clients - it's resolved server-side.
 """
 
 from __future__ import annotations
 
 import time
+import uuid
 from typing import TYPE_CHECKING, Any, Iterator
 
 import pyarrow as pa
-from pyarrow import ipc
 
-from dfe_engine.query.models import ExplainPlan, QueryMetadata, QueryOptions
+from dfe_engine.query.models import (
+    AuthContext,
+    QueryMetadata,
+    QueryOptions,
+)
 from dfe_engine.query.result import QueryResult
 
 if TYPE_CHECKING:
@@ -22,6 +29,7 @@ class QueryClient:
     Client for DFE Query API.
 
     Supports both direct (in-process) and HTTP modes.
+    Clients specify query labels and parameters - never raw SQL.
 
     Examples:
         # HTTP mode (for external consumers)
@@ -30,17 +38,22 @@ class QueryClient:
         # Direct mode (in-process, no HTTP)
         client = QueryClient(direct=True)
 
-        # Query and get Arrow Table
-        table = client.query("clickhouse:default", "SELECT * FROM logs")
+        # Execute query by label with parameters
+        result = client.query(
+            "analytics/user_activity",
+            params={"event_types": ["login", "purchase"]},
+            limit=500,
+        )
 
-        # Query and get DataFrame
-        df = client.query_df("clickhouse:default", "SELECT * FROM logs")
+        # Access data
+        df = result.to_pandas()
+        table = result.to_arrow()
 
-        # Query with EXPLAIN
-        result = client.query_with_explain(
-            "clickhouse:default",
-            "SELECT * FROM logs",
-            parallel=True  # Run query and EXPLAIN concurrently
+        # With EXPLAIN plan
+        result = client.query(
+            "hunts/active_threats",
+            params={"severities": ["critical"]},
+            include_explain=True,
         )
         print(result.explain.steps)
     """
@@ -81,38 +94,52 @@ class QueryClient:
 
     def query(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None = None,
+        *,
+        limit: int | None = None,
+        offset: int | None = None,
+        time_from: str | None = None,
+        time_to: str | None = None,
         timeout_seconds: int | None = None,
-    ) -> pa.Table:
+        store: str | None = None,
+        cache: bool = True,
+    ) -> QueryResult:
         """
-        Execute query and return Arrow Table.
+        Execute query and return result.
 
         Args:
-            datasource: Datasource URI (e.g., 'clickhouse:default')
-            sql: Query string
-            params: Optional query parameters
-            timeout_seconds: Query timeout (uses default if not specified)
+            query_label: Query label (e.g., 'analytics/user_activity')
+            params: Query parameters (validated against query schema)
+            limit: Max rows to return
+            offset: Skip first N rows
+            time_from: Start time (ISO8601) for time-bounded queries
+            time_to: End time (ISO8601) for time-bounded queries
+            timeout_seconds: Query timeout
+            store: Target store (only if query allows store: '*')
+            cache: Allow cached results
 
         Returns:
-            PyArrow Table
+            QueryResult with data and metadata
         """
-        result = self._execute(
-            datasource=datasource,
-            sql=sql,
-            params=params,
-            timeout_seconds=timeout_seconds or self.timeout_seconds,
+        options = QueryOptions(
+            limit=limit,
+            offset=offset,
+            time_from=time_from,
+            time_to=time_to,
+            timeout_seconds=timeout_seconds,
+            store=store,
+            cache=cache,
             include_explain=False,
         )
-        return result.table
+
+        return self._execute(query_label, params, options)
 
     def query_df(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None = None,
-        timeout_seconds: int | None = None,
+        **kwargs: Any,
     ) -> pd.DataFrame:
         """
         Execute query and return pandas DataFrame.
@@ -120,53 +147,56 @@ class QueryClient:
         Zero-copy conversion from Arrow where possible.
 
         Args:
-            datasource: Datasource URI
-            sql: Query string
-            params: Optional query parameters
-            timeout_seconds: Query timeout
+            query_label: Query label
+            params: Query parameters
+            **kwargs: Passed to query()
 
         Returns:
             pandas DataFrame
         """
-        table = self.query(datasource, sql, params, timeout_seconds)
-        return table.to_pandas()
+        result = self.query(query_label, params, **kwargs)
+        return result.to_pandas()
 
     def query_with_explain(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None = None,
-        timeout_seconds: int | None = None,
+        *,
         parallel: bool = True,
+        **kwargs: Any,
     ) -> QueryResult:
         """
         Execute query and return results with EXPLAIN plan.
 
         Args:
-            datasource: Datasource URI
-            sql: Query string
-            params: Optional query parameters
-            timeout_seconds: Query timeout
+            query_label: Query label
+            params: Query parameters
             parallel: Execute query and EXPLAIN concurrently
+            **kwargs: Passed to query()
 
         Returns:
             QueryResult with table, metadata, and explain plan
         """
-        return self._execute(
-            datasource=datasource,
-            sql=sql,
-            params=params,
-            timeout_seconds=timeout_seconds or self.timeout_seconds,
+        options = QueryOptions(
+            limit=kwargs.get("limit"),
+            offset=kwargs.get("offset"),
+            time_from=kwargs.get("time_from"),
+            time_to=kwargs.get("time_to"),
+            timeout_seconds=kwargs.get("timeout_seconds"),
+            store=kwargs.get("store"),
+            cache=kwargs.get("cache", True),
             include_explain=True,
-            parallel=parallel,
+            explain_parallel=parallel,
         )
+
+        return self._execute(query_label, params, options)
 
     def query_batches(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None = None,
         batch_size: int = 10_000,
+        **kwargs: Any,
     ) -> Iterator[pa.RecordBatch]:
         """
         Stream query results in batches.
@@ -174,65 +204,79 @@ class QueryClient:
         Useful for large results that don't fit in memory.
 
         Args:
-            datasource: Datasource URI
-            sql: Query string
-            params: Optional query parameters
+            query_label: Query label
+            params: Query parameters
             batch_size: Maximum rows per batch
+            **kwargs: Passed to query()
 
         Yields:
             Arrow RecordBatch
         """
-        result = self._execute(
-            datasource=datasource,
-            sql=sql,
-            params=params,
-            timeout_seconds=self.timeout_seconds,
-            include_explain=False,
-        )
+        result = self.query(query_label, params, **kwargs)
         yield from result.iter_batches(batch_size)
 
     def _execute(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None,
-        timeout_seconds: int,
-        include_explain: bool,
-        parallel: bool = False,
+        options: QueryOptions,
     ) -> QueryResult:
         """Execute query via direct or HTTP mode."""
         if self.direct:
-            return self._execute_direct(
-                datasource, sql, params, timeout_seconds, include_explain, parallel
-            )
+            return self._execute_direct(query_label, params, options)
         else:
-            return self._execute_http(
-                datasource, sql, params, timeout_seconds, include_explain, parallel
-            )
+            return self._execute_http(query_label, params, options)
 
     def _execute_direct(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None,
-        timeout_seconds: int,
-        include_explain: bool,
-        parallel: bool,
+        options: QueryOptions,
     ) -> QueryResult:
         """Execute query directly (in-process)."""
         from dfe_engine.query.datasources import get_adapter
+        from dfe_engine.query.registry import get_registry
+        from dfe_engine.query.validator import validate_params
 
-        adapter = get_adapter(datasource)
+        registry = get_registry()
+        query_def = registry.get(query_label)
+
+        # For direct mode, create a synthetic auth context
+        # In production, this would come from the calling service's context
+        auth = AuthContext(
+            org_id="direct",  # Direct mode bypasses multi-tenancy
+            user_id="direct",
+            roles=["admin"],  # Direct mode has full access
+            request_id=str(uuid.uuid4()),
+        )
+
+        # Validate and build parameters
+        final_params = validate_params(query_def, params, options, auth)
+
+        # Resolve store
+        stores = registry.resolve_store(query_def, options.store)
+        store = stores[0]  # For now, use first match
+
+        # Render SQL
+        sql = registry.render_sql(query_def, final_params, store)
+
+        # Get adapter and execute
+        adapter = get_adapter(query_def.datasource)
 
         start = time.perf_counter()
 
-        if include_explain:
+        timeout = final_params.get("timeout_seconds", self.timeout_seconds)
+
+        if options.include_explain:
             table, explain = adapter.execute_with_explain(
-                sql, params, timeout_seconds, parallel=parallel
+                sql,
+                final_params,
+                timeout,
+                parallel=options.explain_parallel,
             )
             explain_duration = int((time.perf_counter() - start) * 1000)
         else:
-            table = adapter.execute(sql, params, timeout_seconds)
+            table = adapter.execute(sql, final_params, timeout)
             explain = None
             explain_duration = None
 
@@ -241,35 +285,28 @@ class QueryClient:
         metadata = QueryMetadata(
             row_count=table.num_rows,
             query_duration_ms=duration_ms,
-            datasource=datasource,
+            query_label=query_label,
+            datasource=query_def.datasource,
+            store=store,
             explain_duration_ms=explain_duration,
+            request_id=auth.request_id,
         )
 
         return QueryResult(table=table, metadata=metadata, explain=explain)
 
     def _execute_http(
         self,
-        datasource: str,
-        sql: str,
+        query_label: str,
         params: dict[str, Any] | None,
-        timeout_seconds: int,
-        include_explain: bool,
-        parallel: bool,
+        options: QueryOptions,
     ) -> QueryResult:
         """Execute query via HTTP API."""
-        options = QueryOptions(
-            timeout_seconds=timeout_seconds,
-            include_explain=include_explain,
-            parallel=parallel,
-        )
-
         response = self.http_client.post(
             "/api/v1/query",
             json={
-                "datasource": datasource,
-                "query": sql,
+                "query": query_label,
                 "params": params,
-                "options": options.model_dump(),
+                "options": options.model_dump(exclude_none=True),
             },
         )
         response.raise_for_status()
@@ -278,11 +315,14 @@ class QueryClient:
         metadata = QueryMetadata(
             row_count=int(response.headers.get("X-Row-Count", 0)),
             query_duration_ms=int(response.headers.get("X-Query-Duration-Ms", 0)),
-            datasource=datasource,
+            query_label=query_label,
+            datasource=response.headers.get("X-Datasource", "unknown"),
+            store=response.headers.get("X-Store"),
             truncated=response.headers.get("X-Truncated", "false").lower() == "true",
             cached=response.headers.get("X-Cached", "false").lower() == "true",
             explain_duration_ms=int(response.headers.get("X-Explain-Duration-Ms", 0))
             or None,
+            request_id=response.headers.get("X-Request-Id"),
         )
 
         # Parse Arrow IPC response (explain embedded in schema metadata)

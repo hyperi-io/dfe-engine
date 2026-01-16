@@ -1,865 +1,164 @@
-# Query Gateway API
+# DFE Query API
 
-**Safe, RBAC-controlled query interface for PostgreSQL, ClickHouse, Prometheus, and Kafka**
+**Version:** 2.0.0
+**Last Updated:** 2026-01-16
+
+A secure, label-based query interface with multi-tenant isolation, RBAC, and Apache Arrow wire format.
 
 ---
 
 ## Overview
 
-The Query Gateway provides a unified, secure interface for executing queries across multiple data stores without requiring a dedicated API endpoint per query. It implements:
+The Query API provides a **secure, label-based interface** for querying multiple datasources. Key security features:
 
-- **Query Registry**: YAML-defined query templates with parameterisation
-- **RBAC**: Casbin-based role access control per query
-- **Tenant Isolation**: Mandatory org_id scoping injected server-side
-- **Cost Estimation**: Pre-execution EXPLAIN for ClickHouse
-- **Caching**: PostgreSQL-backed shared cache for ClickHouse, Prometheus, and Kafka
-- **Audit Logging**: Full query execution audit trail
+- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
+- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Role-based access control** - Queries can require specific roles/permissions
+- **Parameter validation** - All parameters validated against server-side schemas
+- **Apache Arrow wire format** - Efficient binary serialization
+
+### Supported Datasources
+
+| Datasource | Description | Wire Format |
+|------------|-------------|-------------|
+| `clickhouse` | ClickHouse analytics database | Arrow IPC |
+| `postgres` | PostgreSQL transactional database | Arrow IPC |
+| `prometheus` | Prometheus metrics | Arrow IPC |
+| `s3` | S3 bucket directory listing | Arrow IPC |
+| `minio` | MinIO (S3-compatible) listing | Arrow IPC |
+| `file` | Local filesystem directory listing | Arrow IPC |
 
 ---
 
-## Unified API Design
+## Security Model
 
-### Single Endpoint, Multiple Stores
+### Key Principles
 
-All stores are accessed via one API with store-specific routing:
+1. **Query labels, not SQL** - Clients reference pre-defined queries by label
+2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
+3. **Automatic tenant isolation** - `_org_id` extracted from JWT and injected
+4. **Parameter validation** - All params validated against schema before execution
+5. **Role-based access** - Queries can require specific roles/permissions
 
+### Example Security Flow
+
+```mermaid
+sequenceDiagram
+    participant C as Client
+    participant CP as Control Plane
+    participant QR as Query Registry
+    participant V as Validator
+    participant DB as ClickHouse
+
+    C->>CP: POST /api/query<br/>query: "hunts/active_threats"<br/>params: {severities: ["critical"]}
+    CP->>CP: Extract JWT (org_id, roles)
+    CP->>QR: Lookup query definition
+    QR-->>V: Query template + schema
+    V->>V: Validate params against schema
+    V->>V: Inject _org_id from JWT
+    V->>V: Check required_roles: [analyst]
+    V->>DB: Execute SQL with injected _org_id
+    DB-->>C: Arrow IPC response
 ```
-POST /api/query
+
+**Client Request:**
+
+```json
 {
-  "query_id": "kafka.topic_messages",  // store prefix determines routing
-  "params": {...}
+  "query": "hunts/active_threats",
+  "params": {"severities": ["critical", "high"]},
+  "options": {"limit": 500}
 }
 ```
 
-The `query_id` format is `{namespace}.{operation}` where namespace maps to store:
-- `analytics.*`, `hunts.*` → ClickHouse
-- `users.*`, `config.*` → PostgreSQL
-- `metrics.*` → Prometheus
-- `kafka.*`, `streams.*` → Kafka
+**Server-side Query Definition (not visible to client):**
 
-### Pros of Unified API
+```yaml
+queries:
+  hunts/active_threats:
+    datasource: clickhouse:default
+    store: events
+    sql: |
+      SELECT alert_id, severity, timestamp
+      FROM {{ store }}.alerts
+      WHERE org_id = {{ _org_id }}  -- INJECTED, cannot be overridden
+      AND severity IN {{ severities | sql_array }}
+      LIMIT {{ limit }}
+    parameters:
+      severities:
+        type: array
+        items: string
+        required: true
+    tenant_isolated: true
+    required_roles: [analyst]
+```
 
-| Advantage | Description |
-|-----------|-------------|
-| **Single integration point** | Frontend learns one API, not four |
-| **Consistent RBAC** | Same Casbin policy model for all stores |
-| **Unified audit** | Single log format for all query types |
-| **Shared infrastructure** | Cache, rate limiting, auth middleware reused |
-| **Simpler SDK** | One TypeScript client class |
-| **Easier testing** | Mock one endpoint, test all stores |
+### Protected Resources
 
-### Cons of Unified API
+Certain system stores are blocked to prevent access to sensitive metadata:
 
-| Disadvantage | Mitigation |
-|--------------|------------|
-| **Store-specific features hidden** | Expose via `options` field (e.g., `explain` for CH) |
-| **Different response shapes** | Normalise to common `{data, meta}` structure |
-| **Kafka is fundamentally different** | Read-only operations fit the pattern; streaming doesn't |
-| **Error handling varies** | Map to common error codes with store-specific details |
-| **Performance characteristics differ** | Per-store timeouts and limits in query definitions |
-
-### Recommendation
-
-**Use unified API.** The benefits outweigh the complexity. Kafka fits because:
-1. We only expose read operations (topic metadata, message sampling, lag)
-2. hs-pylib already provides a read-only Kafka client (`ReadOnlyKafkaClient`)
-3. Streaming/subscription is a separate concern (WebSocket, not REST)
+| Datasource | Protected Stores |
+|------------|------------------|
+| `clickhouse` | `system`, `information_schema`, `INFORMATION_SCHEMA` |
+| `postgres` | `pg_catalog`, `information_schema`, `pg_toast` |
 
 ---
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        TypeScript Frontend                               │
-└─────────────────────────────────────────────────┬───────────────────────┘
-                                                  │
-                                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                        dfe-control-plane                                 │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────────────┐  │
-│  │  AuthN (JWT)    │  │  AuditLogger    │  │  Rate Limiter           │  │
-│  └────────┬────────┘  └────────┬────────┘  └────────────┬────────────┘  │
-│           │                    │                        │               │
-│           └────────────────────┼────────────────────────┘               │
-│                                ▼                                        │
-│                    POST /api/query                                      │
-│                    { query_id, params }                                 │
-└─────────────────────────────────────────────────┬───────────────────────┘
-                                                  │
-                                                  ▼
-┌─────────────────────────────────────────────────────────────────────────┐
-│                          dfe-engine                                      │
-│  ┌─────────────────────────────────────────────────────────────────┐    │
-│  │                     query_gateway/                               │    │
-│  │  ┌─────────────┐  ┌─────────────┐  ┌─────────────────────────┐  │    │
-│  │  │  Registry   │  │  Validator  │  │  RBAC Enforcer (Casbin) │  │    │
-│  │  │  (YAML)     │  │  (Params)   │  │                         │  │    │
-│  │  └──────┬──────┘  └──────┬──────┘  └────────────┬────────────┘  │    │
-│  │         │                │                      │               │    │
-│  │         └────────────────┼──────────────────────┘               │    │
-│  │                          ▼                                      │    │
-│  │  ┌─────────────────────────────────────────────────────────┐   │    │
-│  │  │              QueryRenderer (Jinja2 + typed params)       │   │    │
-│  │  │              + Mandatory org_id injection                │   │    │
-│  │  └─────────────────────────────────────────────────────────┘   │    │
-│  │                          │                                      │    │
-│  │         ┌────────────────┼────────────────────────┐            │    │
-│  │         ▼                ▼                ▼       ▼            │    │
-│  │  ┌───────────┐   ┌───────────┐    ┌──────────┐ ┌──────────┐   │    │
-│  │  │  CH Exec  │   │  PG Exec  │    │Prom Exec │ │Kafka Exec│   │    │
-│  │  │ + EXPLAIN │   │           │    │          │ │(hs-pylib)│   │    │
-│  │  └─────┬─────┘   └─────┬─────┘    └────┬─────┘ └────┬─────┘   │    │
-│  │        │               │               │            │         │    │
-│  └────────┼───────────────┼───────────────┼────────────┼─────────┘    │
-│           │               │               │            │              │
-│  ┌────────┴───────────────┴───────────────┴────────────┴──────────┐   │
-│  │                    PostgresCache (shared)                       │   │
-│  │                 (CH + Prometheus + Kafka metadata)              │   │
-│  └─────────────────────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────┬──────────────────────┘
-                                                  │
-         ┌────────────────┬───────────────┬───────┴───────┐
-         ▼                ▼               ▼               ▼
-  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐
-  │ ClickHouse  │  │ PostgreSQL  │  │ Prometheus  │  │    Kafka    │
-  └─────────────┘  └─────────────┘  └─────────────┘  └─────────────┘
+```mermaid
+flowchart TB
+    subgraph Clients["Client Layer"]
+        TS["TypeScript Client"]
+        PY["Python Client"]
+        RS["Rust Client"]
+    end
+
+    subgraph ControlPlane["dfe-control-plane"]
+        Auth["AuthN (JWT)"]
+        Audit["AuditLogger"]
+        Rate["Rate Limiter"]
+        API["POST /api/query"]
+    end
+
+    subgraph QueryEngine["dfe-engine Query API"]
+        Registry["QueryRegistry<br/>PostgreSQL + YAML fallback<br/>Jinja2 SQL templates"]
+        Validator["ParameterValidator<br/>Type coercion<br/>Auth context injection"]
+
+        subgraph Adapters["Datasource Adapters"]
+            CH["ClickHouse<br/>+ EXPLAIN"]
+            PG["PostgreSQL"]
+            Storage["Storage<br/>S3/MinIO/FS"]
+        end
+
+        Arrow["Arrow IPC Response<br/>Schema + Metadata"]
+    end
+
+    subgraph Backends["Data Backends"]
+        CHServer[("ClickHouse")]
+        PGServer[("PostgreSQL")]
+        S3[("S3/MinIO")]
+        FS[("Filesystem")]
+    end
+
+    Clients -->|"query label + params"| ControlPlane
+    Auth --> API
+    Audit --> API
+    Rate --> API
+    API -->|"QueryRequest"| Registry
+    Registry --> Validator
+    Validator --> Adapters
+    CH --> CHServer
+    PG --> PGServer
+    Storage --> S3
+    Storage --> FS
+    Adapters --> Arrow
+    Arrow -->|"Arrow IPC stream"| Clients
 ```
 
 ---
 
-## RBAC Design
-
-### Casbin Model
-
-We use RBAC with domains (multi-tenant) and resource-based permissions. The model allows:
-
-- Users have roles within organisations (domains)
-- Roles grant access to specific query IDs
-- Query definitions specify which roles can execute them
-
-**Model Configuration** (`model.conf`):
-
-```ini
-[request_definition]
-r = sub, dom, obj, act
-
-[policy_definition]
-p = sub, dom, obj, act
-
-[role_definition]
-g = _, _, _
-
-[policy_effect]
-e = some(where (p.eft == allow))
-
-[matchers]
-m = g(r.sub, p.sub, r.dom) && r.dom == p.dom && r.obj == p.obj && r.act == p.act
-```
-
-**Components:**
-
-| Element | Description | Example |
-|---------|-------------|---------|
-| `sub` | Subject (user or role) | `user:alice`, `role:analyst` |
-| `dom` | Domain (organisation) | `org:acme-corp` |
-| `obj` | Object (query ID) | `analytics.events_by_day` |
-| `act` | Action | `execute`, `explain` |
-
-### Policy Storage
-
-Policies stored in PostgreSQL using [casbin-async-sqlalchemy-adapter](https://github.com/pycasbin/async-sqlalchemy-adapter):
-
-```python
-from casbin import AsyncEnforcer
-from casbin_async_sqlalchemy_adapter import Adapter
-
-adapter = Adapter("postgresql+asyncpg://user:pass@localhost/dfe")
-enforcer = AsyncEnforcer("model.conf", adapter)
-```
-
-### Policy Examples
-
-```csv
-# Roles
-p, role:admin, org:*, *, execute
-p, role:admin, org:*, *, explain
-p, role:analyst, org:*, analytics.*, execute
-p, role:analyst, org:*, analytics.*, explain
-p, role:viewer, org:*, analytics.events_summary, execute
-p, role:hunt_operator, org:*, hunts.*, execute
-
-# Role assignments (user, role, domain)
-g, user:alice, role:admin, org:acme-corp
-g, user:bob, role:analyst, org:acme-corp
-g, user:charlie, role:viewer, org:acme-corp
-```
-
-### Query-Level RBAC in Registry
-
-Each query definition specifies allowed roles:
-
-```yaml
-queries:
-  events_by_day:
-    store: clickhouse
-    description: Daily event counts
-
-    # RBAC: roles that can execute this query
-    roles:
-      - admin
-      - analyst
-      - viewer  # Read-only access
-
-    # Optional: different roles for explain vs execute
-    roles_explain:
-      - admin
-      - analyst
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      # ...
-```
-
-### Enforcement Flow
-
-```python
-async def execute_query(
-    principal: str,      # e.g., "user:alice"
-    org_id: str,         # e.g., "acme-corp"
-    query_id: str,       # e.g., "analytics.events_by_day"
-    params: dict,
-    explain: bool = False,
-) -> QueryResult:
-
-    # 1. Load query definition
-    query_def = registry.get(query_id)
-    if not query_def:
-        raise QueryNotFoundError(query_id)
-
-    # 2. RBAC enforcement
-    action = "explain" if explain else "execute"
-    domain = f"org:{org_id}"
-
-    allowed = await enforcer.enforce(principal, domain, query_id, action)
-    if not allowed:
-        logger.warning("RBAC denied", principal=principal, org=org_id, query=query_id)
-        raise PermissionDeniedError(f"Access denied to {query_id}")
-
-    # 3. Validate and inject org_id
-    validated_params = validator.validate(query_def, params)
-    validated_params["org_id"] = org_id  # Mandatory injection
-
-    # 4. Execute
-    return await executor.execute(query_def, validated_params, explain=explain)
-```
-
----
-
-## Query Registry
-
-### Directory Structure
-
-```
-src/dfe_engine/query_gateway/
-├── __init__.py
-├── controller.py          # SafeQueryController (static methods)
-├── registry.py            # QueryRegistry loader
-├── validator.py           # Parameter validation
-├── renderer.py            # SQL/PromQL rendering with org injection
-├── enforcer.py            # Casbin RBAC integration
-├── cache.py               # PostgresCache backend
-├── guards.py              # Cost estimation, limits
-├── model.conf             # Casbin model definition
-├── executors/
-│   ├── __init__.py
-│   ├── base.py            # BaseExecutor protocol
-│   ├── clickhouse.py      # ClickHouse executor + EXPLAIN
-│   ├── postgres.py        # PostgreSQL executor
-│   └── prometheus.py      # Prometheus executor
-└── queries/               # Query definitions
-    ├── clickhouse/
-    │   ├── analytics.yaml
-    │   └── hunts.yaml
-    ├── postgres/
-    │   └── users.yaml
-    └── prometheus/
-        └── metrics.yaml
-```
-
-### Query Definition Schema
-
-```yaml
-# queries/clickhouse/analytics.yaml
-queries:
-  events_by_org_by_day:
-    store: clickhouse
-    description: Daily event counts by organisation
-
-    # RBAC roles allowed to execute
-    roles:
-      - admin
-      - analyst
-
-    # Parameter definitions
-    params:
-      org_id:
-        type: string
-        required: true
-        scope: tenant          # Mandatory tenant filter
-      start_time:
-        type: datetime
-        required: true
-        validate: "value <= utcnow()"
-      end_time:
-        type: datetime
-        required: true
-        validate: "value >= params.start_time and value <= utcnow()"
-      event_types:
-        type: list[string]
-        required: false
-        default: []
-        max_items: 50
-      limit:
-        type: integer
-        required: false
-        default: 1000
-        min: 1
-        max: 10000
-
-    # Query template (Jinja2 + ClickHouse typed params)
-    template: |
-      SELECT
-        toDate(timestamp) AS day,
-        event_type,
-        count(*) AS events
-      FROM {org_id:Identifier}.events
-      WHERE timestamp BETWEEN {start_time:DateTime64} AND {end_time:DateTime64}
-      {% if event_types %}
-        AND event_type IN ({event_types:Array(String)})
-      {% endif %}
-      GROUP BY day, event_type
-      ORDER BY day DESC
-      LIMIT {limit:UInt32}
-
-    # Safety guards
-    guards:
-      timeout_seconds: 30
-      max_rows: 10000
-      explain_threshold_ms: 5000
-
-    # Caching (optional)
-    cache:
-      enabled: true
-      ttl_seconds: 300
-      vary_by:
-        - org_id
-        - start_time
-        - end_time
-        - event_types
-```
-
-### Prometheus Query Example
-
-```yaml
-# queries/prometheus/metrics.yaml
-queries:
-  cpu_by_host:
-    store: prometheus
-    description: CPU usage per host
-
-    roles:
-      - admin
-      - analyst
-      - sre
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      window:
-        type: duration
-        default: "5m"
-        max: "1h"
-      host:
-        type: string
-        required: false
-
-    # org_id injected as mandatory label matcher
-    template: |
-      avg(rate(cpu_usage_seconds_total{org="{{org_id}}"{% if host %}, host="{{host}}"{% endif %}}[{{window}}])) by (host)
-
-    guards:
-      timeout_seconds: 30
-      max_time_range: "7d"
-
-    cache:
-      enabled: true
-      ttl_seconds: 60
-```
-
-### PostgreSQL Query Example
-
-```yaml
-# queries/postgres/users.yaml
-queries:
-  users_by_org:
-    store: postgres
-    description: List users in organisation
-
-    roles:
-      - admin
-
-    params:
-      org_id:
-        type: uuid
-        scope: tenant
-      status:
-        type: string
-        enum: [active, inactive, pending]
-        required: false
-      limit:
-        type: integer
-        default: 100
-        max: 1000
-
-    # psycopg3 parameterised query (%(name)s syntax)
-    template: |
-      SELECT id, email, status, created_at
-      FROM users
-      WHERE org_id = %(org_id)s
-      {% if status %}AND status = %(status)s{% endif %}
-      ORDER BY created_at DESC
-      LIMIT %(limit)s
-
-    guards:
-      timeout_seconds: 10
-
-    # No caching for PostgreSQL (as per requirements)
-    cache:
-      enabled: false
-```
-
-### Kafka Query Examples
-
-Kafka queries use hs-pylib's `ReadOnlyKafkaClient` for safe, read-only operations.
-
-```yaml
-# queries/kafka/topics.yaml
-queries:
-  list_topics:
-    store: kafka
-    description: List all Kafka topics with partition counts
-
-    roles:
-      - admin
-      - analyst
-      - sre
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      include_internal:
-        type: boolean
-        default: false
-
-    # No template - uses ReadOnlyKafkaClient.list_topics()
-    operation: list_topics
-
-    guards:
-      timeout_seconds: 10
-
-    cache:
-      enabled: true
-      ttl_seconds: 60
-
-  topic_metadata:
-    store: kafka
-    description: Get detailed topic metadata including watermarks
-
-    roles:
-      - admin
-      - sre
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      topic:
-        type: string
-        required: true
-        # Topic names are validated against org prefix
-        validate: "value.startswith(params.org_id + '.')"
-
-    operation: describe_topic
-
-    guards:
-      timeout_seconds: 15
-
-    cache:
-      enabled: true
-      ttl_seconds: 30
-
-  consumer_lag:
-    store: kafka
-    description: Get consumer group lag per partition
-
-    roles:
-      - admin
-      - sre
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      group_id:
-        type: string
-        required: true
-      topic:
-        type: string
-        required: true
-
-    operation: get_consumer_lag
-
-    guards:
-      timeout_seconds: 30
-
-    cache:
-      enabled: true
-      ttl_seconds: 15
-
-  sample_messages:
-    store: kafka
-    description: Sample messages from a topic (reservoir sampling)
-
-    roles:
-      - admin
-      - analyst
-
-    params:
-      org_id:
-        type: string
-        scope: tenant
-      topic:
-        type: string
-        required: true
-      count:
-        type: integer
-        default: 10
-        min: 1
-        max: 100
-      start_time:
-        type: datetime
-        required: false
-      end_time:
-        type: datetime
-        required: false
-
-    operation: sample_messages
-
-    guards:
-      timeout_seconds: 60
-      max_messages: 100
-
-    # Sampling results are not cached (different each time)
-    cache:
-      enabled: false
-```
-
-**Kafka Executor Implementation** (uses hs-pylib):
-
-```python
-# src/dfe_engine/query_gateway/executors/kafka.py
-from hs_pylib.kafka import ReadOnlyKafkaClient
-from hs_pylib.kafka.sampling import reservoir_sample, time_bounded_consume
-
-class KafkaExecutor:
-    """Read-only Kafka executor using hs-pylib."""
-
-    def __init__(self, config: dict):
-        self.client = ReadOnlyKafkaClient(config)
-
-    async def execute(
-        self,
-        operation: str,
-        params: dict,
-        guards: QueryGuards,
-    ) -> QueryResult:
-
-        org_id = params["org_id"]
-
-        if operation == "list_topics":
-            topics = self.client.list_topics(
-                include_internal=params.get("include_internal", False)
-            )
-            # Filter to org's topics only
-            org_topics = [t for t in topics if t.name.startswith(f"{org_id}.")]
-            return QueryResult(data=[t._asdict() for t in org_topics])
-
-        elif operation == "describe_topic":
-            topic = params["topic"]
-            # Validate topic belongs to org
-            if not topic.startswith(f"{org_id}."):
-                raise PermissionDeniedError(f"Topic {topic} not in org {org_id}")
-            metadata = self.client.describe_topic(topic)
-            return QueryResult(data=metadata._asdict())
-
-        elif operation == "get_consumer_lag":
-            lag = self.client.get_consumer_lag(
-                group_id=params["group_id"],
-                topic=params["topic"],
-            )
-            return QueryResult(data=lag)
-
-        elif operation == "sample_messages":
-            # Uses hs-pylib sampling utilities
-            messages = self._sample_messages(params, guards)
-            return QueryResult(data=messages)
-
-        raise ValueError(f"Unknown Kafka operation: {operation}")
-```
-
----
-
-## Parameterisation
-
-### ClickHouse Native Parameters
-
-ClickHouse supports typed query parameters that prevent SQL injection:
-
-```sql
--- Template with typed placeholders
-SELECT * FROM {org_id:Identifier}.events
-WHERE timestamp BETWEEN {start:DateTime64} AND {end:DateTime64}
-  AND user_id = {user_id:String}
-LIMIT {limit:UInt32}
-```
-
-**Supported types:**
-- `String`, `UInt32`, `UInt64`, `Int32`, `Int64`
-- `DateTime`, `DateTime64`, `Date`
-- `Array(T)`, `Identifier` (for table/column names)
-
-### Jinja2 for Conditional Logic
-
-Jinja2 handles optional parameters and conditional SQL blocks:
-
-```sql
-SELECT *
-FROM {org_id:Identifier}.events
-WHERE timestamp >= {start:DateTime64}
-{% if event_types %}
-  AND event_type IN ({event_types:Array(String)})
-{% endif %}
-{% if severity %}
-  AND severity >= {severity:UInt8}
-{% endif %}
-```
-
-### Rendering Pipeline
-
-```python
-class QueryRenderer:
-    def render(self, query_def: QueryDefinition, params: dict) -> str:
-        # 1. Jinja2 first pass (conditionals)
-        template = Environment(autoescape=False).from_string(query_def.template)
-        sql = template.render(**params)
-
-        # 2. ClickHouse parameter substitution (type-safe)
-        # The {param:Type} syntax is passed to ClickHouse client
-        return sql
-```
-
----
-
-## EXPLAIN Integration
-
-### Pre-Execution Cost Estimation
-
-For ClickHouse queries, run EXPLAIN before execution to estimate cost:
-
-```python
-async def execute_with_explain(
-    self,
-    query: str,
-    params: dict,
-    guards: QueryGuards,
-) -> tuple[Any, ExplainResult]:
-
-    # Run EXPLAIN
-    explain_query = f"EXPLAIN PLAN header=1 {query}"
-    explain_result = await self.client.query(explain_query, parameters=params)
-
-    estimated_rows = explain_result.get("estimated_rows", 0)
-    estimated_ms = explain_result.get("elapsed_ms", 0)
-
-    # Check against threshold
-    if estimated_ms > guards.explain_threshold_ms:
-        logger.warning(
-            "Expensive query detected",
-            estimated_ms=estimated_ms,
-            threshold=guards.explain_threshold_ms,
-        )
-
-    # Execute actual query
-    result = await self.client.query(query, parameters=params)
-
-    return result, ExplainResult(
-        estimated_rows=estimated_rows,
-        estimated_ms=estimated_ms,
-        plan=explain_result.get("plan"),
-    )
-```
-
-### API Response with EXPLAIN
-
-```json
-{
-  "data": [...],
-  "meta": {
-    "query_id": "analytics.events_by_day",
-    "rows": 1523,
-    "duration_ms": 245,
-    "cached": false,
-    "explain": {
-      "estimated_rows": 1600,
-      "estimated_ms": 200,
-      "read_bytes": 1048576
-    }
-  }
-}
-```
-
----
-
-## Caching Layer
-
-### PostgreSQL-Backed Cache
-
-Shared cache accessible by all pod instances, storing results for ClickHouse and Prometheus queries.
-
-**Schema:**
-
-```sql
-CREATE TABLE query_cache (
-    cache_key TEXT PRIMARY KEY,
-    query_id TEXT NOT NULL,
-    org_id TEXT NOT NULL,
-    data JSONB NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    expires_at TIMESTAMPTZ NOT NULL,
-    hit_count INTEGER DEFAULT 0,
-    size_bytes INTEGER
-);
-
-CREATE INDEX idx_cache_expiry ON query_cache(expires_at);
-CREATE INDEX idx_cache_org ON query_cache(org_id);
-CREATE INDEX idx_cache_query ON query_cache(query_id);
-```
-
-### Cache Key Generation
-
-```python
-def cache_key(query_id: str, params: dict, org_id: str) -> str:
-    """Generate deterministic cache key from query and parameters."""
-    # Only include vary_by params in hash
-    vary_params = {k: v for k, v in params.items() if k in query_def.cache.vary_by}
-    params_hash = hashlib.sha256(
-        json.dumps(vary_params, sort_keys=True, default=str).encode()
-    ).hexdigest()[:16]
-    return f"qc:{org_id}:{query_id}:{params_hash}"
-```
-
-### Integration with hs-pylib Cache
-
-Extend hs-pylib's cache module with a PostgreSQL backend:
-
-```python
-# src/dfe_engine/query_gateway/cache.py
-from typing import Any
-from psycopg_pool import AsyncConnectionPool
-from hs_pylib.logger import logger
-
-class PostgresCacheBackend:
-    """PostgreSQL-backed cache for multi-instance query result sharing."""
-
-    def __init__(self, pool: AsyncConnectionPool):
-        self.pool = pool
-
-    async def get(self, key: str) -> Any | None:
-        async with self.pool.connection() as conn:
-            row = await conn.execute(
-                """
-                UPDATE query_cache
-                SET hit_count = hit_count + 1
-                WHERE cache_key = $1 AND expires_at > NOW()
-                RETURNING data
-                """,
-                (key,)
-            ).fetchone()
-            return row["data"] if row else None
-
-    async def set(
-        self,
-        key: str,
-        data: Any,
-        ttl_seconds: int,
-        query_id: str,
-        org_id: str,
-    ) -> None:
-        async with self.pool.connection() as conn:
-            await conn.execute(
-                """
-                INSERT INTO query_cache (cache_key, query_id, org_id, data, expires_at, size_bytes)
-                VALUES ($1, $2, $3, $4, NOW() + $5 * INTERVAL '1 second', $6)
-                ON CONFLICT (cache_key) DO UPDATE SET
-                    data = EXCLUDED.data,
-                    expires_at = EXCLUDED.expires_at,
-                    hit_count = 0,
-                    size_bytes = EXCLUDED.size_bytes
-                """,
-                (key, query_id, org_id, Json(data), ttl_seconds, len(str(data)))
-            )
-
-    async def invalidate_org(self, org_id: str) -> int:
-        """Invalidate all cache for an organisation (e.g., after data load)."""
-        async with self.pool.connection() as conn:
-            result = await conn.execute(
-                "DELETE FROM query_cache WHERE org_id = $1",
-                (org_id,)
-            )
-            return result.rowcount
-
-    async def invalidate_query(self, query_id: str, org_id: str | None = None) -> int:
-        """Invalidate cache for a specific query, optionally scoped to org."""
-        async with self.pool.connection() as conn:
-            if org_id:
-                result = await conn.execute(
-                    "DELETE FROM query_cache WHERE query_id = $1 AND org_id = $2",
-                    (query_id, org_id)
-                )
-            else:
-                result = await conn.execute(
-                    "DELETE FROM query_cache WHERE query_id = $1",
-                    (query_id,)
-                )
-            return result.rowcount
-
-    async def cleanup_expired(self) -> int:
-        """Periodic cleanup of expired entries. Run via scheduler."""
-        async with self.pool.connection() as conn:
-            result = await conn.execute(
-                "DELETE FROM query_cache WHERE expires_at < NOW()"
-            )
-            return result.rowcount
-```
-
----
-
-## API Contract
+## API Reference
 
 ### Execute Query
 
@@ -867,199 +166,581 @@ class PostgresCacheBackend:
 POST /api/query
 Content-Type: application/json
 Authorization: Bearer <jwt>
+Accept: application/vnd.apache.arrow.stream
 
+Request:
 {
-  "query_id": "analytics.events_by_day",
+  "query": "analytics/user_activity",
   "params": {
-    "start_time": "2025-01-01T00:00:00Z",
-    "end_time": "2025-01-15T00:00:00Z",
     "event_types": ["login", "logout"],
-    "limit": 500
+    "severities": ["critical", "high"]
   },
   "options": {
-    "explain": false,
-    "explain_only": false,
-    "bypass_cache": false
+    "limit": 100,
+    "offset": 0,
+    "time_from": "2024-01-01T00:00:00Z",
+    "time_to": "2024-01-31T23:59:59Z",
+    "timeout_seconds": 30,
+    "include_explain": false,
+    "cache": true
   }
+}
+
+Response: Arrow IPC stream with metadata headers
+X-DFE-Row-Count: 100
+X-DFE-Query-Duration-Ms: 42
+X-DFE-Query-Label: analytics/user_activity
+X-DFE-Datasource: clickhouse:default
+X-DFE-Truncated: false
+X-DFE-Cached: true
+X-DFE-Has-More: true
+X-DFE-Next-Offset: 100
+```
+
+### Query Request Model
+
+```typescript
+interface QueryRequest {
+  // Query label (namespace/name format)
+  query: string;  // e.g., "analytics/user_activity"
+
+  // Query parameters (validated against schema)
+  params?: Record<string, unknown>;
+
+  // Execution options
+  options?: QueryOptions;
+}
+
+interface QueryOptions {
+  // Pagination - offset-based
+  limit?: number;      // 1-100000, default from query definition
+  offset?: number;     // >= 0, default 0
+
+  // Pagination - cursor-based (mutually exclusive with offset)
+  cursor?: string;     // Opaque cursor from previous response
+
+  // Pagination - keyset-based
+  after_key?: unknown; // Value to paginate after
+  order_by?: string;   // Column to order by
+  order_dir?: "asc" | "desc";  // Sort direction
+
+  // Time bounds (for time-series queries)
+  time_from?: string;  // ISO8601 datetime
+  time_to?: string;    // ISO8601 datetime, defaults to now
+
+  // Execution
+  timeout_seconds?: number;  // 1-300, default 30
+
+  // EXPLAIN
+  include_explain?: boolean;  // Include query plan
+  explain_parallel?: boolean; // Run query and EXPLAIN concurrently
+
+  // Caching
+  cache?: boolean;     // Allow cached results, default true
+
+  // Store override (only if query allows store: '*')
+  store?: string;      // Target store
 }
 ```
 
-**Response:**
+### Query Response Metadata
+
+```typescript
+interface QueryMetadata {
+  row_count: number;
+  query_duration_ms: number;
+  query_label: string;
+  datasource: string;
+  store?: string;
+  truncated: boolean;
+  cached: boolean;
+  cache_key?: string;
+  explain_duration_ms?: number;
+  request_id?: string;
+
+  // Pagination info
+  has_more: boolean;
+  next_cursor?: string;
+  next_offset?: number;
+  total_count?: number;
+}
+```
+
+---
+
+## Pagination
+
+The API supports three pagination modes:
+
+```mermaid
+flowchart LR
+    subgraph Offset["Offset-Based"]
+        O1["Page 1<br/>offset=0"]
+        O2["Page 2<br/>offset=100"]
+        O3["Page 3<br/>offset=200"]
+        O1 --> O2 --> O3
+    end
+
+    subgraph Cursor["Cursor-Based"]
+        C1["Page 1<br/>cursor=null"]
+        C2["Page 2<br/>cursor=abc123"]
+        C3["Page 3<br/>cursor=def456"]
+        C1 -->|"next_cursor"| C2 -->|"next_cursor"| C3
+    end
+
+    subgraph Keyset["Keyset-Based"]
+        K1["Page 1<br/>after_key=null"]
+        K2["Page 2<br/>after_key=ts1"]
+        K3["Page 3<br/>after_key=ts2"]
+        K1 -->|"last value"| K2 -->|"last value"| K3
+    end
+```
+
+### 1. Offset-Based Pagination
+
+Simple pagination using `limit` and `offset`. Best for small datasets.
 
 ```json
 {
-  "status": "ok",
-  "data": [
-    {"day": "2025-01-15", "event_type": "login", "events": 1234},
-    {"day": "2025-01-15", "event_type": "logout", "events": 1100}
-  ],
-  "meta": {
-    "query_id": "analytics.events_by_day",
-    "store": "clickhouse",
-    "rows": 30,
-    "duration_ms": 45,
-    "cached": true,
-    "cache_age_seconds": 120,
-    "org_id": "acme-corp"
+  "query": "analytics/events",
+  "options": {
+    "limit": 100,
+    "offset": 0
   }
 }
 ```
 
-**With EXPLAIN:**
+**Response includes:**
+- `has_more: true` if more rows available
+- `next_offset: 100` for next page
+
+### 2. Cursor-Based Pagination
+
+Efficient pagination using opaque cursors. Best for large datasets.
 
 ```json
 {
-  "status": "ok",
-  "data": [...],
-  "meta": {
-    "query_id": "analytics.events_by_day",
-    "rows": 30,
-    "duration_ms": 45,
-    "explain": {
-      "estimated_rows": 35,
-      "estimated_ms": 40,
-      "read_bytes": 524288,
-      "plan": "Expression\n  ReadFromMergeTree..."
-    }
+  "query": "analytics/events",
+  "options": {
+    "limit": 100,
+    "cursor": "eyJsYXN0X2lkIjogMTIzfQ=="
   }
 }
 ```
 
-### List Available Queries
+**Response includes:**
+- `next_cursor` for next page
+- More efficient than offset for deep pagination
+
+### 3. Keyset Pagination
+
+Stable pagination using a sort key. Best for ordered data.
+
+```json
+{
+  "query": "analytics/events",
+  "options": {
+    "limit": 100,
+    "after_key": "2024-01-15T12:00:00Z",
+    "order_by": "timestamp",
+    "order_dir": "desc"
+  }
+}
+```
+
+**Benefits:**
+- Stable results even with concurrent inserts
+- Efficient for time-series data
+
+---
+
+## Query Labels
+
+Queries are referenced by labels in `namespace/name` format:
 
 ```
-GET /api/query/registry
-Authorization: Bearer <jwt>
+analytics/user_activity
+analytics/conversion_funnel
+hunts/active_threats
+hunts/ioc_matches
+system/health_check
+storage/s3_list
+storage/file_list
+```
 
-Response:
+### Namespace Conventions
+
+| Namespace | Description | Typical Datasource |
+|-----------|-------------|-------------------|
+| `analytics` | Analytics and reporting | ClickHouse |
+| `hunts` | Threat hunting queries | ClickHouse |
+| `system` | System administration | PostgreSQL |
+| `users` | User management | PostgreSQL |
+| `metrics` | Infrastructure metrics | Prometheus |
+| `storage` | Directory listings | S3/MinIO/File |
+
+---
+
+## Query Registry
+
+### Query Definition Schema
+
+```yaml
+queries:
+  analytics/user_activity:
+    # Datasource and store
+    datasource: clickhouse:default
+    store: events  # or "events_*" for glob, "/^tenant_\\d+$/" for regex, "*" for client-specified
+
+    # SQL template (Jinja2)
+    sql: |
+      SELECT user_id, event_type, timestamp
+      FROM {{ store }}.events
+      WHERE org_id = {{ _org_id }}
+      {% if event_types %}
+        AND event_type IN {{ event_types | sql_array }}
+      {% endif %}
+      ORDER BY timestamp DESC
+      LIMIT {{ limit }}
+      OFFSET {{ offset }}
+
+    # Parameter definitions
+    parameters:
+      event_types:
+        type: array
+        items: string
+        required: false
+        description: Filter by event types
+        max_items: 50
+
+    # Standard parameter overrides
+    defaults:
+      limit: 1000
+      timeout_seconds: 30
+    limits:
+      max_limit: 10000
+      max_timeout: 60
+
+    # Time bounding
+    time_column: timestamp
+    time_required: false
+    max_time_range_days: 90
+
+    # Security
+    tenant_isolated: true  # SQL must contain {{ _org_id }}
+    required_roles: [analyst, admin]
+    required_permissions: []
+
+    # Caching
+    cache_ttl_seconds: 300
+    cache_namespace: analytics
+
+    # Audit
+    audit_level: full  # none, basic, full
+    pii_columns: [user_id, email]
+
+    # Metadata
+    description: Query user activity events
+    tags: [analytics, events]
+```
+
+### Jinja2 SQL Filters
+
+| Filter | Description | Example |
+|--------|-------------|---------|
+| `sql_string` | Escape and quote string | `{{ value \| sql_string }}` → `'escaped''value'` |
+| `sql_array` | Convert list to SQL array | `{{ items \| sql_array }}` → `('a', 'b', 'c')` |
+| `sql_identifier` | Quote identifier | `{{ table \| sql_identifier }}` → `"table_name"` |
+
+### Reserved Parameters
+
+These parameters are injected by the server and cannot be overridden:
+
+| Parameter | Source | Description |
+|-----------|--------|-------------|
+| `_org_id` | JWT `org_id` | Tenant organization ID |
+| `_user_id` | JWT `user_id` | User ID |
+| `_roles` | JWT `roles` | User roles list |
+| `_request_id` | Generated | Request tracking ID |
+
+---
+
+## Storage Listing Queries
+
+Built-in queries for directory listing across storage backends.
+
+### S3/MinIO Listing
+
+```yaml
+storage/s3_list:
+  datasource: s3:default
+  store: "*"
+  parameters:
+    bucket:
+      type: string
+      description: Bucket name (defaults to target)
+    prefix:
+      type: string
+      description: Path prefix to filter
+      default: ""
+    delimiter:
+      type: string
+      description: Path delimiter
+      default: "/"
+```
+
+**Usage:**
+```json
 {
-  "queries": [
+  "query": "storage/s3_list",
+  "params": {
+    "bucket": "my-bucket",
+    "prefix": "data/2024/"
+  },
+  "options": {"limit": 100}
+}
+```
+
+### Filesystem Listing
+
+```yaml
+storage/file_list:
+  datasource: file:default
+  store: "*"
+  parameters:
+    path:
+      type: string
+      description: Subdirectory path to list
+      default: ""
+    recursive:
+      type: boolean
+      description: List recursively
+      default: false
+    pattern:
+      type: string
+      description: Glob pattern filter
+      default: "*"
+```
+
+**Usage:**
+```json
+{
+  "query": "storage/file_list",
+  "params": {
+    "path": "logs/",
+    "pattern": "*.json",
+    "recursive": true
+  }
+}
+```
+
+### Listing Result Schema
+
+All storage adapters return a consistent Arrow schema:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | string | File/directory name |
+| `path` | string | Full path |
+| `type` | string | "file" or "directory" |
+| `size` | int64 | Size in bytes (0 for directories) |
+| `modified` | timestamp | Last modified time |
+| `etag` | string | ETag (S3 only) |
+| `storage_class` | string | Storage class (S3 only) |
+| `content_type` | string | MIME type |
+
+---
+
+## EXPLAIN Plans
+
+### Requesting EXPLAIN
+
+```json
+{
+  "query": "analytics/events",
+  "options": {
+    "include_explain": true,
+    "explain_parallel": true
+  }
+}
+```
+
+### EXPLAIN Response
+
+```json
+{
+  "steps": [
     {
-      "id": "analytics.events_by_day",
-      "store": "clickhouse",
-      "description": "Daily event counts",
-      "params": {
-        "start_time": {"type": "datetime", "required": true},
-        "end_time": {"type": "datetime", "required": true},
-        "event_types": {"type": "list[string]", "required": false}
-      }
+      "step_type": "read",
+      "description": "ReadFromMergeTree (events)",
+      "estimated_rows": 10000,
+      "estimated_cost": 0.5
+    },
+    {
+      "step_type": "filter",
+      "description": "Filter (org_id = 'acme')"
+    },
+    {
+      "step_type": "limit",
+      "description": "Limit 100"
     }
-  ]
+  ],
+  "total_estimated_cost": 1.5,
+  "total_estimated_rows": 100,
+  "warnings": ["Consider adding index on timestamp"],
+  "raw_plan": "Expression\n  ReadFromMergeTree..."
 }
 ```
 
-### Invalidate Cache
+### Step Types
+
+| Type | Description |
+|------|-------------|
+| `read` | Table/index scan |
+| `filter` | WHERE/PREWHERE clause |
+| `aggregate` | GROUP BY operation |
+| `sort` | ORDER BY operation |
+| `join` | Join operation |
+| `projection` | Column selection |
+| `limit` | LIMIT clause |
+| `union` | Union operation |
+
+---
+
+## Error Handling
+
+### Error Types
+
+| Error | HTTP Status | Description |
+|-------|-------------|-------------|
+| `QueryNotFoundError` | 404 | Invalid query label |
+| `ParameterValidationError` | 400 | Invalid or missing parameter |
+| `AuthorizationError` | 403 | Missing required role/permission |
+| `QueryTimeoutError` | 504 | Query execution timeout |
+| `StorageListingError` | 500 | Storage listing failed |
+
+### Error Response Format
+
+```json
+{
+  "error": {
+    "type": "ParameterValidationError",
+    "message": "Parameter 'severities' must be one of: ['critical', 'high', 'medium', 'low']",
+    "param": "severities",
+    "request_id": "req_abc123"
+  }
+}
+```
+
+---
+
+## Caching
+
+### Cache Configuration
+
+Queries can enable caching in their definition:
+
+```yaml
+queries:
+  analytics/summary:
+    cache_ttl_seconds: 300  # 5 minutes
+    cache_namespace: analytics
+```
+
+### Cache Invalidation
 
 ```
 POST /api/query/cache/invalidate
-Authorization: Bearer <jwt>
-X-Org-Id: acme-corp
-
 {
-  "query_id": "analytics.events_by_day",  // optional - if omitted, invalidates all for org
-}
-
-Response:
-{
-  "status": "ok",
-  "invalidated": 15
+  "query_label": "analytics/summary",  // Optional
+  "org_id": "acme"                     // Optional
 }
 ```
 
----
+### Cache Key Generation
 
-## Resource Limits
+Cache keys are generated deterministically:
 
-| Store | Mechanism | Configuration |
-|-------|-----------|---------------|
-| ClickHouse | EXPLAIN threshold + query timeout + max_rows | Per-query in YAML |
-| PostgreSQL | `statement_timeout` at connection level | Settings module |
-| Prometheus | Time range limits + timeout | Per-query in YAML |
-
-### ClickHouse Settings
-
-```python
-# Applied per-query via ClickHouse settings
-query_settings = {
-    "max_execution_time": guards.timeout_seconds,
-    "max_result_rows": guards.max_rows,
-    "max_result_bytes": guards.max_bytes or 100_000_000,  # 100MB default
-}
+```
+qc:{org_id}:{query_label}:{params_hash}
 ```
 
-### PostgreSQL Settings
-
-```python
-# Connection-level timeout
-async with pool.connection() as conn:
-    await conn.execute(f"SET statement_timeout = '{timeout_ms}'")
-    result = await conn.execute(query, params)
-```
+Where `params_hash` is SHA-256 of sorted parameter JSON.
 
 ---
 
-## Audit Logging
+## RBAC Integration
 
-All query executions are logged with full context:
+### Query-Level Roles
 
-```python
-logger.info(
-    "Query executed",
-    query_id=query_id,
-    org_id=org_id,
-    principal=principal,
-    store=query_def.store,
-    duration_ms=duration_ms,
-    rows=row_count,
-    cached=was_cached,
-    params_hash=params_hash,  # Not full params for security
-    explain_ms=explain_result.estimated_ms if explain_result else None,
-)
+```yaml
+queries:
+  system/admin_stats:
+    required_roles: [admin]
+    required_permissions: [system:read]
+    tenant_isolated: false  # Cross-tenant query (requires admin)
 ```
 
-Audit fields:
-- `timestamp`, `query_id`, `org_id`, `principal`
-- `store`, `duration_ms`, `rows`, `cached`
-- `status` (ok/error), `error_message` (if failed)
-- `explain_estimated_ms`, `explain_read_bytes`
+### Authorization Flow
+
+```mermaid
+flowchart TD
+    Start["Incoming Request"] --> ExtractJWT["Extract roles from JWT"]
+    ExtractJWT --> CheckRoles{"User has<br/>required_role?"}
+    CheckRoles -->|"No"| Deny403["403 Forbidden"]
+    CheckRoles -->|"Yes"| CheckPerms{"User has<br/>required_permission?"}
+    CheckPerms -->|"No"| Deny403
+    CheckPerms -->|"Yes"| CheckTenant{"tenant_isolated<br/>= false?"}
+    CheckTenant -->|"Yes"| CheckAdmin{"User is admin?"}
+    CheckTenant -->|"No"| Allow["Execute Query"]
+    CheckAdmin -->|"No"| Deny403
+    CheckAdmin -->|"Yes"| Allow
+```
+
+**Steps:**
+
+1. Extract roles/permissions from JWT
+2. Check `required_roles` - user must have at least one
+3. Check `required_permissions` - user must have at least one
+4. If `tenant_isolated: false`, user must be admin
 
 ---
 
-## Implementation Phases
+## Wire Format
 
-### Phase 1: Core Infrastructure
+### Arrow IPC
 
-1. Query registry loader (YAML → Python objects)
-2. Parameter validator with type coercion
-3. Query renderer (Jinja2 + typed params)
-4. Base executor protocol
+All responses use Apache Arrow IPC streaming format:
 
-### Phase 2: RBAC Integration
+```
+Content-Type: application/vnd.apache.arrow.stream
+```
 
-1. Casbin model and adapter setup
-2. Policy storage in PostgreSQL
-3. Query-level role enforcement
-4. Role management API
+**Benefits:**
+- Zero-copy deserialization
+- Schema embedded in stream
+- Efficient for columnar data
+- Cross-language support
 
-### Phase 3: Store Executors
+### Metadata Embedding
 
-1. ClickHouse executor with EXPLAIN
-2. PostgreSQL executor with statement_timeout
-3. Prometheus executor with label injection
+Query metadata is embedded in Arrow schema metadata:
 
-### Phase 4: Caching
+| Key | Description |
+|-----|-------------|
+| `dfe:row_count` | Number of rows |
+| `dfe:query_duration_ms` | Query execution time |
+| `dfe:query_label` | Query label |
+| `dfe:explain:steps` | EXPLAIN steps (JSON) |
+| `dfe:explain:warnings` | Performance warnings |
 
-1. PostgresCache backend
-2. Cache key generation
-3. Cache invalidation API
-4. Cleanup scheduler
+---
 
-### Phase 5: API Layer
+## SDK Documentation
 
-1. `/api/query` endpoint in control-plane
-2. `/api/query/registry` endpoint
-3. `/api/query/cache/invalidate` endpoint
-4. TypeScript SDK
+- [Python SDK](./QUERY-API-PYTHON.md) - Python client with pandas integration
+- [TypeScript SDK](./QUERY-API-TYPESCRIPT.md) - TypeScript client with React Query
+- [Rust SDK](./QUERY-API-RUST.md) - Rust client with arrow-rs
 
 ---
 
@@ -1067,12 +748,12 @@ Audit fields:
 
 | Property | How Achieved |
 |----------|--------------|
-| No SQL injection | ClickHouse typed params, psycopg3 placeholders |
-| Tenant isolation | Mandatory `org_id` in every query, RBAC domain enforcement |
-| AuthZ | Casbin RBAC with per-query role definitions |
+| No SQL injection | Server-side SQL with Jinja2 filters |
+| Tenant isolation | Mandatory `_org_id` injection from JWT |
+| AuthZ | Per-query role/permission requirements |
 | Least privilege | Queries specify minimum required roles |
-| Resource limits | EXPLAIN gates, timeouts, max_rows |
-| Audit trail | Structured logging of all executions |
+| Resource limits | Per-query timeouts, limits, max time range |
+| Audit trail | Full query execution logging |
 | No arbitrary queries | Query registry is the allowlist |
 | Type safety | Parameter validation with strict schemas |
 
@@ -1080,10 +761,7 @@ Audit fields:
 
 ## References
 
-- [Casbin Python (pycasbin)](https://github.com/casbin/pycasbin) - Authorization library
-- [casbin-async-sqlalchemy-adapter](https://pypi.org/project/casbin-async-sqlalchemy-adapter/) - Async PostgreSQL adapter
-- [Casbin RBAC Documentation](https://www.casbin.org/docs/rbac/) - Role-based access control
-- [Casbin RBAC with Pattern](https://casbin.org/docs/rbac-with-pattern/) - Pattern matching for scalability
-- [ClickHouse Query Parameters](https://clickhouse.com/docs/guides/developer/stored-procedures-and-prepared-statements) - Parameterised queries
-- [ClickHouse Security Best Practices](https://www.wiz.io/blog/clickhouse-and-wiz) - Cloud database security
-- [API Gateway RBAC Pattern](https://medium.com/@07rohit/designing-a-role-based-access-control-rbac-system-a-scalable-approach-441f05168933) - Scalable access control
+- [Apache Arrow](https://arrow.apache.org/) - Columnar data format
+- [Apache Arrow IPC](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) - Streaming format
+- [Jinja2](https://jinja.palletsprojects.com/) - Template engine
+- [ClickHouse](https://clickhouse.com/) - Analytics database
