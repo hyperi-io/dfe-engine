@@ -1,3 +1,10 @@
+# [1.2.0](https://github.com/hypersec-io/dfe-engine/compare/v1.1.3...v1.2.0) (2026-01-16)
+
+
+### Features
+
+* add unified Query API with Arrow IPC wire format ([2a6e9de](https://github.com/hypersec-io/dfe-engine/commit/2a6e9de8d2ee32e83d63fadb95b3a06e98bb654a))
+
 ## [1.1.3](https://github.com/hypersec-io/dfe-engine/compare/v1.1.2...v1.1.3) (2025-12-16)
 
 
