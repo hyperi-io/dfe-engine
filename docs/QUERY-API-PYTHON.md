@@ -1,6 +1,6 @@
 # DFE Query API - Python SDK
 
-**Version:** 1.0.0
+**Version:** 2.0.0
 **Last Updated:** 2026-01-16
 
 This document specifies how to consume the DFE Query API from Python applications.
@@ -9,7 +9,13 @@ This document specifies how to consume the DFE Query API from Python application
 
 ## Overview
 
-The Query API provides a unified interface for querying multiple datasources (ClickHouse, PostgreSQL, Prometheus) with Apache Arrow as the wire format. This enables zero-copy data transfer and seamless integration with the Python data ecosystem.
+The Query API provides a **secure, label-based interface** for querying multiple datasources (ClickHouse, PostgreSQL, Prometheus). Key security features:
+
+- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
+- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Role-based access control** - Queries can require specific roles/permissions
+- **Parameter validation** - All parameters validated against server-side schemas
+- **Apache Arrow wire format** - Zero-copy data transfer
 
 ---
 
@@ -28,7 +34,7 @@ The Query API provides a unified interface for querying multiple datasources (Cl
 
 ```bash
 # If using dfe-engine directly
-pip install dfe-engine>=1.2.0
+pip install dfe-engine>=2.0.0
 
 # If consuming API externally
 pip install pyarrow>=22.0.0 httpx>=0.27.0
@@ -48,13 +54,17 @@ from dfe_engine.query import QueryClient
 # Create client in direct mode
 client = QueryClient(direct=True)
 
-# Execute query - returns PyArrow Table
-table = client.query("clickhouse:default", "SELECT * FROM logs LIMIT 100")
-print(f"Rows: {table.num_rows}, Columns: {table.column_names}")
+# Execute query by label with parameters
+result = client.query(
+    "analytics/user_activity",
+    params={"event_types": ["login", "logout"]},
+    limit=100,
+)
 
-# Convert to pandas DataFrame (zero-copy)
-df = client.query_df("clickhouse:default", "SELECT * FROM logs LIMIT 100")
-df.groupby("level").count()
+# Access results
+print(f"Rows: {result.table.num_rows}")
+df = result.to_pandas()
+df.groupby("event_type").count()
 ```
 
 ### HTTP Mode (External Consumer)
@@ -67,9 +77,52 @@ from dfe_engine.query import QueryClient
 # Create client with API URL
 client = QueryClient(base_url="http://localhost:8000")
 
-# Same API as direct mode
-table = client.query("clickhouse:default", "SELECT * FROM logs")
-df = client.query_df("clickhouse:default", "SELECT * FROM logs")
+# Same API as direct mode - always use query labels, never raw SQL
+result = client.query(
+    "analytics/user_activity",
+    params={"event_types": ["login"]},
+)
+df = result.to_pandas()
+```
+
+---
+
+## Security Model
+
+### Key Principles
+
+1. **Query labels, not SQL** - Clients reference pre-defined queries by label
+2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
+3. **Automatic tenant isolation** - `_org_id` extracted from JWT and injected
+4. **Parameter validation** - All params validated against schema before execution
+5. **Role-based access** - Queries can require specific roles/permissions
+
+### Example Security Flow
+
+```python
+# Client sends:
+result = client.query(
+    "hunts/active_threats",      # Query label
+    params={"severities": ["critical", "high"]},  # Validated parameters
+    limit=500,
+)
+
+# Server-side query definition (not visible to client):
+# queries:
+#   hunts/active_threats:
+#     sql: |
+#       SELECT alert_id, severity, timestamp
+#       FROM {{ store }}.alerts
+#       WHERE org_id = {{ _org_id }}  -- INJECTED, cannot be overridden
+#       AND severity IN {{ severities | sql_array }}
+#       LIMIT {{ limit }}
+#     parameters:
+#       severities:
+#         type: array
+#         items: string
+#         required: true
+#     tenant_isolated: true
+#     required_roles: [analyst]
 ```
 
 ---
@@ -90,61 +143,90 @@ class QueryClient:
 
 ### Methods
 
-#### `query(datasource, sql, params?, timeout_seconds?) -> pa.Table`
+#### `query(query_label, params?, *, limit?, offset?, cursor?, after_key?, order_by?, order_dir?, time_from?, time_to?, timeout_seconds?, store?, cache?) -> QueryResult`
 
-Execute query and return Arrow Table.
+Execute a labeled query and return result.
 
 ```python
 # Simple query
-table = client.query("clickhouse:default", "SELECT * FROM events")
+result = client.query("analytics/user_activity")
 
-# With parameters (prevents SQL injection)
-table = client.query(
-    "clickhouse:default",
-    "SELECT * FROM events WHERE org_id = {org:String} AND level = {level:String}",
-    params={"org": "acme", "level": "ERROR"},
+# With parameters
+result = client.query(
+    "analytics/user_activity",
+    params={"event_types": ["login", "purchase"]},
 )
 
-# With custom timeout
-table = client.query(
-    "clickhouse:default",
-    "SELECT * FROM huge_table",
+# With standard options
+result = client.query(
+    "hunts/active_threats",
+    params={"severities": ["critical"]},
+    limit=500,
+    time_from="2024-01-01T00:00:00Z",
+    time_to="2024-01-31T23:59:59Z",
     timeout_seconds=120,
+)
+
+# With store override (only if query definition allows store='*')
+result = client.query(
+    "admin/table_stats",
+    store="analytics_db",  # Target store
 )
 ```
 
-#### `query_df(datasource, sql, params?, timeout_seconds?) -> pd.DataFrame`
+**Parameters:**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `query_label` | `str` | Query identifier (e.g., `"analytics/user_activity"`) |
+| `params` | `dict` | Query parameters (validated against schema) |
+| `limit` | `int` | Maximum rows (clamped to query/global max) |
+| `offset` | `int` | Skip first N rows (offset-based pagination) |
+| `cursor` | `str` | Opaque cursor from previous response (cursor-based pagination) |
+| `after_key` | `Any` | Last seen key value (keyset-based pagination) |
+| `order_by` | `str` | Column for keyset pagination ordering |
+| `order_dir` | `str` | Sort direction: `"asc"` or `"desc"` (default: `"asc"`) |
+| `time_from` | `str` | Start time (ISO8601) for time-bounded queries |
+| `time_to` | `str` | End time (ISO8601), defaults to now |
+| `timeout_seconds` | `int` | Query timeout (clamped to query/global max) |
+| `store` | `str` | Target store (only if query allows) |
+| `cache` | `bool` | Allow cached results (default: `True`) |
+
+#### `query_df(query_label, params?, **kwargs) -> pd.DataFrame`
 
 Execute query and return pandas DataFrame (zero-copy from Arrow).
 
 ```python
-df = client.query_df("clickhouse:default", "SELECT * FROM logs")
+df = client.query_df(
+    "analytics/user_activity",
+    params={"event_types": ["login"]},
+)
 
 # DataFrame operations
-df.groupby("level").agg({"count": "sum"})
+df.groupby("event_type").agg({"count": "sum"})
 df.to_parquet("output.parquet")
 ```
 
-#### `query_with_explain(datasource, sql, params?, timeout_seconds?, parallel?) -> QueryResult`
+#### `query_with_explain(query_label, params?, *, parallel?, **kwargs) -> QueryResult`
 
 Execute query with EXPLAIN plan.
 
 ```python
 result = client.query_with_explain(
-    "clickhouse:default",
-    "SELECT * FROM logs WHERE level = 'ERROR'",
+    "analytics/user_activity",
+    params={"event_types": ["login"]},
     parallel=True,  # Run query and EXPLAIN concurrently
 )
 
 # Access results
-print(f"Rows: {result.num_rows}")
+print(f"Rows: {result.table.num_rows}")
 print(f"Duration: {result.metadata.query_duration_ms}ms")
 
 # Access EXPLAIN plan
 for step in result.explain.steps:
     print(f"{step.step_type}: {step.description}")
 
-# Warnings about query performance
+# Performance warnings
 for warning in result.explain.warnings:
     print(f"Warning: {warning}")
 
@@ -152,18 +234,17 @@ for warning in result.explain.warnings:
 df = result.to_pandas()
 ```
 
-#### `query_batches(datasource, sql, params?, batch_size?) -> Iterator[pa.RecordBatch]`
+#### `query_batches(query_label, params?, batch_size?, **kwargs) -> Iterator[pa.RecordBatch]`
 
 Stream large results in batches (memory efficient).
 
 ```python
-# Process large table without loading all into memory
+# Process large result without loading all into memory
 for batch in client.query_batches(
-    "clickhouse:default",
-    "SELECT * FROM huge_table",
+    "analytics/all_events",
+    params={"date": "2024-01-15"},
     batch_size=10_000,
 ):
-    # Process each batch
     df_batch = batch.to_pandas()
     process(df_batch)
 ```
@@ -172,7 +253,7 @@ for batch in client.query_batches(
 
 ## QueryResult
 
-Returned by `query_with_explain()`.
+Returned by `query()` and `query_with_explain()`.
 
 ### Properties
 
@@ -180,16 +261,29 @@ Returned by `query_with_explain()`.
 |----------|------|-------------|
 | `table` | `pa.Table` | Arrow Table with results |
 | `metadata` | `QueryMetadata` | Execution metadata |
-| `explain` | `ExplainPlan` | Query execution plan |
-| `num_rows` | `int` | Number of rows |
-| `num_columns` | `int` | Number of columns |
-| `schema` | `pa.Schema` | Arrow schema |
-| `column_names` | `list[str]` | Column names |
+| `explain` | `ExplainPlan \| None` | Query execution plan (if requested) |
+
+### QueryMetadata
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `row_count` | `int` | Number of rows returned |
+| `query_duration_ms` | `int` | Query execution time |
+| `query_label` | `str` | Executed query label |
+| `datasource` | `str` | Datasource used |
+| `store` | `str` | Store/database used |
+| `truncated` | `bool` | Results truncated by limit |
+| `cached` | `bool` | Result served from cache |
+| `request_id` | `str` | Request tracking ID |
+| `has_more` | `bool` | More pages available |
+| `next_cursor` | `str \| None` | Cursor for next page (cursor-based) |
+| `next_offset` | `int \| None` | Offset for next page (offset-based) |
+| `total_count` | `int \| None` | Total rows (if available) |
 
 ### Export Methods
 
 ```python
-result = client.query_with_explain("clickhouse:default", sql)
+result = client.query("analytics/user_activity")
 
 # Arrow formats
 table = result.to_arrow()           # PyArrow Table
@@ -226,16 +320,14 @@ Query execution plan from EXPLAIN.
 ### Structure
 
 ```python
-@dataclass
-class ExplainPlan:
+class ExplainPlan(BaseModel):
     steps: list[ExplainStep]           # Execution steps
     total_estimated_cost: float | None # Estimated query cost
     total_estimated_rows: int | None   # Estimated row count
     warnings: list[str]                # Performance warnings
     raw_plan: str | None               # Original EXPLAIN output
 
-@dataclass
-class ExplainStep:
+class ExplainStep(BaseModel):
     step_type: ExplainStepType         # READ, FILTER, AGGREGATE, etc.
     description: str                   # Step description
     estimated_rows: int | None         # Estimated rows for this step
@@ -259,73 +351,182 @@ class ExplainStep:
 | `UNION` | Union operation |
 | `UNKNOWN` | Unclassified step |
 
-### Example Usage
+---
+
+## Pagination
+
+The Query API supports three pagination modes for different use cases.
+
+### Offset-Based Pagination
+
+Traditional pagination with `limit` and `offset`. Simple but inefficient for deep pages.
 
 ```python
-result = client.query_with_explain(
-    "clickhouse:default",
-    """
-    SELECT org_id, count() as cnt
-    FROM events
-    WHERE timestamp > now() - INTERVAL 1 DAY
-    GROUP BY org_id
-    ORDER BY cnt DESC
-    LIMIT 10
-    """,
-    parallel=True,
+# First page
+result = client.query("analytics/user_activity", limit=100)
+
+# Second page
+result = client.query("analytics/user_activity", limit=100, offset=100)
+
+# Third page
+result = client.query("analytics/user_activity", limit=100, offset=200)
+
+# Check for more pages
+if result.metadata.has_more:
+    next_offset = result.metadata.next_offset
+    result = client.query("analytics/user_activity", limit=100, offset=next_offset)
+```
+
+### Cursor-Based Pagination
+
+Efficient pagination using opaque cursors. Best for APIs and large datasets.
+
+```python
+# First page
+result = client.query("analytics/user_activity", limit=100)
+
+# Subsequent pages using cursor
+while result.metadata.has_more:
+    result = client.query(
+        "analytics/user_activity",
+        limit=100,
+        cursor=result.metadata.next_cursor,
+    )
+    process(result.to_pandas())
+```
+
+### Keyset-Based Pagination
+
+High-performance pagination for sorted data. Best for time-series.
+
+```python
+# First page (sorted by timestamp descending)
+result = client.query(
+    "analytics/user_activity",
+    limit=100,
+    order_by="timestamp",
+    order_dir="desc",
 )
 
-# Analyze the plan
-print(f"Estimated rows: {result.explain.total_estimated_rows}")
+# Next page: use last timestamp as after_key
+while result.metadata.has_more:
+    df = result.to_pandas()
+    last_timestamp = df["timestamp"].iloc[-1]
 
-for step in result.explain.steps:
-    if step.step_type == ExplainStepType.READ:
-        print(f"Reading from: {step.details.get('table')}")
-    elif step.step_type == ExplainStepType.FILTER:
-        print(f"Filter: {step.description}")
-
-# Check for warnings
-if result.explain.warnings:
-    print("Performance warnings:")
-    for w in result.explain.warnings:
-        print(f"  - {w}")
-
-# Raw plan for debugging
-print(result.explain.raw_plan)
+    result = client.query(
+        "analytics/user_activity",
+        limit=100,
+        after_key=last_timestamp,
+        order_by="timestamp",
+        order_dir="desc",
+    )
 ```
+
+### Pagination Recommendations
+
+| Use Case | Mode | Reason |
+|----------|------|--------|
+| API responses | Cursor | Stable, no duplicates |
+| Time-series data | Keyset | High performance with indexed columns |
+| Admin UIs | Offset | Simple, allows jumping to pages |
+| Export/ETL | Cursor or Keyset | Memory efficient iteration |
 
 ---
 
-## Parallel EXPLAIN
+## Storage Listing
 
-When `parallel=True`, the query and EXPLAIN run concurrently:
+Query API provides built-in queries for listing files in S3, MinIO, and local filesystems.
+
+### S3 Bucket Listing
 
 ```python
-# Sequential (default): query runs, then EXPLAIN
-result = client.query_with_explain(datasource, sql, parallel=False)
-# Total time ≈ query_time + explain_time
+# List S3 bucket contents
+result = client.query(
+    "storage/s3_list",
+    params={
+        "bucket": "my-bucket",
+        "prefix": "logs/2024/",
+    },
+    limit=1000,
+)
 
-# Parallel: query and EXPLAIN run concurrently
-result = client.query_with_explain(datasource, sql, parallel=True)
-# Total time ≈ max(query_time, explain_time)
+df = result.to_pandas()
+# Columns: name, path, type, size, modified, etag, storage_class, content_type
+print(df[["name", "type", "size"]])
 ```
 
-Use parallel mode when:
+### MinIO Listing
 
-- You need the EXPLAIN plan for analysis
-- Query execution time is non-trivial
-- You want to minimize total latency
+```python
+# List MinIO bucket (same API as S3)
+result = client.query(
+    "storage/minio_list",
+    params={
+        "bucket": "my-bucket",
+        "prefix": "data/",
+    },
+)
+```
 
----
+### Filesystem Listing
 
-## Datasource URIs
+```python
+# List local directory
+result = client.query(
+    "storage/file_list",
+    params={
+        "path": "reports/2024",
+        "recursive": True,
+        "pattern": "*.json",
+    },
+)
 
-| URI | Backend | Notes |
-|-----|---------|-------|
-| `clickhouse:default` | ClickHouse | Default target from config |
-| `clickhouse:analytics` | ClickHouse | Named target |
-| `postgres:main` | PostgreSQL | Default PostgreSQL |
-| `prometheus:metrics` | Prometheus | PromQL queries |
+df = result.to_pandas()
+for _, row in df.iterrows():
+    print(f"{row['type']:10} {row['size']:>10} {row['name']}")
+```
+
+### Storage Listing Schema
+
+All storage adapters return consistent Arrow schema:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | `string` | File or directory name |
+| `path` | `string` | Full path within storage |
+| `type` | `string` | `"file"` or `"directory"` |
+| `size` | `int64` | Size in bytes (0 for directories) |
+| `modified` | `timestamp[us, tz=UTC]` | Last modified time |
+| `etag` | `string` | Object ETag (S3/MinIO) |
+| `storage_class` | `string` | Storage class (S3/MinIO) |
+| `content_type` | `string` | MIME type |
+
+### Storage Pagination
+
+Storage listings support cursor-based pagination:
+
+```python
+# Page through large bucket
+result = client.query(
+    "storage/s3_list",
+    params={"bucket": "my-bucket", "prefix": "logs/"},
+    limit=1000,
+)
+
+all_files = []
+while True:
+    all_files.extend(result.to_pylist())
+    if not result.metadata.has_more:
+        break
+    result = client.query(
+        "storage/s3_list",
+        params={"bucket": "my-bucket", "prefix": "logs/"},
+        cursor=result.metadata.next_cursor,
+        limit=1000,
+    )
+
+print(f"Total files: {len(all_files)}")
+```
 
 ---
 
@@ -333,21 +534,64 @@ Use parallel mode when:
 
 ```python
 from dfe_engine.query import QueryClient
+from dfe_engine.query.registry import QueryNotFoundError
+from dfe_engine.query.validator import (
+    ParameterValidationError,
+    AuthorizationError,
+)
 import httpx
 
 client = QueryClient(base_url="http://localhost:8000")
 
 try:
-    table = client.query("clickhouse:default", "SELECT * FROM nonexistent")
+    result = client.query(
+        "hunts/active_threats",
+        params={"severities": ["critical"]},
+    )
+except QueryNotFoundError as e:
+    print(f"Query not found: {e}")
+except ParameterValidationError as e:
+    print(f"Invalid parameter '{e.param}': {e}")
+except AuthorizationError as e:
+    print(f"Not authorized: {e}")
 except httpx.HTTPStatusError as e:
-    if e.response.status_code == 400:
-        print(f"Query error: {e.response.text}")
-    elif e.response.status_code == 504:
+    if e.response.status_code == 504:
         print("Query timed out")
     else:
         raise
 except httpx.ConnectError:
     print("Cannot connect to Query API")
+```
+
+### Common Errors
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `QueryNotFoundError` | Invalid query label | Check query label spelling |
+| `ParameterValidationError` | Invalid or missing parameter | Check parameter schema |
+| `AuthorizationError` | Missing required role/permission | Contact admin for access |
+| `HTTP 504` | Query timeout | Increase timeout or optimize query |
+
+---
+
+## Query Labels
+
+Queries are referenced by labels in `namespace/name` format:
+
+```python
+# Analytics namespace
+client.query("analytics/user_activity")
+client.query("analytics/conversion_funnel")
+client.query("analytics/retention_cohorts")
+
+# Hunts namespace
+client.query("hunts/active_threats")
+client.query("hunts/ioc_matches")
+client.query("hunts/anomaly_detection")
+
+# System namespace (requires admin role)
+client.query("system/health_check")
+client.query("system/table_stats")
 ```
 
 ---
@@ -364,31 +608,30 @@ client = QueryClient(base_url="http://localhost:8000")
 client = QueryClient(direct=True)
 ```
 
-### 2. Use Parameterized Queries
+### 2. Use Time Bounds for Time-Series Data
 
 ```python
-# BAD: String interpolation (SQL injection risk, no caching)
-sql = f"SELECT * FROM events WHERE org_id = '{org_id}'"
-
-# GOOD: Parameters (safe, enables query caching)
-table = client.query(
-    "clickhouse:default",
-    "SELECT * FROM events WHERE org_id = {org:String}",
-    params={"org": org_id},
+# GOOD: Limit time range to reduce data scanned
+result = client.query(
+    "analytics/user_activity",
+    time_from="2024-01-01T00:00:00Z",
+    time_to="2024-01-02T00:00:00Z",
 )
+
+# BAD: No time bounds on time-series table
+result = client.query("analytics/user_activity")  # Scans all data
 ```
 
 ### 3. Stream Large Results
 
 ```python
 # BAD: Load everything into memory
-table = client.query("clickhouse:default", "SELECT * FROM huge_table")
-df = table.to_pandas()  # Memory spike
+result = client.query("analytics/all_events", limit=1_000_000)
+df = result.to_pandas()  # Memory spike
 
 # GOOD: Stream in batches
 for batch in client.query_batches(
-    "clickhouse:default",
-    "SELECT * FROM huge_table",
+    "analytics/all_events",
     batch_size=50_000,
 ):
     process_batch(batch.to_pandas())
@@ -400,15 +643,15 @@ for batch in client.query_batches(
 # GOOD: Stay in Arrow for computations
 import pyarrow.compute as pc
 
-table = client.query("clickhouse:default", "SELECT * FROM events")
+result = client.query("analytics/user_activity")
 
 # Filter in Arrow (fast)
-filtered = table.filter(pc.field("level") == "ERROR")
+filtered = result.table.filter(pc.field("level") == "ERROR")
 
 # Aggregate in Arrow
-counts = pc.value_counts(table["level"])
+counts = pc.value_counts(result.table["level"])
 
-# Only convert to pandas when needed for pandas-specific operations
+# Only convert to pandas when needed
 df = filtered.to_pandas()
 ```
 
@@ -419,32 +662,36 @@ df = filtered.to_pandas()
 ### FastAPI Service
 
 ```python
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, HTTPException
 from dfe_engine.query import QueryClient
+from dfe_engine.query.validator import AuthorizationError
 
 app = FastAPI()
 
 def get_query_client() -> QueryClient:
     return QueryClient(direct=True)
 
-@app.get("/events/{org_id}")
-async def get_events(
-    org_id: str,
+@app.get("/threats")
+async def get_threats(
+    severities: list[str] = ["critical", "high"],
     client: QueryClient = Depends(get_query_client),
 ):
-    result = client.query_with_explain(
-        "clickhouse:default",
-        "SELECT * FROM events WHERE org_id = {org:String} LIMIT 100",
-        params={"org": org_id},
-        parallel=True,
-    )
-    return {
-        "data": result.to_pylist(),
-        "metadata": {
-            "rows": result.num_rows,
-            "duration_ms": result.metadata.query_duration_ms,
-        },
-    }
+    try:
+        result = client.query(
+            "hunts/active_threats",
+            params={"severities": severities},
+            limit=100,
+        )
+        return {
+            "data": result.to_pylist(),
+            "metadata": {
+                "rows": result.metadata.row_count,
+                "duration_ms": result.metadata.query_duration_ms,
+                "cached": result.metadata.cached,
+            },
+        }
+    except AuthorizationError:
+        raise HTTPException(status_code=403, detail="Not authorized")
 ```
 
 ### CLI Tool
@@ -460,27 +707,27 @@ console = Console()
 
 @app.command()
 def query(
-    sql: str,
-    datasource: str = "clickhouse:default",
+    label: str,
+    limit: int = 50,
     explain: bool = False,
 ):
+    """Execute a query by label."""
     client = QueryClient(direct=True)
 
     if explain:
-        result = client.query_with_explain(datasource, sql, parallel=True)
+        result = client.query_with_explain(label, limit=limit, parallel=True)
         console.print(f"[dim]Duration: {result.metadata.query_duration_ms}ms[/dim]")
         console.print(f"[dim]Plan:[/dim]")
         for step in result.explain.steps:
             console.print(f"  {step.step_type}: {step.description}")
-        table_data = result.table
     else:
-        table_data = client.query(datasource, sql)
+        result = client.query(label, limit=limit)
 
     # Display as rich table
     rich_table = Table()
-    for col in table_data.column_names:
+    for col in result.table.column_names:
         rich_table.add_column(col)
-    for row in table_data.to_pylist()[:50]:
+    for row in result.to_pylist()[:limit]:
         rich_table.add_row(*[str(v) for v in row.values()])
     console.print(rich_table)
 ```
@@ -491,4 +738,4 @@ def query(
 
 - [Apache Arrow Python Documentation](https://arrow.apache.org/docs/python/index.html)
 - [PyArrow on PyPI](https://pypi.org/project/pyarrow/) (v22.0.0)
-- [Apache Arrow 22.0.0 Release Notes](https://arrow.apache.org/release/22.0.0.html)
+- [Query Gateway API Specification](./QUERY-API.md)

@@ -1,6 +1,6 @@
 # DFE Query API - Rust SDK
 
-**Version:** 1.0.0
+**Version:** 2.0.0
 **Last Updated:** 2026-01-16
 
 This document specifies how to consume the DFE Query API from Rust applications.
@@ -9,7 +9,14 @@ This document specifies how to consume the DFE Query API from Rust applications.
 
 ## Overview
 
-The Query API returns Apache Arrow IPC streams. Rust has first-class Arrow support via the `arrow-rs` crate, providing zero-copy deserialization and tight integration with the Rust data ecosystem (DataFusion, Polars, etc.).
+The Query API provides a **secure, label-based interface** for querying multiple datasources. Key security features:
+
+- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
+- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Role-based access control** - Queries can require specific roles/permissions
+- **Apache Arrow wire format** - Zero-copy deserialization via `arrow-rs`
+
+Rust has first-class Arrow support via the `arrow-rs` crate, providing tight integration with the Rust data ecosystem (DataFusion, Polars, etc.).
 
 ---
 
@@ -69,15 +76,19 @@ rustflags = ["-C", "target-cpu=native"]
 
 ```rust
 use dfe_query::{QueryClient, QueryResult};
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Create client
     let client = QueryClient::new("http://localhost:8000");
 
-    // Execute query
+    // Execute query by label with parameters
     let result = client
-        .query("clickhouse:default", "SELECT * FROM logs LIMIT 100")
+        .query(
+            "analytics/user_activity",
+            Some(json!({ "event_types": ["login", "logout"] })),
+        )
         .await?;
 
     println!("Rows: {}", result.num_rows());
@@ -126,10 +137,16 @@ impl From<&Field> for Column {
 pub struct QueryMetadata {
     pub row_count: usize,
     pub query_duration_ms: u64,
+    pub query_label: String,
     pub datasource: String,
     pub truncated: bool,
     pub cached: bool,
     pub explain_duration_ms: Option<u64>,
+    // Pagination info
+    pub has_more: bool,
+    pub next_cursor: Option<String>,
+    pub next_offset: Option<usize>,
+    pub total_count: Option<usize>,
 }
 
 /// EXPLAIN step type.
@@ -174,7 +191,7 @@ pub struct ExplainPlan {
 /// Query request payload.
 #[derive(Debug, Serialize)]
 pub struct QueryRequest {
-    pub datasource: String,
+    /// Query label (e.g., "analytics/user_activity")
     pub query: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub params: Option<serde_json::Value>,
@@ -186,11 +203,31 @@ pub struct QueryRequest {
 #[derive(Debug, Default, Serialize)]
 pub struct QueryOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub offset: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub after_key: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_by: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub order_dir: Option<String>,  // "asc" or "desc"
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_from: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub time_to: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub timeout_seconds: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub include_explain: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parallel: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub store: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cache: Option<bool>,
 }
 ```
 
@@ -371,26 +408,24 @@ impl QueryClient {
         self
     }
 
-    /// Execute a query.
+    /// Execute a query by label.
     pub async fn query(
         &self,
-        datasource: &str,
-        sql: &str,
+        query_label: &str,
+        params: Option<serde_json::Value>,
     ) -> Result<QueryResult> {
-        self.query_with_params(datasource, sql, None, None).await
+        self.query_with_options(query_label, params, None).await
     }
 
-    /// Execute a query with parameters.
-    pub async fn query_with_params(
+    /// Execute a query with options.
+    pub async fn query_with_options(
         &self,
-        datasource: &str,
-        sql: &str,
+        query_label: &str,
         params: Option<serde_json::Value>,
         options: Option<QueryOptions>,
     ) -> Result<QueryResult> {
         let request = QueryRequest {
-            datasource: datasource.to_string(),
-            query: sql.to_string(),
+            query: query_label.to_string(),
             params,
             options,
         };
@@ -410,7 +445,7 @@ impl QueryClient {
         }
 
         // Parse metadata from headers
-        let metadata = self.parse_metadata(&response, datasource)?;
+        let metadata = self.parse_metadata(&response, query_label)?;
 
         // Read Arrow IPC stream
         let bytes = response.bytes().await?;
@@ -429,8 +464,7 @@ impl QueryClient {
     /// Execute query with EXPLAIN plan.
     pub async fn query_with_explain(
         &self,
-        datasource: &str,
-        sql: &str,
+        query_label: &str,
         params: Option<serde_json::Value>,
         parallel: bool,
     ) -> Result<QueryResult> {
@@ -440,13 +474,13 @@ impl QueryClient {
             ..Default::default()
         };
 
-        self.query_with_params(datasource, sql, params, Some(options)).await
+        self.query_with_options(query_label, params, Some(options)).await
     }
 
     fn parse_metadata(
         &self,
         response: &reqwest::Response,
-        datasource: &str,
+        query_label: &str,
     ) -> Result<QueryMetadata> {
         let headers = response.headers();
 
@@ -461,6 +495,12 @@ impl QueryClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
+
+        let datasource = headers
+            .get("X-Datasource")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("unknown")
+            .to_string();
 
         let truncated = headers
             .get("X-Truncated")
@@ -479,13 +519,39 @@ impl QueryClient {
             .and_then(|v| v.to_str().ok())
             .and_then(|v| v.parse().ok());
 
+        let has_more = headers
+            .get("X-Has-More")
+            .and_then(|v| v.to_str().ok())
+            .map(|v| v == "true")
+            .unwrap_or(false);
+
+        let next_cursor = headers
+            .get("X-Next-Cursor")
+            .and_then(|v| v.to_str().ok())
+            .map(String::from);
+
+        let next_offset = headers
+            .get("X-Next-Offset")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+
+        let total_count = headers
+            .get("X-Total-Count")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse().ok());
+
         Ok(QueryMetadata {
             row_count,
             query_duration_ms,
-            datasource: datasource.to_string(),
+            query_label: query_label.to_string(),
+            datasource,
             truncated,
             cached,
             explain_duration_ms,
+            has_more,
+            next_cursor,
+            next_offset,
+            total_count,
         })
     }
 
@@ -528,19 +594,22 @@ impl QueryClient {
 //! DFE Query API Client for Rust
 //!
 //! This crate provides a client for the DFE Query API with Apache Arrow
-//! as the wire format.
+//! as the wire format. Queries are referenced by label - SQL is defined
+//! server-side.
 //!
 //! # Example
 //!
 //! ```rust,no_run
 //! use dfe_query::QueryClient;
+//! use serde_json::json;
 //!
 //! #[tokio::main]
 //! async fn main() -> Result<(), Box<dyn std::error::Error>> {
 //!     let client = QueryClient::new("http://localhost:8000");
 //!
+//!     // Query by label with parameters
 //!     let result = client
-//!         .query("clickhouse:default", "SELECT * FROM logs LIMIT 100")
+//!         .query("analytics/user_activity", Some(json!({ "limit": 100 })))
 //!         .await?;
 //!
 //!     for batch in result.batches() {
@@ -577,13 +646,15 @@ pub use arrow_schema::{DataType, Field, Schema, SchemaRef};
 
 ```rust
 use dfe_query::QueryClient;
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> dfe_query::Result<()> {
     let client = QueryClient::new("http://localhost:8000");
 
+    // Query by label
     let result = client
-        .query("clickhouse:default", "SELECT * FROM events LIMIT 1000")
+        .query("analytics/user_activity", None)
         .await?;
 
     println!("Query returned {} rows in {}ms",
@@ -593,7 +664,6 @@ async fn main() -> dfe_query::Result<()> {
 
     // Access Arrow data
     for batch in result.batches() {
-        // Process each RecordBatch
         let timestamp_col = batch.column(0);
         println!("First column has {} values", timestamp_col.len());
     }
@@ -612,19 +682,49 @@ use serde_json::json;
 async fn main() -> dfe_query::Result<()> {
     let client = QueryClient::new("http://localhost:8000");
 
+    // Parameters are validated against server-side schema
     let result = client
-        .query_with_params(
-            "clickhouse:default",
-            "SELECT * FROM events WHERE org_id = {org:String} LIMIT {limit:UInt32}",
+        .query(
+            "hunts/active_threats",
             Some(json!({
-                "org": "acme-corp",
-                "limit": 100
+                "severities": ["critical", "high"]
             })),
-            None,
         )
         .await?;
 
-    println!("Found {} events for acme-corp", result.num_rows());
+    println!("Found {} active threats", result.num_rows());
+
+    Ok(())
+}
+```
+
+### Query with Options
+
+```rust
+use dfe_query::{QueryClient, QueryOptions};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    let options = QueryOptions {
+        limit: Some(500),
+        time_from: Some("2024-01-01T00:00:00Z".to_string()),
+        time_to: Some("2024-01-31T23:59:59Z".to_string()),
+        timeout_seconds: Some(120),
+        ..Default::default()
+    };
+
+    let result = client
+        .query_with_options(
+            "analytics/user_activity",
+            Some(json!({ "event_types": ["login", "logout"] })),
+            Some(options),
+        )
+        .await?;
+
+    println!("Found {} events", result.num_rows());
 
     Ok(())
 }
@@ -634,6 +734,7 @@ async fn main() -> dfe_query::Result<()> {
 
 ```rust
 use dfe_query::{QueryClient, ExplainStepType};
+use serde_json::json;
 
 #[tokio::main]
 async fn main() -> dfe_query::Result<()> {
@@ -641,16 +742,8 @@ async fn main() -> dfe_query::Result<()> {
 
     let result = client
         .query_with_explain(
-            "clickhouse:default",
-            r#"
-            SELECT org_id, count() as cnt
-            FROM events
-            WHERE timestamp > now() - INTERVAL 1 DAY
-            GROUP BY org_id
-            ORDER BY cnt DESC
-            LIMIT 10
-            "#,
-            None,
+            "analytics/top_orgs",
+            Some(json!({ "days": 7 })),
             true, // parallel execution
         )
         .await?;
@@ -698,7 +791,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Fetch data from Query API
     let result = client
-        .query("clickhouse:default", "SELECT * FROM events")
+        .query("analytics/all_events", None)
         .await?;
 
     // Create DataFusion context
@@ -710,7 +803,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     ctx.register_batch("events", batches[0].clone())?;
 
-    // Run SQL on the data
+    // Run SQL on the data locally
     let df = ctx
         .sql("SELECT org_id, COUNT(*) as cnt FROM events GROUP BY org_id")
         .await?;
@@ -724,15 +817,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Integration with Polars
 
 ```rust
-use dfe_query::QueryClient;
+use dfe_query::{QueryClient, QueryOptions};
 use polars::prelude::*;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = QueryClient::new("http://localhost:8000");
 
+    let options = QueryOptions {
+        limit: Some(10_000),
+        ..Default::default()
+    };
+
     let result = client
-        .query("clickhouse:default", "SELECT * FROM events LIMIT 10000")
+        .query_with_options("analytics/all_events", None, Some(options))
         .await?;
 
     // Convert Arrow to Polars DataFrame
@@ -758,16 +856,21 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Streaming Large Results
 
 ```rust
-use dfe_query::QueryClient;
+use dfe_query::{QueryClient, QueryOptions};
 use std::time::Duration;
 
 #[tokio::main]
 async fn main() -> dfe_query::Result<()> {
     let client = QueryClient::new("http://localhost:8000")
-        .timeout(Duration::from_secs(300)); // 5 minute timeout for large query
+        .timeout(Duration::from_secs(300)); // 5 minute timeout
+
+    let options = QueryOptions {
+        limit: Some(1_000_000),
+        ..Default::default()
+    };
 
     let result = client
-        .query("clickhouse:default", "SELECT * FROM huge_table")
+        .query_with_options("analytics/all_events", None, Some(options))
         .await?;
 
     // Process batches incrementally
@@ -801,14 +904,16 @@ use dfe_query::{QueryClient, QueryError};
 async fn main() {
     let client = QueryClient::new("http://localhost:8000");
 
-    match client.query("clickhouse:default", "SELECT * FROM logs").await {
+    match client.query("analytics/user_activity", None).await {
         Ok(result) => {
             println!("Got {} rows", result.num_rows());
         }
         Err(QueryError::Http { status, body }) => {
             match status {
-                400 => eprintln!("Invalid query: {}", body),
+                400 => eprintln!("Invalid parameters: {}", body),
                 401 => eprintln!("Unauthorized - check credentials"),
+                403 => eprintln!("Forbidden - missing required role"),
+                404 => eprintln!("Query not found: {}", body),
                 504 => eprintln!("Query timed out"),
                 _ => eprintln!("HTTP error {}: {}", status, body),
             }
@@ -823,6 +928,272 @@ async fn main() {
             eprintln!("Error: {}", e);
         }
     }
+}
+```
+
+---
+
+## Pagination
+
+The Query API supports three pagination modes.
+
+### Offset-Based Pagination
+
+```rust
+use dfe_query::{QueryClient, QueryOptions};
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    // First page
+    let options = QueryOptions {
+        limit: Some(100),
+        ..Default::default()
+    };
+    let result = client
+        .query_with_options("analytics/user_activity", None, Some(options))
+        .await?;
+
+    // Second page
+    if result.metadata().has_more {
+        let options = QueryOptions {
+            limit: Some(100),
+            offset: result.metadata().next_offset.map(|o| o as u32),
+            ..Default::default()
+        };
+        let page2 = client
+            .query_with_options("analytics/user_activity", None, Some(options))
+            .await?;
+    }
+
+    Ok(())
+}
+```
+
+### Cursor-Based Pagination
+
+```rust
+use dfe_query::{QueryClient, QueryOptions};
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    // First page
+    let mut options = QueryOptions {
+        limit: Some(100),
+        ..Default::default()
+    };
+    let mut result = client
+        .query_with_options("analytics/user_activity", None, Some(options.clone()))
+        .await?;
+
+    let mut all_rows = result.num_rows();
+
+    // Fetch all pages using cursor
+    while result.metadata().has_more {
+        options.cursor = result.metadata().next_cursor.clone();
+
+        result = client
+            .query_with_options("analytics/user_activity", None, Some(options.clone()))
+            .await?;
+
+        all_rows += result.num_rows();
+    }
+
+    println!("Total rows: {}", all_rows);
+    Ok(())
+}
+```
+
+### Keyset-Based Pagination
+
+```rust
+use dfe_query::{QueryClient, QueryOptions};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    // First page (sorted by timestamp descending)
+    let mut options = QueryOptions {
+        limit: Some(100),
+        order_by: Some("timestamp".to_string()),
+        order_dir: Some("desc".to_string()),
+        ..Default::default()
+    };
+
+    let mut result = client
+        .query_with_options("analytics/user_activity", None, Some(options.clone()))
+        .await?;
+
+    // Next pages using last timestamp as after_key
+    while result.metadata().has_more && result.num_rows() > 0 {
+        // Get last timestamp from result (implementation depends on schema)
+        let last_timestamp = get_last_timestamp(&result);
+
+        options.after_key = Some(json!(last_timestamp));
+
+        result = client
+            .query_with_options("analytics/user_activity", None, Some(options.clone()))
+            .await?;
+    }
+
+    Ok(())
+}
+
+fn get_last_timestamp(result: &dfe_query::QueryResult) -> String {
+    // Extract last timestamp from Arrow batch
+    // Implementation depends on your schema
+    "2024-01-15T12:00:00Z".to_string()
+}
+```
+
+---
+
+## Storage Listing
+
+Query API provides built-in queries for listing files in S3, MinIO, and local filesystems.
+
+### S3 Bucket Listing
+
+```rust
+use dfe_query::QueryClient;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    let result = client
+        .query(
+            "storage/s3_list",
+            Some(json!({
+                "bucket": "my-bucket",
+                "prefix": "logs/2024/"
+            })),
+        )
+        .await?;
+
+    println!("Found {} items", result.num_rows());
+
+    // Columns: name, path, type, size, modified, etag, storage_class, content_type
+    for batch in result.batches() {
+        // Process file listing
+    }
+
+    Ok(())
+}
+```
+
+### MinIO Listing
+
+```rust
+use dfe_query::QueryClient;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    // Same API as S3
+    let result = client
+        .query(
+            "storage/minio_list",
+            Some(json!({
+                "bucket": "my-bucket",
+                "prefix": "data/"
+            })),
+        )
+        .await?;
+
+    Ok(())
+}
+```
+
+### Filesystem Listing
+
+```rust
+use dfe_query::QueryClient;
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    let result = client
+        .query(
+            "storage/file_list",
+            Some(json!({
+                "path": "reports/2024",
+                "recursive": true,
+                "pattern": "*.json"
+            })),
+        )
+        .await?;
+
+    println!("Found {} files", result.num_rows());
+
+    Ok(())
+}
+```
+
+### Storage Listing Schema
+
+All storage adapters return consistent Arrow schema:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | `Utf8` | File or directory name |
+| `path` | `Utf8` | Full path within storage |
+| `type` | `Utf8` | `"file"` or `"directory"` |
+| `size` | `Int64` | Size in bytes |
+| `modified` | `Timestamp` | Last modified time (UTC) |
+| `etag` | `Utf8` | Object ETag (S3/MinIO) |
+| `storage_class` | `Utf8` | Storage class |
+| `content_type` | `Utf8` | MIME type |
+
+### Paginating Storage Listings
+
+```rust
+use dfe_query::{QueryClient, QueryOptions};
+use serde_json::json;
+
+#[tokio::main]
+async fn main() -> dfe_query::Result<()> {
+    let client = QueryClient::new("http://localhost:8000");
+
+    let params = json!({
+        "bucket": "my-bucket",
+        "prefix": "logs/"
+    });
+
+    let mut options = QueryOptions {
+        limit: Some(1000),
+        ..Default::default()
+    };
+
+    let mut result = client
+        .query_with_options("storage/s3_list", Some(params.clone()), Some(options.clone()))
+        .await?;
+
+    let mut total_files = result.num_rows();
+
+    while result.metadata().has_more {
+        options.cursor = result.metadata().next_cursor.clone();
+
+        result = client
+            .query_with_options("storage/s3_list", Some(params.clone()), Some(options.clone()))
+            .await?;
+
+        total_files += result.num_rows();
+    }
+
+    println!("Total files: {}", total_files);
+
+    Ok(())
 }
 ```
 

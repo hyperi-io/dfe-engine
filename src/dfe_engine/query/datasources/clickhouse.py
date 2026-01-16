@@ -95,9 +95,7 @@ class ClickHouseAdapter(DatasourceAdapter):
                 f"EXPLAIN ESTIMATE {query}",
                 parameters=params or {},
             )
-            total_rows = sum(
-                int(row[2]) for row in estimate_result.result_rows if len(row) > 2
-            )
+            total_rows = sum(int(row[2]) for row in estimate_result.result_rows if len(row) > 2)
         except Exception:
             total_rows = None
 
