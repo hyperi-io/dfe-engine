@@ -1,6 +1,6 @@
 # DFE Query API - TypeScript SDK
 
-**Version:** 1.0.0
+**Version:** 2.0.0
 **Last Updated:** 2026-01-16
 
 This document specifies how to consume the DFE Query API from TypeScript/JavaScript applications.
@@ -9,7 +9,13 @@ This document specifies how to consume the DFE Query API from TypeScript/JavaScr
 
 ## Overview
 
-The Query API returns Apache Arrow IPC streams. This SDK wraps the Arrow deserialization and provides a type-safe, ergonomic interface that integrates with React Query and Effect.
+The Query API provides a **secure, label-based interface** for querying multiple datasources. Key security features:
+
+- **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
+- **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
+- **Role-based access control** - Queries can require specific roles/permissions
+- **Parameter validation** - All parameters validated against server-side schemas
+- **Apache Arrow wire format** - Efficient binary serialization
 
 ---
 
@@ -51,12 +57,14 @@ npm install @apache-arrow/esnext-esm@^18.0.0
 ### Basic Usage
 
 ```typescript
-import { query, QueryResult } from '@hypersec/query-client';
+import { QueryClient, QueryResult } from '@hypersec/query-client';
 
-// Execute query
-const result = await query({
-  datasource: 'clickhouse:default',
-  query: 'SELECT * FROM logs LIMIT 100',
+const client = new QueryClient({ baseUrl: 'http://localhost:8000' });
+
+// Execute query by label with parameters
+const result = await client.query('analytics/user_activity', {
+  params: { eventTypes: ['login', 'logout'] },
+  limit: 100,
 });
 
 console.log(`Rows: ${result.rowCount}`);
@@ -64,7 +72,7 @@ console.log(`Columns: ${result.columns.map(c => c.name)}`);
 
 // Access rows as typed objects
 result.rows.forEach(row => {
-  console.log(row.timestamp, row.message);
+  console.log(row.timestamp, row.eventType);
 });
 ```
 
@@ -73,12 +81,11 @@ result.rows.forEach(row => {
 ```typescript
 import { useQuery } from '@hypersec/query-client/react';
 
-function LogViewer() {
-  const { data, isLoading, error } = useQuery(
-    'clickhouse:default',
-    'SELECT * FROM logs WHERE level = {level:String} LIMIT 100',
-    { level: 'ERROR' }
-  );
+function ThreatDashboard() {
+  const { data, isLoading, error } = useQuery('hunts/active_threats', {
+    params: { severities: ['critical', 'high'] },
+    limit: 50,
+  });
 
   if (isLoading) return <Loading />;
   if (error) return <Error error={error} />;
@@ -104,82 +111,412 @@ function LogViewer() {
 
 ---
 
-## Installation & Setup
+## Security Model
 
-### 1. Create the Query Client Package
+### Key Principles
 
-Create `packages/dfe-query-client/` in your monorepo:
+1. **Query labels, not SQL** - Clients reference pre-defined queries by label
+2. **Server-side SQL** - SQL templates stored in registry, clients cannot modify
+3. **Automatic tenant isolation** - `_org_id` extracted from JWT and injected
+4. **Parameter validation** - All params validated against schema before execution
+5. **Role-based access** - Queries can require specific roles/permissions
 
+### Example Security Flow
+
+```typescript
+// Client sends:
+const result = await client.query('hunts/active_threats', {
+  params: { severities: ['critical', 'high'] },
+  limit: 500,
+});
+
+// Server-side query definition (not visible to client):
+// queries:
+//   hunts/active_threats:
+//     sql: |
+//       SELECT alert_id, severity, timestamp
+//       FROM {{ store }}.alerts
+//       WHERE org_id = {{ _org_id }}  -- INJECTED, cannot be overridden
+//       AND severity IN {{ severities | sql_array }}
+//       LIMIT {{ limit }}
+//     parameters:
+//       severities:
+//         type: array
+//         items: string
+//         required: true
+//     tenant_isolated: true
+//     required_roles: [analyst]
 ```
-packages/dfe-query-client/
-├── package.json
-├── tsconfig.json
-└── src/
-    ├── index.ts
-    ├── client.ts
-    ├── types.ts
-    ├── react.ts        # React Query hooks
-    └── effect.ts       # Effect integration
+
+---
+
+## API Reference
+
+### QueryClient
+
+```typescript
+interface QueryClientConfig {
+  baseUrl: string;              // API base URL
+  timeout?: number;             // Default timeout in ms (default: 30000)
+  headers?: Record<string, string>;  // Additional headers
+}
+
+class QueryClient {
+  constructor(config: QueryClientConfig);
+
+  query<T = Record<string, unknown>>(
+    queryLabel: string,
+    options?: QueryOptions,
+  ): Promise<QueryResult<T>>;
+
+  queryWithExplain<T = Record<string, unknown>>(
+    queryLabel: string,
+    options?: QueryOptions & { parallel?: boolean },
+  ): Promise<QueryResult<T> & { explain: ExplainPlan }>;
+}
 ```
 
-### 2. Package Configuration
+### QueryOptions
 
-```json
-{
-  "name": "@hypersec/query-client",
-  "version": "1.0.0",
-  "type": "module",
-  "exports": {
-    ".": "./dist/index.js",
-    "./react": "./dist/react.js",
-    "./effect": "./dist/effect.js"
-  },
-  "dependencies": {
-    "apache-arrow": "^18.0.0"
-  },
-  "peerDependencies": {
-    "@tanstack/react-query": "^5.0.0",
-    "@effect/schema": "^0.75.0"
-  },
-  "peerDependenciesMeta": {
-    "@tanstack/react-query": { "optional": true },
-    "@effect/schema": { "optional": true }
-  }
+```typescript
+interface QueryOptions {
+  params?: Record<string, unknown>;  // Query parameters
+  limit?: number;                     // Max rows (clamped to server max)
+  offset?: number;                    // Skip first N rows (offset pagination)
+  cursor?: string;                    // Opaque cursor (cursor pagination)
+  afterKey?: unknown;                 // Last seen key (keyset pagination)
+  orderBy?: string;                   // Column for keyset ordering
+  orderDir?: 'asc' | 'desc';         // Sort direction (default: 'asc')
+  timeFrom?: string;                  // ISO8601 start time
+  timeTo?: string;                    // ISO8601 end time
+  timeoutMs?: number;                 // Query timeout
+  store?: string;                     // Target store (if query allows)
+  cache?: boolean;                    // Allow cached results (default: true)
+}
+```
+
+### QueryResult
+
+```typescript
+interface QueryResult<T = Record<string, unknown>> {
+  // Data access
+  rows: T[];                          // Typed row objects
+  rowCount: number;                   // Number of rows
+  columns: Column[];                  // Column metadata
+
+  // Arrow access
+  table: arrow.Table;                 // Raw Arrow Table
+  batches: arrow.RecordBatch[];       // Arrow RecordBatches
+
+  // Metadata
+  metadata: QueryMetadata;
+
+  // Export methods
+  toJSON(): string;
+  toCSV(): string;
+  toArrowIPC(): Uint8Array;
+}
+
+interface QueryMetadata {
+  rowCount: number;
+  queryDurationMs: number;
+  queryLabel: string;
+  datasource: string;
+  store?: string;
+  truncated: boolean;
+  cached: boolean;
+  requestId?: string;
+  hasMore: boolean;                   // More pages available
+  nextCursor?: string;                // Cursor for next page
+  nextOffset?: number;                // Offset for next page
+  totalCount?: number;                // Total rows (if available)
+}
+
+interface Column {
+  name: string;
+  type: arrow.DataType;
+  nullable: boolean;
 }
 ```
 
 ---
 
-## Core Implementation
+## Query Labels
 
-### Types (`src/types.ts`)
+Queries are referenced by labels in `namespace/name` format:
 
 ```typescript
-/**
- * Column metadata from Arrow schema.
- */
-export interface Column {
-  name: string;
-  type: string;
-  nullable: boolean;
+// Analytics namespace
+await client.query('analytics/user_activity');
+await client.query('analytics/conversion_funnel');
+await client.query('analytics/retention_cohorts');
+
+// Hunts namespace
+await client.query('hunts/active_threats');
+await client.query('hunts/ioc_matches');
+await client.query('hunts/anomaly_detection');
+
+// System namespace (requires admin role)
+await client.query('system/health_check');
+await client.query('system/table_stats');
+```
+
+---
+
+## React Query Integration
+
+### Setup
+
+```typescript
+// providers.tsx
+import { QueryClientProvider } from '@tanstack/react-query';
+import { createQueryClient } from '@hypersec/query-client/react';
+
+const queryClient = createQueryClient({
+  baseUrl: process.env.NEXT_PUBLIC_API_URL!,
+});
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>
+      {children}
+    </QueryClientProvider>
+  );
+}
+```
+
+### useQuery Hook
+
+```typescript
+import { useQuery } from '@hypersec/query-client/react';
+
+function ActivityTable() {
+  const { data, isLoading, error, refetch } = useQuery(
+    'analytics/user_activity',
+    {
+      params: { eventTypes: ['login', 'purchase'] },
+      limit: 100,
+      timeFrom: '2024-01-01T00:00:00Z',
+    },
+    {
+      staleTime: 30_000,        // Consider fresh for 30s
+      refetchOnWindowFocus: false,
+    }
+  );
+
+  if (isLoading) return <Skeleton />;
+  if (error) return <ErrorBanner error={error} />;
+
+  return (
+    <DataTable
+      columns={data.columns}
+      rows={data.rows}
+      onRefresh={() => refetch()}
+    />
+  );
+}
+```
+
+### useSuspenseQuery
+
+```typescript
+import { useSuspenseQuery } from '@hypersec/query-client/react';
+
+function ThreatList() {
+  // This will suspend until data is ready
+  const { data } = useSuspenseQuery('hunts/active_threats', {
+    params: { severities: ['critical'] },
+  });
+
+  return <ThreatTable threats={data.rows} />;
 }
 
-/**
- * Query execution metadata.
- */
-export interface QueryMetadata {
-  rowCount: number;
-  queryDurationMs: number;
-  datasource: string;
-  truncated: boolean;
-  cached: boolean;
-  explainDurationMs?: number;
+// Usage with Suspense boundary
+function App() {
+  return (
+    <Suspense fallback={<Loading />}>
+      <ThreatList />
+    </Suspense>
+  );
+}
+```
+
+### useInfiniteQuery
+
+```typescript
+import { useInfiniteQuery } from '@hypersec/query-client/react';
+
+function InfiniteEventList() {
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery('analytics/all_events', {
+    params: { date: '2024-01-15' },
+    pageSize: 50,
+  });
+
+  return (
+    <div>
+      {data.pages.flatMap(page => page.rows).map(event => (
+        <EventCard key={event.id} event={event} />
+      ))}
+      {hasNextPage && (
+        <button
+          onClick={() => fetchNextPage()}
+          disabled={isFetchingNextPage}
+        >
+          {isFetchingNextPage ? 'Loading...' : 'Load More'}
+        </button>
+      )}
+    </div>
+  );
+}
+```
+
+---
+
+## Effect Integration
+
+### Schema Validation
+
+```typescript
+import { Schema as S } from '@effect/schema';
+import { query } from '@hypersec/query-client';
+
+// Define row schema
+const ThreatAlert = S.Struct({
+  alertId: S.String,
+  severity: S.Literal('critical', 'high', 'medium', 'low'),
+  timestamp: S.DateFromString,
+  description: S.String,
+  source: S.String,
+});
+
+type ThreatAlert = S.Schema.Type<typeof ThreatAlert>;
+
+// Query with schema validation
+const result = await query<ThreatAlert>('hunts/active_threats', {
+  params: { severities: ['critical', 'high'] },
+  schema: ThreatAlert,  // Validates each row
+});
+
+// result.rows is typed as ThreatAlert[]
+result.rows.forEach(alert => {
+  console.log(alert.severity);  // Type-safe access
+});
+```
+
+### Effect Error Handling
+
+```typescript
+import { Effect, pipe } from 'effect';
+import { queryEffect } from '@hypersec/query-client/effect';
+
+const program = pipe(
+  queryEffect('hunts/active_threats', {
+    params: { severities: ['critical'] },
+  }),
+  Effect.map(result => result.rows),
+  Effect.catchTag('QueryNotFoundError', () =>
+    Effect.succeed([])
+  ),
+  Effect.catchTag('AuthorizationError', error =>
+    Effect.fail(new UnauthorizedError(error.message))
+  ),
+);
+
+const threats = await Effect.runPromise(program);
+```
+
+---
+
+## Error Handling
+
+### Error Types
+
+```typescript
+import {
+  QueryNotFoundError,
+  ParameterValidationError,
+  AuthorizationError,
+  QueryTimeoutError,
+  NetworkError,
+} from '@hypersec/query-client';
+
+try {
+  const result = await client.query('hunts/active_threats', {
+    params: { severities: ['critical'] },
+  });
+} catch (error) {
+  if (error instanceof QueryNotFoundError) {
+    console.error('Query not found:', error.queryLabel);
+  } else if (error instanceof ParameterValidationError) {
+    console.error('Invalid parameter:', error.param, error.message);
+  } else if (error instanceof AuthorizationError) {
+    console.error('Not authorized:', error.requiredRoles);
+  } else if (error instanceof QueryTimeoutError) {
+    console.error('Query timed out after', error.timeoutMs, 'ms');
+  } else if (error instanceof NetworkError) {
+    console.error('Network error:', error.message);
+  } else {
+    throw error;
+  }
+}
+```
+
+### Common Errors
+
+| Error | Cause | Resolution |
+|-------|-------|------------|
+| `QueryNotFoundError` | Invalid query label | Check query label spelling |
+| `ParameterValidationError` | Invalid or missing parameter | Check parameter schema |
+| `AuthorizationError` | Missing required role/permission | Contact admin for access |
+| `QueryTimeoutError` | Query execution timeout | Increase timeout or add filters |
+| `NetworkError` | Connection failed | Check network/API availability |
+
+---
+
+## EXPLAIN Plans
+
+### Getting EXPLAIN Data
+
+```typescript
+const result = await client.queryWithExplain('analytics/user_activity', {
+  params: { eventTypes: ['login'] },
+  parallel: true,  // Run query and EXPLAIN concurrently
+});
+
+console.log('Query duration:', result.metadata.queryDurationMs, 'ms');
+console.log('EXPLAIN duration:', result.metadata.explainDurationMs, 'ms');
+
+// Analyze the plan
+for (const step of result.explain.steps) {
+  console.log(`${step.stepType}: ${step.description}`);
+  if (step.estimatedRows) {
+    console.log(`  Estimated rows: ${step.estimatedRows}`);
+  }
 }
 
-/**
- * Single step in EXPLAIN plan.
- */
-export interface ExplainStep {
+// Check for warnings
+for (const warning of result.explain.warnings) {
+  console.warn('Performance warning:', warning);
+}
+```
+
+### ExplainPlan Structure
+
+```typescript
+interface ExplainPlan {
+  steps: ExplainStep[];
+  totalEstimatedCost?: number;
+  totalEstimatedRows?: number;
+  warnings: string[];
+  rawPlan?: string;
+}
+
+interface ExplainStep {
   stepType: 'read' | 'filter' | 'aggregate' | 'sort' | 'join' | 'projection' | 'limit' | 'union' | 'unknown';
   description: string;
   estimatedRows?: number;
@@ -188,620 +525,307 @@ export interface ExplainStep {
   actualTimeMs?: number;
   details?: Record<string, unknown>;
 }
-
-/**
- * Query execution plan.
- */
-export interface ExplainPlan {
-  steps: ExplainStep[];
-  totalEstimatedCost?: number;
-  totalEstimatedRows?: number;
-  warnings: string[];
-  rawPlan?: string;
-}
-
-/**
- * Query result with typed rows.
- */
-export interface QueryResult<T = Record<string, unknown>> {
-  rows: T[];
-  columns: Column[];
-  metadata: QueryMetadata;
-  explain?: ExplainPlan;
-}
-
-/**
- * Query request options.
- */
-export interface QueryOptions {
-  timeout?: number;
-  includeExplain?: boolean;
-  parallel?: boolean;
-}
-```
-
-### Client (`src/client.ts`)
-
-```typescript
-import { tableFromIPC, Table } from 'apache-arrow';
-import type { Column, QueryMetadata, QueryResult, ExplainPlan, QueryOptions } from './types';
-
-/**
- * Query API base URL. Configure via environment or direct assignment.
- */
-let baseUrl = '/api/v1';
-
-export function setBaseUrl(url: string): void {
-  baseUrl = url;
-}
-
-/**
- * Execute a query against the Query API.
- *
- * @param datasource - Datasource URI (e.g., 'clickhouse:default')
- * @param sql - Query string
- * @param params - Optional query parameters
- * @param options - Query options
- * @returns Query result with typed rows
- */
-export async function query<T = Record<string, unknown>>(
-  datasource: string,
-  sql: string,
-  params?: Record<string, unknown>,
-  options?: QueryOptions,
-): Promise<QueryResult<T>> {
-  const response = await fetch(`${baseUrl}/query`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      datasource,
-      query: sql,
-      params,
-      options: {
-        timeout_seconds: options?.timeout ?? 30,
-        include_explain: options?.includeExplain ?? false,
-        parallel: options?.parallel ?? false,
-      },
-    }),
-  });
-
-  if (!response.ok) {
-    const error = await response.text();
-    throw new QueryError(response.status, error);
-  }
-
-  // Parse Arrow IPC response
-  const buffer = await response.arrayBuffer();
-  const table = tableFromIPC(buffer);
-
-  // Extract metadata from headers
-  const metadata: QueryMetadata = {
-    rowCount: parseInt(response.headers.get('X-Row-Count') ?? '0', 10),
-    queryDurationMs: parseInt(response.headers.get('X-Query-Duration-Ms') ?? '0', 10),
-    datasource,
-    truncated: response.headers.get('X-Truncated') === 'true',
-    cached: response.headers.get('X-Cached') === 'true',
-    explainDurationMs: parseInt(response.headers.get('X-Explain-Duration-Ms') ?? '0', 10) || undefined,
-  };
-
-  // Extract columns from Arrow schema
-  const columns: Column[] = table.schema.fields.map(field => ({
-    name: field.name,
-    type: String(field.type),
-    nullable: field.nullable,
-  }));
-
-  // Extract EXPLAIN from Arrow metadata (if present)
-  const explain = extractExplainFromMetadata(table);
-
-  return {
-    rows: table.toArray() as T[],
-    columns,
-    metadata,
-    explain,
-  };
-}
-
-/**
- * Query with EXPLAIN plan.
- */
-export async function queryWithExplain<T = Record<string, unknown>>(
-  datasource: string,
-  sql: string,
-  params?: Record<string, unknown>,
-  parallel = true,
-): Promise<QueryResult<T>> {
-  return query<T>(datasource, sql, params, {
-    includeExplain: true,
-    parallel,
-  });
-}
-
-/**
- * Extract EXPLAIN plan from Arrow schema metadata.
- */
-function extractExplainFromMetadata(table: Table): ExplainPlan | undefined {
-  const metadata = table.schema.metadata;
-  if (!metadata) return undefined;
-
-  const stepsJson = metadata.get('dfe:explain:steps');
-  if (!stepsJson) return undefined;
-
-  try {
-    const data = JSON.parse(stepsJson);
-    const warningsStr = metadata.get('dfe:explain:warnings') ?? '';
-
-    return {
-      steps: data.steps ?? [],
-      warnings: warningsStr ? warningsStr.split(',') : [],
-      rawPlan: metadata.get('dfe:explain:raw') ?? undefined,
-      totalEstimatedCost: parseFloat(metadata.get('dfe:explain:estimated_cost') ?? '') || undefined,
-    };
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Query API error.
- */
-export class QueryError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly body: string,
-  ) {
-    super(`Query failed (${status}): ${body}`);
-    this.name = 'QueryError';
-  }
-}
-```
-
-### React Query Hooks (`src/react.ts`)
-
-```typescript
-import {
-  useQuery as useReactQuery,
-  useMutation,
-  type UseQueryOptions,
-  type UseQueryResult,
-} from '@tanstack/react-query';
-import { query, queryWithExplain, type QueryResult, type QueryOptions } from './client';
-
-/**
- * React Query hook for executing queries.
- *
- * @example
- * ```tsx
- * const { data, isLoading } = useQuery(
- *   'clickhouse:default',
- *   'SELECT * FROM logs LIMIT 100'
- * );
- * ```
- */
-export function useQuery<T = Record<string, unknown>>(
-  datasource: string,
-  sql: string,
-  params?: Record<string, unknown>,
-  options?: QueryOptions & {
-    enabled?: boolean;
-    staleTime?: number;
-    refetchInterval?: number;
-  },
-): UseQueryResult<QueryResult<T>> {
-  return useReactQuery({
-    queryKey: ['dfe-query', datasource, sql, params],
-    queryFn: () => query<T>(datasource, sql, params, options),
-    enabled: options?.enabled ?? true,
-    staleTime: options?.staleTime ?? 5 * 60 * 1000, // 5 minutes
-    refetchInterval: options?.refetchInterval,
-  });
-}
-
-/**
- * React Query hook for queries with EXPLAIN plan.
- *
- * @example
- * ```tsx
- * const { data } = useQueryWithExplain(
- *   'clickhouse:default',
- *   'SELECT * FROM events WHERE level = {level:String}',
- *   { level: 'ERROR' },
- *   { parallel: true }
- * );
- *
- * // Access EXPLAIN
- * data?.explain?.steps.forEach(step => console.log(step));
- * ```
- */
-export function useQueryWithExplain<T = Record<string, unknown>>(
-  datasource: string,
-  sql: string,
-  params?: Record<string, unknown>,
-  options?: {
-    parallel?: boolean;
-    enabled?: boolean;
-    staleTime?: number;
-  },
-): UseQueryResult<QueryResult<T>> {
-  return useReactQuery({
-    queryKey: ['dfe-query-explain', datasource, sql, params],
-    queryFn: () => queryWithExplain<T>(datasource, sql, params, options?.parallel),
-    enabled: options?.enabled ?? true,
-    staleTime: options?.staleTime ?? 5 * 60 * 1000,
-  });
-}
-
-/**
- * Mutation hook for ad-hoc queries (e.g., from a query editor).
- *
- * @example
- * ```tsx
- * const mutation = useQueryMutation();
- *
- * const handleSubmit = (sql: string) => {
- *   mutation.mutate({
- *     datasource: 'clickhouse:default',
- *     sql,
- *   });
- * };
- * ```
- */
-export function useQueryMutation<T = Record<string, unknown>>() {
-  return useMutation({
-    mutationFn: ({
-      datasource,
-      sql,
-      params,
-      options,
-    }: {
-      datasource: string;
-      sql: string;
-      params?: Record<string, unknown>;
-      options?: QueryOptions;
-    }) => query<T>(datasource, sql, params, options),
-  });
-}
-```
-
-### Effect Integration (`src/effect.ts`)
-
-```typescript
-import { Effect, Layer, Context } from 'effect';
-import { Schema } from '@effect/schema';
-import { query as rawQuery, type QueryResult, type QueryOptions } from './client';
-
-/**
- * Query client service for Effect.
- */
-export class QueryClient extends Context.Tag('QueryClient')<
-  QueryClient,
-  {
-    readonly query: <T>(
-      datasource: string,
-      sql: string,
-      params?: Record<string, unknown>,
-      options?: QueryOptions,
-    ) => Effect.Effect<QueryResult<T>, QueryError>;
-  }
->() {}
-
-/**
- * Query error for Effect.
- */
-export class QueryError extends Schema.TaggedError<QueryError>()('QueryError', {
-  status: Schema.Number,
-  message: Schema.String,
-}) {}
-
-/**
- * Live implementation of QueryClient.
- */
-export const QueryClientLive = Layer.succeed(QueryClient, {
-  query: <T>(
-    datasource: string,
-    sql: string,
-    params?: Record<string, unknown>,
-    options?: QueryOptions,
-  ) =>
-    Effect.tryPromise({
-      try: () => rawQuery<T>(datasource, sql, params, options),
-      catch: (error) =>
-        new QueryError({
-          status: error instanceof Error && 'status' in error ? (error as any).status : 500,
-          message: String(error),
-        }),
-    }),
-});
-
-/**
- * Execute query in Effect context.
- *
- * @example
- * ```typescript
- * const program = Effect.gen(function* () {
- *   const client = yield* QueryClient;
- *   const result = yield* client.query<LogRow>(
- *     'clickhouse:default',
- *     'SELECT * FROM logs'
- *   );
- *   return result.rows;
- * });
- *
- * const rows = await program.pipe(
- *   Effect.provide(QueryClientLive),
- *   Effect.runPromise
- * );
- * ```
- */
 ```
 
 ---
 
-## Usage Examples
+## Pagination
 
-### Basic Query
+The Query API supports three pagination modes for different use cases.
 
-```typescript
-import { query } from '@hypersec/query-client';
+### Offset-Based Pagination
 
-interface LogRow {
-  timestamp: string;
-  level: string;
-  message: string;
-}
-
-const result = await query<LogRow>(
-  'clickhouse:default',
-  'SELECT timestamp, level, message FROM logs LIMIT 100'
-);
-
-result.rows.forEach(row => {
-  console.log(`[${row.level}] ${row.timestamp}: ${row.message}`);
-});
-```
-
-### With Parameters
+Traditional pagination with `limit` and `offset`. Simple but inefficient for deep pages.
 
 ```typescript
-const result = await query<EventRow>(
-  'clickhouse:default',
-  `SELECT * FROM events
-   WHERE org_id = {org:String}
-     AND timestamp > {start:DateTime}
-   LIMIT {limit:UInt32}`,
-  {
-    org: 'acme-corp',
-    start: '2024-01-01 00:00:00',
-    limit: 1000,
-  }
-);
-```
+// First page
+const page1 = await client.query('analytics/user_activity', { limit: 100 });
 
-### Query with EXPLAIN
+// Second page
+const page2 = await client.query('analytics/user_activity', { limit: 100, offset: 100 });
 
-```typescript
-import { queryWithExplain } from '@hypersec/query-client';
-
-const result = await queryWithExplain(
-  'clickhouse:default',
-  'SELECT org_id, count() FROM events GROUP BY org_id ORDER BY count() DESC',
-  undefined,
-  true // parallel execution
-);
-
-console.log(`Query took ${result.metadata.queryDurationMs}ms`);
-
-// Analyze execution plan
-result.explain?.steps.forEach(step => {
-  console.log(`${step.stepType}: ${step.description}`);
-  if (step.estimatedRows) {
-    console.log(`  Estimated rows: ${step.estimatedRows}`);
-  }
-});
-
-// Check for performance warnings
-result.explain?.warnings.forEach(warning => {
-  console.warn(`⚠️ ${warning}`);
-});
-```
-
-### React Component
-
-```tsx
-import { useQuery } from '@hypersec/query-client/react';
-
-interface MetricRow {
-  timestamp: string;
-  value: number;
-  metric_name: string;
-}
-
-function MetricsChart({ metricName }: { metricName: string }) {
-  const { data, isLoading, error, refetch } = useQuery<MetricRow>(
-    'clickhouse:default',
-    `SELECT timestamp, value, metric_name
-     FROM metrics
-     WHERE metric_name = {name:String}
-       AND timestamp > now() - INTERVAL 1 HOUR
-     ORDER BY timestamp`,
-    { name: metricName },
-    { refetchInterval: 30_000 } // Refresh every 30s
-  );
-
-  if (isLoading) return <Spinner />;
-  if (error) return <ErrorBanner error={error} onRetry={refetch} />;
-
-  return (
-    <LineChart
-      data={data.rows}
-      xKey="timestamp"
-      yKey="value"
-      title={`${metricName} (${data.metadata.queryDurationMs}ms)`}
-    />
-  );
+// Using metadata
+if (page1.metadata.hasMore) {
+  const nextPage = await client.query('analytics/user_activity', {
+    limit: 100,
+    offset: page1.metadata.nextOffset,
+  });
 }
 ```
 
-### Query Editor with EXPLAIN
+### Cursor-Based Pagination
 
-```tsx
-import { useQueryMutation, useQueryWithExplain } from '@hypersec/query-client/react';
-import { useState } from 'react';
+Efficient pagination using opaque cursors. Best for APIs and large datasets.
 
-function QueryEditor() {
-  const [sql, setSql] = useState('');
-  const [showExplain, setShowExplain] = useState(false);
-  const mutation = useQueryMutation();
+```typescript
+// First page
+let result = await client.query('analytics/user_activity', { limit: 100 });
+const allRows = [...result.rows];
 
-  const handleRun = () => {
-    mutation.mutate({
-      datasource: 'clickhouse:default',
-      sql,
-      options: { includeExplain: showExplain, parallel: true },
-    });
-  };
+// Fetch all pages using cursor
+while (result.metadata.hasMore) {
+  result = await client.query('analytics/user_activity', {
+    limit: 100,
+    cursor: result.metadata.nextCursor,
+  });
+  allRows.push(...result.rows);
+}
+```
+
+### Keyset-Based Pagination
+
+High-performance pagination for sorted data. Best for time-series.
+
+```typescript
+// First page (sorted by timestamp descending)
+let result = await client.query('analytics/user_activity', {
+  limit: 100,
+  orderBy: 'timestamp',
+  orderDir: 'desc',
+});
+
+// Next page: use last timestamp as afterKey
+while (result.metadata.hasMore && result.rows.length > 0) {
+  const lastTimestamp = result.rows[result.rows.length - 1].timestamp;
+
+  result = await client.query('analytics/user_activity', {
+    limit: 100,
+    afterKey: lastTimestamp,
+    orderBy: 'timestamp',
+    orderDir: 'desc',
+  });
+}
+```
+
+### React Query Infinite Pagination
+
+```typescript
+import { useInfiniteQuery } from '@hypersec/query-client/react';
+
+function InfiniteEventList() {
+  const {
+    data,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery('analytics/all_events', {
+    params: { date: '2024-01-15' },
+    pageSize: 50,
+  });
 
   return (
     <div>
-      <textarea value={sql} onChange={e => setSql(e.target.value)} />
-
-      <label>
-        <input
-          type="checkbox"
-          checked={showExplain}
-          onChange={e => setShowExplain(e.target.checked)}
-        />
-        Show EXPLAIN
-      </label>
-
-      <button onClick={handleRun} disabled={mutation.isPending}>
-        {mutation.isPending ? 'Running...' : 'Run Query'}
-      </button>
-
-      {mutation.data && (
-        <>
-          <ResultsTable result={mutation.data} />
-          {mutation.data.explain && (
-            <ExplainPanel explain={mutation.data.explain} />
-          )}
-        </>
+      {data.pages.flatMap(page => page.rows).map(event => (
+        <EventCard key={event.id} event={event} />
+      ))}
+      {hasNextPage && (
+        <button onClick={() => fetchNextPage()} disabled={isFetchingNextPage}>
+          {isFetchingNextPage ? 'Loading...' : 'Load More'}
+        </button>
       )}
     </div>
   );
 }
+```
 
-function ExplainPanel({ explain }: { explain: ExplainPlan }) {
-  return (
-    <div className="explain-panel">
-      <h3>Execution Plan</h3>
-      {explain.warnings.length > 0 && (
-        <div className="warnings">
-          {explain.warnings.map((w, i) => (
-            <div key={i} className="warning">⚠️ {w}</div>
-          ))}
-        </div>
-      )}
-      <ol>
-        {explain.steps.map((step, i) => (
-          <li key={i}>
-            <strong>{step.stepType}</strong>: {step.description}
-            {step.estimatedRows && (
-              <span className="estimate">~{step.estimatedRows} rows</span>
-            )}
-          </li>
-        ))}
-      </ol>
-      {explain.rawPlan && (
-        <details>
-          <summary>Raw Plan</summary>
-          <pre>{explain.rawPlan}</pre>
-        </details>
-      )}
-    </div>
-  );
+### Pagination Recommendations
+
+| Use Case | Mode | Reason |
+|----------|------|--------|
+| REST APIs | Cursor | Stable, no duplicates |
+| Time-series | Keyset | High performance |
+| Admin UIs | Offset | Jump to any page |
+| Infinite scroll | Cursor | Memory efficient |
+
+---
+
+## Storage Listing
+
+Query API provides built-in queries for listing files in S3, MinIO, and local filesystems.
+
+### S3 Bucket Listing
+
+```typescript
+const result = await client.query('storage/s3_list', {
+  params: {
+    bucket: 'my-bucket',
+    prefix: 'logs/2024/',
+  },
+  limit: 1000,
+});
+
+// Columns: name, path, type, size, modified, etag, storageClass, contentType
+result.rows.forEach(item => {
+  console.log(`${item.type}: ${item.name} (${item.size} bytes)`);
+});
+```
+
+### MinIO Listing
+
+```typescript
+// Same API as S3
+const result = await client.query('storage/minio_list', {
+  params: {
+    bucket: 'my-bucket',
+    prefix: 'data/',
+  },
+});
+```
+
+### Filesystem Listing
+
+```typescript
+const result = await client.query('storage/file_list', {
+  params: {
+    path: 'reports/2024',
+    recursive: true,
+    pattern: '*.json',
+  },
+});
+
+result.rows.forEach(item => {
+  console.log(`${item.type.padEnd(10)} ${item.size.toString().padStart(10)} ${item.name}`);
+});
+```
+
+### Storage Listing Schema
+
+All storage adapters return consistent Arrow schema:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `name` | `string` | File or directory name |
+| `path` | `string` | Full path within storage |
+| `type` | `string` | `"file"` or `"directory"` |
+| `size` | `int64` | Size in bytes (0 for directories) |
+| `modified` | `timestamp` | Last modified time (UTC) |
+| `etag` | `string` | Object ETag (S3/MinIO) |
+| `storageClass` | `string` | Storage class (S3/MinIO) |
+| `contentType` | `string` | MIME type |
+
+### Storage Pagination with Cursor
+
+```typescript
+// Page through large bucket
+let result = await client.query('storage/s3_list', {
+  params: { bucket: 'my-bucket', prefix: 'logs/' },
+  limit: 1000,
+});
+
+const allFiles: StorageItem[] = [...result.rows];
+
+while (result.metadata.hasMore) {
+  result = await client.query('storage/s3_list', {
+    params: { bucket: 'my-bucket', prefix: 'logs/' },
+    cursor: result.metadata.nextCursor,
+    limit: 1000,
+  });
+  allFiles.push(...result.rows);
 }
+
+console.log(`Total files: ${allFiles.length}`);
+```
+
+---
+
+## Performance Tips
+
+### 1. Use Time Bounds
+
+```typescript
+// GOOD: Limit time range to reduce data scanned
+const result = await client.query('analytics/user_activity', {
+  timeFrom: '2024-01-01T00:00:00Z',
+  timeTo: '2024-01-02T00:00:00Z',
+});
+
+// BAD: No time bounds on time-series table
+const result = await client.query('analytics/user_activity');
+```
+
+### 2. Use Pagination
+
+```typescript
+// For large datasets, paginate instead of loading all at once
+const pageSize = 100;
+let offset = 0;
+let allRows: Row[] = [];
+
+while (true) {
+  const result = await client.query('analytics/all_events', {
+    limit: pageSize,
+    offset,
+  });
+
+  allRows.push(...result.rows);
+
+  if (result.rows.length < pageSize) break;
+  offset += pageSize;
+}
+```
+
+### 3. Streaming Large Results
+
+```typescript
+import { queryStream } from '@hypersec/query-client';
+
+// Stream results in batches
+for await (const batch of queryStream('analytics/all_events', {
+  batchSize: 10_000,
+})) {
+  await processBatch(batch.rows);
+}
+```
+
+### 4. Cache Configuration
+
+```typescript
+// Disable caching for real-time data
+const result = await client.query('hunts/active_threats', {
+  params: { severities: ['critical'] },
+  cache: false,  // Always get fresh data
+});
 ```
 
 ---
 
 ## Bundle Size Optimization
 
-### Use Specific Module Format
-
-```bash
-# Full package (all formats) - ~450KB
-npm install apache-arrow
-
-# ESModules only - ~150KB
-npm install @apache-arrow/esnext-esm
-```
-
 ### Tree Shaking
 
-Import only what you need:
-
 ```typescript
-// GOOD: Named imports (tree-shakeable)
-import { tableFromIPC } from 'apache-arrow';
+// Import only what you need
+import { query } from '@hypersec/query-client/core';
+import { useQuery } from '@hypersec/query-client/react';
 
-// BAD: Namespace import (includes everything)
-import * as Arrow from 'apache-arrow';
+// Avoid default import which includes everything
+// import QueryClient from '@hypersec/query-client';
 ```
 
-### Lazy Loading
+### Arrow ESM Package
 
-Load Arrow only when needed:
-
-```typescript
-async function query(datasource: string, sql: string) {
-  // Arrow loaded on first query
-  const { tableFromIPC } = await import('apache-arrow');
-
-  const response = await fetch('/api/v1/query', { ... });
-  const buffer = await response.arrayBuffer();
-  return tableFromIPC(buffer);
-}
+```bash
+# Smaller bundle with ESM
+npm install @apache-arrow/esnext-esm@^18.0.0
 ```
 
----
-
-## Error Handling
-
 ```typescript
-import { query, QueryError } from '@hypersec/query-client';
-
-try {
-  const result = await query('clickhouse:default', 'SELECT * FROM logs');
-} catch (error) {
-  if (error instanceof QueryError) {
-    switch (error.status) {
-      case 400:
-        console.error('Invalid query:', error.body);
-        break;
-      case 401:
-        // Redirect to login
-        window.location.href = '/login';
-        break;
-      case 504:
-        console.error('Query timed out');
-        break;
-      default:
-        console.error('Query failed:', error.message);
-    }
-  } else {
-    // Network error
-    console.error('Network error:', error);
-  }
-}
+// Configure bundler to resolve Arrow ESM
+// vite.config.ts
+export default {
+  resolve: {
+    alias: {
+      'apache-arrow': '@apache-arrow/esnext-esm',
+    },
+  },
+};
 ```
 
 ---
 
 ## References
 
-- [Apache Arrow JavaScript Documentation](https://arrow.apache.org/docs/js/index.html)
-- [apache-arrow on npm](https://www.npmjs.com/package/apache-arrow) (v18.0.0+)
-- [Arrow.js GitHub Repository](https://github.com/apache/arrow-js)
+- [Apache Arrow JavaScript Documentation](https://arrow.apache.org/docs/js/)
+- [Apache Arrow JS on npm](https://www.npmjs.com/package/apache-arrow)
 - [TanStack React Query](https://tanstack.com/query/latest)
+- [Query Gateway API Specification](./QUERY-API.md)

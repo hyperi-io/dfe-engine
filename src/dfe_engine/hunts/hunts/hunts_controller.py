@@ -55,9 +55,7 @@ class HuntController:
         if target_config_data is None:
             return
 
-        paths = HuntController._resolve_hunt_paths(
-            config_values, target_config_data
-        )
+        paths = HuntController._resolve_hunt_paths(config_values, target_config_data)
         if paths is None:
             return
 
@@ -79,9 +77,7 @@ class HuntController:
         )
 
     @staticmethod
-    def _load_dfe_config(
-        config_path: str, target_file_path: Optional[str]
-    ) -> Optional[dict]:
+    def _load_dfe_config(config_path: str, target_file_path: Optional[str]) -> Optional[dict]:
         """Load DFE config and perform initial validation."""
         try:
             dfe_config = DFEConfigLoader.load_dfe_package(
@@ -190,9 +186,7 @@ class HuntController:
             raise
 
     @staticmethod
-    def _resolve_hunt_paths(
-        config_values: dict, target_config_data: dict
-    ) -> Optional[dict]:
+    def _resolve_hunt_paths(config_values: dict, target_config_data: dict) -> Optional[dict]:
         """Resolve hunt and rules paths, validating required values."""
         hunt_config_path = config_values["hunt_config_path"] or target_config_data.get(
             "hunt_config_path", None
@@ -217,9 +211,7 @@ class HuntController:
         }
 
     @staticmethod
-    def _validate_directories(
-        hunt_config_path: str, hunt_rules_path: str
-    ) -> Optional[tuple]:
+    def _validate_directories(hunt_config_path: str, hunt_rules_path: str) -> Optional[tuple]:
         """Parse and validate hunt and rule directories."""
         hunt_dirs = (
             [dir.strip() for dir in hunt_config_path.split(",")]
