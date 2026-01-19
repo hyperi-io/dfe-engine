@@ -1,0 +1,91 @@
+# Built-in queries for storage directory listing
+# Supports S3, MinIO, and local filesystem
+
+queries:
+  # S3 bucket listing
+  storage/s3_list:
+    datasource: "s3:default"
+    store: "*"
+    sql: ""  # Storage adapters use params directly, not SQL
+    description: "List objects in S3 bucket"
+    parameters:
+      bucket:
+        type: string
+        required: false
+        description: "Bucket name (defaults to target)"
+      prefix:
+        type: string
+        required: false
+        description: "Path prefix to filter"
+        default: ""
+      delimiter:
+        type: string
+        required: false
+        description: "Path delimiter"
+        default: "/"
+    tenant_isolated: true
+    required_roles: []
+    defaults:
+      limit: 1000
+    limits:
+      max_limit: 10000
+    tags: ["storage", "s3"]
+
+  # MinIO listing (same as S3 but explicit)
+  storage/minio_list:
+    datasource: "minio:default"
+    store: "*"
+    sql: ""
+    description: "List objects in MinIO bucket"
+    parameters:
+      bucket:
+        type: string
+        required: false
+        description: "Bucket name (defaults to target)"
+      prefix:
+        type: string
+        required: false
+        description: "Path prefix to filter"
+        default: ""
+      delimiter:
+        type: string
+        required: false
+        description: "Path delimiter"
+        default: "/"
+    tenant_isolated: true
+    required_roles: []
+    defaults:
+      limit: 1000
+    limits:
+      max_limit: 10000
+    tags: ["storage", "minio"]
+
+  # Filesystem listing
+  storage/file_list:
+    datasource: "file:default"
+    store: "*"
+    sql: ""
+    description: "List files in directory"
+    parameters:
+      path:
+        type: string
+        required: false
+        description: "Subdirectory path to list"
+        default: ""
+      recursive:
+        type: boolean
+        required: false
+        description: "List recursively"
+        default: false
+      pattern:
+        type: string
+        required: false
+        description: "Glob pattern filter"
+        default: "*"
+    tenant_isolated: true
+    required_roles: []
+    defaults:
+      limit: 1000
+    limits:
+      max_limit: 10000
+    tags: ["storage", "filesystem"]

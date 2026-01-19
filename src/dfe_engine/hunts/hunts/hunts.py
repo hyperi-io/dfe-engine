@@ -246,9 +246,7 @@ class Hunt:
         file_path = self._get_checkpoint_file_path(customer)
 
         try:
-            successful_queries, failed_queries = self._execute_queries(
-                execution_context, file_path
-            )
+            successful_queries, failed_queries = self._execute_queries(execution_context, file_path)
         except Exception as e:
             base_error_message = (
                 f"Hunt {self.name} failed during hunt execution. See specific log for {self.name} - "
@@ -403,14 +401,18 @@ class Hunt:
                 "execution_time": query_start_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "end_time": query_end_time.strftime("%Y-%m-%d %H:%M:%S"),
                 "previous_successful_checkpoint": last_success_time.strftime("%Y-%m-%d %H:%M:%S"),
-                "query_checkpoint_time": execution_context["scheduled_start_time_w_buffer"].strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
+                "query_checkpoint_time": execution_context[
+                    "scheduled_start_time_w_buffer"
+                ].strftime("%Y-%m-%d %H:%M:%S"),
                 "execution_time_ms": query_execution_time_ms,
                 "file_path": file_path,
             }
 
-            return {"success": True, "checkpoint": checkpoint, "last_success_time": last_success_time}
+            return {
+                "success": True,
+                "checkpoint": checkpoint,
+                "last_success_time": last_success_time,
+            }
 
         except Exception as e:
             error_message = str(e).split("Stack trace")[0]
@@ -433,7 +435,9 @@ class Hunt:
                     f"Cannot convert cron '{self.cron}' to minutes - likely a variable months value"
                 )
             look_back_in_minutes = timedelta(minutes=self.initial_checkpoint_lookback_minutes)
-            last_success_time = execution_context["scheduled_start_time_w_buffer"] - look_back_in_minutes
+            last_success_time = (
+                execution_context["scheduled_start_time_w_buffer"] - look_back_in_minutes
+            )
             last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
             logger.warning(
                 f"No previous successful run for {self.name}. Initial run will be run using the cron job candence generated last success time '{last_success_time_str}'."
@@ -455,6 +459,4 @@ class Hunt:
                 ch_client, successful_checkpoints
             )
         else:
-            self.checkpoint_manager.create_batch_checkpoint_file(
-                successful_checkpoints, file_path
-            )
+            self.checkpoint_manager.create_batch_checkpoint_file(successful_checkpoints, file_path)
