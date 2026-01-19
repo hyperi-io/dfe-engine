@@ -30,7 +30,7 @@ dependencies = [
     # HTTP clients
     "httpx>=0.28.1",
     "requests>=2.32.5",
-    "urllib3>=2.6.0",
+    "urllib3>=2.6.3",
     # Templating
     "Jinja2>=3.1.6",
     # Sigma rules
@@ -66,7 +66,8 @@ dev = [
     "pytest-xdist>=3.5.0",
     "coverage>=7.6.0",
     "defusedxml>=0.7.1",
-    "moto[s3]>=5.0.7",
+    "moto[s3]>=5.1.20",
+    "werkzeug>=3.1.5",  # Explicit constraint to fix CVE in moto's transitive dep
     "ruff>=0.8.0",
     "Faker>=33.0.0",
     "types-requests>=2.32.0",
@@ -80,13 +81,19 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term --cov-report=xml:cov.xml -m 'not integration'"
+addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration'"
 testpaths = ["tests"]
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse/OpenSearch)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "except Exception as e:",  # Exclude generic exception handlers
 ]
 
 [tool.ruff]

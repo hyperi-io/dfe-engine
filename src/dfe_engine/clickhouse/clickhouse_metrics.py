@@ -1,3 +1,4 @@
+from pydantic import StrictStr
 from typing import Dict
 
 from hs_pylib.logger import logger
@@ -12,7 +13,7 @@ class ClickHouseMetrics:
         """Initialize with target configuration data."""
         self.ch_manager = ClickHouseManager.get_instance(target_config_data)
 
-    def get_hunt_metrics(self, hunt_name: str) -> Dict:
+    def get_hunt_metrics(self, hunt_name: StrictStr) -> Dict:
         """
         Get metrics for a specific hunt from ClickHouse.
 
@@ -64,12 +65,8 @@ class ClickHouseMetrics:
 
             return {
                 "total_executions": total_executions[0][0] if total_executions else 0,
-                "last_execution_time": last_execution[0][0].strftime("%Y-%m-%d %H:%M:%S")
-                if last_execution and last_execution[0][0]
-                else None,
-                "average_execution_time": float(avg_execution_time[0][0])
-                if avg_execution_time and avg_execution_time[0][0]
-                else 0.0,
+                "last_execution_time": last_execution[0][0].strftime("%Y-%m-%d %H:%M:%S") if last_execution and last_execution[0][0] else None,
+                "average_execution_time": float(avg_execution_time[0][0]) if avg_execution_time and avg_execution_time[0][0] else 0.0,
                 "total_matches": total_matches[0][0] if total_matches else 0,
             }
 
