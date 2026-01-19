@@ -140,7 +140,7 @@ class QueryRegistry:
 
             self._jinja_env = Environment(
                 undefined=StrictUndefined,
-                autoescape=False,  # SQL, not HTML
+                autoescape=False,  # SQL templates, not HTML - see sql_* filters below  # noqa: S701
             )
             # Register custom SQL filters
             self._jinja_env.filters["sql_string"] = self._filter_sql_string
