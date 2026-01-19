@@ -1,6 +1,6 @@
 import pytest
 
-from dfe_engine.targets.custom_exceptions import *
+from dfe_engine.targets.custom_exceptions import TargetsFileNotFoundError
 from dfe_engine.targets.targets import Targets
 from pathlib import Path
 
