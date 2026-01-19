@@ -9,7 +9,7 @@ readme = "README.md"
 
 dependencies = [
     # hs-pylib for logging and common utilities
-    "hs-pylib>=2.14.3",
+    "hs-pylib>=2.14.5",
     # Data processing
     "pyarrow>=22.0.0",
     "pandas>=2.2.3",
