@@ -13,7 +13,7 @@ Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 """
 
 from threading import Lock
-from typing import Optional
+from typing import Annotated, Optional
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client
@@ -21,12 +21,6 @@ from clickhouse_connect.driver import httputil
 from hs_pylib.logger import logger
 
 from ..settings import get_settings
-
-
-class ConfigurationError(Exception):
-    """Custom exception for configuration errors."""
-
-    pass
 
 
 class ClickHouseClientWrapper:
@@ -58,9 +52,9 @@ class ClickHouseClientWrapper:
         if ";" in query:
             # Split and execute each statement
             statements = [s.strip() for s in query.split(";") if s.strip()]
-            result = None
+            result = []
             for stmt in statements:
-                result = self._execute_single(stmt, *args, **kwargs)
+                result += self._execute_single(stmt, *args, **kwargs)
             return result
 
         return self._execute_single(query, *args, **kwargs)
@@ -130,18 +124,6 @@ class ClickHouseClientWrapper:
         # Use clickhouse-connect's insert() method
         return self._client.insert(table_name, data, column_names=column_names)
 
-    def __getattr__(self, name):
-        """Delegate all other attributes to the underlying client."""
-        return getattr(self._client, name)
-
-    def __enter__(self):
-        """Support context manager protocol."""
-        return self
-
-    def __exit__(self, exc_type, exc_val, exc_tb):
-        """Support context manager protocol."""
-        return False
-
 
 class ClickHouseManager:
     """
@@ -153,6 +135,14 @@ class ClickHouseManager:
 
     _instance = None  # Singleton instance
 
+    def __init__(self, target_config_data: Optional[dict] = None):
+        self.lock = Lock()
+        self.target_config_data = target_config_data or {}
+        settings = get_settings()
+        self.connections_max = settings.clickhouse.connections_max
+        self._client: Optional[Client] = None
+        self._pool_manager = None
+
     @classmethod
     def get_instance(cls, target_config_data: Optional[dict] = None):
         if cls._instance is None:
@@ -163,16 +153,8 @@ class ClickHouseManager:
     def reset_instance(cls):
         """Reset the singleton instance (useful for testing)."""
         if cls._instance is not None:
-            cls._instance.cleanup()
+            cls._instance._cleanup()
             cls._instance = None
-
-    def __init__(self, target_config_data: Optional[dict] = None):
-        self.lock = Lock()
-        self.target_config_data = target_config_data or {}
-        settings = get_settings()
-        self.connections_max = settings.clickhouse.connections_max
-        self._client: Optional[Client] = None
-        self._pool_manager = None
 
     def get_clickhouse_client(self) -> ClickHouseClientWrapper:
         """Get a ClickHouse client with connection pooling.
@@ -184,9 +166,6 @@ class ClickHouseManager:
                 self._initialize_client()
             return ClickHouseClientWrapper(self._client)
 
-        except ConfigurationError as ce:
-            logger.error(f"Configuration error: {ce}", exc_info=True, stack_info=True)
-            raise
         except Exception as e:
             logger.error(f"An unexpected error occurred during client acquisition: {e}")
             raise
@@ -257,7 +236,7 @@ class ClickHouseManager:
                 )
             raise
 
-    def cleanup(self):
+    def _cleanup(self):
         """Clean up the ClickHouse client and pool."""
         try:
             if self._client is not None:
@@ -271,13 +250,13 @@ class ClickHouseManager:
         except Exception as e:
             logger.error(f"Failed to cleanup ClickHouse client: {e}")
 
-    def teardown_test_databases(self, test_databases):
+    def teardown_test_databases(self, test_databases: Annotated[list[str], "min_length = 1"]):
         """Drop test databases."""
         client = self.get_clickhouse_client()
         try:
             for db in test_databases:
                 logger.info(f"Dropping database {db}")
-                client.command(f"DROP DATABASE IF EXISTS {db}")
+                client.execute(f"DROP DATABASE IF EXISTS {db}")
             logger.info("All test databases dropped successfully.")
         except Exception as e:
             logger.error(f"Failed to drop test databases: {e}")
