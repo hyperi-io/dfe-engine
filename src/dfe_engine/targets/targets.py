@@ -101,6 +101,24 @@ class Targets:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
         return (target_name in targets_data["targets"])
+
+
+    def target_has_key(
+        self,
+        target_name: str,
+        target_key: str
+    ) -> bool:
+        """
+        Finds if the specified target_name has key target_key in the targets file.
+        """
+        logger.debug(f"Finding if '{target_name}' contains key '{target_key}' in '{self.targets_file_path}'...")
+        try:
+            with open(self.targets_file_path, "r") as file:
+                targets_data = yaml.safe_load(file) or {}
+        except FileNotFoundError:
+            raise TargetsFileNotFoundError(self.targets_file_path)
+        
+        return (target_key in targets_data["targets"][target_name])
     
 
     def target_is_default(
@@ -119,7 +137,28 @@ class Targets:
         
         return (target_name == targets_data["default_target"])
 
+
+    def target_set_default(
+        self,
+        target_name: str
+    ) -> Path:
+        """
+        Sets the specified target_name as the default target in the targets file.
+        """
+        logger.debug(f"Setting '{target_name}' as the default target in '{self.targets_file_path}'...")
+        try:
+            with open(self.targets_file_path, "r") as file:
+                targets_data = yaml.safe_load(file) or {}
+            targets_data["default_target"] = target_name
+
+            with open(self.targets_file_path, "w") as file:
+                yaml.dump(targets_data, file)
+        except FileNotFoundError:
+            raise TargetsFileNotFoundError(self.targets_file_path)
+        
+        return self.targets_file_path
     
+
     def target_add(
         self,
         target_name: str,
@@ -134,17 +173,45 @@ class Targets:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
             targets_data["targets"][target_name] = target_data
-
-            if (set_to_default or targets_data["default_target"] == ""):
-                logger.debug(f"Setting '{target_name}' to the default target in '{self.targets_file_path}'...")
-                targets_data["default_target"] = target_name
             
             with open(self.targets_file_path, "w") as file:
                 yaml.dump(targets_data, file)
-            
-            return self.targets_file_path
+
+            if (set_to_default or targets_data["default_target"] == ""):
+                self.target_set_default(target_name)
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
+            
+        return self.targets_file_path
+    
+    
+    def target_update(
+        self,
+        target_name: str,
+        target_key_to_update: str,
+        target_value_to_update: str,
+        set_to_default: bool = False
+    ) -> Path:
+        """
+        Updates the specified target_key_to_update for the target_name in the targets file with the specified target_value_to_update.
+        """
+        logger.debug(f"Updating key '{target_key_to_update}' for target '{target_name}' in '{self.targets_file_path}'...")
+        try:
+            with open(self.targets_file_path, "r") as file:
+                targets_data = yaml.safe_load(file) or {}
+            targets_data["targets"][target_name][target_key_to_update] = target_value_to_update
+        
+            with open(self.targets_file_path, "w") as file:
+                yaml.dump(targets_data, file)
+
+            if (set_to_default):
+                self.target_set_default(target_name)
+        
+        except FileNotFoundError:
+            raise TargetsFileNotFoundError(self.targets_file_path)
+            
+        return self.targets_file_path
     
     
     def target_delete(
@@ -162,7 +229,8 @@ class Targets:
             
             with open(self.targets_file_path, "w") as file:
                 yaml.dump(targets_data, file)
-            
-            return self.targets_file_path
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
+            
+        return self.targets_file_path
