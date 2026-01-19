@@ -1,3 +1,10 @@
+## [1.3.6](https://github.com/hypersec-io/dfe-engine/compare/v1.3.5...v1.3.6) (2026-01-19)
+
+
+### Bug Fixes
+
+* Update uv lock ([63e2035](https://github.com/hypersec-io/dfe-engine/commit/63e2035d131cf189f78bc1e4764f898c11b88cac))
+
 ## [1.3.5](https://github.com/hypersec-io/dfe-engine/compare/v1.3.4...v1.3.5) (2026-01-19)
 
 
