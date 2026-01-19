@@ -5,7 +5,7 @@ from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import *
+from .custom_exceptions import TargetsFileNotFoundError
 
 class Targets:
 
