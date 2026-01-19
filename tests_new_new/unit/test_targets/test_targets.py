@@ -2,7 +2,6 @@ import pytest
 
 from dfe_engine.targets.custom_exceptions import TargetsFileNotFoundError
 from dfe_engine.targets.targets import Targets
-from pathlib import Path
 
 @pytest.fixture
 def init_targets_obj(tmp_path):
@@ -80,6 +79,18 @@ def test_target_add_with_existing(init_targets_obj, init_targets_file_with_two_t
         target_name = init_targets_file_with_two_targets["target_name_1"]
     ))
 
+def test_target_set_default(init_targets_obj, init_targets_file_with_two_targets):
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_two_targets["target_name_1"]
+    ))
+
+    init_targets_obj.target_set_default(
+        target_name = init_targets_file_with_two_targets["target_name_2"]
+    )
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_two_targets["target_name_2"]
+    ))
+
 def test_target_add_with_existing_using_set_default(init_targets_obj, init_targets_file_with_target):
     new_target_name = "test_target_2"
     new_target_data = {
@@ -98,6 +109,38 @@ def test_target_add_with_existing_using_set_default(init_targets_obj, init_targe
         target_name = new_target_name
     ))
 
+def test_target_update(init_targets_obj, init_targets_file_with_target):
+    target_key_to_update = "test_key_1"
+    target_value_to_update = "updated_value"
+
+    init_targets_obj.target_update(
+        target_name = init_targets_file_with_target,
+        target_key_to_update = target_key_to_update,
+        target_value_to_update = target_value_to_update
+    )
+
+    assert(init_targets_obj.target_exists(
+        target_name = init_targets_file_with_target
+    ))
+
+def test_target_update_using_set_default(init_targets_obj, init_targets_file_with_two_targets):
+    target_key_to_update = "test_key_1"
+    target_value_to_update = "updated_value"
+
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_two_targets["target_name_1"]
+    ))
+
+    init_targets_obj.target_update(
+        target_name = init_targets_file_with_two_targets["target_name_2"],
+        target_key_to_update = target_key_to_update,
+        target_value_to_update = target_value_to_update,
+        set_to_default = True
+    )
+    assert(init_targets_obj.target_is_default(
+        target_name = init_targets_file_with_two_targets["target_name_2"]
+    ))
+
 def test_target_delete(init_targets_obj, init_targets_file_with_target):
     assert(init_targets_obj.target_exists(
         target_name = init_targets_file_with_target
@@ -109,6 +152,14 @@ def test_target_delete(init_targets_obj, init_targets_file_with_target):
     init_targets_obj.target_delete(init_targets_file_with_target)
     assert(not init_targets_obj.target_exists(
         target_name = init_targets_file_with_target
+    ))
+
+def test_target_has_key(init_targets_obj, init_targets_file_with_target):
+    target_key_to_find = "test_key_1"
+
+    assert(init_targets_obj.target_has_key(
+        target_name = init_targets_file_with_target,
+        target_key = target_key_to_find
     ))
 
 def test_targets_list(init_targets_obj, init_targets_file_with_two_targets):
@@ -151,12 +202,48 @@ def test_target_add_missing_file(init_targets_obj):
     
     assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
 
+def test_target_set_default_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_set_default(
+            target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_update_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+    target_key_to_update = "test_key_1"
+    target_value_to_update = "updated_value"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_update(
+            target_name = target_name,
+            target_key_to_update = target_key_to_update,
+            target_value_to_update = target_value_to_update
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
 def test_target_delete_missing_file(init_targets_obj):
     target_name = "test_target_1"
 
     with pytest.raises(TargetsFileNotFoundError) as exc_info:
         init_targets_obj.target_delete(
             target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_has_key_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+    target_key_to_find = "test_key_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_has_key(
+            target_name = target_name,
+            target_key = target_key_to_find
         )
     
     assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
