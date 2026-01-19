@@ -15,7 +15,7 @@ class Targets:
         targets_file_name: Optional[str] = "targets.yaml"
     ):
         self.targets_file_dir = config.init_config_directory(
-            config_dir = targets_file_dir,
+            config_dir = Path(targets_file_dir).expanduser(),
             create_targets = False,
             create_env = False
         )
