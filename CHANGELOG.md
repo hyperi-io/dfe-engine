@@ -1,3 +1,10 @@
+## [1.3.3](https://github.com/hypersec-io/dfe-engine/compare/v1.3.2...v1.3.3) (2026-01-19)
+
+
+### Bug Fixes
+
+* Using hs-pyblib 2.14.3 ([ec1d74e](https://github.com/hypersec-io/dfe-engine/commit/ec1d74ea5345c611f00b51114913e246d36daa00))
+
 # [1.3.0](https://github.com/hypersec-io/dfe-engine/compare/v1.2.0...v1.3.0) (2026-01-16)
 
 
