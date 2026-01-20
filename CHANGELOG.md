@@ -1,3 +1,10 @@
+## [1.3.8](https://github.com/hypersec-io/dfe-engine/compare/v1.3.7...v1.3.8) (2026-01-20)
+
+
+### Bug Fixes
+
+* New exception ([ec04f8b](https://github.com/hypersec-io/dfe-engine/commit/ec04f8b1fca595597d07186d30055b35d97e71a8))
+
 ## [1.3.7](https://github.com/hypersec-io/dfe-engine/compare/v1.3.6...v1.3.7) (2026-01-20)
 
 
