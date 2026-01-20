@@ -1,3 +1,10 @@
+## [1.3.13](https://github.com/hypersec-io/dfe-engine/compare/v1.3.12...v1.3.13) (2026-01-20)
+
+
+### Bug Fixes
+
+* New concept of target warning that is not detrimental to execution ([a431181](https://github.com/hypersec-io/dfe-engine/commit/a43118125145146692574f029a189b5700a17805))
+
 ## [1.3.12](https://github.com/hypersec-io/dfe-engine/compare/v1.3.11...v1.3.12) (2026-01-20)
 
 
