@@ -1,3 +1,10 @@
+## [1.3.9](https://github.com/hypersec-io/dfe-engine/compare/v1.3.8...v1.3.9) (2026-01-20)
+
+
+### Bug Fixes
+
+* New target get data function ([c2b2651](https://github.com/hypersec-io/dfe-engine/commit/c2b2651243efaca44958d287ab3e60f199d23cec))
+
 ## [1.3.8](https://github.com/hypersec-io/dfe-engine/compare/v1.3.7...v1.3.8) (2026-01-20)
 
 
