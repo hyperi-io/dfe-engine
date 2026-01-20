@@ -1,3 +1,10 @@
+## [1.3.10](https://github.com/hypersec-io/dfe-engine/compare/v1.3.9...v1.3.10) (2026-01-20)
+
+
+### Bug Fixes
+
+* Allow custom messages in targets errors ([0b385ad](https://github.com/hypersec-io/dfe-engine/commit/0b385ad13da07bdcebc274d55dce2153b03c9a58))
+
 ## [1.3.9](https://github.com/hypersec-io/dfe-engine/compare/v1.3.8...v1.3.9) (2026-01-20)
 
 
