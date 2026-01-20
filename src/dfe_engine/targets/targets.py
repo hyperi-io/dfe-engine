@@ -5,7 +5,7 @@ from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import TargetsFileNotFoundError
+from .custom_exceptions import TargetNotFoundError, TargetsFileNotFoundError
 
 class Targets:
 
@@ -252,3 +252,27 @@ class Targets:
             raise TargetsFileNotFoundError(self.targets_file_path)
             
         return self.targets_file_path
+
+
+    def get_active_target(
+        self,
+        target_name: str = None
+    ) -> dict:
+        """
+        Provides the active target data based on hierarchy.
+        """
+        logger.debug(f"Identifying target to use from '{self.targets_file_path}'...")
+        try:
+            target_data = config.get_target_config(
+                target = target_name,
+                targets_file_path = self.targets_file_path
+            )
+            logger.debug(f"Using target '{target_data["target_name"]}'.")
+
+            for key, value in target_data.items():
+                logger.debug(f"{key}: {value}")
+        
+        except ValueError:
+            raise TargetNotFoundError
+
+        return target_data
