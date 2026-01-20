@@ -5,6 +5,7 @@ __all__ = [
     'TargetExistsError',
     'TargetKeyNotFoundError',
     'TargetNotFoundError',
+    'TargetNoUpdateError',
     'TargetsFileExistsError',
     'TargetsFileNotFoundError'
 ]
@@ -33,6 +34,9 @@ class TargetNotFoundError(TargetsError):
     def __init__(self, targets_file_path: str, target_name: str, custom_message: str = ""):
         super().__init__(f"The target '{target_name}' could not be found in '{targets_file_path}'.", custom_message)
 
+class TargetNoUpdateError(TargetsError):
+    def __init__(self, targets_file_path: str, target_name: str, target_key: str, target_value: str, custom_message: str = ""):
+        super().__init__(f"The target '{target_name}' already has '{target_key}' of '{target_value}' in '{targets_file_path}'.", custom_message)
 class TargetsFileExistsError(TargetsError):
     def __init__(self, targets_file_path: str, custom_message: str = ""):
         super().__init__(f"The target file '{targets_file_path}' already exists.", custom_message)
