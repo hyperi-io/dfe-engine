@@ -1,3 +1,10 @@
+## [1.3.14](https://github.com/hypersec-io/dfe-engine/compare/v1.3.13...v1.3.14) (2026-01-20)
+
+
+### Bug Fixes
+
+* Deprecating older code and updates to include new config module ([0667a41](https://github.com/hypersec-io/dfe-engine/commit/0667a4137fbfe436eb1435c2a946362e4c9385fb))
+
 ## [1.3.13](https://github.com/hypersec-io/dfe-engine/compare/v1.3.12...v1.3.13) (2026-01-20)
 
 
