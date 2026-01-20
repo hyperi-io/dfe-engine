@@ -3,6 +3,7 @@ __all__ = [
     'TargetAlreadyDefaultError',
     'TargetDeleteDefaultError',
     'TargetExistsError',
+    'TargetKeyNotFoundError',
     'TargetNotFoundError',
     'TargetsFileExistsError',
     'TargetsFileNotFoundError'
@@ -23,6 +24,10 @@ class TargetDeleteDefaultError(TargetsError):
 class TargetExistsError(TargetsError):
     def __init__(self, targets_file_path: str, target_name: str, custom_message: str = ""):
         super().__init__(f"The target '{target_name}' already exists in '{targets_file_path}'.", custom_message)
+
+class TargetKeyNotFoundError(TargetsError):
+    def __init__(self, targets_file_path: str, target_name: str, target_key: str, custom_message: str = ""):
+        super().__init__(f"The target '{target_name}' does not contain key '{target_key}' in '{targets_file_path}'.", custom_message)
 
 class TargetNotFoundError(TargetsError):
     def __init__(self, targets_file_path: str, target_name: str, custom_message: str = ""):
