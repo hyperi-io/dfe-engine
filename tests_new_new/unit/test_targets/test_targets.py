@@ -79,6 +79,15 @@ def test_target_add_with_existing(init_targets_obj, init_targets_file_with_two_t
         target_name = init_targets_file_with_two_targets["target_name_1"]
     ))
 
+def test_target_get_data(init_targets_obj, init_targets_file_with_target):
+    expected_target_data = {
+        "test_key_1": "test_value_1"
+    }
+
+    assert(init_targets_obj.target_get_data(
+        target_name = init_targets_file_with_target
+    ) == expected_target_data)
+
 def test_target_set_default(init_targets_obj, init_targets_file_with_two_targets):
     assert(init_targets_obj.target_is_default(
         target_name = init_targets_file_with_two_targets["target_name_1"]
@@ -207,6 +216,16 @@ def test_target_set_default_missing_file(init_targets_obj):
 
     with pytest.raises(TargetsFileNotFoundError) as exc_info:
         init_targets_obj.target_set_default(
+            target_name = target_name
+        )
+    
+    assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found. Please initialise this using `dfecli targets init`.")
+
+def test_target_get_data_missing_file(init_targets_obj):
+    target_name = "test_target_1"
+
+    with pytest.raises(TargetsFileNotFoundError) as exc_info:
+        init_targets_obj.target_get_data(
             target_name = target_name
         )
     
