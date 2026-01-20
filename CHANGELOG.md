@@ -1,3 +1,10 @@
+## [1.3.11](https://github.com/hypersec-io/dfe-engine/compare/v1.3.10...v1.3.11) (2026-01-20)
+
+
+### Bug Fixes
+
+* New exception for target keys ([43d56c8](https://github.com/hypersec-io/dfe-engine/commit/43d56c8c8dfb906267761cfa388138361456bb38))
+
 ## [1.3.10](https://github.com/hypersec-io/dfe-engine/compare/v1.3.9...v1.3.10) (2026-01-20)
 
 
