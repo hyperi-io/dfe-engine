@@ -136,6 +136,24 @@ class Targets:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
         return (target_name == targets_data["default_target"])
+    
+
+    def target_get_data(
+        self,
+        target_name: str
+    ) -> dict:
+        """
+        Provides the specified target data from the targets file.
+        """
+        logger.debug(f"Getting data for target '{target_name}' in '{self.targets_file_path}'...")
+        try:
+            with open(self.targets_file_path, "r") as file:
+                targets_data = yaml.safe_load(file) or {}
+            target_data = targets_data["targets"][target_name]
+        except FileNotFoundError:
+            raise TargetsFileNotFoundError(self.targets_file_path)
+        
+        return target_data
 
 
     def target_set_default(
