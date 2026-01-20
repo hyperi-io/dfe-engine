@@ -1,3 +1,10 @@
+## [1.3.12](https://github.com/hypersec-io/dfe-engine/compare/v1.3.11...v1.3.12) (2026-01-20)
+
+
+### Bug Fixes
+
+* New error for target not needing an update ([8986ea6](https://github.com/hypersec-io/dfe-engine/commit/8986ea6f35bdaeb512384f17c21a1531012595b6))
+
 ## [1.3.11](https://github.com/hypersec-io/dfe-engine/compare/v1.3.10...v1.3.11) (2026-01-20)
 
 
