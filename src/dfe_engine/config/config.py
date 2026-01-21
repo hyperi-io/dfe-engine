@@ -18,7 +18,7 @@ class Config:
             config_subdir_name = Path(config_file_dir).expanduser().name,
             create_targets = False,
             create_env = False
-        )
+        ) / Path(config_file_dir).expanduser().name
         self.config_file_name = config_file_name
         self.config_file_path = self.config_file_dir / self.config_file_name
 
