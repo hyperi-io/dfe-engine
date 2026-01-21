@@ -1,3 +1,10 @@
+## [1.3.17](https://github.com/hypersec-io/dfe-engine/compare/v1.3.16...v1.3.17) (2026-01-21)
+
+
+### Bug Fixes
+
+* Move to just raise config keyerror ([68b2031](https://github.com/hypersec-io/dfe-engine/commit/68b2031ff6cf4f9ee2eb2eba757775e6a093c137))
+
 ## [1.3.16](https://github.com/hypersec-io/dfe-engine/compare/v1.3.15...v1.3.16) (2026-01-21)
 
 
