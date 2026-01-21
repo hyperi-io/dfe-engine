@@ -14,7 +14,7 @@ class Config:
         config_file_name: Optional[str] = "config.yaml"
     ):
         self.config_file_dir = config.init_config_directory(
-            config_dir = Path(config_file_dir).expanduser(),
+            config_dir = Path(config_file_dir).parent.expanduser(),
             create_targets = False,
             create_env = False
         )
@@ -62,5 +62,8 @@ class Config:
                 value = value[key]
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
+        except KeyError:
+            logger.debug(f"Key '{'.'.join(key_path)}' not found in config file '{self.config_file_path}'.")
+            return None
 
         return value
