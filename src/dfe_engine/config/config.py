@@ -1,8 +1,11 @@
+import yaml
+
 from hs_pylib import config, logger
 from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
+from .custom_exceptions import ConfigFileNotFoundError
 class Config:
 
     def __init__(
@@ -27,3 +30,37 @@ class Config:
         """
         logger.debug(f"Checking existence of config file '{self.config_file_path}'...")
         return self.config_file_path.exists()
+
+    
+    def config_file_create(
+        self
+    ) -> Path:
+        """
+        Creates the config file.
+        """
+        logger.debug(f"Creating config file '{self.config_file_path}'...")
+        initial_file_data = {}
+        with open(self.config_file_path, "w") as file:
+            yaml.dump(initial_file_data, file)
+        return self.config_file_path
+    
+
+    def config_get_key(
+        self,
+        key_path: list[str]
+    ) -> str:
+        """
+        Provides the specified key path from the config file.
+        """
+        logger.debug(f"Getting key '{'.'.join(key_path)}' from config file '{self.config_file_path}'...")
+        try:
+            with open(self.config_file_path, "r") as file:
+                config_data = yaml.safe_load(file) or {}
+            
+            value = config_data
+            for key in key_path:
+                value = value[key]
+        except FileNotFoundError:
+            raise ConfigFileNotFoundError(self.config_file_path)
+
+        return value
