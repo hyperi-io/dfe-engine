@@ -1,3 +1,10 @@
+## [1.3.18](https://github.com/hypersec-io/dfe-engine/compare/v1.3.17...v1.3.18) (2026-01-21)
+
+
+### Bug Fixes
+
+* Use config_subdir_name to string together config dir ([7b1944f](https://github.com/hypersec-io/dfe-engine/commit/7b1944f8c5eb2f404f7b0c8ac9a3a2173449f417))
+
 ## [1.3.17](https://github.com/hypersec-io/dfe-engine/compare/v1.3.16...v1.3.17) (2026-01-21)
 
 
