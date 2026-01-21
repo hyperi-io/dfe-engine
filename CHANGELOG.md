@@ -1,3 +1,10 @@
+## [1.3.16](https://github.com/hypersec-io/dfe-engine/compare/v1.3.15...v1.3.16) (2026-01-21)
+
+
+### Bug Fixes
+
+* Preventing config from creating config directory ([897c2de](https://github.com/hypersec-io/dfe-engine/commit/897c2dee7a7f8b53f7abcaf887dc02341de7595b))
+
 ## [1.3.15](https://github.com/hypersec-io/dfe-engine/compare/v1.3.14...v1.3.15) (2026-01-21)
 
 
