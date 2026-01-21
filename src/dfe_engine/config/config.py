@@ -63,7 +63,6 @@ class Config:
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
         except KeyError:
-            logger.debug(f"Key '{'.'.join(key_path)}' not found in config file '{self.config_file_path}'.")
-            return None
+            raise
 
         return value
