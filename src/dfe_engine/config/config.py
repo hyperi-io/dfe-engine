@@ -14,7 +14,8 @@ class Config:
         config_file_name: Optional[str] = "config.yaml"
     ):
         self.config_file_dir = config.init_config_directory(
-            config_dir = Path(config_file_dir).parent.expanduser(),
+            config_dir = Path(config_file_dir).expanduser().parent,
+            config_subdir_name = Path(config_file_dir).expanduser().name,
             create_targets = False,
             create_env = False
         )
