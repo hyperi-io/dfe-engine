@@ -1,3 +1,10 @@
+## [1.3.15](https://github.com/hypersec-io/dfe-engine/compare/v1.3.14...v1.3.15) (2026-01-21)
+
+
+### Bug Fixes
+
+* Adding config key extract ([8f7f210](https://github.com/hypersec-io/dfe-engine/commit/8f7f210338ff0c4e0634a4b46b0efd395ce95f9f))
+
 ## [1.3.14](https://github.com/hypersec-io/dfe-engine/compare/v1.3.13...v1.3.14) (2026-01-20)
 
 
