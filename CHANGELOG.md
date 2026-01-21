@@ -1,3 +1,10 @@
+## [1.3.19](https://github.com/hypersec-io/dfe-engine/compare/v1.3.18...v1.3.19) (2026-01-21)
+
+
+### Bug Fixes
+
+* Including subdir in Config object ([91cefea](https://github.com/hypersec-io/dfe-engine/commit/91cefea1905102a246aff9ce6b860f74264de68a))
+
 ## [1.3.18](https://github.com/hypersec-io/dfe-engine/compare/v1.3.17...v1.3.18) (2026-01-21)
 
 
