@@ -2,15 +2,14 @@ import pytest
 
 from dfe_engine.targets.custom_exceptions import TargetsFileNotFoundError
 from dfe_engine.targets.targets import Targets
+from pathlib import Path
 
 @pytest.fixture
 def init_targets_obj(tmp_path):
-    targets_file_dir = tmp_path
-    targets_file_name = "targets.yaml"
+    targets_file_path = Path(tmp_path / "targets.yaml")
 
     yield Targets(
-        targets_file_dir = targets_file_dir,
-        targets_file_name = targets_file_name
+        targets_file_path = targets_file_path
     )
 
 @pytest.fixture
