@@ -1,11 +1,12 @@
 import yaml
 
+from deepdiff import DeepDiff
 from hs_pylib import config, logger
 from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import ConfigFileNotFoundError
+from .custom_exceptions import ConfigFileNotFoundError, ConfigMissingKeyError
 class Config:
 
     def __init__(
@@ -44,27 +45,55 @@ class Config:
         initial_file_data = {}
         with open(self.config_file_path, "w") as file:
             yaml.dump(initial_file_data, file)
+        
         return self.config_file_path
     
 
     def config_get_key(
         self,
-        key_path: list[str]
+        key: str
     ) -> str:
         """
         Provides the specified key path from the config file.
         """
-        logger.debug(f"Getting key '{'.'.join(key_path)}' from config file '{self.config_file_path}'...")
+        logger.debug(f"Getting key '{key}' from config file '{self.config_file_path}'...")
         try:
             with open(self.config_file_path, "r") as file:
                 config_data = yaml.safe_load(file) or {}
             
-            value = config_data
-            for key in key_path:
-                value = value[key]
+            if ("." in key):
+                key_value = config_data
+                key_path = key.split(".")
+                for key_parent in key_path:
+                    key_value = key_value[key_parent]
+            else:
+                key_value = config_data[key]
+        
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
+        
         except KeyError:
-            raise
+            raise ConfigMissingKeyError(self.config_file_path, key)
 
-        return value
+        return key_value
+
+
+    def config_update(
+        self,
+        new_data: dict
+    ) -> dict:
+        """
+        Updates the config file with the specified new_data.
+        """
+        logger.debug(f"Updating config file '{self.config_file_path}' with new data...")
+        try:
+            with open(self.config_file_path, "r") as file:
+                old_config_data = yaml.safe_load(file) or {}
+            
+            with open(self.config_file_path, "w") as file:
+                yaml.dump(new_data, file)
+
+        except FileNotFoundError:
+            raise ConfigFileNotFoundError(self.config_file_path)
+            
+        return DeepDiff(old_config_data, new_data, ignore_order = True)
