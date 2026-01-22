@@ -10,16 +10,17 @@ class Config:
 
     def __init__(
         self,
-        config_file_dir: Optional[str] = None,
-        config_file_name: Optional[str] = "config.yaml"
+        config_file_path: Optional[str] = None
     ):
+        subdir_name = Path(config_file_path).expanduser().parent.name
         self.config_file_dir = config.init_config_directory(
-            config_dir = Path(config_file_dir).expanduser().parent,
-            config_subdir_name = Path(config_file_dir).expanduser().name,
+            config_dir = Path(config_file_path).expanduser().parent.parent,
+            create_subdir = True,
+            config_subdir_name = subdir_name,
             create_targets = False,
             create_env = False
-        ) / Path(config_file_dir).expanduser().name
-        self.config_file_name = config_file_name
+        ) / subdir_name
+        self.config_file_name = Path(config_file_path).expanduser().name
         self.config_file_path = self.config_file_dir / self.config_file_name
 
     
