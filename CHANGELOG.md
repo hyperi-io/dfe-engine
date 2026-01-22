@@ -1,3 +1,10 @@
+## [1.3.20](https://github.com/hypersec-io/dfe-engine/compare/v1.3.19...v1.3.20) (2026-01-22)
+
+
+### Bug Fixes
+
+* Move to only allow path spec ([ac5ff68](https://github.com/hypersec-io/dfe-engine/commit/ac5ff68286a7f4a38aa29d977c68c8e72f5da607))
+
 ## [1.3.19](https://github.com/hypersec-io/dfe-engine/compare/v1.3.18...v1.3.19) (2026-01-21)
 
 
