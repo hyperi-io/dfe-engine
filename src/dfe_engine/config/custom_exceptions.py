@@ -23,4 +23,11 @@ class ConfigFileNotFoundError(ConfigError):
     Raised when the config file is not found.
     """
     def __init__(self, config_file_path: str, custom_message: str = ""):
-        super().__init__(f"The config file '{config_file_path} could not found.", custom_message)
+        super().__init__(f"The config file '{config_file_path}' could not be found.", custom_message)
+
+class ConfigMissingKeyError(ConfigError):
+    """
+    Raised when a key is not found in a config file.
+    """
+    def __init__(self, config_file_path: str, key: str, custom_message: str = ""):
+        super().__init__(f"The key '{key}' could not be found in the config file '{config_file_path}'.")
