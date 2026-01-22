@@ -46,6 +46,7 @@ class Targets:
         }
         with open(self.targets_file_path, "w") as file:
             yaml.dump(initial_file_data, file)
+        
         return self.targets_file_path
     
 
@@ -59,6 +60,7 @@ class Targets:
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -80,6 +82,7 @@ class Targets:
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -97,6 +100,7 @@ class Targets:
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -115,6 +119,7 @@ class Targets:
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -132,6 +137,7 @@ class Targets:
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -150,6 +156,7 @@ class Targets:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
             target_data = targets_data["targets"][target_name]
+        
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
@@ -265,7 +272,7 @@ class Targets:
         try:
             target_data = config.get_target_config(
                 target = target_name,
-                targets_file_path = self.targets_file_path
+                targets_file = self.targets_file_path
             )
             logger.debug(f"Using target '{target_data["target_name"]}'.")
 
@@ -273,6 +280,6 @@ class Targets:
                 logger.debug(f"{key}: {value}")
         
         except ValueError:
-            raise TargetNotFoundError
+            raise TargetNotFoundError(self.targets_file_path, target_name)
 
         return target_data

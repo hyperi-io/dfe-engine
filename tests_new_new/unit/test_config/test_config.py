@@ -1,0 +1,102 @@
+import pytest
+
+from dfe_engine.config.config import Config
+from dfe_engine.config.custom_exceptions import ConfigFileNotFoundError, ConfigMissingKeyError
+from pathlib import Path
+
+
+@pytest.fixture
+def init_config_obj(tmp_path):
+    config_file_path = Path(tmp_path / "config" / "config.yaml")
+
+    yield Config(
+        config_file_path = str(config_file_path)
+    )
+
+
+@pytest.fixture
+def init_config_file(init_config_obj):
+    result = init_config_obj.config_file_create()
+    assert(result == init_config_obj.config_file_path)
+
+
+@pytest.fixture
+def init_config_file_with_data(init_config_obj, init_config_file):
+    config_data = {
+        "test_config_1": "test_value_1",
+        "test_config_path": {
+            "test_nested_key": "test_nested_value"
+        }
+    }
+    init_config_obj.config_update(
+        new_data = config_data
+    )
+
+
+def test_config_file_not_exists(init_config_obj):
+    assert(not init_config_obj.config_file_exists())
+
+
+def test_config_file_exists(init_config_obj, init_config_file):
+    assert(init_config_obj.config_file_exists())
+
+
+def test_config_update_initial(init_config_obj, init_config_file_with_data):
+    key = "test_config_1"
+    expected_value = "test_value_1"
+
+    assert(init_config_obj.config_get_key(
+        key = key
+    ) == expected_value)
+
+
+def test_config_update_with_existing_data(init_config_obj, init_config_file_with_data):
+    key = "test_config_2"
+    value = "test_value_2"
+    new_config_data = {
+        key: value
+    }
+
+    init_config_obj.config_update(new_config_data)
+
+    assert(init_config_obj.config_get_key(key) == value)
+
+
+def test_config_get_key(init_config_obj, init_config_file_with_data):
+    key_1 = "test_config_1"
+    expected_value_1 = "test_value_1"
+    key_2 = "test_config_path.test_nested_key"
+    expected_value_2 = "test_nested_value"
+
+    assert(init_config_obj.config_get_key(key_1) == expected_value_1)
+    
+    assert(init_config_obj.config_get_key(key_2) == expected_value_2)
+
+
+def test_config_update_missing_file(init_config_obj):
+    new_config_data = {
+        "test_config_2": "test_value_2"
+    }
+
+    with pytest.raises(ConfigFileNotFoundError) as exc_info:
+        init_config_obj.config_update(new_config_data)
+    
+    assert(str(exc_info.value) == f"The config file '{init_config_obj.config_file_path}' could not be found.")
+
+
+def test_config_get_key_missing_file(init_config_obj):
+    key = "test_config_1"
+
+    with pytest.raises(ConfigFileNotFoundError) as exc_info:
+        init_config_obj.config_get_key(key)
+    
+    assert(str(exc_info.value) == f"The config file '{init_config_obj.config_file_path}' could not be found.")
+
+
+def test_config_get_non_existant_key(init_config_obj, init_config_file_with_data):
+    key = "test_non_existant_key"
+
+    with pytest.raises(ConfigMissingKeyError) as exc_info:
+        init_config_obj.config_get_key(key)
+    
+    assert(str(exc_info.value) == f"The key '{key}' could not be found in the config file '{init_config_obj.config_file_path}'.")
