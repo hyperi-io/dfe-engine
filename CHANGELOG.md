@@ -1,3 +1,10 @@
+## [1.3.21](https://github.com/hypersec-io/dfe-engine/compare/v1.3.20...v1.3.21) (2026-01-22)
+
+
+### Bug Fixes
+
+* Added test for config as well as minor patches for targets ([72d74f1](https://github.com/hypersec-io/dfe-engine/commit/72d74f1eac62c56c50dee1fdbe814d08a0647746))
+
 ## [1.3.20](https://github.com/hypersec-io/dfe-engine/compare/v1.3.19...v1.3.20) (2026-01-22)
 
 

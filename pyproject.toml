@@ -1,6 +1,6 @@
 [project]
 name = "dfe-engine"
-version = "1.3.20"
+version = "1.3.21"
 description = "DFE Engine - Core library for Data Fusion Engine"
 authors = [{ name = "HyperSec", email = "engineering@hypersec.io" }]
 license = { text = "LicenseRef-HyperSec-EULA" }
