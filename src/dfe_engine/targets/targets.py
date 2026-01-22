@@ -11,15 +11,15 @@ class Targets:
 
     def __init__(
         self,
-        targets_file_dir: Optional[str] = None,
-        targets_file_name: Optional[str] = "targets.yaml"
+        targets_file_path: Optional[str] = None
     ):
         self.targets_file_dir = config.init_config_directory(
-            config_dir = Path(targets_file_dir).expanduser(),
+            config_dir = Path(targets_file_path).expanduser().parent,
+            create_subdir = False,
             create_targets = False,
             create_env = False
         )
-        self.targets_file_name = targets_file_name
+        self.targets_file_name = Path(targets_file_path).expanduser().name
         self.targets_file_path = self.targets_file_dir / self.targets_file_name
 
     
