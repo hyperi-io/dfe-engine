@@ -1,7 +1,9 @@
 __all__ = [
     'ConfigError',
     'ConfigFileExistsError',
-    'ConfigFileNotFoundError'
+    'ConfigFileNotFoundError',
+    'ConfigMissingKeyError',
+    'ConfigNotInitializedError'
 ]
 
 class ConfigError(Exception):
@@ -29,5 +31,12 @@ class ConfigMissingKeyError(ConfigError):
     """
     Raised when a key is not found in a config file.
     """
-    def __init__(self, config_file_path: str, key: str, custom_message: str = ""):
-        super().__init__(f"The key '{key}' could not be found in the config file '{config_file_path}'.")
+    def __init__(self, config_file_path: str, config_key: str, custom_message: str = ""):
+        super().__init__(f"The key '{config_key}' could not be found in the config file '{config_file_path}'.", custom_message)
+
+class ConfigNotInitializedError(ConfigError):
+    """
+    Raised when a config key has not been initialized prior to operations.
+    """
+    def __init__(self, config_file_path: str, root_config_key: str, custom_message: str = ""):
+        super().__init__(f"The root key '{root_config_key}' has not been initialised in file '{config_file_path}'.")
