@@ -1,3 +1,10 @@
+## [1.3.24](https://github.com/hypersec-io/dfe-engine/compare/v1.3.23...v1.3.24) (2026-01-24)
+
+
+### Bug Fixes
+
+* New exception for config ([bc0d713](https://github.com/hypersec-io/dfe-engine/commit/bc0d7133ce6de275cc94e268bc45f4ea25b0f5b4))
+
 ## [1.3.23](https://github.com/hypersec-io/dfe-engine/compare/v1.3.22...v1.3.23) (2026-01-24)
 
 
