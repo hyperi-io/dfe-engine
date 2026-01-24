@@ -1,3 +1,10 @@
+## [1.3.22](https://github.com/hypersec-io/dfe-engine/compare/v1.3.21...v1.3.22) (2026-01-24)
+
+
+### Bug Fixes
+
+* Add ability to write to a key in config update ([cffd615](https://github.com/hypersec-io/dfe-engine/commit/cffd6159678f75c8a0cf82f4374c9c5132807e3a))
+
 ## [1.3.21](https://github.com/hypersec-io/dfe-engine/compare/v1.3.20...v1.3.21) (2026-01-22)
 
 
