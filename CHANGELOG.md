@@ -1,3 +1,10 @@
+## [1.3.26](https://github.com/hypersec-io/dfe-engine/compare/v1.3.25...v1.3.26) (2026-01-24)
+
+
+### Bug Fixes
+
+* config_get returning dict ([201a1ed](https://github.com/hypersec-io/dfe-engine/commit/201a1ede16345fbfdce050f5000fe4c5ac8d74e3))
+
 ## [1.3.25](https://github.com/hypersec-io/dfe-engine/compare/v1.3.24...v1.3.25) (2026-01-24)
 
 
