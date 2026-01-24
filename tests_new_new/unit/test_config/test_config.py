@@ -62,6 +62,38 @@ def test_config_update_with_existing_data(init_config_obj, init_config_file_with
     assert(init_config_obj.config_get_key(key) == value)
 
 
+def test_config_update_with_root_key(init_config_obj, init_config_file_with_data):
+    root_key = "test_root"
+    key = "test_config_2"
+    value = "test_value_2"
+    new_config_data = {
+        key: value
+    }
+
+    init_config_obj.config_update(
+        new_data = new_config_data,
+        root_key = root_key
+    )
+
+    assert(init_config_obj.config_get_key(f"{root_key}.{key}") == value)
+
+
+def test_config_update_with_complex_root_key(init_config_obj, init_config_file_with_data):
+    root_key = "test_root.test_complex"
+    key = "test_config_2"
+    value = "test_value_2"
+    new_config_data = {
+        key: value
+    }
+
+    init_config_obj.config_update(
+        new_data = new_config_data,
+        root_key = root_key
+    )
+
+    assert(init_config_obj.config_get_key(f"{root_key}.{key}") == value)
+
+
 def test_config_get_key(init_config_obj, init_config_file_with_data):
     key_1 = "test_config_1"
     expected_value_1 = "test_value_1"
