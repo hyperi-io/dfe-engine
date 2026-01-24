@@ -7,7 +7,7 @@ from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import ConfigFileNotFoundError, ConfigMissingKeyError
+from .custom_exceptions import ConfigFileNotFoundError, ConfigKeyNotFoundError
 class Config:
 
     def __init__(
@@ -55,7 +55,7 @@ class Config:
         config_key: str
     ) -> bool:
         """
-        Finds if the specified key exists in the configuration file.
+        Finds if the specified config_key exists in the configuration file.
         """
         logger.debug(f"Finding if '{config_key}' exists in '{self.config_file_path}'...")
         try:
@@ -82,7 +82,7 @@ class Config:
         config_key: str = None
     ) -> str | dict:
         """
-        Provides the specified config_key path from the config file or full config if none given.
+        Provides the specified config_key from the config file or full config if none given.
         """
         logger.debug(f"Getting key '{config_key}' from config file '{self.config_file_path}'...")
         try:
@@ -104,7 +104,7 @@ class Config:
             raise ConfigFileNotFoundError(self.config_file_path)
         
         except KeyError:
-            raise ConfigMissingKeyError(self.config_file_path, config_key)
+            raise ConfigKeyNotFoundError(self.config_file_path, config_key)
 
         return config_key_value
 

@@ -1,7 +1,7 @@
 import pytest
 
 from dfe_engine.config.config import Config
-from dfe_engine.config.custom_exceptions import ConfigFileNotFoundError, ConfigMissingKeyError
+from dfe_engine.config.custom_exceptions import ConfigFileNotFoundError, ConfigKeyNotFoundError
 from pathlib import Path
 
 
@@ -218,7 +218,7 @@ def test_config_get_missing_file(init_config_obj):
 def test_config_get_non_existant_key(init_config_obj, init_config_file_with_data):
     key = "test_non_existant_key"
 
-    with pytest.raises(ConfigMissingKeyError) as exc_info:
+    with pytest.raises(ConfigKeyNotFoundError) as exc_info:
         init_config_obj.config_get(key)
     
     assert(str(exc_info.value) == f"The key '{key}' could not be found in the config file '{init_config_obj.config_file_path}'.")
