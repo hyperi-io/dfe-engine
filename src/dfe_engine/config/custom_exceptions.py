@@ -54,5 +54,5 @@ class ConfigNoUpdateWarning(ConfigWarning):
     """
     Raised when a target already has the specified key value pair.
     """
-    def __init__(self, config_file_path: str):
+    def __init__(self, config_file_path: str, custom_message: str = ""):
         super().__init__(f"The config file '{config_file_path}' already matches the provided information.", custom_message)
