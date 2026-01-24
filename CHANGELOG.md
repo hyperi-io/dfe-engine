@@ -1,3 +1,10 @@
+## [1.3.25](https://github.com/hypersec-io/dfe-engine/compare/v1.3.24...v1.3.25) (2026-01-24)
+
+
+### Bug Fixes
+
+* Immutable dict causing issues ([696911b](https://github.com/hypersec-io/dfe-engine/commit/696911bf74180ff648407236df65736a78467ec1))
+
 ## [1.3.24](https://github.com/hypersec-io/dfe-engine/compare/v1.3.23...v1.3.24) (2026-01-24)
 
 
