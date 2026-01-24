@@ -47,61 +47,88 @@ class Config:
             yaml.dump(initial_file_data, file)
         
         return self.config_file_path
-    
 
-    def config_get_key(
+
+    def config_has_key(
         self,
-        key: str
-    ) -> str:
+        config_key: str
+    ) -> bool:
         """
-        Provides the specified key path from the config file.
+        Finds if the specified key exists in the configuration file.
         """
-        logger.debug(f"Getting key '{key}' from config file '{self.config_file_path}'...")
+        logger.debug(f"Finding if '{config_key}' exists in '{self.config_file_path}'...")
         try:
             with open(self.config_file_path, "r") as file:
                 config_data = yaml.safe_load(file) or {}
             
-            if ("." in key):
-                key_value = config_data
-                key_path = key.split(".")
-                for key_parent in key_path:
-                    key_value = key_value[key_parent]
-            else:
-                key_value = config_data[key]
+            if ("." in config_key):
+                config_key_path = config_key.split(".")
+                for config_key in config_key_path[:-1]:
+                    config_data = config_data[config_key]
+                config_key = config_key_path[-1]
         
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
         
         except KeyError:
-            raise ConfigMissingKeyError(self.config_file_path, key)
+            return False
 
-        return key_value
+        return (config_key in config_data)
+    
+
+    def config_get_key(
+        self,
+        config_key: str
+    ) -> str:
+        """
+        Provides the specified config_key path from the config file.
+        """
+        logger.debug(f"Getting key '{config_key}' from config file '{self.config_file_path}'...")
+        try:
+            with open(self.config_file_path, "r") as file:
+                config_data = yaml.safe_load(file) or {}
+            
+            if ("." in config_key):
+                config_key_value = config_data
+                config_key_path = config_key.split(".")
+                for key_parent in config_key_path:
+                    config_key_value = config_key_value[key_parent]
+            else:
+                config_key_value = config_data[config_key]
+        
+        except FileNotFoundError:
+            raise ConfigFileNotFoundError(self.config_file_path)
+        
+        except KeyError:
+            raise ConfigMissingKeyError(self.config_file_path, config_key)
+
+        return config_key_value
 
 
     def config_update(
         self,
         new_data: dict,
-        root_key: str = None
+        root_config_key: str = None
     ) -> dict:
         """
         Updates the config file with the specified new_data in the root_key path (if provided).
         """
-        logger.debug(f"Updating config file '{self.config_file_path}' with new data{f" for key '{root_key}" if root_key else ""}...")
+        logger.debug(f"Updating config file '{self.config_file_path}' with new data{f" for key '{root_config_key}" if root_config_key else ""}...")
         try:
             with open(self.config_file_path, "r") as file:
                 old_config_data = yaml.safe_load(file) or {}
             
-            if (root_key):
+            if (root_config_key):
                 new_config_data = old_config_data
-                root_key_path = root_key.split(".")
+                root_config_key_path = root_config_key.split(".")
 
                 current = new_config_data
-                for key in root_key_path[:-1]:
-                    if key not in current:
-                        current[key] = {}
-                    current = current[key]
+                for config_key in root_config_key_path[:-1]:
+                    if config_key not in current:
+                        current[config_key] = {}
+                    current = current[config_key]
                 
-                current[root_key_path[-1]] = new_data
+                current[root_config_key_path[-1]] = new_data
             else:
                 new_config_data = new_data
             
