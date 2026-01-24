@@ -42,11 +42,11 @@ def test_config_file_exists(init_config_obj, init_config_file):
 
 
 def test_config_update_initial(init_config_obj, init_config_file_with_data):
-    key = "test_config_1"
+    config_key = "test_config_1"
     expected_value = "test_value_1"
 
     assert(init_config_obj.config_get_key(
-        key = key
+        config_key = config_key
     ) == expected_value)
 
 
@@ -63,7 +63,7 @@ def test_config_update_with_existing_data(init_config_obj, init_config_file_with
 
 
 def test_config_update_with_root_key(init_config_obj, init_config_file_with_data):
-    root_key = "test_root"
+    root_config_key = "test_root"
     key = "test_config_2"
     value = "test_value_2"
     new_config_data = {
@@ -72,14 +72,14 @@ def test_config_update_with_root_key(init_config_obj, init_config_file_with_data
 
     init_config_obj.config_update(
         new_data = new_config_data,
-        root_key = root_key
+        root_config_key = root_config_key
     )
 
-    assert(init_config_obj.config_get_key(f"{root_key}.{key}") == value)
+    assert(init_config_obj.config_get_key(f"{root_config_key}.{key}") == value)
 
 
 def test_config_update_with_complex_root_key(init_config_obj, init_config_file_with_data):
-    root_key = "test_root.test_complex"
+    root_config_key = "test_root.test_complex"
     key = "test_config_2"
     value = "test_value_2"
     new_config_data = {
@@ -88,10 +88,38 @@ def test_config_update_with_complex_root_key(init_config_obj, init_config_file_w
 
     init_config_obj.config_update(
         new_data = new_config_data,
-        root_key = root_key
+        root_config_key = root_config_key
     )
 
-    assert(init_config_obj.config_get_key(f"{root_key}.{key}") == value)
+    assert(init_config_obj.config_get_key(f"{root_config_key}.{key}") == value)
+
+
+def test_config_has_key(init_config_obj, init_config_file_with_data):
+    key = "test_config_1"
+    expected_value = True
+
+    assert(init_config_obj.config_has_key(key) == expected_value)
+
+
+def test_config_has_missing_key(init_config_obj, init_config_file_with_data):
+    key = "test_config_missing_1"
+    expected_value = False
+
+    assert(init_config_obj.config_has_key(key) == expected_value)
+
+
+def test_config_has_complex_key(init_config_obj, init_config_file_with_data):
+    key = "test_config_path.test_nested_key"
+    expected_value = True
+
+    assert(init_config_obj.config_has_key(key) == expected_value)
+
+
+def test_config_has_missing_complex_key(init_config_obj, init_config_file_with_data):
+    key = "test_missing_root_key.test_missing_nested_key"
+    expected_value = False
+
+    assert(init_config_obj.config_has_key(key) == expected_value)
 
 
 def test_config_get_key(init_config_obj, init_config_file_with_data):
@@ -112,6 +140,15 @@ def test_config_update_missing_file(init_config_obj):
 
     with pytest.raises(ConfigFileNotFoundError) as exc_info:
         init_config_obj.config_update(new_config_data)
+    
+    assert(str(exc_info.value) == f"The config file '{init_config_obj.config_file_path}' could not be found.")
+
+
+def test_config_has_key_missing_file(init_config_obj):
+    key = "test_config_1"
+
+    with pytest.raises(ConfigFileNotFoundError) as exc_info:
+        init_config_obj.config_has_key(key)
     
     assert(str(exc_info.value) == f"The config file '{init_config_obj.config_file_path}' could not be found.")
 
