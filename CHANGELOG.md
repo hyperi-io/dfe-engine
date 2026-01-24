@@ -1,3 +1,10 @@
+## [1.3.27](https://github.com/hypersec-io/dfe-engine/compare/v1.3.26...v1.3.27) (2026-01-24)
+
+
+### Bug Fixes
+
+* New custom exception for no updates to a config ([8b41add](https://github.com/hypersec-io/dfe-engine/commit/8b41add31bd3c2ecc09b2aa7ab79b858cb937699))
+
 ## [1.3.26](https://github.com/hypersec-io/dfe-engine/compare/v1.3.25...v1.3.26) (2026-01-24)
 
 
