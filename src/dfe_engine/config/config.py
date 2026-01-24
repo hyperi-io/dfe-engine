@@ -80,18 +80,33 @@ class Config:
 
     def config_update(
         self,
-        new_data: dict
+        new_data: dict,
+        root_key: str = None
     ) -> dict:
         """
-        Updates the config file with the specified new_data.
+        Updates the config file with the specified new_data in the root_key path (if provided).
         """
-        logger.debug(f"Updating config file '{self.config_file_path}' with new data...")
+        logger.debug(f"Updating config file '{self.config_file_path}' with new data{f" for key '{root_key}" if root_key else ""}...")
         try:
             with open(self.config_file_path, "r") as file:
                 old_config_data = yaml.safe_load(file) or {}
             
+            if (root_key):
+                new_config_data = old_config_data
+                root_key_path = root_key.split(".")
+
+                current = new_config_data
+                for key in root_key_path[:-1]:
+                    if key not in current:
+                        current[key] = {}
+                    current = current[key]
+                
+                current[root_key_path[-1]] = new_data
+            else:
+                new_config_data = new_data
+            
             with open(self.config_file_path, "w") as file:
-                yaml.dump(new_data, file)
+                yaml.dump(new_config_data, file, sort_keys = False)
 
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
