@@ -31,6 +31,7 @@ def init_config_file_with_data(init_config_obj, init_config_file):
     init_config_obj.config_update(
         new_data = config_data
     )
+    yield config_data
 
 
 def test_config_file_not_exists(init_config_obj):
@@ -56,41 +57,87 @@ def test_config_update_with_existing_data(init_config_obj, init_config_file_with
     new_config_data = {
         key: value
     }
+    expected_diff = {
+        "values_changed": {
+            "root": {
+                "new_value": new_config_data,
+                "old_value": init_config_file_with_data,
+            },
+        },
+    }
 
-    init_config_obj.config_update(new_config_data)
+    diff = init_config_obj.config_update(new_config_data)
 
+    assert(diff == expected_diff)
     assert(init_config_obj.config_get_key(key) == value)
 
 
 def test_config_update_with_root_key(init_config_obj, init_config_file_with_data):
-    root_config_key = "test_root"
-    key = "test_config_2"
-    value = "test_value_2"
+    root_config_key = "test_config_path"
+    key = "test_nested_key_2"
+    value = "test_nested_value_2"
     new_config_data = {
         key: value
     }
+    expected_diff = {
+        "values_changed": {
+            f"root['{root_config_key}']": {
+                "new_value": new_config_data,
+                "old_value": init_config_file_with_data[root_config_key],
+            },
+        },
+    }
 
-    init_config_obj.config_update(
+    diff = init_config_obj.config_update(
         new_data = new_config_data,
         root_config_key = root_config_key
     )
 
+    assert(diff == expected_diff)
     assert(init_config_obj.config_get_key(f"{root_config_key}.{key}") == value)
 
 
 def test_config_update_with_complex_root_key(init_config_obj, init_config_file_with_data):
-    root_config_key = "test_root.test_complex"
+    root_config_key = "test_config_path.test_complex"
     key = "test_config_2"
     value = "test_value_2"
     new_config_data = {
         key: value
     }
+    expected_diff = {
+        "dictionary_item_added": [
+            f"root{"".join(f"['{config_key}']" for config_key in root_config_key.split("."))}"
+        ]
+    }
 
-    init_config_obj.config_update(
+    diff = init_config_obj.config_update(
         new_data = new_config_data,
         root_config_key = root_config_key
     )
 
+    assert(diff == expected_diff)
+    assert(init_config_obj.config_get_key(f"{root_config_key}.{key}") == value)
+
+
+def test_config_update_with_missing_complex_root_key(init_config_obj, init_config_file_with_data):
+    root_config_key = "test_config_path.complex_missing_key.test_complex"
+    key = "test_config_2"
+    value = "test_value_2"
+    new_config_data = {
+        key: value
+    }
+    expected_diff = {
+        "dictionary_item_added": [
+            f"root{"".join(f"['{config_key}']" for config_key in root_config_key.split(".")[:-1])}"
+        ]
+    }
+
+    diff = init_config_obj.config_update(
+        new_data = new_config_data,
+        root_config_key = root_config_key
+    )
+
+    assert(diff == expected_diff)
     assert(init_config_obj.config_get_key(f"{root_config_key}.{key}") == value)
 
 

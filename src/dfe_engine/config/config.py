@@ -1,3 +1,4 @@
+import copy
 import yaml
 
 from deepdiff import DeepDiff
@@ -117,17 +118,17 @@ class Config:
         try:
             with open(self.config_file_path, "r") as file:
                 old_config_data = yaml.safe_load(file) or {}
-            
+
+            new_config_data = copy.deepcopy(old_config_data)
+
             if (root_config_key):
-                new_config_data = old_config_data
                 root_config_key_path = root_config_key.split(".")
 
                 current = new_config_data
                 for config_key in root_config_key_path[:-1]:
-                    if config_key not in current:
+                    if (config_key not in current):
                         current[config_key] = {}
                     current = current[config_key]
-                
                 current[root_config_key_path[-1]] = new_data
             else:
                 new_config_data = new_data
@@ -137,5 +138,5 @@ class Config:
 
         except FileNotFoundError:
             raise ConfigFileNotFoundError(self.config_file_path)
-            
-        return DeepDiff(old_config_data, new_data, ignore_order = True)
+        
+        return DeepDiff(old_config_data, new_config_data, ignore_order = True)
