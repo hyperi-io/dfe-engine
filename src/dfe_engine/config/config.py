@@ -77,17 +77,20 @@ class Config:
         return (config_key in config_data)
     
 
-    def config_get_key(
+    def config_get(
         self,
-        config_key: str
-    ) -> str:
+        config_key: str = None
+    ) -> str | dict:
         """
-        Provides the specified config_key path from the config file.
+        Provides the specified config_key path from the config file or full config if none given.
         """
         logger.debug(f"Getting key '{config_key}' from config file '{self.config_file_path}'...")
         try:
             with open(self.config_file_path, "r") as file:
                 config_data = yaml.safe_load(file) or {}
+            
+            if not(config_key):
+                return config_data
             
             if ("." in config_key):
                 config_key_value = config_data
