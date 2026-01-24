@@ -1,3 +1,10 @@
+## [1.3.28](https://github.com/hypersec-io/dfe-engine/compare/v1.3.27...v1.3.28) (2026-01-24)
+
+
+### Bug Fixes
+
+* Missing custom_message in new exception ([e79d057](https://github.com/hypersec-io/dfe-engine/commit/e79d0574073edb3a277fedb84cca57044e44386b))
+
 ## [1.3.27](https://github.com/hypersec-io/dfe-engine/compare/v1.3.26...v1.3.27) (2026-01-24)
 
 
