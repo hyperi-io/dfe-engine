@@ -1,3 +1,10 @@
+## [1.3.29](https://github.com/hypersec-io/dfe-engine/compare/v1.3.28...v1.3.29) (2026-01-24)
+
+
+### Bug Fixes
+
+* Align targets functions with config ([4f4c900](https://github.com/hypersec-io/dfe-engine/commit/4f4c9008e9819f8151f0cd7bea246143cd7083bd))
+
 ## [1.3.28](https://github.com/hypersec-io/dfe-engine/compare/v1.3.27...v1.3.28) (2026-01-24)
 
 
