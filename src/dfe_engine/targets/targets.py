@@ -1,11 +1,13 @@
+import copy
 import yaml
 
+from deepdiff import DeepDiff
 from hs_pylib import config, logger
 from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import TargetNotFoundError, TargetsFileNotFoundError
+from .custom_exceptions import TargetKeyNotFoundError, TargetNotFoundError, TargetsFileNotFoundError
 
 class Targets:
 
@@ -104,6 +106,7 @@ class Targets:
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
+        print(targets_data)
         return (target_name in targets_data["targets"])
 
 
@@ -113,17 +116,28 @@ class Targets:
         target_key: str
     ) -> bool:
         """
-        Finds if the specified target_name has key target_key in the targets file.
+        Finds if the specified target_key exists for the specified target_name in the targets file.
         """
         logger.debug(f"Finding if '{target_name}' contains key '{target_key}' in '{self.targets_file_path}'...")
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+            
+            targets_data = targets_data["targets"][target_name]
+            
+            if ("." in target_key):
+                target_key_path = target_key.split(".")
+                for target_key in target_key_path[:-1]:
+                    targets_data = targets_data[target_key]
+                target_key = target_key_path[-1]
         
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
-        return (target_key in targets_data["targets"][target_name])
+        except KeyError:
+            return False
+        
+        return (target_key in targets_data)
     
 
     def target_is_default(
@@ -144,23 +158,39 @@ class Targets:
         return (target_name == targets_data["default_target"])
     
 
-    def target_get_data(
+    def target_get(
         self,
-        target_name: str
-    ) -> dict:
+        target_name: str,
+        target_key: str = None
+    ) -> str | dict:
         """
-        Provides the specified target data from the targets file.
+        Provides the specified target_key for target target_name from the targets file or full target if none given.
         """
-        logger.debug(f"Getting data for target '{target_name}' in '{self.targets_file_path}'...")
+        logger.debug(f"Getting {f"key '{target_key}' for " if target_key else ""}target '{target_name}' in '{self.targets_file_path}'...")
         try:
             with open(self.targets_file_path, "r") as file:
                 targets_data = yaml.safe_load(file) or {}
+            
             target_data = targets_data["targets"][target_name]
+            
+            if not(target_key):
+                return target_data
+
+            if ("." in target_key):
+                target_key_value = target_data
+                target_key_path = target_key.split(".")
+                for key_parent in target_key_path:
+                    target_key_value = target_key_value[key_parent]
+            else:
+                target_key_value = target_data[target_key]
         
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
-        return target_data
+        except KeyError:
+            raise TargetKeyNotFoundError(self.targets_file_path, target_name, target_key)
+        
+        return target_key_value
 
 
     def target_set_default(
@@ -214,29 +244,58 @@ class Targets:
     def target_update(
         self,
         target_name: str,
-        target_key_to_update: str,
-        target_value_to_update: str,
+        new_data: dict,
         set_to_default: bool = False
-    ) -> Path:
+    ) -> dict:
         """
-        Updates the specified target_key_to_update for the target_name in the targets file with the specified target_value_to_update.
+        Updates the specified target_name with the specified new_data in the targets file.
         """
-        logger.debug(f"Updating key '{target_key_to_update}' for target '{target_name}' in '{self.targets_file_path}'...")
+        logger.debug(f"Updating target '{target_name}' in targets file '{self.targets_file_path}' with new data...")
         try:
             with open(self.targets_file_path, "r") as file:
-                targets_data = yaml.safe_load(file) or {}
-            targets_data["targets"][target_name][target_key_to_update] = target_value_to_update
-        
-            with open(self.targets_file_path, "w") as file:
-                yaml.dump(targets_data, file)
+                old_targets_data = yaml.safe_load(file) or {}
+            
+            new_targets_data = copy.deepcopy(old_targets_data)
+            new_targets_data["targets"][target_name] = new_data
 
-            if (set_to_default):
+            with open(self.targets_file_path, "w") as file:
+                yaml.dump(new_targets_data, file, sort_keys = False)
+            
+            if (set_to_default or new_targets_data["default_target"] == ""):
                 self.target_set_default(target_name)
-        
+
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
+        
+        return DeepDiff(old_targets_data, new_targets_data, ignore_order = True)
+
+
+    # def target_update(
+    #     self,
+    #     target_name: str,
+    #     target_key_to_update: str,
+    #     target_value_to_update: str,
+    #     set_to_default: bool = False
+    # ) -> Path:
+    #     """
+    #     Updates the specified target_key_to_update for the target_name in the targets file with the specified target_value_to_update.
+    #     """
+    #     logger.debug(f"Updating key '{target_key_to_update}' for target '{target_name}' in '{self.targets_file_path}'...")
+    #     try:
+    #         with open(self.targets_file_path, "r") as file:
+    #             targets_data = yaml.safe_load(file) or {}
+    #         targets_data["targets"][target_name][target_key_to_update] = target_value_to_update
+        
+    #         with open(self.targets_file_path, "w") as file:
+    #             yaml.dump(targets_data, file)
+
+    #         if (set_to_default):
+    #             self.target_set_default(target_name)
+        
+    #     except FileNotFoundError:
+    #         raise TargetsFileNotFoundError(self.targets_file_path)
             
-        return self.targets_file_path
+    #     return self.targets_file_path
     
     
     def target_delete(

@@ -3,6 +3,7 @@ __all__ = [
     'TargetDeleteDefaultError',
     'TargetExistsError',
     'TargetKeyNotFoundError',
+    'TargetMissingKeyError',
     'TargetNotFoundError',
     'TargetsFileExistsError',
     'TargetsFileNotFoundError',
@@ -37,7 +38,7 @@ class TargetKeyNotFoundError(TargetsError):
     Raised when a target does not contain a specified key.
     """
     def __init__(self, targets_file_path: str, target_name: str, target_key: str, custom_message: str = ""):
-        super().__init__(f"The target '{target_name}' does not contain key '{target_key}' in '{targets_file_path}'.", custom_message)
+        super().__init__(f"The key '{target_key}' could not be found for target '{target_name}' in '{targets_file_path}'.", custom_message)
 
 class TargetNotFoundError(TargetsError):
     """
@@ -78,5 +79,5 @@ class TargetNoUpdateWarning(TargetsWarning):
     """
     Raised when a target already has the specified key value pair.
     """
-    def __init__(self, targets_file_path: str, target_name: str, target_key: str, target_value: str, custom_message: str = ""):
-        super().__init__(f"The target '{target_name}' already has '{target_key}' of '{target_value}' in '{targets_file_path}'.", custom_message)
+    def __init__(self, targets_file_path: str, target_name: str, target_key: str = None, target_value: str = None, custom_message: str = ""):
+        super().__init__(f"The target '{target_name}' in '{targets_file_path}' already {f"has '{target_key}' of '{target_value}'" if (target_key and target_value) else "matches the provided information"}.", custom_message)
