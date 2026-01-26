@@ -4,6 +4,7 @@ __all__ = [
     'TargetExistsError',
     'TargetKeyNotFoundError',
     'TargetKeyNotFoundError',
+    'TargetKeyNotRequiredError',
     'TargetNotFoundError',
     'TargetsFileExistsError',
     'TargetsFileNotFoundError',
@@ -39,6 +40,13 @@ class TargetKeyNotFoundError(TargetsError):
     """
     def __init__(self, targets_file_path: str, target_name: str, target_key: str, custom_message: str = ""):
         super().__init__(f"The key '{target_key}' could not be found for target '{target_name}' in '{targets_file_path}'.", custom_message)
+
+class TargetKeyNotRequiredError(TargetsError):
+    """
+    Raised when a key is attempted to be added to a target that is not required.
+    """
+    def __init__(self, target_key: str, custom_message: str = ""):
+        super().__init__(f"The key '{target_key}' is not required for target configurations.", custom_message)
 
 class TargetNotFoundError(TargetsError):
     """
