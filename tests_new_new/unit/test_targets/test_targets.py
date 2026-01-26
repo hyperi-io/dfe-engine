@@ -172,33 +172,53 @@ def test_target_update(init_targets_obj, init_targets_file_with_target):
     new_target_data = {
         key: value
     }
+    expected_diff = {
+        "values_changed": {
+            f"root['targets']['{init_targets_file_with_target}']['{key}']": {
+                "new_value": f"{value}",
+                "old_value": "test_value_1"
+            }
+        }
+    }
 
-    init_targets_obj.target_update(
+    diff = init_targets_obj.target_update(
         target_name = init_targets_file_with_target,
         new_data = new_target_data
     )
 
+    assert(diff == expected_diff)
     assert(init_targets_obj.target_exists(
         target_name = init_targets_file_with_target
     ))
 
 
 def test_target_update_using_set_default(init_targets_obj, init_targets_file_with_two_targets):
+    target = "target_name_2"
     key = "test_key_1"
     value = "updated_value"
     new_target_data = {
         key: value
+    }
+    expected_diff = {
+        "values_changed": {
+            f"root['targets']['{init_targets_file_with_two_targets[target]}']['{key}']": {
+                "new_value": f"{value}",
+                "old_value": "test_value_1"
+            }
+        }
     }
 
     assert(init_targets_obj.target_is_default(
         target_name = init_targets_file_with_two_targets["target_name_1"]
     ))
 
-    init_targets_obj.target_update(
-        target_name = init_targets_file_with_two_targets["target_name_2"],
+    diff = init_targets_obj.target_update(
+        target_name = init_targets_file_with_two_targets[target],
         new_data = new_target_data,
         set_to_default = True
     )
+
+    assert(diff == expected_diff)
     assert(init_targets_obj.target_is_default(
         target_name = init_targets_file_with_two_targets["target_name_2"]
     ))
