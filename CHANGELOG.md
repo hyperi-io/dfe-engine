@@ -1,3 +1,10 @@
+## [1.3.30](https://github.com/hypersec-io/dfe-engine/compare/v1.3.29...v1.3.30) (2026-01-26)
+
+
+### Bug Fixes
+
+* Updated exception name and removed stray print ([dca0c55](https://github.com/hypersec-io/dfe-engine/commit/dca0c5550d7459903eb9ceb46c74f8de3fd19b82))
+
 ## [1.3.29](https://github.com/hypersec-io/dfe-engine/compare/v1.3.28...v1.3.29) (2026-01-24)
 
 
