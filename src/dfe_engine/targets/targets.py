@@ -106,7 +106,6 @@ class Targets:
         except FileNotFoundError:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
-        print(targets_data)
         return (target_name in targets_data["targets"])
 
 
