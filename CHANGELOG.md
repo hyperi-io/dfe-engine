@@ -1,3 +1,10 @@
+## [1.3.31](https://github.com/hypersec-io/dfe-engine/compare/v1.3.30...v1.3.31) (2026-01-27)
+
+
+### Bug Fixes
+
+* New targets exception for when user tries to add non required key ([5b3422d](https://github.com/hypersec-io/dfe-engine/commit/5b3422d1847b36fefd61f34e7a718e0fe015fcc3))
+
 ## [1.3.30](https://github.com/hypersec-io/dfe-engine/compare/v1.3.29...v1.3.30) (2026-01-26)
 
 
