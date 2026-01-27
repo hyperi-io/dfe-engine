@@ -442,3 +442,16 @@ def test_target_get_non_existant_key(init_targets_obj, init_targets_file_with_ta
         )
     
     assert(str(exc_info.value) == f"The key '{target_key_to_find}' could not be found for target '{target_name}' in '{init_targets_obj.targets_file_path}'.")
+
+
+def test_target_get_non_existant_complex_key(init_targets_obj, init_targets_file_with_target):
+    target_name = "test_target_1"
+    target_key_to_find = "test_key_1.non_existant.key"
+
+    with pytest.raises(TargetKeyNotFoundError) as exc_info:
+        init_targets_obj.target_get(
+            target_name = target_name,
+            target_key = target_key_to_find
+        )
+    
+    assert(str(exc_info.value) == f"The key '{target_key_to_find}' could not be found for target '{target_name}' in '{init_targets_obj.targets_file_path}'.")
