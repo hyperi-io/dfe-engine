@@ -161,7 +161,7 @@ class Targets:
         self,
         target_name: str,
         target_key: str = None
-    ) -> str | dict:
+    ) -> str | dict | None:
         """
         Provides the specified target_key for target target_name from the targets file or full target if none given.
         """
@@ -179,8 +179,8 @@ class Targets:
                 target_key_value = target_data
                 target_key_path = target_key.split(".")
                 for key_parent in target_key_path:
-                    if (key_parent not in target_key_value):
-                        raise TargetKeyNotFoundError(self.targets_file_path, target_name, target_key)
+                    if (key_parent not in target_key_value or not(isinstance(target_key_value, dict))):
+                        return None
                     target_key_value = target_key_value[key_parent]
             else:
                 target_key_value = target_data[target_key]
@@ -189,7 +189,7 @@ class Targets:
             raise TargetsFileNotFoundError(self.targets_file_path)
         
         except KeyError:
-            raise TargetKeyNotFoundError(self.targets_file_path, target_name, target_key)
+            return None
         
         return target_key_value
 
