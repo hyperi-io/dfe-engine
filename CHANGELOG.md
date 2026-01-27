@@ -1,3 +1,10 @@
+## [1.3.34](https://github.com/hypersec-io/dfe-engine/compare/v1.3.33...v1.3.34) (2026-01-27)
+
+
+### Bug Fixes
+
+* New exception for unrequired config key ([1fc2b8a](https://github.com/hypersec-io/dfe-engine/commit/1fc2b8a2258f62edab32627c8d3a8f0713969a41))
+
 ## [1.3.33](https://github.com/hypersec-io/dfe-engine/compare/v1.3.32...v1.3.33) (2026-01-27)
 
 
