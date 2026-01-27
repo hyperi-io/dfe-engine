@@ -1,3 +1,10 @@
+## [1.3.32](https://github.com/hypersec-io/dfe-engine/compare/v1.3.31...v1.3.32) (2026-01-27)
+
+
+### Bug Fixes
+
+* Updates for complex key not found in get ([d4b853d](https://github.com/hypersec-io/dfe-engine/commit/d4b853d199c98bd6842265468ef5ea33971d6e7b))
+
 ## [1.3.31](https://github.com/hypersec-io/dfe-engine/compare/v1.3.30...v1.3.31) (2026-01-27)
 
 
