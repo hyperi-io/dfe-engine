@@ -1,3 +1,10 @@
+## [1.3.33](https://github.com/hypersec-io/dfe-engine/compare/v1.3.32...v1.3.33) (2026-01-27)
+
+
+### Bug Fixes
+
+* Updating get to return None ([4dc2d6d](https://github.com/hypersec-io/dfe-engine/commit/4dc2d6d79be434d69abb4ebd50cbb373410f0bde))
+
 ## [1.3.32](https://github.com/hypersec-io/dfe-engine/compare/v1.3.31...v1.3.32) (2026-01-27)
 
 
