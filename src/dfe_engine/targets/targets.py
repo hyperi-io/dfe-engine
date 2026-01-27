@@ -179,6 +179,8 @@ class Targets:
                 target_key_value = target_data
                 target_key_path = target_key.split(".")
                 for key_parent in target_key_path:
+                    if (key_parent not in target_key_value):
+                        raise TargetKeyNotFoundError(self.targets_file_path, target_name, target_key)
                     target_key_value = target_key_value[key_parent]
             else:
                 target_key_value = target_data[target_key]
