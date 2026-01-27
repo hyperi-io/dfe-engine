@@ -317,6 +317,30 @@ def test_get_active_target(init_targets_obj, init_targets_file_with_two_targets,
     assert(str(exc_info.value) == f"The target '{target_name}' could not be found in '{init_targets_obj.targets_file_path}'.")
 
 
+def test_target_get_non_existant_key(init_targets_obj, init_targets_file_with_target):
+    target_name = "test_target_1"
+    target_key_to_find = "test_non_existant_key"
+
+    value_found = init_targets_obj.target_get(
+        target_name = target_name,
+        target_key = target_key_to_find
+    )
+    
+    assert(value_found is None)
+
+
+def test_target_get_non_existant_complex_key(init_targets_obj, init_targets_file_with_target):
+    target_name = "test_target_1"
+    target_key_to_find = "test_key_1.non_existant.key"
+
+    value_found = init_targets_obj.target_get(
+        target_name = target_name,
+        target_key = target_key_to_find
+    )
+
+    assert(value_found is None)
+
+
 def test_target_exists_missing_file(init_targets_obj):
     target_name = "test_target_1"
 
@@ -429,29 +453,3 @@ def test_targets_file_default_target_missing_file(init_targets_obj):
         init_targets_obj.targets_file_default_target()
     
     assert(str(exc_info.value) == f"The targets file '{init_targets_obj.targets_file_path}' could not be found.")
-
-
-def test_target_get_non_existant_key(init_targets_obj, init_targets_file_with_target):
-    target_name = "test_target_1"
-    target_key_to_find = "test_non_existant_key"
-
-    with pytest.raises(TargetKeyNotFoundError) as exc_info:
-        init_targets_obj.target_get(
-            target_name = target_name,
-            target_key = target_key_to_find
-        )
-    
-    assert(str(exc_info.value) == f"The key '{target_key_to_find}' could not be found for target '{target_name}' in '{init_targets_obj.targets_file_path}'.")
-
-
-def test_target_get_non_existant_complex_key(init_targets_obj, init_targets_file_with_target):
-    target_name = "test_target_1"
-    target_key_to_find = "test_key_1.non_existant.key"
-
-    with pytest.raises(TargetKeyNotFoundError) as exc_info:
-        init_targets_obj.target_get(
-            target_name = target_name,
-            target_key = target_key_to_find
-        )
-    
-    assert(str(exc_info.value) == f"The key '{target_key_to_find}' could not be found for target '{target_name}' in '{init_targets_obj.targets_file_path}'.")
