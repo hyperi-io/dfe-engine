@@ -3,6 +3,7 @@ __all__ = [
     'ConfigFileExistsError',
     'ConfigFileNotFoundError',
     'ConfigKeyNotFoundError',
+    'ConfigKeyNotRequiredError',
     'ConfigNotInitializedError',
     'ConfigWarning',
     'ConfigNoUpdateWarning'
@@ -35,6 +36,13 @@ class ConfigKeyNotFoundError(ConfigError):
     """
     def __init__(self, config_file_path: str, config_key: str, custom_message: str = ""):
         super().__init__(f"The key '{config_key}' could not be found in the config file '{config_file_path}'.", custom_message)
+
+class ConfigKeyNotRequiredError(ConfigError):
+    """
+    Raised when a key is attempted to be added to a config that is not required.
+    """
+    def __init__(self, config_key: str, custom_message: str = ""):
+        super().__init__(f"The key '{config_key}' is not required for this configuration.", custom_message)
 
 class ConfigNotInitializedError(ConfigError):
     """
