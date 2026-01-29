@@ -1,3 +1,10 @@
+## [1.3.35](https://github.com/hypersec-io/dfe-engine/compare/v1.3.34...v1.3.35) (2026-01-29)
+
+
+### Bug Fixes
+
+* Initial commit for new schema builder with tests ([5b26374](https://github.com/hypersec-io/dfe-engine/commit/5b26374a60dba84cd853be833f78ee2cfa5ebf18))
+
 ## [1.3.34](https://github.com/hypersec-io/dfe-engine/compare/v1.3.33...v1.3.34) (2026-01-27)
 
 
