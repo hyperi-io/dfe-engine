@@ -1,3 +1,10 @@
+## [1.3.50](https://github.com/hypersec-io/dfe-engine/compare/v1.3.49...v1.3.50) (2026-02-03)
+
+
+### Bug Fixes
+
+* Minor config debug ([e154ae6](https://github.com/hypersec-io/dfe-engine/commit/e154ae677912e5db21ca9733e52e5d00a4710db8))
+
 ## [1.3.49](https://github.com/hypersec-io/dfe-engine/compare/v1.3.48...v1.3.49) (2026-02-03)
 
 
