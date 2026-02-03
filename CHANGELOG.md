@@ -1,3 +1,10 @@
+## [1.3.42](https://github.com/hypersec-io/dfe-engine/compare/v1.3.41...v1.3.42) (2026-02-03)
+
+
+### Bug Fixes
+
+* Duplicate check before object create ([dd183b4](https://github.com/hypersec-io/dfe-engine/commit/dd183b47a368910a335c39a873999e7d0c44d650))
+
 ## [1.3.41](https://github.com/hypersec-io/dfe-engine/compare/v1.3.40...v1.3.41) (2026-02-03)
 
 
