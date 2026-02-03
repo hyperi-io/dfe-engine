@@ -96,16 +96,21 @@ class SchemaBuilder:
                 raise SchemaBuilderNoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
 
             log_string = f"'{len(schemas_to_build)}' schema{"s" if len(schemas_to_build) > 1 else ""} to build:"
+            unqiue_schemas_to_build = []
             for schema in schemas_to_build:
-                log_string += f"\n- {schema["name"]}"
+                try:
+                    if (any(schema["name"] == unique_schema["name"] for unique_schema in unqiue_schemas_to_build)):
+                        raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
+                    log_string += f"\n- {schema["name"]}"
+                
+                except SchemaError as e:
+                    logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
+                    continue
             logger.debug(log_string)
 
             schema_objs = []
-            for schema in schemas_to_build:
+            for schema in unqiue_schemas_to_build:
                 try:
-                    if (any(schema["name"] == schema_obj.info.get("name", "") for schema_obj in schema_objs)):
-                        raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
-                    
                     schema_obj = Schema(
                         name = schema["name"],
                         derived_schema_directory = schema["derived_schema_directory"],
