@@ -1,3 +1,10 @@
+## [1.3.47](https://github.com/hypersec-io/dfe-engine/compare/v1.3.46...v1.3.47) (2026-02-03)
+
+
+### Bug Fixes
+
+* using loc on the df to re assign json ([636d576](https://github.com/hypersec-io/dfe-engine/commit/636d5760543c4b33c84d5d6635ebc2a01048e481))
+
 ## [1.3.46](https://github.com/hypersec-io/dfe-engine/compare/v1.3.45...v1.3.46) (2026-02-03)
 
 
