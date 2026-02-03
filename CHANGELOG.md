@@ -1,3 +1,10 @@
+## [1.3.46](https://github.com/hypersec-io/dfe-engine/compare/v1.3.45...v1.3.46) (2026-02-03)
+
+
+### Bug Fixes
+
+* Move JSON identification to utils ([a2b7e71](https://github.com/hypersec-io/dfe-engine/commit/a2b7e711404c74d2d090a89d9ec3269bf9885208))
+
 ## [1.3.45](https://github.com/hypersec-io/dfe-engine/compare/v1.3.44...v1.3.45) (2026-02-03)
 
 
