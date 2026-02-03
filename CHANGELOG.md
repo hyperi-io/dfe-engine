@@ -1,3 +1,10 @@
+## [1.3.36](https://github.com/hypersec-io/dfe-engine/compare/v1.3.35...v1.3.36) (2026-02-03)
+
+
+### Bug Fixes
+
+* Forcing paths to be path objs with no home tldr ([f2e0a05](https://github.com/hypersec-io/dfe-engine/commit/f2e0a0586af575fd5a071efe36edfcfcc7f2bdb2))
+
 ## [1.3.35](https://github.com/hypersec-io/dfe-engine/compare/v1.3.34...v1.3.35) (2026-01-29)
 
 
