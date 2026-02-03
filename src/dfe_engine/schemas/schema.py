@@ -41,7 +41,7 @@ class Schema:
     def _file_exists(
         self,
         file_path: Path
-    ) -> bool:
+    ) -> Path:
         """
         Internal function to check if a file exists.
         """
@@ -49,4 +49,4 @@ class Schema:
         if not(file_path.is_file()):
             raise SchemaFileNotFoundError(file_path)
         
-        return (file_path.is_file())
+        return (file_path)

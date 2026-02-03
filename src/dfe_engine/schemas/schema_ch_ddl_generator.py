@@ -40,15 +40,21 @@ class SchemaCHDDLGenerator:
 
     def __init__(
         self,
+        common_header_version: str = None,
+        meta_schema_path: str = None,
         type_maps_version: str = None,
         use_json_feature: bool = True
     ):
         schema_utils = SchemaUtils(
+            common_header_version = common_header_version,
+            meta_schema_path = meta_schema_path,
             type_maps_version = type_maps_version,
             use_json_feature = use_json_feature
         )
 
-        self.type_maps_df = schema_utils.get_type_maps_dataframe()
+        self.common_header_df = schema_utils.get_common_header_df()
+        self.meta_schema_df = schema_utils.get_meta_schema_df()
+        self.type_maps_df = schema_utils.get_type_maps_df()
 
         # self.type_map_df = SchemaUtils.load_type_maps(
         #     self.commons_variables_package,
