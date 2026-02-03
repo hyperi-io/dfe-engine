@@ -1,3 +1,10 @@
+## [1.3.45](https://github.com/hypersec-io/dfe-engine/compare/v1.3.44...v1.3.45) (2026-02-03)
+
+
+### Bug Fixes
+
+* Added new JSON mapping control ([483b6cb](https://github.com/hypersec-io/dfe-engine/commit/483b6cb8ab9b851519eca8d7ec93814568bbe0d9))
+
 ## [1.3.44](https://github.com/hypersec-io/dfe-engine/compare/v1.3.43...v1.3.44) (2026-02-03)
 
 
