@@ -18,9 +18,11 @@ class Config:
 
         self.config_file_dir = Path(config_file_path).expanduser().parent.parent / subdir_name
         logger.error(Path(config_file_path).parent)
+        logger.error(Path(config_file_path).expanduser().parent)
+        logger.error(Path(config_file_path).parent.exists())
+        logger.error(Path(config_file_path).expanduser().parent.exists())
 
         if not(Path(config_file_path).parent.exists()):
-            logger.error(Path(config_file_path).parent)
             config.init_config_directory(
                 config_dir = self.config_file_dir.parent,
                 create_subdir = True,
