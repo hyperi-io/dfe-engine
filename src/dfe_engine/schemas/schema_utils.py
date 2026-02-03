@@ -1,10 +1,9 @@
 import pandas as pd
 
-from dfe_engine.schemas.custom_exceptions import SchemaError
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderWarning, SchemaBuilderJSONWarning
 from hs_pylib import logger
 from importlib import resources
 from pathlib import Path
-from typing import List
 
 
 class SchemaUtils:
@@ -15,7 +14,8 @@ class SchemaUtils:
 
     def __init__(
         self,
-        type_maps_version: str = None
+        type_maps_version: str = None,
+        use_json_feature: bool = False
     ):
         resources_path = resources.files(self.RESOURCES_PACKAGE_PATH)
         
@@ -25,6 +25,7 @@ class SchemaUtils:
             type_maps_version = self._get_latest_version_in_path(Path(resources_path) / self.TYPE_MAPS_PATH)
 
         self.type_maps_path = Path(resources_path) / self.TYPE_MAPS_PATH / type_maps_version / self.TYPE_MAPS_FILE_NAME
+        self.use_json_feature = use_json_feature
 
 
     @staticmethod
@@ -59,29 +60,15 @@ class SchemaUtils:
         """
         try:
             df = self._csv_to_dataframe(self.type_maps_path)
-            print(self.type_maps_path)
 
-        except Exception as e:
-            raise SchemaError(e)
+            try:
+                if ("json" in df["type"].values and not(self.use_json_feature)):
+                    raise SchemaBuilderJSONWarning("The 'use_json_feature' is set to False. Continuing using the string mapping for the JSON type...")
+            
+            except SchemaBuilderWarning:
+                df["json"] = df["string"]
 
-        # type_columns = sorted(column_names)
-        # cols_df = sorted(df.columns.tolist())
-
-        # if cols_df != type_columns:
-        #     error_msg = (
-        #         f"Type CSV file is missing or has additional columns. "
-        #         f"Should contain: {', '.join(type_columns)}; file {resource_path}."
-        #     )
-        #     raise CSVValidationError(error_msg)
-
-        # df[dup_column] = df[dup_column].str.lower()
-
-        # if not df[dup_column].is_unique:
-        #     duplicate_values = df[df[dup_column].duplicated(keep=False)].sort_values(dup_column)
-        #     error_msg = (
-        #         f"Duplicate {dup_column} provided in file {resource_path}\n"
-        #         + duplicate_values.to_markdown()
-        #     )
-        #     raise CSVValidationError(error_msg)
-
+        except Exception:
+            raise
+                
         return df

@@ -44,13 +44,11 @@ class SchemaCHDDLGenerator:
         use_json_feature: bool = True
     ):
         schema_utils = SchemaUtils(
-            type_maps_version = type_maps_version
+            type_maps_version = type_maps_version,
+            use_json_feature = use_json_feature
         )
 
         self.type_maps_df = schema_utils.get_type_maps_dataframe()
-
-        if ("json" in self.type_maps_df["type"].values and not(self.use_json_feature)):
-            raise SchemaBuilderJSONWarning("The 'use_json_feature' is set to False. Continuing using the string mapping for the JSON type...")
 
         # self.type_map_df = SchemaUtils.load_type_maps(
         #     self.commons_variables_package,
