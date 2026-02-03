@@ -18,6 +18,7 @@ class NoSchemasToBuildError(SchemaError):
     Raised when there are no schemas identified to build.
     """
     def __init__(self, schema_filter: str, derived_schema_filter: str, custom_message: str = ""):
+        error_str = ""
         if (schema_filter):
             schema_filter_str = f"schema filter '[{schema_filter.replace(",", ", ")}]'"
             error_str = f"matching {schema_filter_str}"
