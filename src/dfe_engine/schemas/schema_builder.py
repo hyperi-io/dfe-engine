@@ -27,11 +27,11 @@ class SchemaBuilder:
         
         self.build_schema_config = schema_config.config_get(self.CONFIG_ROOT_KEY)
         self.derived_schema_filter = derived_schema_filter
-        self.derived_schemas_path = derived_schemas_path
-        self.meta_schemas_path = meta_schemas_path
+        self.derived_schemas_path = Path(derived_schemas_path).expanduser()
+        self.meta_schemas_path = Path(meta_schemas_path).expanduser()
+        self.output_path = Path(output_path).expanduser()
         self.schema_filter = schema_filter
         self.schemas_ttl = schemas_ttl
-        self.output_path = output_path
 
 
     def _directory_exists(
