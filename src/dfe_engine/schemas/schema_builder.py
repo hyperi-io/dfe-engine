@@ -1,6 +1,6 @@
 import fnmatch
 
-from dfe_engine.schemas.custom_exceptions import SchemaFileNotFoundError, SchemaBuilderDirNotFoundError
+from dfe_engine.schemas.custom_exceptions import NoSchemasToBuildError, SchemaFileNotFoundError, SchemaBuilderDirNotFoundError
 from dfe_engine.schemas.schema import Schema
 from dfe_engine.config.config import Config
 from hs_pylib import logger
@@ -88,6 +88,9 @@ class SchemaBuilder:
             self._directory_exists(self.output_path)
 
             schemas_to_build = self._filter_schemas()
+
+            if (len(schemas_to_build) < 1):
+                raise NoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
 
             log_string = f"'{len(schemas_to_build)}' schema{"s" if len(schemas_to_build) > 1 else ""} to build:"
             for schema in schemas_to_build:
