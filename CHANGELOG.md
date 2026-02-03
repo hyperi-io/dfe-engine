@@ -1,3 +1,10 @@
+## [1.3.37](https://github.com/hypersec-io/dfe-engine/compare/v1.3.36...v1.3.37) (2026-02-03)
+
+
+### Bug Fixes
+
+* New exception when no schemas to build ([80174c3](https://github.com/hypersec-io/dfe-engine/commit/80174c3f046081462377a663ece523d8eb5d9148))
+
 ## [1.3.36](https://github.com/hypersec-io/dfe-engine/compare/v1.3.35...v1.3.36) (2026-02-03)
 
 
