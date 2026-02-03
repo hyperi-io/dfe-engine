@@ -2,6 +2,7 @@ import fnmatch
 
 from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicateSchemaNameError, SchemaBuilderNoSchemasToBuildError
 from dfe_engine.schemas.schema import Schema
+from dfe_engine.schemas.schema_ch_ddl_generator import SchemaCHDDLGenerator
 from dfe_engine.config.config import Config
 from hs_pylib import logger
 from pathlib import Path
@@ -19,7 +20,8 @@ class SchemaBuilder:
         schema_config_path: Path,
         derived_schema_filter: str = None,
         schema_filter: str = None,
-        schemas_ttl: int = None
+        schemas_ttl: int = None,
+        type_maps_version: str = None
     ):
         schema_config = Config(
             config_file_path = schema_config_path
@@ -32,6 +34,7 @@ class SchemaBuilder:
         self.output_path = Path(output_path).expanduser()
         self.schema_filter = schema_filter
         self.schemas_ttl = schemas_ttl
+        self.type_maps_version = type_maps_version
 
 
     def _directory_exists(
@@ -100,7 +103,7 @@ class SchemaBuilder:
             schema_objs = []
             for schema in schemas_to_build:
                 try:
-                    if (any(schema["name"] in schema_obj for schema_obj in schema_objs)):
+                    if (any(schema["name"] == schema_obj.name for schema_obj in schema_objs)):
                         raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
                     
                     schema_obj = Schema(
@@ -118,6 +121,11 @@ class SchemaBuilder:
                 except SchemaError as e:
                     logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
                     continue
+            
+            for schema_obj in schema_objs:
+                ch_ddl = SchemaCHDDLGenerator(
+                    type_maps_version = self.type_maps_version
+                )
 
         except Exception:
             raise
