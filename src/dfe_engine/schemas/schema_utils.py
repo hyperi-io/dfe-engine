@@ -17,14 +17,17 @@ class SchemaUtils:
         self,
         type_maps_version: str = None
     ):
+        resources_path = resources.files(self.RESOURCES_PACKAGE_PATH)
+        
         if (type_maps_version):
             type_maps_version = type_maps_version.replace(".", "_")
         else:
-            type_maps_version = self._get_latest_version_in_path(Path(self.RESOURCES_PACKAGE_PATH / self.TYPE_MAPS_PATH))
+            type_maps_version = self._get_latest_version_in_path(Path(resources_path) / self.TYPE_MAPS_PATH)
 
-        self.type_maps_path = Path(self.RESOURCES_PACKAGE_PATH / self.TYPE_MAPS_PATH / type_maps_version / self.TYPE_MAPS_FILE_NAME)
+        self.type_maps_path = Path(resources_path) / self.TYPE_MAPS_PATH / type_maps_version / self.TYPE_MAPS_FILE_NAME
 
 
+    @staticmethod
     def _get_latest_version_in_path(
         path: Path
     ) -> str:
@@ -34,6 +37,7 @@ class SchemaUtils:
         return max(dir.name for dir in path.iterdir() if dir.is_dir())
 
 
+    @staticmethod
     def _csv_to_dataframe(
         csv_path: Path
     ) -> pd.DataFrame:
