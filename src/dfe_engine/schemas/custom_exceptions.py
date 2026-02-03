@@ -58,3 +58,24 @@ class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
             error_str = f"{f"{error_str} and" if (error_str) else " matching"} {derived_schema_filter_str}"
         
         super().__init__(f"No schemas found{error_str}.", custom_message)
+
+class SchemaWarning(Exception):
+    """
+    Base class for schema related warnings.
+    """
+    def __init__(self, message: str, custom_message: str = ""):
+        super().__init__(f"{message} {custom_message}".strip() if custom_message else message)
+
+class SchemaBuilderWarning(SchemaWarning):
+    """
+    Base class for schema builder related warnings.
+    """
+    def __init__(self, message: str, custom_message: str = ""):
+        super().__init__(message, custom_message)
+
+class SchemaBuilderJSONWarning(SchemaBuilderWarning):
+    """
+    Raised when the JSON type is in use but has been specified not to be.
+    """
+    def __init__(self, custom_message: str = ""):        
+        super().__init__("A JSON mapping has been identified.", custom_message)
