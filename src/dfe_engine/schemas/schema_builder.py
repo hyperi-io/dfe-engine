@@ -95,19 +95,20 @@ class SchemaBuilder:
             if (len(schemas_to_build) < 1):
                 raise SchemaBuilderNoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
 
-            log_string = f"'{len(schemas_to_build)}' schema{"s" if len(schemas_to_build) > 1 else ""} to build:"
             unique_schemas_to_build = []
             for schema in schemas_to_build:
                 try:
                     if (any(schema["name"] == unique_schema["name"] for unique_schema in unique_schemas_to_build)):
                         raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
                     unique_schemas_to_build.append(schema)
-                    log_string += f"\n- {schema["name"]}"
-                
                 except SchemaError as e:
                     logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
                     continue
-            logger.debug(log_string)
+            
+            log_string = f"'{len(unique_schemas_to_build)}' schema{"s" if len(unique_schemas_to_build) > 1 else ""} to build:"
+            for schema in unique_schemas_to_build:
+                log_string += f"\n- {schema["name"]}"
+            logger.info(log_string)
 
             schema_objs = []
             for schema in unique_schemas_to_build:
