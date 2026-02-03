@@ -66,7 +66,7 @@ class SchemaUtils:
                     raise SchemaBuilderJSONWarning("The 'use_json_feature' is set to False. Continuing using the string mapping for the JSON type...")
             
             except SchemaBuilderWarning:
-                df["json"] = df["string"]
+                df.loc[df["type"] == "json", df.columns != "type"] = df.loc[df["type"] == "string", df.columns != "type"].values
 
         except Exception:
             raise
