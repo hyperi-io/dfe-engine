@@ -15,13 +15,18 @@ class Config:
         config_file_path: Optional[str] = None
     ):
         subdir_name = Path(config_file_path).expanduser().parent.name
-        self.config_file_dir = config.init_config_directory(
-            config_dir = Path(config_file_path).expanduser().parent.parent,
-            create_subdir = True,
-            config_subdir_name = subdir_name,
-            create_targets = False,
-            create_env = False
-        ) / subdir_name
+
+        self.config_file_dir = Path(config_file_path).expanduser().parent.parent / subdir_name
+
+        if not(Path(config_file_path).parent.exists()):
+            config.init_config_directory(
+                config_dir = self.config_file_dir.parent,
+                create_subdir = True,
+                config_subdir_name = subdir_name,
+                create_targets = False,
+                create_env = False
+            )
+        
         self.config_file_name = Path(config_file_path).expanduser().name
         self.config_file_path = self.config_file_dir / self.config_file_name
 

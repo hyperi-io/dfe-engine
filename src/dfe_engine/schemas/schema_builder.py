@@ -18,6 +18,7 @@ class SchemaBuilder:
         meta_schemas_path: Path,
         output_path: Path,
         schema_config_path: Path,
+        common_header_version: str = None,
         derived_schema_filter: str = None,
         schema_filter: str = None,
         schemas_ttl: int = None,
@@ -29,6 +30,7 @@ class SchemaBuilder:
         )
         
         self.build_schema_config = schema_config.config_get(self.CONFIG_ROOT_KEY)
+        self.common_header_version = common_header_version
         self.derived_schema_filter = derived_schema_filter
         self.derived_schemas_path = Path(derived_schemas_path).expanduser()
         self.meta_schemas_path = Path(meta_schemas_path).expanduser()
@@ -133,6 +135,8 @@ class SchemaBuilder:
             
             for schema_obj in schema_objs:
                 ch_ddl = SchemaCHDDLGenerator(
+                    common_header_version = self.common_header_version,
+                    meta_schema_path = schema_obj.info["meta_schema"]["path"],
                     type_maps_version = self.type_maps_version,
                     use_json_feature = self.use_json_feature
                 )
