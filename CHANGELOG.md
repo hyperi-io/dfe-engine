@@ -1,3 +1,10 @@
+## [1.3.43](https://github.com/hypersec-io/dfe-engine/compare/v1.3.42...v1.3.43) (2026-02-03)
+
+
+### Bug Fixes
+
+* Forgot to add the schemas ([d7fa65a](https://github.com/hypersec-io/dfe-engine/commit/d7fa65aea8e4a50e07a6bdcd6292431665e71e85))
+
 ## [1.3.42](https://github.com/hypersec-io/dfe-engine/compare/v1.3.41...v1.3.42) (2026-02-03)
 
 
