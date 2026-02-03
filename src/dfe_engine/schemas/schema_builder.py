@@ -96,11 +96,12 @@ class SchemaBuilder:
                 raise SchemaBuilderNoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
 
             log_string = f"'{len(schemas_to_build)}' schema{"s" if len(schemas_to_build) > 1 else ""} to build:"
-            unqiue_schemas_to_build = []
+            unique_schemas_to_build = []
             for schema in schemas_to_build:
                 try:
-                    if (any(schema["name"] == unique_schema["name"] for unique_schema in unqiue_schemas_to_build)):
+                    if (any(schema["name"] == unique_schema["name"] for unique_schema in unique_schemas_to_build)):
                         raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
+                    unique_schemas_to_build.append(schema)
                     log_string += f"\n- {schema["name"]}"
                 
                 except SchemaError as e:
@@ -109,7 +110,7 @@ class SchemaBuilder:
             logger.debug(log_string)
 
             schema_objs = []
-            for schema in unqiue_schemas_to_build:
+            for schema in unique_schemas_to_build:
                 try:
                     schema_obj = Schema(
                         name = schema["name"],
