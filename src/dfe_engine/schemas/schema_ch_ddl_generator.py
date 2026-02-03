@@ -1,4 +1,7 @@
+from dfe_engine.schemas.custom_exceptions import SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_utils import SchemaUtils
+from hs_pylib import logger
+
 
 class SchemaCHDDLGenerator:
 
@@ -37,13 +40,17 @@ class SchemaCHDDLGenerator:
 
     def __init__(
         self,
-        type_maps_version: str = None
+        type_maps_version: str = None,
+        use_json_feature: bool = True
     ):
         schema_utils = SchemaUtils(
             type_maps_version = type_maps_version
         )
 
-        print(schema_utils.get_type_maps_dataframe())
+        self.type_maps_df = schema_utils.get_type_maps_dataframe()
+
+        if ("json" in self.type_maps_df["type"].values and not(self.use_json_feature)):
+            raise SchemaBuilderJSONWarning("The 'use_json_feature' is set to False. Continuing using the string mapping for the JSON type...")
 
         # self.type_map_df = SchemaUtils.load_type_maps(
         #     self.commons_variables_package,
