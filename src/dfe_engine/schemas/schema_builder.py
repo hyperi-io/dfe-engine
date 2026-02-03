@@ -103,7 +103,7 @@ class SchemaBuilder:
             schema_objs = []
             for schema in schemas_to_build:
                 try:
-                    if (any(schema["name"] == schema_obj.name for schema_obj in schema_objs)):
+                    if (any(schema["name"] == schema_obj.info.get("name", "") for schema_obj in schema_objs)):
                         raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
                     
                     schema_obj = Schema(
