@@ -1,3 +1,10 @@
+## [1.3.44](https://github.com/hypersec-io/dfe-engine/compare/v1.3.43...v1.3.44) (2026-02-03)
+
+
+### Bug Fixes
+
+* Unique identification pre info generation ([8e3580e](https://github.com/hypersec-io/dfe-engine/commit/8e3580ec5645c0b47c2222b9bfdc46e201d32b1f))
+
 ## [1.3.43](https://github.com/hypersec-io/dfe-engine/compare/v1.3.42...v1.3.43) (2026-02-03)
 
 
