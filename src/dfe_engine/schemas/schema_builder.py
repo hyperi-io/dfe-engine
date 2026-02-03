@@ -21,7 +21,8 @@ class SchemaBuilder:
         derived_schema_filter: str = None,
         schema_filter: str = None,
         schemas_ttl: int = None,
-        type_maps_version: str = None
+        type_maps_version: str = None,
+        use_json_feature: str = None
     ):
         schema_config = Config(
             config_file_path = schema_config_path
@@ -35,6 +36,7 @@ class SchemaBuilder:
         self.schema_filter = schema_filter
         self.schemas_ttl = schemas_ttl
         self.type_maps_version = type_maps_version
+        self.use_json_feature = use_json_feature
 
 
     def _directory_exists(
@@ -131,7 +133,8 @@ class SchemaBuilder:
             
             for schema_obj in schema_objs:
                 ch_ddl = SchemaCHDDLGenerator(
-                    type_maps_version = self.type_maps_version
+                    type_maps_version = self.type_maps_version,
+                    use_json_feature = self.use_json_feature
                 )
 
         except Exception:
