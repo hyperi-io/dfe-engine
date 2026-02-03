@@ -1,3 +1,10 @@
+## [1.3.48](https://github.com/hypersec-io/dfe-engine/compare/v1.3.47...v1.3.48) (2026-02-03)
+
+
+### Bug Fixes
+
+* Updates to config and CH DDL builder ([7489695](https://github.com/hypersec-io/dfe-engine/commit/74896951293073af4aa0e319e736de51f536a09a))
+
 ## [1.3.47](https://github.com/hypersec-io/dfe-engine/compare/v1.3.46...v1.3.47) (2026-02-03)
 
 
