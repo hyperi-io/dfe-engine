@@ -1,3 +1,10 @@
+## [1.3.39](https://github.com/hypersec-io/dfe-engine/compare/v1.3.38...v1.3.39) (2026-02-03)
+
+
+### Bug Fixes
+
+* Checking duplicate schemas ([33134d6](https://github.com/hypersec-io/dfe-engine/commit/33134d6711d88657c42c0a769e73403089081570))
+
 ## [1.3.38](https://github.com/hypersec-io/dfe-engine/compare/v1.3.37...v1.3.38) (2026-02-03)
 
 
