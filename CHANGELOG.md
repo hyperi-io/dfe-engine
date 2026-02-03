@@ -1,3 +1,10 @@
+## [1.3.41](https://github.com/hypersec-io/dfe-engine/compare/v1.3.40...v1.3.41) (2026-02-03)
+
+
+### Bug Fixes
+
+* Updates to the schema build ([cacf4ca](https://github.com/hypersec-io/dfe-engine/commit/cacf4ca8f372d6219e1964190d284fcea7cc62fe))
+
 ## [1.3.40](https://github.com/hypersec-io/dfe-engine/compare/v1.3.39...v1.3.40) (2026-02-03)
 
 
