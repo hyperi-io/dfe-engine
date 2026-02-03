@@ -1,3 +1,10 @@
+## [1.3.40](https://github.com/hypersec-io/dfe-engine/compare/v1.3.39...v1.3.40) (2026-02-03)
+
+
+### Bug Fixes
+
+* New CH DDL generator ([3a1b848](https://github.com/hypersec-io/dfe-engine/commit/3a1b848d1b0d39dfc1746b2238423aa58047c194))
+
 ## [1.3.39](https://github.com/hypersec-io/dfe-engine/compare/v1.3.38...v1.3.39) (2026-02-03)
 
 
