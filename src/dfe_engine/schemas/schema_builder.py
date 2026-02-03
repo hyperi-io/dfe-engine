@@ -1,6 +1,6 @@
 import fnmatch
 
-from dfe_engine.schemas.custom_exceptions import NoSchemasToBuildError, SchemaFileNotFoundError, SchemaBuilderDirNotFoundError
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicateSchemaNameError, SchemaBuilderNoSchemasToBuildError
 from dfe_engine.schemas.schema import Schema
 from dfe_engine.config.config import Config
 from hs_pylib import logger
@@ -90,15 +90,19 @@ class SchemaBuilder:
             schemas_to_build = self._filter_schemas()
 
             if (len(schemas_to_build) < 1):
-                raise NoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
+                raise SchemaBuilderNoSchemasToBuildError(self.schema_filter, self.derived_schema_filter)
 
             log_string = f"'{len(schemas_to_build)}' schema{"s" if len(schemas_to_build) > 1 else ""} to build:"
             for schema in schemas_to_build:
                 log_string += f"\n- {schema["name"]}"
             logger.debug(log_string)
 
-            for schema in schemas_to_build[:]:
+            schema_objs = []
+            for schema in schemas_to_build:
                 try:
+                    if (any(schema["name"] in schema_obj for schema_obj in schema_objs)):
+                        raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
+                    
                     schema_obj = Schema(
                         name = schema["name"],
                         derived_schema_directory = schema["derived_schema_directory"],
@@ -109,10 +113,10 @@ class SchemaBuilder:
                         meta_schemas_path = self.meta_schemas_path,
                         ttl = schema.get("ttl", self.schemas_ttl)
                     )
+                    schema_objs.append(schema_obj)
                 
-                except SchemaFileNotFoundError as e:
+                except SchemaError as e:
                     logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
-                    schemas_to_build.remove(schema)
                     continue
 
         except Exception:

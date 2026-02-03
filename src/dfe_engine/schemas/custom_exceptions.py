@@ -1,9 +1,10 @@
 __all__ = [
     'SchemaError',
-    'NoSchemasToBuildError',
     'SchemaFileNotFoundError',
     'SchemaBuilderError',
-    'SchemaBuilderDirNotFoundError'
+    'SchemaBuilderDirNotFoundError',
+    'SchemaBuilderDuplicateSchemaName',
+    'SchemaBuilderNoSchemasToBuildError'
 ]
 
 class SchemaError(Exception):
@@ -12,21 +13,6 @@ class SchemaError(Exception):
     """
     def __init__(self, message: str, custom_message: str = ""):
         super().__init__(f"{message} {custom_message}".strip() if custom_message else message)
-
-class NoSchemasToBuildError(SchemaError):
-    """
-    Raised when there are no schemas identified to build.
-    """
-    def __init__(self, schema_filter: str, derived_schema_filter: str, custom_message: str = ""):
-        error_str = ""
-        if (schema_filter):
-            schema_filter_str = f"schema filter '[{schema_filter.replace(",", ", ")}]'"
-            error_str = f"matching {schema_filter_str}"
-        if (derived_schema_filter):
-            derived_schema_filter_str = f"derived schema filter '[{derived_schema_filter.replace(",", ", ")}]'"
-            error_str = f"{f"{error_str} and" if (error_str) else "matching"} {derived_schema_filter_str}"
-        
-        super().__init__(f"No schemas found{error_str}.", custom_message)
 
 class SchemaFileNotFoundError(SchemaError):
     """
@@ -48,3 +34,27 @@ class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
     def __init__(self, directory: str, custom_message: str = ""):
         super().__init__(f"The directory '{directory}' could not be found.", custom_message)
+
+class SchemaBuilderDuplicateSchemaNameError(SchemaBuilderError):
+    """
+    Raised when a schema build conifg has a name defined multiple times.
+    """
+    def __init__(self, schema_name: str, custom_message: str = ""):
+        super().__init__(f"The schema '{schema_name}' is already defined.", custom_message)
+
+class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
+    """
+    Raised when there are no schemas identified to build.
+    """
+    def __init__(self, schema_filter: str, derived_schema_filter: str, custom_message: str = ""):
+        error_str = ""
+        if (schema_filter):
+            split_schema_filter = schema_filter.split(",")
+            schema_filter_str = f"schema filters '[{", ".join(split_schema_filter)}]'"
+            error_str = f" matching {schema_filter_str}"
+        if (derived_schema_filter):
+            split_derived_schema_filter = derived_schema_filter.split(",")
+            derived_schema_filter_str = f"derived schema filters '[{", ".join(split_derived_schema_filter)}]'"
+            error_str = f"{f"{error_str} and" if (error_str) else " matching"} {derived_schema_filter_str}"
+        
+        super().__init__(f"No schemas found{error_str}.", custom_message)
