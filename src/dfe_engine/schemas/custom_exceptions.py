@@ -1,5 +1,6 @@
 __all__ = [
     'SchemaError',
+    'NoSchemasToBuildError',
     'SchemaFileNotFoundError',
     'SchemaBuilderError',
     'SchemaBuilderDirNotFoundError'
@@ -11,6 +12,20 @@ class SchemaError(Exception):
     """
     def __init__(self, message: str, custom_message: str = ""):
         super().__init__(f"{message} {custom_message}".strip() if custom_message else message)
+
+class NoSchemasToBuildError(SchemaError):
+    """
+    Raised when there are no schemas identified to build.
+    """
+    def __init__(self, schema_filter: str, derived_schema_filter: str, custom_message: str = ""):
+        if (schema_filter):
+            schema_filter_str = f"schema filter '[{schema_filter.replace(",", ", ")}]'"
+            error_str = f"matching {schema_filter_str}"
+        if (derived_schema_filter):
+            derived_schema_filter_str = f"derived schema filter '[{derived_schema_filter.replace(",", ", ")}]'"
+            error_str = f"{f"{error_str} and" if (error_str) else "matching"} {derived_schema_filter_str}"
+        
+        super().__init__(f"No schemas found{error_str}.", custom_message)
 
 class SchemaFileNotFoundError(SchemaError):
     """
