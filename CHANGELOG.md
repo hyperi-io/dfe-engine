@@ -1,3 +1,10 @@
+## [1.3.38](https://github.com/hypersec-io/dfe-engine/compare/v1.3.37...v1.3.38) (2026-02-03)
+
+
+### Bug Fixes
+
+* Init error str as empty ([47d79b6](https://github.com/hypersec-io/dfe-engine/commit/47d79b62bc7d70c551254f3c3b72b580c5fde8d8))
+
 ## [1.3.37](https://github.com/hypersec-io/dfe-engine/compare/v1.3.36...v1.3.37) (2026-02-03)
 
 
