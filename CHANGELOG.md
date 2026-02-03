@@ -1,3 +1,10 @@
+## [1.3.51](https://github.com/hypersec-io/dfe-engine/compare/v1.3.50...v1.3.51) (2026-02-03)
+
+
+### Bug Fixes
+
+* Fixed config with expanduser ([d1cbc0c](https://github.com/hypersec-io/dfe-engine/commit/d1cbc0ccb1591222d416e0a1e7df475d52a35532))
+
 ## [1.3.50](https://github.com/hypersec-io/dfe-engine/compare/v1.3.49...v1.3.50) (2026-02-03)
 
 
