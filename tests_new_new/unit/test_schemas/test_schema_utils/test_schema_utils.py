@@ -19,9 +19,9 @@ from ..test_schema.test_schema import init_schema
 def init_schema_utils():
     
     def _init_(
+        meta_schema_path = None,
         common_header_path = None,
         common_header_version = None,
-        meta_schema_path = None,
         type_maps_path = None,
         type_maps_version = None,
         use_json_feature = False
@@ -165,7 +165,7 @@ def test_csv_to_dataframe(tmp_path, init_schema_utils):
         "index_order": ["", "", "", "", "", "", "", "", "", ""],
         "index_type": ["", "", "", "", "", "", "", "", "", ""],
         "comment": ["", "", "", "", "", "", "", "", "", ""]
-    }).replace("", np.nan)
+    }).replace("", np.nan).infer_objects(copy = False)
 
     with open(csv_file_path, "w") as file:
         reader = csv.reader(io.StringIO(csv_data))
@@ -205,6 +205,29 @@ def test_get_invalid_common_header_df(init_schema_utils):
     with pytest.raises(SchemaError) as exc_info:
         schema_utils.get_common_header_df()
     assert (expected_message.format(directory = "") in str(exc_info.value))
+
+
+def test_get_meta_schemas_df(init_schema_utils, meta_schema_name_version, test_get_meta_schemas_df_input):
+    name, version, path = meta_schema_name_version
+    expected_dataframe = test_get_meta_schemas_df_input.get(name, {}).get(version, {})
+
+    if not(isinstance(expected_dataframe, pd.DataFrame)):
+        schema_utils = init_schema_utils(
+            meta_schema_path = Path(path) / name / version / f"{name}.csv"
+        )
+
+        schema_utils.get_meta_schema_df()
+
+        pytest.skip(f"Meta schema '{name} - {version}' does not have a matching expected dataframe. Performed syntax check only.")
+
+    schema_utils = init_schema_utils(
+        meta_schema_path = Path(path) / name / version / f"{name}.csv"
+    )
+
+    meta_schema_df = schema_utils.get_meta_schema_df()
+
+    pd.testing.assert_frame_equal(expected_dataframe, meta_schema_df)
+    assert(expected_dataframe.equals(meta_schema_df))
 
 
 def test_get_type_maps_df(init_schema_utils, type_maps_version, test_get_type_maps_df_input):

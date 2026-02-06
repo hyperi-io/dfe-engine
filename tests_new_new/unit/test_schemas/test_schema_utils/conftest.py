@@ -4,7 +4,11 @@ import pytest
 
 from dfe_engine.schemas.custom_exceptions import SchemaBuilderInvalidVersionError
 from dfe_engine.schemas.schema_utils import SchemaUtils
+from importlib import resources
 from pathlib import Path
+
+
+pd.set_option('future.no_silent_downcasting', True)
 
 
 def pytest_generate_tests(metafunc):
@@ -18,7 +22,7 @@ def pytest_generate_tests(metafunc):
             path = schema_utils.common_header_path.parent.parent
         
         versions = [version.name for version in path.iterdir() if version.is_dir()]
-        metafunc.parametrize("common_header_version", versions)
+        metafunc.parametrize("common_header_version", versions, ids = lambda x: x)
     
     if ("type_maps_version" in metafunc.fixturenames):
         marker = metafunc.definition.get_closest_marker("type_maps_version")
@@ -30,7 +34,23 @@ def pytest_generate_tests(metafunc):
             path = schema_utils.type_maps_path.parent.parent
         
         versions = [version.name for version in path.iterdir() if version.is_dir()]
-        metafunc.parametrize("type_maps_version", versions)
+        metafunc.parametrize("type_maps_version", versions, ids = lambda x: x)
+    
+    if ("meta_schema_name_version" in metafunc.fixturenames):
+        marker = metafunc.definition.get_closest_marker("meta_schema_name_version")
+
+        if (marker):
+            path = Path(marker.args[0])
+        else:
+            schema_utils = SchemaUtils()
+            path = Path(resources.files(schema_utils.RESOURCES_PACKAGE_PATH)._paths[0]) / "data" / "meta_schemas"
+        
+        name_versions = [
+            (name.name, version.name, path)
+            for name in path.iterdir() if name.is_dir()
+            for version in name.iterdir() if version.is_dir()
+        ]
+        metafunc.parametrize("meta_schema_name_version", name_versions, ids = lambda x: f"{x[0]}-{x[1]}")
 
 
 TEST_SCHEMA_UTILS_GET_VERSION_NO_PATH_INPUT = [
@@ -84,7 +104,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_000_001": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -109,7 +129,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_001_000": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -134,7 +154,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_001_001": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logjson", "type": "json", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -160,7 +180,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_002_000": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logjson", "type": "json", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -186,12 +206,41 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan)
+    ]).replace("", np.nan).infer_objects(copy = False)
 }
 
 @pytest.fixture()
 def test_get_common_header_df_input():
     return TEST_GET_COMMON_HEADER_DF_INPUT
+
+
+TEST_GET_META_SCHEMAS_DF_INPUT = {
+    "logs_alerts": {
+        "v001_000_000": pd.DataFrame([
+            {"column": "_source", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "_source_event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "alert_name", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "alert_severity", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "alert_type", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "alert_uid", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "confidence_level", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "confidence_score", "type": "int16", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "detection_time", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "event", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "event_id", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "remediation_steps", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "rule_id", "type": "uuid", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "source_table", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "tactics", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "tags_str", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+            {"column": "techniques", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
+        ]).replace("", np.nan).infer_objects(copy = False)
+    }
+}
+
+@pytest.fixture()
+def test_get_meta_schemas_df_input():
+    return TEST_GET_META_SCHEMAS_DF_INPUT
 
 
 TEST_GET_TYPE_MAPS_DF_INPUT = {
@@ -219,7 +268,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_001_000": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -244,7 +293,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_001_001": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -270,7 +319,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan),
+    ]).replace("", np.nan).infer_objects(copy = False),
     "v001_002_000": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -296,7 +345,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan)
+    ]).replace("", np.nan).infer_objects(copy = False)
 }
 
 @pytest.fixture()
