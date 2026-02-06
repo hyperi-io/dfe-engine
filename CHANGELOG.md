@@ -1,3 +1,11 @@
+## [1.3.52](https://github.com/hypersec-io/dfe-engine/compare/v1.3.51...v1.3.52) (2026-02-06)
+
+
+### Bug Fixes
+
+* New tests + data resources added as a submodule ([45a9e94](https://github.com/hypersec-io/dfe-engine/commit/45a9e94272910ced0bf43bfd0b70e663173374b8))
+* New tests and submodule of data resources ([f312c51](https://github.com/hypersec-io/dfe-engine/commit/f312c5164999ef39a4ab56cb718c56c9ab3edaf1))
+
 ## [1.3.51](https://github.com/hypersec-io/dfe-engine/compare/v1.3.50...v1.3.51) (2026-02-03)
 
 
