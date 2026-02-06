@@ -3,11 +3,10 @@ import yaml
 
 from deepdiff import DeepDiff
 from hs_pylib import config, logger
-from hs_pylib.config import get_settings
 from pathlib import Path
 from typing import Optional
 
-from .custom_exceptions import TargetKeyNotFoundError, TargetNotFoundError, TargetsFileNotFoundError
+from .custom_exceptions import TargetNotFoundError, TargetsFileNotFoundError
 
 class Targets:
 

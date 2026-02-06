@@ -2,9 +2,15 @@ __all__ = [
     'SchemaError',
     'SchemaFileNotFoundError',
     'SchemaBuilderError',
+    'SchemaBuilderCommonHeaderError',
+    'SchemaBuilderTypeMapsError',
     'SchemaBuilderDirNotFoundError',
-    'SchemaBuilderDuplicateSchemaName',
-    'SchemaBuilderNoSchemasToBuildError'
+    'SchemaBuilderDuplicateSchemaNameError',
+    'SchemaBuilderInvalidVersionError',
+    'SchemaBuilderNoSchemasToBuildError',
+    'SchemaWarning',
+    'SchemaBuilderWarning',
+    'SchemaBuilderJSONWarning'
 ]
 
 class SchemaError(Exception):
@@ -28,6 +34,13 @@ class SchemaBuilderError(SchemaError):
     def __init__(self, message: str, custom_message: str = ""):
         super().__init__(message, custom_message)
 
+class SchemaBuilderCommonHeaderError(SchemaBuilderError):
+    """
+    Raised when an issue occurs when reading a common header file.
+    """
+    def __init__(self, version: str = "", custom_message: str = ""):
+        super().__init__(f"An issue occured whilst reading common header version '{version}'.", custom_message)
+
 class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
     Raised when a directory required cannot be found.
@@ -41,6 +54,13 @@ class SchemaBuilderDuplicateSchemaNameError(SchemaBuilderError):
     """
     def __init__(self, schema_name: str, custom_message: str = ""):
         super().__init__(f"The schema '{schema_name}' is already defined.", custom_message)
+
+class SchemaBuilderInvalidVersionError(SchemaBuilderError):
+    """
+    Raised when a non-semantic version is identified.
+    """
+    def __init__(self, version: str, custom_message: str = ""):
+        super().__init__(f"Invalid version '{version}'. Please ensure you are using semantic versioning (e.g. v001_000_001).", custom_message)
 
 class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
     """
@@ -58,6 +78,13 @@ class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
             error_str = f"{f"{error_str} and" if (error_str) else " matching"} {derived_schema_filter_str}"
         
         super().__init__(f"No schemas found{error_str}.", custom_message)
+
+class SchemaBuilderTypeMapsError(SchemaBuilderError):
+    """
+    Raised when an issue occurs when reading a type maps file.
+    """
+    def __init__(self, version: str = "", custom_message: str = ""):
+        super().__init__(f"An issue occured whilst reading type maps version '{version}'.", custom_message)
 
 class SchemaWarning(Exception):
     """

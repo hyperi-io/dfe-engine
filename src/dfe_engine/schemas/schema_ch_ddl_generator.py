@@ -1,4 +1,3 @@
-from dfe_engine.schemas.custom_exceptions import SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from hs_pylib import logger
 
