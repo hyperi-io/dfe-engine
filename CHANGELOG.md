@@ -1,3 +1,10 @@
+## [1.3.53](https://github.com/hypersec-io/dfe-engine/compare/v1.3.52...v1.3.53) (2026-02-06)
+
+
+### Bug Fixes
+
+* Non compulsory meta schema read tests ([f873528](https://github.com/hypersec-io/dfe-engine/commit/f873528c0da6afed045b44809722e34cab264e4a))
+
 ## [1.3.52](https://github.com/hypersec-io/dfe-engine/compare/v1.3.51...v1.3.52) (2026-02-06)
 
 
