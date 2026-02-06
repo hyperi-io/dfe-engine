@@ -43,12 +43,16 @@ class SchemaBuilder:
 
     def _directory_exists(
         self,
-        directory_path: Path
+        directory_path: Path,
+        create_dir: bool = False
     ) -> bool:
         """
         Internal function to check if a directory exists.
         """
         logger.debug(f"Checking existence of directory '{directory_path}'...")
+        if (create_dir):
+            directory_path.mkdir(exist_ok = True)
+        
         if not(directory_path.is_dir()):
             raise SchemaBuilderDirNotFoundError(directory_path)
         
@@ -92,7 +96,7 @@ class SchemaBuilder:
         """
         try:
             self._directory_exists(self.derived_schemas_path)
-            self._directory_exists(self.output_path)
+            self._directory_exists(self.output_path, create_dir = True)
 
             schemas_to_build = self._filter_schemas()
 
@@ -106,7 +110,7 @@ class SchemaBuilder:
                         raise SchemaBuilderDuplicateSchemaNameError(schema["name"])
                     unique_schemas_to_build.append(schema)
                 except SchemaError as e:
-                    logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
+                    logger.warning(f"{e} Skipping duplicate schema entry for '{schema["name"]}'...")
                     continue
             
             log_string = f"'{len(unique_schemas_to_build)}' schema{"s" if len(unique_schemas_to_build) > 1 else ""} to build:"
@@ -116,23 +120,18 @@ class SchemaBuilder:
 
             schema_objs = []
             for schema in unique_schemas_to_build:
-                try:
-                    schema_obj = Schema(
-                        name = schema["name"],
-                        derived_schema_directory = schema["derived_schema_directory"],
-                        derived_schema_version = schema["derived_schema_version"],
-                        derived_schemas_path = self.derived_schemas_path,
-                        meta_schema_name = schema["meta_schema"],
-                        meta_schema_version = schema["meta_schema_version"],
-                        meta_schemas_path = self.meta_schemas_path,
-                        ttl = schema.get("ttl", self.schemas_ttl)
-                    )
-                    schema_objs.append(schema_obj)
-                
-                except SchemaError as e:
-                    logger.warning(f"{e} Skipping schema name '{schema["name"]}'.")
-                    continue
-            
+                schema_obj = Schema(
+                    name = schema["name"],
+                    derived_schema_directory = schema["derived_schema_directory"],
+                    derived_schema_version = schema["derived_schema_version"],
+                    derived_schemas_path = self.derived_schemas_path,
+                    meta_schema_name = schema["meta_schema"],
+                    meta_schema_version = schema["meta_schema_version"],
+                    meta_schemas_path = self.meta_schemas_path,
+                    ttl = schema.get("ttl", self.schemas_ttl)
+                )
+                schema_objs.append(schema_obj)
+
             for schema_obj in schema_objs:
                 ch_ddl = SchemaCHDDLGenerator(
                     common_header_version = self.common_header_version,
