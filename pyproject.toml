@@ -77,7 +77,7 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-python_paths = ["src/dfe_engine", "tests"]
+pythonpath = ["src/dfe_engine", "tests"]
 minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"

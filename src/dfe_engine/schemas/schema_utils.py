@@ -15,6 +15,8 @@ class SchemaUtils:
     COMMON_HEADER_FILE_NAME = "common_header.csv"
     COMMON_HEADER_PATH = "data/common_headers"
 
+    META_SCHEMA_FIELDS = ["column", "type", "default", "index_order", "index_type", "ddl_comment"]
+
     TYPE_MAPS_FIELDS = ["type", "clickhouse_type", "clickhouse_type_index"]
     TYPE_MAPS_FILE_NAME = "type_maps.csv"
     TYPE_MAPS_PATH = "data/type_maps"
@@ -25,8 +27,8 @@ class SchemaUtils:
         self,
         common_header_path: Path = None,
         common_header_version: str = None,
-        meta_schema_path: str = None,
-        type_maps_path: str = None,
+        meta_schema_path: Path = None,
+        type_maps_path: Path = None,
         type_maps_version: str = None,
         use_json_feature: bool = False
     ):
@@ -124,6 +126,8 @@ class SchemaUtils:
         """
         try:
             meta_schema_df = self._csv_to_dataframe(self.meta_schema_path)
+
+            meta_schema_df = meta_schema_df.reindex(columns =  self.META_SCHEMA_FIELDS).sort_values(by = "column").reset_index(drop = True)
 
         except SchemaError:
             raise
