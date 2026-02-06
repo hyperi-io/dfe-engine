@@ -8,3 +8,6 @@
 	url = https://github.com/hypersec-io/ai.git
 	update = rebase
 	fetchRecurseSubmodules = true
+[submodule "src/dfe_engine/dfe-data-resources"]
+	path = src/dfe_engine/dfe-data-resources
+	url = git@github.com:hypersec-io/dfe-data-resources.git
