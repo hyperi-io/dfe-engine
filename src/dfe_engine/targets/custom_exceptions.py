@@ -3,7 +3,6 @@ __all__ = [
     'TargetDeleteDefaultError',
     'TargetExistsError',
     'TargetKeyNotFoundError',
-    'TargetKeyNotFoundError',
     'TargetKeyNotRequiredError',
     'TargetNotFoundError',
     'TargetsFileExistsError',
