@@ -1,3 +1,11 @@
+## [1.3.54](https://github.com/hypersec-io/dfe-engine/compare/v1.3.53...v1.3.54) (2026-02-09)
+
+
+### Bug Fixes
+
+* New constraints on meta/CH/type maps as well as easy to edit required fields ([1cc9298](https://github.com/hypersec-io/dfe-engine/commit/1cc92982c146e40e430e1ad7c780bbfe7773fead))
+* New tests to support new column definitions - removed __init__ from coverage as well as internal functions ([68949f4](https://github.com/hypersec-io/dfe-engine/commit/68949f4bb1320f6a35ded83af57a2aec0c0da1e5))
+
 ## [1.3.53](https://github.com/hypersec-io/dfe-engine/compare/v1.3.52...v1.3.53) (2026-02-06)
 
 
