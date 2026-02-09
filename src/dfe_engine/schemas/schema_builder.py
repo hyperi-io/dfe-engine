@@ -1,6 +1,6 @@
 import fnmatch
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicateSchemaNameError, SchemaBuilderMetaSchemaError, SchemaBuilderNoSchemasToBuildError
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicateSchemaNameError, SchemaBuilderMetaSchemaError, SchemaBuilderNoSchemasToBuildError
 from dfe_engine.schemas.schema import Schema
 from dfe_engine.schemas.schema_ch_ddl_generator import SchemaCHDDLGenerator
 from dfe_engine.config.config import Config
@@ -140,9 +140,13 @@ class SchemaBuilder:
                         type_maps_version = self.type_maps_version,
                         use_json_feature = self.use_json_feature
                     )
+                
                 except SchemaBuilderMetaSchemaError as e:
                     for error in e.errors:
-                        logger.error(error)
+                        logger.error(f"SchemaBuilderMetaSchemaError: {error}")
+                
+                except SchemaBuilderError:
+                    raise
 
         except Exception:
             raise
