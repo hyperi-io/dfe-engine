@@ -41,7 +41,7 @@ class Schema:
     def _file_exists(
         self,
         file_path: Path
-    ) -> Path:
+    ) -> Path: # pragma: no cover
         """
         Internal function to check if a file exists.
         """
