@@ -1,13 +1,19 @@
+import numpy as np
+import pandas as pd
+
+
 __all__ = [
     'SchemaError',
     'SchemaFileNotFoundError',
     'SchemaBuilderError',
     'SchemaBuilderCommonHeaderError',
-    'SchemaBuilderTypeMapsError',
     'SchemaBuilderDirNotFoundError',
     'SchemaBuilderDuplicateSchemaNameError',
     'SchemaBuilderInvalidVersionError',
+    'SchemaBuilderMetaSchemaError',
+    'SchemaBuilderMissingRequiredFieldsError',
     'SchemaBuilderNoSchemasToBuildError',
+    'SchemaBuilderTypeMapsError',
     'SchemaWarning',
     'SchemaBuilderWarning',
     'SchemaBuilderJSONWarning'
@@ -61,6 +67,26 @@ class SchemaBuilderInvalidVersionError(SchemaBuilderError):
     """
     def __init__(self, version: str, custom_message: str = ""):
         super().__init__(f"Invalid version '{version}'. Please ensure you are using semantic versioning (e.g. v001_000_001).", custom_message)
+
+class SchemaBuilderMetaSchemaError(SchemaBuilderError):
+    """
+    Raised when an issue occurs when reading a meta schema file.
+    """
+    def __init__(self, meta_schema_path: str = "", custom_message: str = ""):
+        super().__init__(f"An issue occured whilst reading the meta schema at '{meta_schema_path}'.", custom_message)
+
+class SchemaBuilderMissingRequiredFieldsError(SchemaBuilderError):
+    """
+    Raised when an issue occurs when a required schema field is missing.
+    """
+    def __init__(self, empty_values: pd.DataFrame, field: str, schema_path: str, field_pk: str = None, custom_message: str = ""):
+        if (field["name"] == field_pk):
+            multiple_errors = len(empty_values) > 1
+            message = f"Empty '{field["name"]}' entr{"ies" if multiple_errors else "y"} identified"
+        else:
+            multiple_errors = empty_values[field_pk].notna().sum() > 1
+            message = f"{field_pk.capitalize()} name{f"s '[{", ".join(str(column) for column in empty_values[field_pk].tolist() if column is not np.nan)}]' are" if multiple_errors else f" '{empty_values[field_pk].tolist()[0]}' is"} missing an entry for '{field["name"]}'"
+        super().__init__(f"{message} in '{schema_path}'.", custom_message)
 
 class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
     """
