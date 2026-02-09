@@ -151,8 +151,8 @@ class SchemaUtils:
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderCommonHeaderError(self.common_header_version, missing_field_errors)
 
-        except SchemaError as e:
-            raise SchemaBuilderCommonHeaderError(self.common_header_version, e)
+        except SchemaBuilderCommonHeaderError:
+            raise
                 
         return common_header_df
 
@@ -179,8 +179,8 @@ class SchemaUtils:
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderMetaSchemaError(self.meta_schema_path, missing_field_errors)
 
-        except SchemaError as e:
-            raise SchemaBuilderMetaSchemaError(self.meta_schema_path, e)
+        except SchemaBuilderMetaSchemaError:
+            raise
                 
         return meta_schema_df
 
@@ -217,7 +217,7 @@ class SchemaUtils:
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderTypeMapsError(self.type_maps_version, missing_field_errors)
 
-        except SchemaError as e:
-            raise SchemaBuilderTypeMapsError(self.type_maps_version, e)
+        except SchemaBuilderTypeMapsError:
+            raise
                 
         return type_maps_df
