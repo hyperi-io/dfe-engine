@@ -47,7 +47,7 @@ def ch_client(dfe_config_fixtures):
 
 @pytest.fixture(scope="function")
 def test_logger(tmp_path):
-    """Return hs-pylib logger for hunt tests."""
+    """Return hyperi-pylib logger for hunt tests."""
     return hs_logger
 
 

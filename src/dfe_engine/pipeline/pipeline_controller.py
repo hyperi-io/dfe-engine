@@ -85,7 +85,7 @@ class PipelineBuilderController:
                     logger.warning(f"Path does not exist: {val}")
             if formatted_templates["type"]:
                 logger.info(
-                    "\nHyperSec DFE - List of Vector Templates\n"
+                    "\nHyperI DFE - List of Vector Templates\n"
                     + tabulate(formatted_templates, headers="keys", tablefmt="grid")
                 )
             else:

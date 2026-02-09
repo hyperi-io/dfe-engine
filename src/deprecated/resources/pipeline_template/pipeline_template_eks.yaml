@@ -1,4 +1,4 @@
-# HyperSec DFE Vector Helm Template
+# HyperI DFE Vector Helm Template
 # DFE Deployment Types: AWS, SaaS
 # Based on Vector Helm Chart deployment
 #
@@ -8,7 +8,7 @@
 # v1.1    2024-06-25    Update for new caching and storage classes
 # v1.0    2023-06-29    PaaS migration for DFE 2.1
 #
-# (c) HyperSec 2024
+# (c) HyperI 2024
 #
 
 commonLabels:

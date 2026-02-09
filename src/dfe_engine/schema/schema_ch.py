@@ -487,7 +487,7 @@ class ClickHouseSchema:
             file_handle (typing.IO): The file handle to write to.
         """
         timestamp = datetime.now().strftime("%Y-%m-%d-%H:%M:%S")
-        header = f"-- HyperSec DFE {schema_name} v{schema_version} {timestamp}\n"
+        header = f"-- HyperI DFE {schema_name} v{schema_version} {timestamp}\n"
         create_statement = (
             f"CREATE TABLE IF NOT EXISTS {{{{ org_id }}}}.{schema_name}\n("
             if self.no_cluster_declarations_needed

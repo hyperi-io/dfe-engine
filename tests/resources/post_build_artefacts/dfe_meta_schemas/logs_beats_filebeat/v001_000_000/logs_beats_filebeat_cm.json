@@ -30666,7 +30666,7 @@
     }
   },
   "_meta": {
-    "description": "HyperSec logs_beats_filebeat OpenSearch ISM log streaming template. Compatibility mode. v3.1 2024-04-17-22:29:32"
+    "description": "HyperI logs_beats_filebeat OpenSearch ISM log streaming template. Compatibility mode. v3.1 2024-04-17-22:29:32"
   },
   "composed_of": [
     "hypersec-log-component-template"
