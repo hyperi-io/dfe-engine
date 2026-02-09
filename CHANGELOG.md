@@ -1,3 +1,10 @@
+## [1.3.55](https://github.com/hypersec-io/dfe-engine/compare/v1.3.54...v1.3.55) (2026-02-09)
+
+
+### Bug Fixes
+
+* Allow list of errors to be presented when various issues with schema ([e9a61f3](https://github.com/hypersec-io/dfe-engine/commit/e9a61f308cccb10bda606a7a95925cff8cf8994b))
+
 ## [1.3.54](https://github.com/hypersec-io/dfe-engine/compare/v1.3.53...v1.3.54) (2026-02-09)
 
 
