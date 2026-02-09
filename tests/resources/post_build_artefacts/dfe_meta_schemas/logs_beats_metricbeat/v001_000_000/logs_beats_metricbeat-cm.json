@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "HyperSec logs_beats_metricbeat OpenSearch ISM log streaming template. vv001_000_000"
+    "description": "HyperI logs_beats_metricbeat OpenSearch ISM log streaming template. vv001_000_000"
   },
   "composed_of": [
     "hypersec-log-component-template"

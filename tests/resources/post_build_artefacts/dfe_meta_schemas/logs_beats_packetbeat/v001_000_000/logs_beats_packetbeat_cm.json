@@ -8628,7 +8628,7 @@
     }
   },
   "_meta": {
-    "description": "HyperSec logs_beats_packetbeat OpenSearch ISM log streaming template. vv001_000_000 COMPATIBILITY MODE."
+    "description": "HyperI logs_beats_packetbeat OpenSearch ISM log streaming template. vv001_000_000 COMPATIBILITY MODE."
   },
   "composed_of": [
     "hypersec-log-component-template"

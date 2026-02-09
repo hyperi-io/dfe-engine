@@ -1,10 +1,10 @@
 # 
-# HyperSec DFE Vector Component Template
-# Purpose: AWS S3 Sink for HyperSec DFE Archive 
+# HyperI DFE Vector Component Template
+# Purpose: AWS S3 Sink for HyperI DFE Archive 
 # Deployment Types: AWS, SaaS
 # Version: v001.000.000
 # Release Date: 2024-03-27
-# CT Build: © HyperSec 2024
+# CT Build: © HyperI 2024
 #
 # Required environment variables:
 # - _207_SINK_AWS_S3_INPUT: name of input: remap or source

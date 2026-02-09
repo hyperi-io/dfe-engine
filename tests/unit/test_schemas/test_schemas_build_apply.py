@@ -22,7 +22,7 @@ def test_build_schema(dfe_config_fixtures):
     )
 
     builder.build()
-    # Note: caplog doesn't capture hs-pylib logger (structlog) output
+    # Note: caplog doesn't capture hyperi-pylib logger (structlog) output
     # Verify actual output files instead
     assert builder.schema_filter_list == "logs_alerts", (
         "Schema filter list does not match expected value."
@@ -53,7 +53,7 @@ def test_build_schema_backward_compatibility(dfe_config_fixtures_backward_compat
     )
 
     builder.build()
-    # Note: caplog doesn't capture hs-pylib logger (structlog) output
+    # Note: caplog doesn't capture hyperi-pylib logger (structlog) output
     # Verify actual output files instead
     assert (schema_output_path / "logs_alerts" / "logs_alerts.sql").exists(), (
         "logs_alerts schema file was not created."

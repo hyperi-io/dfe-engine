@@ -4,7 +4,7 @@
 #  Language:     Python
 #
 #  License:      LicenseRef-HyperSec-EULA
-#  Copyright:    (c) 2025 HyperSec
+#  Copyright:    (c) 2025 HyperI
 
 """DFE Engine - Core library for Data Fusion Engine.
 
