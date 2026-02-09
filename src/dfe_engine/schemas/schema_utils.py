@@ -69,6 +69,24 @@ class SchemaUtils:
             raise SchemaError(e)
 
 
+    def _find_missing_field_errors(
+        self,
+        df_to_search: pd.DataFrame,
+        field_definitions: list[dict],
+        field_pk: str,
+        file_path: Path
+    ) -> list[Exception]: # pragma: no cover
+        missing_field_errors = []
+
+        for field in field_definitions:
+            empty_values = self._get_empty_column_values_dataframe(field["name"], df_to_search)
+
+            if (field["required"] and not(empty_values.empty)):
+                missing_field_errors.append(SchemaBuilderMissingRequiredFieldsError(empty_values, field, file_path, field_pk))
+        
+        return missing_field_errors
+
+
     @staticmethod
     def _get_empty_column_values_dataframe(
         column_name: str,
@@ -109,24 +127,6 @@ class SchemaUtils:
             raise SchemaBuilderInvalidVersionError(version)
         
         return version
-    
-
-    @staticmethod
-    def _find_missing_field_errors(
-        df_to_search: pd.DataFrame,
-        field_definitions: list[dict],
-        field_pk: str,
-        file_path: Path
-    ) -> list[Exception]: # pragma: no cover
-        missing_field_errors = []
-
-        for field in field_definitions:
-            empty_values = SchemaUtils()._get_empty_column_values_dataframe(field["name"], df_to_search)
-
-            if (field["required"] and not(empty_values.empty)):
-                missing_field_errors.append(SchemaBuilderMissingRequiredFieldsError(empty_values, field, file_path, field_pk))
-        
-        return missing_field_errors
 
 
     def get_common_header_df(
