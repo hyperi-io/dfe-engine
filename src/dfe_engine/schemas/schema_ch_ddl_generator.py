@@ -1,3 +1,4 @@
+from dfe_engine.schemas.custom_exceptions import SchemaBuilderMetaSchemaError
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from hs_pylib import logger
 
@@ -51,13 +52,9 @@ class SchemaCHDDLGenerator:
             use_json_feature = use_json_feature
         )
 
-        self.common_header_df = schema_utils.get_common_header_df()
-        self.meta_schema_df = schema_utils.get_meta_schema_df()
-        self.type_maps_df = schema_utils.get_type_maps_df()
-
-        # self.type_map_df = SchemaUtils.load_type_maps(
-        #     self.commons_variables_package,
-        #     os.path.join(self.common_resource_path, "type_maps.csv"),
-        #     SchemaUtils.COLUMNS_TYPE_MAPS,
-        #     "type",
-        # )
+        try:
+            self.common_header_df = schema_utils.get_common_header_df()
+            self.meta_schema_df = schema_utils.get_meta_schema_df()
+            self.type_maps_df = schema_utils.get_type_maps_df()
+        except SchemaBuilderMetaSchemaError:
+            raise
