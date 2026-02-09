@@ -44,8 +44,11 @@ class SchemaBuilderCommonHeaderError(SchemaBuilderError):
     """
     Raised when an issue occurs when reading a common header file.
     """
-    def __init__(self, version: str = "", custom_message: str = ""):
-        super().__init__(f"An issue occured whilst reading common header version '{version}'.", custom_message)
+    def __init__(self, version: str = "", exception_array: list[Exception] = None, custom_message: str = ""):
+        message = f"An issue occured whilst reading common header version '{version}'."
+        if (exception_array):
+            raise ExceptionGroup(message, exception_array)
+        super().__init__(message, custom_message)
 
 class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
@@ -72,8 +75,11 @@ class SchemaBuilderMetaSchemaError(SchemaBuilderError):
     """
     Raised when an issue occurs when reading a meta schema file.
     """
-    def __init__(self, meta_schema_path: str = "", custom_message: str = ""):
-        super().__init__(f"An issue occured whilst reading the meta schema at '{meta_schema_path}'.", custom_message)
+    def __init__(self, meta_schema_path: str = "", exception_array: list[Exception] = None, custom_message: str = ""):
+        message = f"An issue occured whilst reading the meta schema at '{meta_schema_path}'."
+        if (exception_array):
+            raise ExceptionGroup(message, exception_array)
+        super().__init__(message, custom_message)
 
 class SchemaBuilderMissingRequiredFieldsError(SchemaBuilderError):
     """
@@ -109,8 +115,11 @@ class SchemaBuilderTypeMapsError(SchemaBuilderError):
     """
     Raised when an issue occurs when reading a type maps file.
     """
-    def __init__(self, version: str = "", custom_message: str = ""):
-        super().__init__(f"An issue occured whilst reading type maps version '{version}'.", custom_message)
+    def __init__(self, version: str = "", exception_array: list[Exception] = None, custom_message: str = ""):
+        message = f"An issue occured whilst reading type maps version '{version}'."
+        if (exception_array):
+            raise ExceptionGroup(message, exception_array)
+        super().__init__(message, custom_message)
 
 class SchemaWarning(Exception):
     """
