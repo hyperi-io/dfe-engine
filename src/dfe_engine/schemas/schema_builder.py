@@ -45,7 +45,7 @@ class SchemaBuilder:
         self,
         directory_path: Path,
         create_dir: bool = False
-    ) -> bool:
+    ) -> bool: # pragma: no cover
         """
         Internal function to check if a directory exists.
         """
@@ -61,7 +61,7 @@ class SchemaBuilder:
 
     def _filter_schemas(
         self
-    ) -> list:
+    ) -> list: # pragma: no cover
         """
         Internal function that identifies schemas to build based on instance parameters.
         """

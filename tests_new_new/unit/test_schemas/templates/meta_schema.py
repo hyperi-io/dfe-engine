@@ -1,7 +1,7 @@
 import textwrap
 
 
-LOGS_TEST_META = {
+LOGS_TEST_META_001_000_000 = {
     "meta_schema_name": "logs_test_meta",
     "meta_schema_version": "v001.000.000",
     "meta_schema_data": textwrap.dedent("""

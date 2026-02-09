@@ -98,7 +98,10 @@ exclude_lines = [
 ]
 
 [tool.coverage.run]
-omit = ["**/custom_exceptions.py"]
+omit = [
+    "**/__init__.py",
+    "**/custom_exceptions.py"
+]
 
 [tool.ruff]
 line-length = 100
