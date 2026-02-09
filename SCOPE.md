@@ -42,7 +42,7 @@ logger.debug("Debug info")
 | `opensearch/apply_cm_templates.py` | 35 | Uses `logging.DEBUG` without import |
 | `hunts/runner/cron_runner.py` | 27 | Type hint `logging.Logger` without import |
 
-#### 1.2 Custom Logger Setup (Replace with hs-pylib)
+#### 1.2 Custom Logger Setup (Replace with hyperi-pylib)
 
 | File | Lines | Current Pattern |
 |------|-------|-----------------|
@@ -66,7 +66,7 @@ logger.debug("Debug info")
 | `schema/schema_builder.py` | 399 | `print("Build process stopped due to critical schema validation errors...")` |
 | `watcher_converter/watcher_parser.py` | 698 | `print(f"Warning: Missing or invalid 'action_transform_script'...")` |
 
-#### 1.4 Direct logging Module Calls (Replace with hs-pylib)
+#### 1.4 Direct logging Module Calls (Replace with hyperi-pylib)
 
 | File | Lines | Current |
 |------|-------|---------|
@@ -76,18 +76,18 @@ logger.debug("Debug info")
 #### 1.5 Already Migrated (No Changes Needed)
 
 - `schema/schema_controller.py` - Uses `from hyperi_pylib.logger import logger`
-- `opensearch/opensearch_apply.py` - Uses hs-pylib logger
-- `sigma/sigma_converter.py` - Uses hs-pylib logger
+- `opensearch/opensearch_apply.py` - Uses hyperi-pylib logger
+- `sigma/sigma_converter.py` - Uses hyperi-pylib logger
 
 ---
 
-## 2. Configuration Migration to hs-pylib (Priority: HIGH)
+## 2. Configuration Migration to hyperi-pylib (Priority: HIGH)
 
-**Goal:** Replace all `os.getenv`/`os.environ` patterns with hs-pylib 7-level config cascade
+**Goal:** Replace all `os.getenv`/`os.environ` patterns with hyperi-pylib 7-level config cascade
 
-### hs-pylib Config Cascade (Reference)
+### hyperi-pylib Config Cascade (Reference)
 
-The hs-pylib configuration system implements an automatic 7-level cascade (highest to lowest priority):
+The hyperi-pylib configuration system implements an automatic 7-level cascade (highest to lowest priority):
 
 | Priority | Source | Example | Use Case |
 |----------|--------|---------|----------|
@@ -106,7 +106,7 @@ The hs-pylib configuration system implements an automatic 7-level cascade (highe
 host = os.getenv("DFE_CH_HOST")
 port = os.getenv("DFE_CH_PORT", "9000")
 
-# NEW - hs-pylib config cascade
+# NEW - hyperi-pylib config cascade
 from hyperi_pylib.config import settings
 
 host = settings.get("clickhouse.host")
@@ -260,7 +260,7 @@ Using proper `tempfile` module.
 ### Phase 1 - Logging (Critical) ✅ COMPLETE
 
 - [x] Fix missing `import logging` in 8 files (runtime errors)
-- [x] Replace `colorlog` setup in config_loader.py with hs-pylib
+- [x] Replace `colorlog` setup in config_loader.py with hyperi-pylib
 - [x] Replace custom `_setup_default_logger()` in watcher_converter (2 files)
 - [x] Replace 11 print statements with logger calls
 - [x] Replace direct `logging.info/error` calls in schema_util.py
@@ -268,8 +268,8 @@ Using proper `tempfile` module.
 ### Phase 2 - Configuration ✅ COMPLETE
 
 - [x] Create `defaults.yaml` with standard config structure
-- [x] Migrate 12 environment variables to hs-pylib settings
-- [x] Remove `load_dotenv()` calls (hs-pylib handles this)
+- [x] Migrate 12 environment variables to hyperi-pylib settings
+- [x] Remove `load_dotenv()` calls (hyperi-pylib handles this)
 - [x] Create settings.py with Pydantic-based config cascade
 - [ ] Document new config paths for consumers
 
@@ -281,7 +281,7 @@ Using proper `tempfile` module.
 ### Phase 4 - Dependency Remediation
 
 - [x] Consolidate YAML libraries to use only `ruamel.yaml`
-- [x] Remove PyYAML dependency (still transitive via hs-pylib/pysigma)
+- [x] Remove PyYAML dependency (still transitive via hyperi-pylib/pysigma)
 - [x] Migrate from `clickhouse-pool` + `clickhouse-driver` to `clickhouse-connect`
 - [x] Update ClickHouseManager to use clickhouse-connect HTTP client with built-in pooling
 - [x] Update data_tool.py to use clickhouse-connect
@@ -440,7 +440,7 @@ python -c "import dfe_engine"
 
 ## References
 
-- [hs-pylib CONFIG.md](../hs-pylib/docs/CONFIG.md) - 7-level config cascade documentation
-- [hs-pylib Logger](../hs-pylib/src/hyperi_pylib/logger/) - Logger module
+- [hyperi-pylib CONFIG.md](../hyperi-pylib/docs/CONFIG.md) - 7-level config cascade documentation
+- [hyperi-pylib Logger](../hyperi-pylib/src/hyperi_pylib/logger/) - Logger module
 - [Bandit B113](https://bandit.readthedocs.io/en/latest/plugins/b113_request_without_timeout.html) - Request without timeout
 - [Bandit B701](https://bandit.readthedocs.io/en/latest/plugins/b701_jinja2_autoescape_false.html) - Jinja2 autoescape

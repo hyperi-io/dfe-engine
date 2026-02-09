@@ -1,7 +1,7 @@
 {
   "policy": {
     "policy_id": "hypersec-ism-hot-warm-delete",
-    "description": "HyperSec DFE default hot-warm-delete ISM streaming policy v3.1. Hot 1d -> Warm 14d -> delete",
+    "description": "HyperI DFE default hot-warm-delete ISM streaming policy v3.1. Hot 1d -> Warm 14d -> delete",
     "default_state": "hot",
     "states": [
       {

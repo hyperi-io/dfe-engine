@@ -432,7 +432,7 @@ class SchemaController:
         Parameters:
             dfe_package_file_path (str): Path to the DFE package configuration file.
             args_schema_directory (str): Name of the schema config directory in the .dfe_schema folder.
-            args_do_add_roles (bool): Apply HyperSec core roles for RBAC.
+            args_do_add_roles (bool): Apply HyperI core roles for RBAC.
             args_log_path (str): Path to the logging directory.
             args_target (str): Target name for the specific environment.
             args_target_file_path (str): Path to the target's configuration file.
@@ -689,7 +689,7 @@ class SchemaController:
                 "Resource Path",
             ]
             logger.info(
-                "\nHyperSec DFE - List of Core Schemas\n"
+                "\nHyperI DFE - List of Core Schemas\n"
                 + tabulate(formatted_schemas, headers=headers, tablefmt="grid")
             )
         else:
@@ -717,7 +717,7 @@ class SchemaController:
             df_selected = df[selected_columns]
             df_selected.columns = display_columns
 
-            header = "HyperSec DFE - Schema Types"
+            header = "HyperI DFE - Schema Types"
             logger.info("\n" + header)
             logger.info("\n" + tabulate(df_selected, headers="keys", tablefmt="grid"))
 
@@ -770,7 +770,7 @@ class SchemaController:
                         line.strip().split(",")
                     )  # Assuming CSV format where each line represents a field
 
-        header = f"HyperSec DFE - Fields for {args_schema_name} (Version {args_template_version})"
+        header = f"HyperI DFE - Fields for {args_schema_name} (Version {args_template_version})"
         logger.info("\n" + header)
         logger.info("\n" + tabulate(fields, headers="firstrow", tablefmt="grid"))
 

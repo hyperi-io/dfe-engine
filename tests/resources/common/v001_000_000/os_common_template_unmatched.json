@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "description": "HyperSec OpenSearch default component index template v3.1.1. Requires OpenSearch v2.8 and above. AWS OpenSearch PaaS framework."
+    "description": "HyperI OpenSearch default component index template v3.1.1. Requires OpenSearch v2.8 and above. AWS OpenSearch PaaS framework."
   },
   "template": {
     "settings": {

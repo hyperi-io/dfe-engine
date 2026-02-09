@@ -1292,7 +1292,7 @@ def expected_filebeat_cm_template_json():
         ]
     },
     "_meta": {
-        "description": "HyperSec logs_beats_filebeat_small OpenSearch ISM log streaming template. COMPATIBILITY MODE. v2.3"
+        "description": "HyperI logs_beats_filebeat_small OpenSearch ISM log streaming template. COMPATIBILITY MODE. v2.3"
     },
     "composed_of": [
         "hypersec-log-component-template"
