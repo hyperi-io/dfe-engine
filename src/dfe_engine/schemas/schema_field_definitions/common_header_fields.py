@@ -1,6 +1,7 @@
 COMMON_HEADER_FIELDS = [
     {
         "name": "column",
+        "is_key": True,
         "required": True
     },
     {
