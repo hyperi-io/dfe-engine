@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderJSONWarning
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
 from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
@@ -68,14 +68,42 @@ class SchemaUtils:
             raise SchemaError(e)
 
 
+    def _extract_duplicates(
+        self,
+        dataframe: pd.DataFrame,
+        on_error_exception: Exception,
+        schema_path: Path,
+        schema_version: str,
+        unique_key: str,
+        initial_row_list: list[pd.Series] = None
+    ) -> list[pd.Series]: # pragma: no cover
+        duplicate_field_errors = []
+
+        if (initial_row_list is None):
+            row_list = []
+        else:
+            row_list = initial_row_list
+
+        for _, row in dataframe.iterrows():
+            if (row[unique_key] in [c_row[unique_key] for c_row in row_list]):
+                duplicate_field_errors.append(SchemaBuilderDuplicatePrimaryKeyError(row[unique_key], unique_key, schema_path))
+            else:
+                row_list.append(row)
+        
+        if (len(duplicate_field_errors) > 0):
+            raise on_error_exception(schema_version, duplicate_field_errors)
+        
+        return row_list
+
+
     def _find_missing_field_errors(
         self,
         df_to_search: pd.DataFrame,
         field_definitions: list[dict],
-        field_pk: str,
         file_path: Path
     ) -> list[Exception]: # pragma: no cover
         missing_field_errors = []
+        field_pk = next((field["name"] for field in field_definitions if (field.get("is_key"))), None)
 
         for field in field_definitions:
             empty_values = self._get_empty_column_values_dataframe(field["name"], df_to_search)
@@ -135,15 +163,26 @@ class SchemaUtils:
         meta_schema_path: Path,
         type_maps_df: pd.DataFrame
     ) -> pd.DataFrame:
-        derived_schema_df = self.get_derived_schema_df(
-            derived_schema_path = derived_schema_path
-        )
-        meta_schema_df = self.get_meta_schema_df(
-            meta_schema_path = meta_schema_path
-        )
+        try:
+            derived_schema_df = self.get_derived_schema_df(
+                derived_schema_path = derived_schema_path
+            )
+            meta_schema_df = self.get_meta_schema_df(
+                meta_schema_path = meta_schema_path
+            )
 
-        for row in common_header_df.itertuples(index = False):
-            print(row)
+            combined_rows = []
+
+            combined_rows.extend(self._extract_duplicates(
+                dataframe = common_header_df,
+                on_error_exception = SchemaBuilderCommonHeaderError,
+                unique_key = next((field["name"] for field in COMMON_HEADER_FIELDS if (field.get("is_key"))), None),
+                schema_path = self.common_header_path,
+                schema_version = self.common_header_version
+            ))
+        
+        except SchemaBuilderCommonHeaderError as e:
+            raise
 
 
     def get_common_header_df(
@@ -153,7 +192,7 @@ class SchemaUtils:
         Load a common header CSV file from a resource package.
         """
         try:
-            field_pk = "column"
+            field_pk = next((field["name"] for field in COMMON_HEADER_FIELDS if (field.get("is_key"))), None)
             common_header_df = self._csv_to_dataframe(self.common_header_path)
 
             common_header_df = common_header_df.reindex(columns = [field["name"] for field in COMMON_HEADER_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
@@ -161,7 +200,6 @@ class SchemaUtils:
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = common_header_df,
                 field_definitions = COMMON_HEADER_FIELDS,
-                field_pk = field_pk,
                 file_path = self.common_header_path
             )
         
@@ -188,7 +226,7 @@ class SchemaUtils:
         Load a derived schema CSV file.
         """
         try:
-            field_pk = "column"
+            field_pk = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None)
             derived_schema_df = self._csv_to_dataframe(derived_schema_path)
 
             derived_schema_df = derived_schema_df.reindex(columns = [field["name"] for field in DERIVED_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
@@ -196,14 +234,13 @@ class SchemaUtils:
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = derived_schema_df,
                 field_definitions = DERIVED_SCHEMA_FIELDS,
-                field_pk = field_pk,
                 file_path = derived_schema_path
             )
             
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderDerivedSchemaError(derived_schema_path, missing_field_errors)
             
-            logger.success(f"Successfully imported meta schema from '{derived_schema_path}'.")
+            logger.success(f"Successfully imported derived schema from '{derived_schema_path}'.")
 
         except SchemaBuilderDerivedSchemaError:
             raise
@@ -222,7 +259,7 @@ class SchemaUtils:
         Load a meta schema CSV file.
         """
         try:
-            field_pk = "column"
+            field_pk = next((field["name"] for field in META_SCHEMA_FIELDS if (field.get("is_key"))), None)
             meta_schema_df = self._csv_to_dataframe(meta_schema_path)
 
             meta_schema_df = meta_schema_df.reindex(columns = [field["name"] for field in META_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
@@ -230,7 +267,6 @@ class SchemaUtils:
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = meta_schema_df,
                 field_definitions = META_SCHEMA_FIELDS,
-                field_pk = field_pk,
                 file_path = meta_schema_path
             )
             
@@ -255,7 +291,7 @@ class SchemaUtils:
         Load a type map CSV file from a resource package.
         """
         try:
-            field_pk = "type"
+            field_pk = next((field["name"] for field in TYPE_MAPS_FIELDS if (field.get("is_key"))), None)
             type_maps_df = self._csv_to_dataframe(self.type_maps_path)
 
             type_maps_df = type_maps_df.reindex(columns = [field["name"] for field in TYPE_MAPS_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
@@ -273,7 +309,6 @@ class SchemaUtils:
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = type_maps_df,
                 field_definitions = TYPE_MAPS_FIELDS,
-                field_pk = field_pk,
                 file_path = self.type_maps_path
             )
             
