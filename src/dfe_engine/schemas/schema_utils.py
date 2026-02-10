@@ -1,8 +1,9 @@
 import pandas as pd
 import re
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDirNotFoundError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderJSONWarning
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
+from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.type_maps_fields import TYPE_MAPS_FIELDS
 from hs_pylib import logger
@@ -26,7 +27,6 @@ class SchemaUtils:
         self,
         common_header_path: Path = None,
         common_header_version: str = None,
-        meta_schema_path: Path = None,
         type_maps_path: Path = None,
         type_maps_version: str = None,
         use_json_feature: bool = False
@@ -49,9 +49,8 @@ class SchemaUtils:
         if (type_maps_path is None):
             type_maps_path = resources_path / self.TYPE_MAPS_PATH
         
-        self.common_header_path = common_header_path / self.common_header_version / self.COMMON_HEADER_FILE_NAME
-        self.meta_schema_path = meta_schema_path
-        self.type_maps_path = type_maps_path / self.type_maps_version / self.TYPE_MAPS_FILE_NAME
+        self.common_header_path = Path(common_header_path) / self.common_header_version / self.COMMON_HEADER_FILE_NAME
+        self.type_maps_path = Path(type_maps_path) / self.type_maps_version / self.TYPE_MAPS_FILE_NAME
         self.use_json_feature = use_json_feature
 
 
@@ -127,6 +126,24 @@ class SchemaUtils:
             raise SchemaBuilderInvalidVersionError(version)
         
         return version
+    
+
+    def create_combined_df(
+        self,
+        common_header_df: pd.DataFrame,
+        derived_schema_path: Path,
+        meta_schema_path: Path,
+        type_maps_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        derived_schema_df = self.get_derived_schema_df(
+            derived_schema_path = derived_schema_path
+        )
+        meta_schema_df = self.get_meta_schema_df(
+            meta_schema_path = meta_schema_path
+        )
+
+        for row in common_header_df.itertuples(index = False):
+            print(row)
 
 
     def get_common_header_df(
@@ -150,22 +167,63 @@ class SchemaUtils:
         
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderCommonHeaderError(self.common_header_version, missing_field_errors)
+            
+            logger.success(f"Successfully imported common headers version '{self.common_header_version}'.")
+            logger.debug(f"Using the following common_header_df...\n{common_header_df}")
 
         except SchemaBuilderCommonHeaderError:
             raise
+
+        except SchemaError:
+            raise SchemaBuilderCommonHeaderError(self.common_header_version)
                 
         return common_header_df
 
 
-    def get_meta_schema_df(
-        self
+    def get_derived_schema_df(
+        self,
+        derived_schema_path
     ) -> pd.DataFrame:
         """
-        Load a meta schema CSV file from a resource package.
+        Load a derived schema CSV file.
         """
         try:
             field_pk = "column"
-            meta_schema_df = self._csv_to_dataframe(self.meta_schema_path)
+            derived_schema_df = self._csv_to_dataframe(derived_schema_path)
+
+            derived_schema_df = derived_schema_df.reindex(columns = [field["name"] for field in DERIVED_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
+
+            missing_field_errors = self._find_missing_field_errors(
+                df_to_search = derived_schema_df,
+                field_definitions = DERIVED_SCHEMA_FIELDS,
+                field_pk = field_pk,
+                file_path = derived_schema_path
+            )
+            
+            if (len(missing_field_errors) > 0):
+                raise SchemaBuilderDerivedSchemaError(derived_schema_path, missing_field_errors)
+            
+            logger.success(f"Successfully imported meta schema from '{derived_schema_path}'.")
+
+        except SchemaBuilderDerivedSchemaError:
+            raise
+
+        except SchemaError:
+            raise SchemaBuilderDerivedSchemaError(derived_schema_path)
+                
+        return derived_schema_df
+
+
+    def get_meta_schema_df(
+        self,
+        meta_schema_path
+    ) -> pd.DataFrame:
+        """
+        Load a meta schema CSV file.
+        """
+        try:
+            field_pk = "column"
+            meta_schema_df = self._csv_to_dataframe(meta_schema_path)
 
             meta_schema_df = meta_schema_df.reindex(columns = [field["name"] for field in META_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
 
@@ -173,14 +231,19 @@ class SchemaUtils:
                 df_to_search = meta_schema_df,
                 field_definitions = META_SCHEMA_FIELDS,
                 field_pk = field_pk,
-                file_path = self.meta_schema_path
+                file_path = meta_schema_path
             )
             
             if (len(missing_field_errors) > 0):
-                raise SchemaBuilderMetaSchemaError(self.meta_schema_path, missing_field_errors)
+                raise SchemaBuilderMetaSchemaError(meta_schema_path, missing_field_errors)
+            
+            logger.success(f"Successfully imported meta schema from '{meta_schema_path}'.")
 
         except SchemaBuilderMetaSchemaError:
             raise
+
+        except SchemaError:
+            raise SchemaBuilderMetaSchemaError(meta_schema_path)
                 
         return meta_schema_df
 
@@ -216,8 +279,14 @@ class SchemaUtils:
             
             if (len(missing_field_errors) > 0):
                 raise SchemaBuilderTypeMapsError(self.type_maps_version, missing_field_errors)
+            
+            logger.success(f"Successfully imported type maps version '{self.type_maps_version}'.")
+            logger.debug(f"Using the following type_maps_df...\n{type_maps_df}")
 
         except SchemaBuilderTypeMapsError:
             raise
+
+        except SchemaError:
+            raise SchemaBuilderTypeMapsError(self.type_maps_version)
                 
         return type_maps_df
