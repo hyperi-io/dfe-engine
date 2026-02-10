@@ -48,6 +48,14 @@ class SchemaBuilderCommonHeaderError(SchemaBuilderError):
         self.errors = errors
         super().__init__(f"An issue occured whilst reading common header version '{version}'.", custom_message)
 
+class SchemaBuilderDerivedSchemaError(SchemaBuilderError):
+    """
+    Raised when an issue occurs when reading a derived schema file.
+    """
+    def __init__(self, meta_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
+        self.errors = errors
+        super().__init__(f"An issue occured whilst reading the derived schema at '{meta_schema_path}'.", custom_message)
+
 class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
     Raised when a directory required cannot be found.

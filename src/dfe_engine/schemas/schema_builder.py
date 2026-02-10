@@ -131,14 +131,18 @@ class SchemaBuilder:
                     ttl = schema.get("ttl", self.schemas_ttl)
                 )
                 schema_objs.append(schema_obj)
+            
+            ch_ddl_generator = SchemaCHDDLGenerator(
+                common_header_version = self.common_header_version,
+                type_maps_version = self.type_maps_version,
+                use_json_feature = self.use_json_feature
+            )
 
             for schema_obj in schema_objs:
                 try:
-                    ch_ddl = SchemaCHDDLGenerator(
-                        common_header_version = self.common_header_version,
-                        meta_schema_path = schema_obj.info["meta_schema"]["path"],
-                        type_maps_version = self.type_maps_version,
-                        use_json_feature = self.use_json_feature
+                    schema_ddl = ch_ddl_generator.build_ddl(
+                       meta_schema_path = schema_obj.meta_schema["path"],
+                       derived_schema_path = schema_obj.derived_schema["path"]
                     )
                 
                 except SchemaBuilderMetaSchemaError as e:

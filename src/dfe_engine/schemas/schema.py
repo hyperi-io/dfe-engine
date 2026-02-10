@@ -22,20 +22,18 @@ class Schema:
         derived_schema_version = derived_schema_version.replace(".", "_")
         meta_schema_version = meta_schema_version.replace(".", "_")
         
-        self.info = {
-            "name": name,
-            "derived_schema": {
-                "name": Path(derived_schema_directory).name,
-                "version": derived_schema_version,
-                "path": self._file_exists(derived_schemas_path / derived_schema_directory / derived_schema_version / f"{Path(derived_schema_directory).name}.csv")
-            },
-            "meta_schema": {
-                "name": meta_schema_name,
-                "version": meta_schema_version,
-                "path": self._file_exists(meta_schemas_path / meta_schema_name / meta_schema_version / f"{meta_schema_name}.csv")
-            },
-            "ttl": ttl if (ttl is not None) else self.DEFAULT_TTL
+        self.name = name
+        self.derived_schema = {
+            "name": Path(derived_schema_directory).name,
+            "version": derived_schema_version,
+            "path": self._file_exists(derived_schemas_path / derived_schema_directory / derived_schema_version / f"{Path(derived_schema_directory).name}.csv")
         }
+        self.meta_schema = {
+            "name": meta_schema_name,
+            "version": meta_schema_version,
+            "path": self._file_exists(meta_schemas_path / meta_schema_name / meta_schema_version / f"{meta_schema_name}.csv")
+        }
+        self.ttl = ttl if (ttl is not None) else self.DEFAULT_TTL
 
 
     def _file_exists(
