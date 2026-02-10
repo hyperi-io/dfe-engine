@@ -1,6 +1,7 @@
 from dfe_engine.schemas.custom_exceptions import SchemaBuilderError, SchemaBuilderMetaSchemaError
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from hs_pylib import logger
+from pathlib import Path
 
 
 class SchemaCHDDLGenerator:
@@ -41,24 +42,34 @@ class SchemaCHDDLGenerator:
     def __init__(
         self,
         common_header_version: str = None,
-        meta_schema_path: str = None,
         type_maps_version: str = None,
         use_json_feature: bool = True
     ):
-        schema_utils = SchemaUtils(
+        self.schema_utils = SchemaUtils(
             common_header_version = common_header_version,
-            meta_schema_path = meta_schema_path,
             type_maps_version = type_maps_version,
             use_json_feature = use_json_feature
         )
 
         try:
-            self.common_header_df = schema_utils.get_common_header_df()
-            self.meta_schema_df = schema_utils.get_meta_schema_df()
-            self.type_maps_df = schema_utils.get_type_maps_df()
+            self.common_header_df = self.schema_utils.get_common_header_df()
+            self.type_maps_df = self.schema_utils.get_type_maps_df()
         
         except SchemaBuilderMetaSchemaError:
             raise
         
         except SchemaBuilderError:
             raise
+    
+
+    def build_ddl(
+        self,
+        meta_schema_path: Path,
+        derived_schema_path: Path
+    ) -> str:
+        fields_df = self.schema_utils.create_combined_df(
+            common_header_df = self.common_header_df,
+            derived_schema_path = derived_schema_path,
+            meta_schema_path = meta_schema_path,
+            type_maps_df = self.type_maps_df
+        )

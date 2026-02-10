@@ -10,7 +10,6 @@ from pathlib import Path
 def init_schema_utils():
     
     def _init_(
-        meta_schema_path = None,
         common_header_path = None,
         common_header_version = None,
         type_maps_path = None,
@@ -20,7 +19,6 @@ def init_schema_utils():
         schema_utils = SchemaUtils(
             common_header_path = common_header_path,
             common_header_version = common_header_version,
-            meta_schema_path = meta_schema_path,
             type_maps_path = type_maps_path,
             type_maps_version = type_maps_version,
             use_json_feature = use_json_feature
@@ -74,18 +72,69 @@ def test_get_invalid_common_header_df(tmp_path, init_schema_utils, init_common_h
         schema_utils.get_common_header_df()
     
     for expected_message in expected_messages:
-        assert (expected_message.format(common_header_file_path = common_header["common_header_path"]) in str(exc_info.value))
+        assert (expected_message.format(common_header_file_path = common_header["common_header_path"]) in str(exc_info.value.errors))
+
+
+def test_get_derived_schema_df(init_schema_utils, derived_schema_name_version, test_get_derived_schemas_df_input):
+    meta_schema_name, name, version, path = derived_schema_name_version
+    expected_dataframe = test_get_derived_schemas_df_input.get(meta_schema_name, {}).get(name, {}).get(version, {})
+
+    schema_utils = init_schema_utils()
+
+    derived_schema_df = schema_utils.get_derived_schema_df(
+        derived_schema_path = Path(path) / meta_schema_name / name / version / f"{name}.csv"
+    )
+
+    if not(isinstance(expected_dataframe, pd.DataFrame)):
+        pytest.skip(f"Derived schema '{name} - {version}' does not have a matching expected dataframe. Performed syntax check only.")
+
+    pd.testing.assert_frame_equal(expected_dataframe, derived_schema_df)
+    assert(expected_dataframe.equals(derived_schema_df))
+
+
+def test_get_invalid_derived_schema_path_df(init_schema_utils, tmp_path):
+    invalid_derived_schema_name = "non-existant"
+    invalid_meta_schema_name = "non-existant"
+    invalid_derived_schema_path = tmp_path / invalid_meta_schema_name / invalid_derived_schema_name / "v001_000_000" / f"{invalid_derived_schema_name}.csv"
+    expected_message = f"An issue occured whilst reading the derived schema at '{invalid_derived_schema_path}'."
+
+    schema_utils = init_schema_utils()
+
+    with pytest.raises(SchemaError) as exc_info:
+        schema_utils.get_derived_schema_df(
+            derived_schema_path = invalid_derived_schema_path
+        )
+    assert (expected_message in str(exc_info.value))
+
+
+def test_get_invalid_derived_schema_df(tmp_path, init_schema_utils, init_derived_schema, test_get_invalid_derived_schema_df_input):
+    derived_schema_path = tmp_path / "derived_schemas"
+    expected_messages = test_get_invalid_derived_schema_df_input["raises"]["messages"]
+
+    derived_schema = init_derived_schema(
+        derived_schema_dict = test_get_invalid_derived_schema_df_input | {"derived_schema_path": derived_schema_path}
+    )
+
+    schema_utils = init_schema_utils()
+
+    with pytest.raises(test_get_invalid_derived_schema_df_input["raises"]["exception"]) as exc_info:
+        schema_utils.get_derived_schema_df(
+            derived_schema_path = derived_schema["derived_schema_path"]
+        )
+    
+    for expected_message in expected_messages:
+        assert (expected_message.format(derived_schema_file_path = derived_schema["derived_schema_path"]) in str(exc_info.value.errors))
 
 
 def test_get_meta_schema_df(init_schema_utils, meta_schema_name_version, test_get_meta_schemas_df_input):
     name, version, path = meta_schema_name_version
     expected_dataframe = test_get_meta_schemas_df_input.get(name, {}).get(version, {})
 
-    schema_utils = init_schema_utils(
+    schema_utils = init_schema_utils()
+
+    meta_schema_df = schema_utils.get_meta_schema_df(
         meta_schema_path = Path(path) / name / version / f"{name}.csv"
     )
-
-    meta_schema_df = schema_utils.get_meta_schema_df()
 
     if not(isinstance(expected_dataframe, pd.DataFrame)):
         pytest.skip(f"Meta schema '{name} - {version}' does not have a matching expected dataframe. Performed syntax check only.")
@@ -99,12 +148,12 @@ def test_get_invalid_meta_schema_path_df(init_schema_utils, tmp_path):
     invalid_meta_schema_path = tmp_path / invalid_meta_schema_name / "v001_000_000" / f"{invalid_meta_schema_name}.csv"
     expected_message = f"An issue occured whilst reading the meta schema at '{invalid_meta_schema_path}'."
 
-    schema_utils = init_schema_utils(
-        meta_schema_path = invalid_meta_schema_path
-    )
+    schema_utils = init_schema_utils()
 
     with pytest.raises(SchemaError) as exc_info:
-        schema_utils.get_meta_schema_df()
+        schema_utils.get_meta_schema_df(
+            meta_schema_path = invalid_meta_schema_path
+        )
     assert (expected_message in str(exc_info.value))
 
 
@@ -116,15 +165,15 @@ def test_get_invalid_meta_schema_df(tmp_path, init_schema_utils, init_meta_schem
         meta_schema_dict = test_get_invalid_meta_schema_df_input | {"meta_schema_path": meta_schema_path}
     )
 
-    schema_utils = init_schema_utils(
-        meta_schema_path = meta_schema["meta_schema_path"]
-    )
+    schema_utils = init_schema_utils()
 
     with pytest.raises(test_get_invalid_meta_schema_df_input["raises"]["exception"]) as exc_info:
-        schema_utils.get_meta_schema_df()
+        schema_utils.get_meta_schema_df(
+            meta_schema_path = meta_schema["meta_schema_path"]
+        )
     
     for expected_message in expected_messages:
-        assert (expected_message.format(meta_schema_file_path = meta_schema["meta_schema_path"]) in str(exc_info.value))
+        assert (expected_message.format(meta_schema_file_path = meta_schema["meta_schema_path"]) in str(exc_info.value.errors))
 
 
 def test_get_type_maps_df(init_schema_utils, type_maps_version, test_get_type_maps_df_input):
@@ -206,4 +255,4 @@ def test_get_invalid_type_maps_df(tmp_path, init_schema_utils, init_type_maps, t
         schema_utils.get_type_maps_df()
     
     for expected_message in expected_messages:
-        assert (expected_message.format(type_maps_file_path = type_maps["type_maps_path"]) in str(exc_info.value))
+        assert (expected_message.format(type_maps_file_path = type_maps["type_maps_path"]) in str(exc_info.value.errors))

@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 import textwrap
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderInvalidVersionError
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderInvalidVersionError
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from importlib import resources
 from pathlib import Path
@@ -25,17 +25,22 @@ def pytest_generate_tests(metafunc):
         versions = [version.name for version in path.iterdir() if version.is_dir()]
         metafunc.parametrize("common_header_version", versions, ids = lambda x: x)
     
-    if ("type_maps_version" in metafunc.fixturenames):
-        marker = metafunc.definition.get_closest_marker("type_maps_version")
+    if ("derived_schema_name_version" in metafunc.fixturenames):
+        marker = metafunc.definition.get_closest_marker("derived_schema_name_version")
 
         if (marker):
             path = Path(marker.args[0])
         else:
             schema_utils = SchemaUtils()
-            path = schema_utils.type_maps_path.parent.parent
+            path = Path(resources.files(schema_utils.RESOURCES_PACKAGE_PATH)._paths[0]) / "data" / "derived_schemas"
         
-        versions = [version.name for version in path.iterdir() if version.is_dir()]
-        metafunc.parametrize("type_maps_version", versions, ids = lambda x: x)
+        name_versions = [
+            (meta_schema.name, name.name, version.name, path)
+            for meta_schema in path.iterdir() if meta_schema.is_dir()
+            for name in meta_schema.iterdir() if name.is_dir()
+            for version in name.iterdir() if version.is_dir()
+        ]
+        metafunc.parametrize("derived_schema_name_version", name_versions, ids = lambda x: f"{x[0]}-{x[1]}-{x[2]}")
     
     if ("meta_schema_name_version" in metafunc.fixturenames):
         marker = metafunc.definition.get_closest_marker("meta_schema_name_version")
@@ -52,6 +57,18 @@ def pytest_generate_tests(metafunc):
             for version in name.iterdir() if version.is_dir()
         ]
         metafunc.parametrize("meta_schema_name_version", name_versions, ids = lambda x: f"{x[0]}-{x[1]}")
+    
+    if ("type_maps_version" in metafunc.fixturenames):
+        marker = metafunc.definition.get_closest_marker("type_maps_version")
+
+        if (marker):
+            path = Path(marker.args[0])
+        else:
+            schema_utils = SchemaUtils()
+            path = schema_utils.type_maps_path.parent.parent
+        
+        versions = [version.name for version in path.iterdir() if version.is_dir()]
+        metafunc.parametrize("type_maps_version", versions, ids = lambda x: x)
 
 
 TEST_SCHEMA_UTILS_GET_VERSION_NO_PATH_INPUT = [
@@ -246,7 +263,7 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
             tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderCommonHeaderError,
             "messages": [
                 "Empty 'column' entry identified in '{common_header_file_path}'."
             ]
@@ -401,6 +418,301 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
 
 @pytest.fixture(params = TEST_GET_INVALID_COMMON_HEADER_DF_INPUT, ids = lambda x: x["name"])
 def test_get_invalid_common_header_df_input(request):
+    return request.param
+
+
+TEST_GET_DERIVED_SCHEMAS_DF_INPUT = {
+    "logs_alerts": {
+        "logs_alerts_derived": {
+            "v001_000_000": pd.DataFrame([
+                {"column": "account_name", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_confidence_level", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_description", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_framework", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_ratingtime_sla_applies", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_rule_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_schedule", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_schedule_duration", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_severity", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_ticket_classification", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_ticket_id", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_ticket_priority", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_triage_score", "type": "int16", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_triage_steps", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_type", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "alert_uid", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_ip", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_ip_ip4", "type": "ipv4", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_ip_ip6", "type": "ipv6", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_is_ipv6", "type": "ipv6", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_port", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "destination_port_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "detected_time", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "detection_time", "type": "", "default": "", "index_order": 1, "index_type": "", "ddl_comment": ""},
+                {"column": "domain", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "event", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "event_id", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "event_id", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "event_original", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "event_type", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "failure_reason", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "image", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "ip_address", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "ip_address_ip4", "type": "ipv4", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "ip_address_ip6", "type": "ipv6", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "ip_port", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "logon_type", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "member_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "message", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "new_process_name", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "new_target_user_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "old_target_user_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "parent_image", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "parent_process_name", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "process_name", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "reason", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "remediation_steps", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "rule_id", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "session_spn", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_ip", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_ip_ip4", "type": "ipv4", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_ip_ip6", "type": "ipv6", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_is_ipv6", "type": "ipv6", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_port", "type": "int32", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_port_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_table", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "source_table", "type": "", "default": "", "index_order": 0, "index_type": "", "ddl_comment": ""},
+                {"column": "status", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "subject_domain_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "subject_user_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "sysmon.image", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "sysmon.parent_image", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "tactic_id", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "tactic_name", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "tactic_reference", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "tactics", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "target_domain_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "target_user_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "technique_id", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "technique_name", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "technique_reference", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "techniques", "type": "", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "timestamp", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "user", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "workstation", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
+                {"column": "workstation_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
+            ]).replace("", np.nan).infer_objects(copy = False)
+        }
+    }
+}
+
+@pytest.fixture()
+def test_get_derived_schemas_df_input():
+    return TEST_GET_DERIVED_SCHEMAS_DF_INPUT
+
+
+TEST_GET_INVALID_DERIVED_SCHEMA_DF_INPUT = [
+    {
+        "name": "missing_single_column",
+        "derived_schema_name": "logs_alerts_derived",
+        "derived_schema_version": "v001_000_000",
+        "meta_schema_name": "logs_alerts",
+        "derived_schema_data": textwrap.dedent("""
+            column,type,index_order,os_order,comment
+            ,,1,,
+            event_id,,,,
+            event,,,,
+            remediation_steps,,,
+            rule_id,,,,
+            source_table,,0,,
+            tactics,,,,
+            techniques,,,,
+            alert_confidence_level,string_fast_lowcardinality,,,Reserved for SOC. Likelihood of this is a real alert vs false positive - This is for SOC to tag or fill in after investigation
+            alert_description,text,,,Description of the detection ( equiv. of threat.detection_description )
+            alert_framework,string,,,MITRE ATT&CK
+            alert_ratingtime_sla_applies,string,,,"true OR false ( In general , if it's aggregation + >= 30mins == false , if it's single message detection == true ) . Eg, priority_alert & runs every 10mins == true , SLA applies"
+            alert_rule_name,string_fast_lowcardinality,,,Add Rule Name. Equivalent of watcher_id in Elastic Watchers
+            alert_schedule,string_fast,,,"Identify whether it's single message detection OR aggregation detection ( eg, smd OR agg )"
+            alert_schedule_duration,string_fast,,,scheduled alert ( how often this detection rule is running such as every 10mins / 30mins / 1hr / 2hrs / 3hrs etc. )
+            alert_severity,string_fast,,,Detection Priority (equiv. of threat.severity such as Low / Medium / High / Critical )
+            alert_ticket_classification,string,,,"Reserved for SOC. ( Eg, SOC can add information such as BruteForce / Data Exfiltration /etc... )"
+            alert_ticket_id,int32,,,Ticket ID created for SOAR ( equiv. of ticket ID in RT Portal )
+            alert_ticket_priority,string_fast_lowcardinality,,,"Reserved for SOC - to use in SOAR ( Eg, P1 / P2 / P3 / P4 )"
+            alert_triage_score,int16,,,"Detection Triage score ( equiv. of threat.triage_score such as 20 = Low, 40 = Medium , 60 = High , 80 = Critical )"
+            alert_triage_steps,text,,,Reserved for SOC - to use in SOAR ( not used in Elastic Search at the moment )
+            alert_type,string_fast,,,Detection Use Case Name in detection ticket
+            alert_uid,string_fast,,,Generate UUID for this specific alert that has occurred
+            detected_time,timestamp,,,Time alert was generated by our detection system
+            event_original,string_fast,,,Extracted copy of raw event that triggered alert
+            org_id,string_fast_lowcardinality,,,Assigned UID / Customer ID that identifies the customer ( equiv. of tenant.name in Elastic )
+            source_table,string_fast_lowcardinality,,,source table the alert was generated from ( equiv. of index name in Elastic )
+            tactic_id,string_fast,,,comma sepeparate list of mitre att&ck tactic ID
+            tactic_name,string_fast,,,comma sepeparate list of mitre att&ck tactic Name
+            technique_id,string_fast,,,comma sepeparate list of mitre att&ck technique ID
+            technique_name,string_fast,,,comma sepeparate list of mitre att&ck technique Name
+            technique_reference,string_fast,,,comma sepeparate list of mitre att&ck technique reference links
+            tactic_reference,string_fast,,,comma sepeparate list of mitre att&ck tactic reference links
+            timestamp,timestamp,,,"Timeseries increasing timestamp (timestamp,timestamp_load) REQUIRED NOT NULLABLE"
+            account_name,string,,,windows_audit
+            destination_hostname,string_fast_lowcardinality,,,windows_audit
+            destination_ip,string_fast_lowcardinality,,,windows_audit
+            destination_ip_ip4,ipv4,,,windows_audit
+            destination_ip_ip6,ipv6,,,windows_audit
+            destination_is_ipv6,ipv6,,,windows_audit
+            destination_port,int32,,,windows_audit
+            destination_port_name,string_fast_lowcardinality,,,windows_audit
+            domain,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            event_id,int32,,,windows_audit
+            event_type,string_fast_lowcardinality,,,windows_audit
+            failure_reason,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            ip_address,string_fast_lowcardinality,,,windows_audit
+            ip_address_ip4,ipv4,,,windows_audit
+            ip_address_ip6,ipv6,,,windows_audit
+            ip_port,int32,,,windows_audit
+            member_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            message,text,,,windows_audit
+            new_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            old_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            reason,string,,,windows_audit
+            session_spn,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            source_hostname,string_fast_lowcardinality,,,windows_audit
+            source_ip,string_fast_lowcardinality,,,windows_audit
+            source_ip_ip4,ipv4,,,windows_audit
+            source_ip_ip6,ipv6,,,windows_audit
+            source_is_ipv6,ipv6,,,windows_audit
+            source_port,int32,,,windows_audit
+            source_port_name,string_fast_lowcardinality,,,windows_audit
+            status,string_fast_lowcardinality,,,windows_audit
+            subject_domain_name,string_fast_lowcardinality,,,windows_audit
+            subject_user_name,string_fast_lowcardinality,,,windows_audit
+            target_domain_name,string_fast_lowcardinality,,,windows_audit
+            target_user_name,string_fast_lowcardinality,,,windows_audit
+            user,string_fast_lowcardinality,,,windows_audit
+            workstation,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            workstation_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            parent_image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.parent_image,string_fast,,,windows_audit
+            parent_process_name,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.image,string_fast,,,windows_audit
+            image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            new_process_name,string,,,windows_audit
+            process_name,string_fast,,,windows_audit
+            logon_type,int32,,,windows_audit
+        """),
+        "raises": {
+            "exception": SchemaError,
+            "messages": [
+                "Empty 'column' entry identified in '{derived_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "missing_multiple_columns",
+        "derived_schema_name": "logs_alerts_derived",
+        "derived_schema_version": "v001_000_000",
+        "meta_schema_name": "logs_alerts",
+        "derived_schema_data": textwrap.dedent("""
+            column,type,index_order,os_order,comment
+            ,,1,,
+            ,,,,
+            event,,,,
+            remediation_steps,,,
+            rule_id,,,,
+            source_table,,0,,
+            tactics,,,,
+            techniques,,,,
+            alert_confidence_level,string_fast_lowcardinality,,,Reserved for SOC. Likelihood of this is a real alert vs false positive - This is for SOC to tag or fill in after investigation
+            alert_description,text,,,Description of the detection ( equiv. of threat.detection_description )
+            alert_framework,string,,,MITRE ATT&CK
+            alert_ratingtime_sla_applies,string,,,"true OR false ( In general , if it's aggregation + >= 30mins == false , if it's single message detection == true ) . Eg, priority_alert & runs every 10mins == true , SLA applies"
+            alert_rule_name,string_fast_lowcardinality,,,Add Rule Name. Equivalent of watcher_id in Elastic Watchers
+            alert_schedule,string_fast,,,"Identify whether it's single message detection OR aggregation detection ( eg, smd OR agg )"
+            alert_schedule_duration,string_fast,,,scheduled alert ( how often this detection rule is running such as every 10mins / 30mins / 1hr / 2hrs / 3hrs etc. )
+            alert_severity,string_fast,,,Detection Priority (equiv. of threat.severity such as Low / Medium / High / Critical )
+            alert_ticket_classification,string,,,"Reserved for SOC. ( Eg, SOC can add information such as BruteForce / Data Exfiltration /etc... )"
+            alert_ticket_id,int32,,,Ticket ID created for SOAR ( equiv. of ticket ID in RT Portal )
+            alert_ticket_priority,string_fast_lowcardinality,,,"Reserved for SOC - to use in SOAR ( Eg, P1 / P2 / P3 / P4 )"
+            alert_triage_score,int16,,,"Detection Triage score ( equiv. of threat.triage_score such as 20 = Low, 40 = Medium , 60 = High , 80 = Critical )"
+            alert_triage_steps,text,,,Reserved for SOC - to use in SOAR ( not used in Elastic Search at the moment )
+            alert_type,string_fast,,,Detection Use Case Name in detection ticket
+            alert_uid,string_fast,,,Generate UUID for this specific alert that has occurred
+            detected_time,timestamp,,,Time alert was generated by our detection system
+            event_original,string_fast,,,Extracted copy of raw event that triggered alert
+            org_id,string_fast_lowcardinality,,,Assigned UID / Customer ID that identifies the customer ( equiv. of tenant.name in Elastic )
+            source_table,string_fast_lowcardinality,,,source table the alert was generated from ( equiv. of index name in Elastic )
+            tactic_id,string_fast,,,comma sepeparate list of mitre att&ck tactic ID
+            tactic_name,string_fast,,,comma sepeparate list of mitre att&ck tactic Name
+            technique_id,string_fast,,,comma sepeparate list of mitre att&ck technique ID
+            technique_name,string_fast,,,comma sepeparate list of mitre att&ck technique Name
+            technique_reference,string_fast,,,comma sepeparate list of mitre att&ck technique reference links
+            tactic_reference,string_fast,,,comma sepeparate list of mitre att&ck tactic reference links
+            timestamp,timestamp,,,"Timeseries increasing timestamp (timestamp,timestamp_load) REQUIRED NOT NULLABLE"
+            account_name,string,,,windows_audit
+            destination_hostname,string_fast_lowcardinality,,,windows_audit
+            destination_ip,string_fast_lowcardinality,,,windows_audit
+            destination_ip_ip4,ipv4,,,windows_audit
+            destination_ip_ip6,ipv6,,,windows_audit
+            destination_is_ipv6,ipv6,,,windows_audit
+            destination_port,int32,,,windows_audit
+            destination_port_name,string_fast_lowcardinality,,,windows_audit
+            domain,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            event_id,int32,,,windows_audit
+            event_type,string_fast_lowcardinality,,,windows_audit
+            failure_reason,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            ip_address,string_fast_lowcardinality,,,windows_audit
+            ip_address_ip4,ipv4,,,windows_audit
+            ip_address_ip6,ipv6,,,windows_audit
+            ip_port,int32,,,windows_audit
+            member_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            message,text,,,windows_audit
+            new_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            old_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            reason,string,,,windows_audit
+            session_spn,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            source_hostname,string_fast_lowcardinality,,,windows_audit
+            source_ip,string_fast_lowcardinality,,,windows_audit
+            source_ip_ip4,ipv4,,,windows_audit
+            source_ip_ip6,ipv6,,,windows_audit
+            source_is_ipv6,ipv6,,,windows_audit
+            source_port,int32,,,windows_audit
+            source_port_name,string_fast_lowcardinality,,,windows_audit
+            status,string_fast_lowcardinality,,,windows_audit
+            subject_domain_name,string_fast_lowcardinality,,,windows_audit
+            subject_user_name,string_fast_lowcardinality,,,windows_audit
+            target_domain_name,string_fast_lowcardinality,,,windows_audit
+            target_user_name,string_fast_lowcardinality,,,windows_audit
+            user,string_fast_lowcardinality,,,windows_audit
+            workstation,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            workstation_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            parent_image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.parent_image,string_fast,,,windows_audit
+            parent_process_name,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.image,string_fast,,,windows_audit
+            image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            new_process_name,string,,,windows_audit
+            process_name,string_fast,,,windows_audit
+            logon_type,int32,,,windows_audit
+        """),
+        "raises": {
+            "exception": SchemaError,
+            "messages": [
+                "Empty 'column' entries identified in '{derived_schema_file_path}'."
+            ]
+        }
+    }
+]
+
+@pytest.fixture(params = TEST_GET_INVALID_DERIVED_SCHEMA_DF_INPUT, ids = lambda x: x["name"])
+def test_get_invalid_derived_schema_df_input(request):
     return request.param
 
 

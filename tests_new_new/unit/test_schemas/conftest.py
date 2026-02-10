@@ -64,29 +64,6 @@ def init_common_header():
 
 
 @pytest.fixture
-def init_type_maps():
-
-    def _init_(type_maps_dict):
-        type_maps_data = type_maps_dict["type_maps_data"]
-        type_maps_path = type_maps_dict["type_maps_path"]
-        type_maps_version = type_maps_dict["type_maps_version"].replace(".", "_")
-
-        type_maps_path = Path(type_maps_path) / type_maps_version / "type_maps.csv"
-        type_maps_path.parent.mkdir(parents = True, exist_ok = True)
-        with open(type_maps_path, "w") as file:
-            reader = csv.reader(io.StringIO(type_maps_data))
-            writer = csv.writer(file)
-            writer.writerows(reader)
-        
-        return {
-            "type_maps_version": type_maps_version,
-            "type_maps_path": type_maps_path
-        }
-    
-    return _init_
-
-
-@pytest.fixture
 def init_derived_schema(init_schema_paths):
 
     def _init_(derived_schema_dict):
@@ -133,6 +110,29 @@ def init_meta_schema(init_schema_paths):
             "meta_schema_name": meta_schema_name,
             "meta_schema_version": meta_schema_version,
             "meta_schema_path": meta_schema_path
+        }
+    
+    return _init_
+
+
+@pytest.fixture
+def init_type_maps():
+
+    def _init_(type_maps_dict):
+        type_maps_data = type_maps_dict["type_maps_data"]
+        type_maps_path = type_maps_dict["type_maps_path"]
+        type_maps_version = type_maps_dict["type_maps_version"].replace(".", "_")
+
+        type_maps_path = Path(type_maps_path) / type_maps_version / "type_maps.csv"
+        type_maps_path.parent.mkdir(parents = True, exist_ok = True)
+        with open(type_maps_path, "w") as file:
+            reader = csv.reader(io.StringIO(type_maps_data))
+            writer = csv.writer(file)
+            writer.writerows(reader)
+        
+        return {
+            "type_maps_version": type_maps_version,
+            "type_maps_path": type_maps_path
         }
     
     return _init_
