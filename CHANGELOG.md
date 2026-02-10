@@ -1,3 +1,10 @@
+## [1.3.60](https://github.com/hyperi-io/dfe-engine/compare/v1.3.59...v1.3.60) (2026-02-10)
+
+
+### Bug Fixes
+
+* Adding new idea of PK to schemas ([afc5c77](https://github.com/hyperi-io/dfe-engine/commit/afc5c774d11526436d72e434a3f689d1049ae3ec))
+
 ## [1.3.59](https://github.com/hyperi-io/dfe-engine/compare/v1.3.58...v1.3.59) (2026-02-10)
 
 
