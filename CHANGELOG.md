@@ -1,3 +1,10 @@
+## [1.3.59](https://github.com/hyperi-io/dfe-engine/compare/v1.3.58...v1.3.59) (2026-02-10)
+
+
+### Bug Fixes
+
+* Derived schemas now tested and loaded via function ([7539fcf](https://github.com/hyperi-io/dfe-engine/commit/7539fcfd79bc1c0393747c4963a2119eeb3c9531))
+
 ## [1.3.58](https://github.com/hypersec-io/dfe-engine/compare/v1.3.57...v1.3.58) (2026-02-09)
 
 
