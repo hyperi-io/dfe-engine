@@ -63,6 +63,13 @@ class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     def __init__(self, directory: str, custom_message: str = ""):
         super().__init__(f"The directory '{directory}' could not be found.", custom_message)
 
+class SchemaBuilderDuplicatePrimaryKeyError(SchemaBuilderError):
+    """
+    Raised when a schema has a duplicate primary key entry.
+    """
+    def __init__(self, duplicate_field: str, primary_key: str, schema_path: str, custom_message: str = ""):
+        super().__init__(f"Multiple entries with '{primary_key}' of '{duplicate_field}' in '{schema_path}'.", custom_message)
+
 class SchemaBuilderDuplicateSchemaNameError(SchemaBuilderError):
     """
     Raised when a schema build conifg has a name defined multiple times.

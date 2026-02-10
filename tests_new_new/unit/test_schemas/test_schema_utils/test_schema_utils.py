@@ -5,6 +5,9 @@ from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from pathlib import Path
 
+from ..templates.derived_schema import LOGS_TEST_DERIVED_001_000_000
+from ..templates.meta_schema import LOGS_TEST_META_001_000_000
+
 
 @pytest.fixture
 def init_schema_utils():
@@ -256,3 +259,21 @@ def test_get_invalid_type_maps_df(tmp_path, init_schema_utils, init_type_maps, t
     
     for expected_message in expected_messages:
         assert (expected_message.format(type_maps_file_path = type_maps["type_maps_path"]) in str(exc_info.value.errors))
+
+
+def test_create_combined_df(init_derived_schema, init_meta_schema, init_schema_utils):
+    derived_schema = init_derived_schema(LOGS_TEST_DERIVED_001_000_000)
+    meta_schema = init_meta_schema(LOGS_TEST_META_001_000_000)
+    schema_utils = init_schema_utils()
+
+    common_header_df = schema_utils.get_common_header_df()
+    type_maps_df = schema_utils.get_type_maps_df()
+
+    schema_utils.create_combined_df(
+        common_header_df = common_header_df,
+        derived_schema_path = derived_schema["derived_schema_path"],
+        meta_schema_path = meta_schema["meta_schema_path"],
+        type_maps_df = type_maps_df
+    )
+
+    assert(False)
