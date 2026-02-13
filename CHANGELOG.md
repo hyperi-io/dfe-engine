@@ -1,3 +1,10 @@
+## [1.3.62](https://github.com/hyperi-io/dfe-engine/compare/v1.3.61...v1.3.62) (2026-02-13)
+
+
+### Bug Fixes
+
+* Meta schema fields now part of combine df ([dc1f0da](https://github.com/hyperi-io/dfe-engine/commit/dc1f0da1e7eb7d6e5b3eaa1cd8c6194f3de67550))
+
 ## [1.3.61](https://github.com/hyperi-io/dfe-engine/compare/v1.3.60...v1.3.61) (2026-02-13)
 
 
