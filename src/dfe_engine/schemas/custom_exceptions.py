@@ -11,6 +11,7 @@ __all__ = [
     'SchemaBuilderDuplicateSchemaNameError',
     'SchemaBuilderInvalidVersionError',
     'SchemaBuilderMetaSchemaError',
+    'SchemaBuilderMissingMetaSchemaFieldError',
     'SchemaBuilderMissingRequiredFieldsError',
     'SchemaBuilderNoSchemasToBuildError',
     'SchemaBuilderTypeMapsError',
@@ -91,6 +92,10 @@ class SchemaBuilderMetaSchemaError(SchemaBuilderError):
     def __init__(self, meta_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
         self.errors = errors
         super().__init__(f"An issue occured whilst reading the meta schema at '{meta_schema_path}'.", custom_message)
+
+class SchemaBuilderMissingMetaSchemaFieldError(SchemaBuilderMetaSchemaError):
+    def __init__(self, field_name: str, key: str, meta_schema_path: str, custom_message: str = ""):
+        super().__init__(f"{key.capitalize()} '{field_name}' cannot be found in '{meta_schema_path}'.", custom_message)
 
 class SchemaBuilderMissingRequiredFieldsError(SchemaBuilderError):
     """
