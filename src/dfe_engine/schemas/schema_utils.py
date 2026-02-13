@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderDuplicatePrimaryKeyWarning, SchemaBuilderJSONWarning
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingMetaSchemaFieldError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderDuplicatePrimaryKeyWarning, SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
 from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
@@ -52,6 +52,54 @@ class SchemaUtils:
         self.common_header_path = Path(common_header_path) / self.common_header_version / self.COMMON_HEADER_FILE_NAME
         self.type_maps_path = Path(type_maps_path) / self.type_maps_version / self.TYPE_MAPS_FILE_NAME
         self.use_json_feature = use_json_feature
+
+
+    def _create_sub_from_meta(
+        self,
+        derived_schema_sub_df: pd.DataFrame,
+        lookup_key: str,
+        meta_schema_df: pd.DataFrame,
+        meta_schema_path: Path,
+    ) -> pd.DataFrame: # pragma: no cover
+        """
+        Internal function that combines the derived sub schema with the meta schema.
+        """
+        combined_sub_fields = {}
+        field_exceptions = []
+
+        for _, row in derived_schema_sub_df.iterrows():
+            matching_fields = meta_schema_df[meta_schema_df[lookup_key] == row[lookup_key]]
+            if (len(matching_fields) == 0):
+                field_exceptions.append(SchemaBuilderMissingMetaSchemaFieldError(row[lookup_key], lookup_key, meta_schema_path))
+                continue
+            elif (len(matching_fields) > 1):
+                try:
+                    matching_fields = self._extract_duplicates(
+                        dataframe = matching_fields,
+                        on_error_exception = SchemaBuilderMetaSchemaError,
+                        schema_path = meta_schema_path,
+                        source = "meta_schema",
+                        unique_key = lookup_key
+                    )
+                
+                except SchemaBuilderMetaSchemaError as e:
+                    for error in e.errors:
+                        if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                            logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+                    
+                    e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
+                    if (e.errors):
+                        field_exceptions.extend(e.errors)
+                        continue
+            row = matching_fields.iloc[0].copy()
+            row["source"] = "meta_schema"
+            combined_sub_fields[row[lookup_key]] = row
+
+        if (len(field_exceptions) > 0):
+            raise SchemaBuilderMetaSchemaError(meta_schema_path, field_exceptions)
+
+        combined_sub_fields_df = pd.DataFrame(combined_sub_fields).T.reset_index(drop = True)
+        return combined_sub_fields_df
 
 
     @staticmethod
@@ -169,8 +217,7 @@ class SchemaUtils:
         self,
         common_header_df: pd.DataFrame,
         derived_schema_path: Path,
-        meta_schema_path: Path,
-        type_maps_df: pd.DataFrame
+        meta_schema_path: Path
     ) -> pd.DataFrame:
         try:
             derived_schema_df = self.get_derived_schema_df(
@@ -193,19 +240,40 @@ class SchemaUtils:
             )
 
             derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
-            derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
 
             combined_rows = combined_rows | self._extract_duplicates(
                 dataframe = derived_schema_add_df,
                 on_error_exception = SchemaBuilderDerivedSchemaError,
                 unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
                 schema_path = derived_schema_path,
-                source = "derived",
+                source = "derived_schema",
                 initial_row_dict = combined_rows
             )
 
-            print(combined_rows)
+            derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
 
+            derived_schema_meta_df = self._create_sub_from_meta(
+                derived_schema_sub_df = derived_schema_sub_df,
+                lookup_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                meta_schema_df = meta_schema_df,
+                meta_schema_path = meta_schema_path
+            )
+
+            print(derived_schema_meta_df)
+
+            combined_rows = combined_rows | self._extract_duplicates(
+                dataframe = derived_schema_meta_df,
+                on_error_exception = SchemaBuilderDerivedSchemaError,
+                unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                schema_path = derived_schema_path,
+                source = "meta_schema",
+                initial_row_dict = combined_rows
+            )
+
+            combined_rows_df = pd.DataFrame(combined_rows).T.reset_index(drop = True)
+            
+            logger.success("Successfully combined schema data.")
+            logger.debug(f"Using the following combined_rows_df...\n{combined_rows_df}")
         
         except SchemaBuilderError as e:
             for error in e.errors:
@@ -215,6 +283,8 @@ class SchemaUtils:
             e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
             if (e.errors):
                 raise e
+        
+        return combined_rows_df
 
 
     def get_common_header_df(

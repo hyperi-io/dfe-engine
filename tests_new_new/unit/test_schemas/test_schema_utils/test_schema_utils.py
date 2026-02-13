@@ -272,8 +272,7 @@ def test_create_combined_df(init_derived_schema, init_meta_schema, init_schema_u
     schema_utils.create_combined_df(
         common_header_df = common_header_df,
         derived_schema_path = derived_schema["derived_schema_path"],
-        meta_schema_path = meta_schema["meta_schema_path"],
-        type_maps_df = type_maps_df
+        meta_schema_path = meta_schema["meta_schema_path"]
     )
 
     assert(False)
