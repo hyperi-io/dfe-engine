@@ -1,3 +1,10 @@
+## [1.3.63](https://github.com/hyperi-io/dfe-engine/compare/v1.3.62...v1.3.63) (2026-02-13)
+
+
+### Bug Fixes
+
+* Small bug with unaccessed var ([b7174d5](https://github.com/hyperi-io/dfe-engine/commit/b7174d5be50216eca4bf40743211246c8e310a77))
+
 ## [1.3.62](https://github.com/hyperi-io/dfe-engine/compare/v1.3.61...v1.3.62) (2026-02-13)
 
 
