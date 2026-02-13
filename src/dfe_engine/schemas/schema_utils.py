@@ -259,8 +259,6 @@ class SchemaUtils:
                 meta_schema_path = meta_schema_path
             )
 
-            print(derived_schema_meta_df)
-
             combined_rows = combined_rows | self._extract_duplicates(
                 dataframe = derived_schema_meta_df,
                 on_error_exception = SchemaBuilderDerivedSchemaError,
@@ -269,11 +267,6 @@ class SchemaUtils:
                 source = "meta_schema",
                 initial_row_dict = combined_rows
             )
-
-            combined_rows_df = pd.DataFrame(combined_rows).T.reset_index(drop = True)
-            
-            logger.success("Successfully combined schema data.")
-            logger.debug(f"Using the following combined_rows_df...\n{combined_rows_df}")
         
         except SchemaBuilderError as e:
             for error in e.errors:
@@ -284,6 +277,10 @@ class SchemaUtils:
             if (e.errors):
                 raise e
         
+        combined_rows_df = pd.DataFrame(combined_rows).T.reset_index(drop = True)
+        logger.success("Successfully combined schema data.")
+        logger.debug(f"Using the following combined_rows_df...\n{combined_rows_df}")
+
         return combined_rows_df
 
 
