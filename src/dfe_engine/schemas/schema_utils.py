@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderJSONWarning
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderDuplicatePrimaryKeyWarning, SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
 from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
@@ -73,27 +73,36 @@ class SchemaUtils:
         dataframe: pd.DataFrame,
         on_error_exception: Exception,
         schema_path: Path,
-        schema_version: str,
+        source: str,
         unique_key: str,
-        initial_row_list: list[pd.Series] = None
-    ) -> list[pd.Series]: # pragma: no cover
-        duplicate_field_errors = []
+        initial_row_dict: dict = None,
+        schema_version: str = None
+    ) -> dict: # pragma: no cover
+        duplicate_field_exceptions = []
 
-        if (initial_row_list is None):
-            row_list = []
+        if (initial_row_dict is None):
+            row_dict = {}
         else:
-            row_list = initial_row_list
+            row_dict = initial_row_dict
 
         for _, row in dataframe.iterrows():
-            if (row[unique_key] in [c_row[unique_key] for c_row in row_list]):
-                duplicate_field_errors.append(SchemaBuilderDuplicatePrimaryKeyError(row[unique_key], unique_key, schema_path))
+            key = row[unique_key]
+            if (key in row_dict):
+                if (row_dict[key]["type"] == row["type"]):
+                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(key, row_dict[key]["source"], unique_key, schema_path))
+                else:
+                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(key, row_dict[key]["source"], unique_key, schema_path))
             else:
-                row_list.append(row)
+                row["source"] = source
+                row_dict[key] = row
         
-        if (len(duplicate_field_errors) > 0):
-            raise on_error_exception(schema_version, duplicate_field_errors)
+        if (len(duplicate_field_exceptions) > 0):
+            if (isinstance(on_error_exception, SchemaBuilderCommonHeaderError)):
+                raise on_error_exception(schema_version, duplicate_field_exceptions)
+            else:
+                raise on_error_exception(schema_path, duplicate_field_exceptions)
         
-        return row_list
+        return row_dict
 
 
     def _find_missing_field_errors(
@@ -171,18 +180,41 @@ class SchemaUtils:
                 meta_schema_path = meta_schema_path
             )
 
-            combined_rows = []
+            combined_rows = {}
 
-            combined_rows.extend(self._extract_duplicates(
+            combined_rows = self._extract_duplicates(
                 dataframe = common_header_df,
                 on_error_exception = SchemaBuilderCommonHeaderError,
                 unique_key = next((field["name"] for field in COMMON_HEADER_FIELDS if (field.get("is_key"))), None),
                 schema_path = self.common_header_path,
+                source = "common_header",
+                initial_row_dict = combined_rows,
                 schema_version = self.common_header_version
-            ))
+            )
+
+            derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
+            derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
+
+            combined_rows = combined_rows | self._extract_duplicates(
+                dataframe = derived_schema_add_df,
+                on_error_exception = SchemaBuilderDerivedSchemaError,
+                unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                schema_path = derived_schema_path,
+                source = "derived",
+                initial_row_dict = combined_rows
+            )
+
+            print(combined_rows)
+
         
-        except SchemaBuilderCommonHeaderError as e:
-            raise
+        except SchemaBuilderError as e:
+            for error in e.errors:
+                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+            
+            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
+            if (e.errors):
+                raise e
 
 
     def get_common_header_df(
