@@ -1,3 +1,10 @@
+## [1.3.61](https://github.com/hyperi-io/dfe-engine/compare/v1.3.60...v1.3.61) (2026-02-13)
+
+
+### Bug Fixes
+
+* Initial push of duplicate checking in schemas ([99a1167](https://github.com/hyperi-io/dfe-engine/commit/99a1167f2e40ef25846a3eb11eed7dfc1758fc2d))
+
 ## [1.3.60](https://github.com/hyperi-io/dfe-engine/compare/v1.3.59...v1.3.60) (2026-02-10)
 
 
