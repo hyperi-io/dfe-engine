@@ -15,7 +15,8 @@ LOGS_TEST_DERIVED_001_000_000 = {
         test_field_7,string,,,,
         test_field_8,string,,,,
         test_field_9,string,,,,
-        test_field_10,string,,,,
+        test_field_10,,,,,
+            
     """),
     "meta_schema_name": "logs_test_meta"
 }

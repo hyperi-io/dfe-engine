@@ -68,8 +68,7 @@ class SchemaCHDDLGenerator:
             fields_df = self.schema_utils.create_combined_df(
                 common_header_df = self.common_header_df,
                 derived_schema_path = derived_schema_path,
-                meta_schema_path = meta_schema_path,
-                type_maps_df = self.type_maps_df
+                meta_schema_path = meta_schema_path
             )
         
         except SchemaBuilderError as e:
