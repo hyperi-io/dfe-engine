@@ -1,3 +1,10 @@
+## [1.3.64](https://github.com/hyperi-io/dfe-engine/compare/v1.3.63...v1.3.64) (2026-02-13)
+
+
+### Bug Fixes
+
+* Allowing dataframe debugs to show 100 rows ([12514c9](https://github.com/hyperi-io/dfe-engine/commit/12514c902e21fb2cfad6564146918a5d403bd0ec))
+
 ## [1.3.63](https://github.com/hyperi-io/dfe-engine/compare/v1.3.62...v1.3.63) (2026-02-13)
 
 
