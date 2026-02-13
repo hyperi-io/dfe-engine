@@ -72,6 +72,6 @@ class SchemaCHDDLGenerator:
                 type_maps_df = self.type_maps_df
             )
         
-        except SchemaBuilderCommonHeaderError as e:
+        except SchemaBuilderError as e:
             for error in e.errors:
-                logger.error(error)
+                logger.error(f"{type(error).__name__}: {error}")
