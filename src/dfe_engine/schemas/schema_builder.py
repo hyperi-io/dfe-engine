@@ -140,6 +140,8 @@ class SchemaBuilder:
 
             for schema_obj in schema_objs:
                 try:
+                    logger.info(f"Building ClickHouse DDL for schema {schema_obj.name}...")
+
                     schema_ddl = ch_ddl_generator.build_ddl(
                        meta_schema_path = schema_obj.meta_schema["path"],
                        derived_schema_path = schema_obj.derived_schema["path"]

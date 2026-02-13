@@ -52,9 +52,9 @@ class SchemaBuilderDerivedSchemaError(SchemaBuilderError):
     """
     Raised when an issue occurs when reading a derived schema file.
     """
-    def __init__(self, meta_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
+    def __init__(self, derived_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
         self.errors = errors
-        super().__init__(f"An issue occured whilst reading the derived schema at '{meta_schema_path}'.", custom_message)
+        super().__init__(f"An issue occured whilst reading the derived schema at '{derived_schema_path}'.", custom_message)
 
 class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
@@ -65,10 +65,10 @@ class SchemaBuilderDirNotFoundError(SchemaBuilderError):
 
 class SchemaBuilderDuplicatePrimaryKeyError(SchemaBuilderError):
     """
-    Raised when a schema has a duplicate primary key entry.
+    Raised when a schema has a duplicate primary key entry and differening type.
     """
-    def __init__(self, duplicate_field: str, primary_key: str, schema_path: str, custom_message: str = ""):
-        super().__init__(f"Multiple entries with '{primary_key}' of '{duplicate_field}' in '{schema_path}'.", custom_message)
+    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, schema_path: str, custom_message: str = ""):
+        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found in '{schema_path}' with unmatched metadata.", custom_message)
 
 class SchemaBuilderDuplicateSchemaNameError(SchemaBuilderError):
     """
@@ -143,6 +143,13 @@ class SchemaBuilderWarning(SchemaWarning):
     """
     def __init__(self, message: str, custom_message: str = ""):
         super().__init__(message, custom_message)
+
+class SchemaBuilderDuplicatePrimaryKeyWarning(SchemaBuilderWarning):
+    """
+    Raised when a schema has a duplicate primary key entry but matching type.
+    """
+    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, schema_path: str, custom_message: str = ""):
+        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found in '{schema_path}' will be skipped...", custom_message)
 
 class SchemaBuilderJSONWarning(SchemaBuilderWarning):
     """
