@@ -89,6 +89,7 @@ class SchemaUtils:
                 try:
                     matching_fields = self._extract_duplicates(
                         dataframe = matching_fields,
+                        field_definitions = field_definitions,
                         on_error_exception = SchemaBuilderMetaSchemaError,
                         schema_path = meta_schema_path,
                         source = "meta_schema",
