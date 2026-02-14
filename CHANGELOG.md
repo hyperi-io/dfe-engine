@@ -1,3 +1,10 @@
+## [1.3.67](https://github.com/hyperi-io/dfe-engine/compare/v1.3.66...v1.3.67) (2026-02-14)
+
+
+### Bug Fixes
+
+* Missing pass through of variable ([a93b862](https://github.com/hyperi-io/dfe-engine/commit/a93b8624bf18323e58f51658a829044c3316f598))
+
 ## [1.3.66](https://github.com/hyperi-io/dfe-engine/compare/v1.3.65...v1.3.66) (2026-02-14)
 
 
