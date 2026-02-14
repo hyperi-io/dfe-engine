@@ -1,3 +1,10 @@
+## [1.3.65](https://github.com/hyperi-io/dfe-engine/compare/v1.3.64...v1.3.65) (2026-02-14)
+
+
+### Bug Fixes
+
+* Adding types to schema fields ([60fe08e](https://github.com/hyperi-io/dfe-engine/commit/60fe08ef9c35b62d2e705178617b390396c0bb1c))
+
 ## [1.3.64](https://github.com/hyperi-io/dfe-engine/compare/v1.3.63...v1.3.64) (2026-02-13)
 
 
