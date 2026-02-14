@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 
 
@@ -107,7 +106,7 @@ class SchemaBuilderMissingRequiredFieldsError(SchemaBuilderError):
             message = f"Empty '{field["name"]}' entr{"ies" if multiple_errors else "y"} identified"
         else:
             multiple_errors = empty_values[field_pk].notna().sum() > 1
-            message = f"{field_pk.capitalize()} name{f"s '[{", ".join(str(column) for column in empty_values[field_pk].tolist() if column is not np.nan)}]' are" if multiple_errors else f" '{empty_values[field_pk].tolist()[0]}' is"} missing an entry for '{field["name"]}'"
+            message = f"{field_pk.capitalize()} name{f"s '[{", ".join(str(column) for column in empty_values[field_pk].tolist() if column is not pd.NA)}]' are" if multiple_errors else f" '{empty_values[field_pk].tolist()[0]}' is"} missing an entry for '{field["name"]}'"
         super().__init__(f"{message} in '{schema_path}'.", custom_message)
 
 class SchemaBuilderNoSchemasToBuildError(SchemaBuilderError):
