@@ -1,3 +1,10 @@
+## [1.3.66](https://github.com/hyperi-io/dfe-engine/compare/v1.3.65...v1.3.66) (2026-02-14)
+
+
+### Bug Fixes
+
+* Small bug in duplicates of derived schema sub + moving to all unique values ([d6645d0](https://github.com/hyperi-io/dfe-engine/commit/d6645d0ae8a6281382eac5ec492ff7d4beb10740))
+
 ## [1.3.65](https://github.com/hyperi-io/dfe-engine/compare/v1.3.64...v1.3.65) (2026-02-14)
 
 
