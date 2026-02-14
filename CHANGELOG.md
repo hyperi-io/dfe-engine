@@ -1,3 +1,10 @@
+## [1.3.68](https://github.com/hyperi-io/dfe-engine/compare/v1.3.67...v1.3.68) (2026-02-14)
+
+
+### Bug Fixes
+
+* Need to check NA now ([82e42f2](https://github.com/hyperi-io/dfe-engine/commit/82e42f2b246de74423717050a8f332a2d5810dd1))
+
 ## [1.3.67](https://github.com/hyperi-io/dfe-engine/compare/v1.3.66...v1.3.67) (2026-02-14)
 
 
