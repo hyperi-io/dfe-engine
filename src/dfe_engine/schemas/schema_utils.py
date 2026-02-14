@@ -159,7 +159,7 @@ class SchemaUtils:
         for _, row in dataframe.iterrows():
             key = row[unique_key]
             if (key in row_dict):
-                if (all(row_dict[key][field] == row[field] for field in composite_key)):
+                if ((all(row_dict[key][field] == row[field] and not pd.isna(row[field])) for field in composite_key)):
                     duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(key, row_dict[key]["source"], unique_key, schema_path))
                 else:
                     duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(key, row_dict[key]["source"], unique_key, schema_path))
