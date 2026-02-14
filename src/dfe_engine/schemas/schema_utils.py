@@ -226,9 +226,19 @@ class SchemaUtils:
             meta_schema_df = self.get_meta_schema_df(
                 meta_schema_path = meta_schema_path
             )
+        
+        except SchemaBuilderError as e:
+            for error in e.errors:
+                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+            
+            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
+            if (e.errors):
+                raise e
 
-            combined_rows = {}
+        combined_rows = {}
 
+        try:
             combined_rows = self._extract_duplicates(
                 dataframe = common_header_df,
                 on_error_exception = SchemaBuilderCommonHeaderError,
@@ -238,9 +248,19 @@ class SchemaUtils:
                 initial_row_dict = combined_rows,
                 schema_version = self.common_header_version
             )
+    
+        except SchemaBuilderError as e:
+            for error in e.errors:
+                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+            
+            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
+            if (e.errors):
+                raise e
 
-            derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
+        derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
 
+        try:
             combined_rows = combined_rows | self._extract_duplicates(
                 dataframe = derived_schema_add_df,
                 on_error_exception = SchemaBuilderDerivedSchemaError,
@@ -249,9 +269,19 @@ class SchemaUtils:
                 source = "derived_schema",
                 initial_row_dict = combined_rows
             )
+    
+        except SchemaBuilderError as e:
+            for error in e.errors:
+                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+            
+            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
+            if (e.errors):
+                raise e
 
-            derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
+        derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
 
+        try:
             derived_schema_meta_df = self._create_sub_from_meta(
                 derived_schema_sub_df = derived_schema_sub_df,
                 lookup_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
@@ -267,13 +297,13 @@ class SchemaUtils:
                 source = "meta_schema",
                 initial_row_dict = combined_rows
             )
-        
+    
         except SchemaBuilderError as e:
             for error in e.errors:
                 if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
                     logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
-            
-            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
+                        
+            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
             if (e.errors):
                 raise e
         
@@ -296,6 +326,11 @@ class SchemaUtils:
             common_header_df = self._csv_to_dataframe(self.common_header_path)
 
             common_header_df = common_header_df.reindex(columns = [field["name"] for field in COMMON_HEADER_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
+
+            for field in COMMON_HEADER_FIELDS:
+                data_type = field.get("type", "string")
+                data_type = data_type.capitalize() if (data_type != "string") else data_type
+                common_header_df[field["name"]] = common_header_df[field["name"]].astype(data_type)
 
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = common_header_df,
@@ -332,6 +367,11 @@ class SchemaUtils:
 
             derived_schema_df = derived_schema_df.reindex(columns = [field["name"] for field in DERIVED_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
 
+            for field in DERIVED_SCHEMA_FIELDS:
+                data_type = field.get("type", "string")
+                data_type = data_type.capitalize() if (data_type != "string") else data_type
+                derived_schema_df[field["name"]] = derived_schema_df[field["name"]].astype(data_type)
+
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = derived_schema_df,
                 field_definitions = DERIVED_SCHEMA_FIELDS,
@@ -365,6 +405,11 @@ class SchemaUtils:
 
             meta_schema_df = meta_schema_df.reindex(columns = [field["name"] for field in META_SCHEMA_FIELDS]).sort_values(by = field_pk).reset_index(drop = True)
 
+            for field in META_SCHEMA_FIELDS:
+                data_type = field.get("type", "string")
+                data_type = data_type.capitalize() if (data_type != "string") else data_type
+                meta_schema_df[field["name"]] = meta_schema_df[field["name"]].astype(data_type)
+            
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = meta_schema_df,
                 field_definitions = META_SCHEMA_FIELDS,
@@ -406,6 +451,11 @@ class SchemaUtils:
                     raise SchemaBuilderError(f"The type_maps file '{self.type_maps_path}' is missing a 'string' type definition.")
                 
                 type_maps_df.loc[type_maps_df["type"] == "json", type_maps_df.columns != "type"] = type_maps_df.loc[type_maps_df["type"] == "string", type_maps_df.columns != "type"].values
+
+            for field in TYPE_MAPS_FIELDS:
+                data_type = field.get("type", "string")
+                data_type = data_type.capitalize() if (data_type != "string") else data_type
+                type_maps_df[field["name"]] = type_maps_df[field["name"]].astype(data_type)
 
             missing_field_errors = self._find_missing_field_errors(
                 df_to_search = type_maps_df,
