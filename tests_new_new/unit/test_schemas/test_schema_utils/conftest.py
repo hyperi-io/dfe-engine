@@ -1,4 +1,3 @@
-import numpy as np
 import pandas as pd
 import pytest
 import textwrap
@@ -118,11 +117,11 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_finalise", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_finalise_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
-        {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0.0, "index_type": "", "ddl_comment": ""},
+        {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0, "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_000_001": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -147,7 +146,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_001_000": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -172,7 +171,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_001_001": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logjson", "type": "json", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -198,7 +197,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_002_000": pd.DataFrame([
         {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "logjson", "type": "json", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
@@ -224,7 +223,7 @@ TEST_GET_COMMON_HEADER_DF_INPUT = {
         {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
         {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-    ]).replace("", np.nan).infer_objects(copy = False)
+    ])
 }
 
 @pytest.fixture()
@@ -506,7 +505,7 @@ TEST_GET_DERIVED_SCHEMAS_DF_INPUT = {
                 {"column": "user", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
                 {"column": "workstation", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
                 {"column": "workstation_name", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-            ]).replace("", np.nan).infer_objects(copy = False)
+            ])
         }
     }
 }
@@ -736,7 +735,7 @@ TEST_GET_META_SCHEMAS_DF_INPUT = {
             {"column": "tactics", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
             {"column": "tags_str", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""},
             {"column": "techniques", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": ""}
-        ]).replace("", np.nan).infer_objects(copy = False)
+        ])
     }
 }
 
@@ -934,7 +933,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_001_000": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -959,7 +958,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_001_001": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -985,7 +984,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan).infer_objects(copy = False),
+    ]),
     "v001_002_000": pd.DataFrame([
         {"type": "boolean", "clickhouse_type": "Nullable(Boolean) CODEC(LZ4)", "clickhouse_type_index": "Boolean CODEC(LZ4)"},
         {"type": "datetime", "clickhouse_type": "Nullable(DateTime64(3,'UTC')) CODEC(DoubleDelta, ZSTD(1))", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, ZSTD(1))"},
@@ -1011,7 +1010,7 @@ TEST_GET_TYPE_MAPS_DF_INPUT = {
         {"type": "timestamp", "clickhouse_type": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)", "clickhouse_type_index": "DateTime64(3,'UTC') CODEC(DoubleDelta, LZ4)"},
         {"type": "tuple", "clickhouse_type": "Nullable(Tuple) CODEC(ZSTD(1))", "clickhouse_type_index": "Tuple CODEC(ZSTD(1))"},
         {"type": "uuid", "clickhouse_type": "Nullable(UUID) CODEC(ZSTD(1))", "clickhouse_type_index": "UUID CODEC(ZSTD(1))"}
-    ]).replace("", np.nan).infer_objects(copy = False)
+    ])
 }
 
 @pytest.fixture()

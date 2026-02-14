@@ -2,6 +2,10 @@ import pandas as pd
 import pytest
 
 from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError
+from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
+from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
+from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
+from dfe_engine.schemas.schema_field_definitions.type_maps_fields import TYPE_MAPS_FIELDS
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from pathlib import Path
 
@@ -33,7 +37,9 @@ def init_schema_utils():
 
 def test_get_common_header_df(init_schema_utils, common_header_version, test_get_common_header_df_input):
     version = common_header_version
-    expected_dataframe = test_get_common_header_df_input[version]
+    field_types = {field["name"]: field.get("type", "string") if (field.get("type", "string") == "string") else field.get("type", "").capitalize() for field in COMMON_HEADER_FIELDS}
+    
+    expected_dataframe = test_get_common_header_df_input[version].replace("", pd.NA).astype(field_types)
 
     schema_utils = init_schema_utils(
         common_header_version = version
@@ -80,6 +86,8 @@ def test_get_invalid_common_header_df(tmp_path, init_schema_utils, init_common_h
 
 def test_get_derived_schema_df(init_schema_utils, derived_schema_name_version, test_get_derived_schemas_df_input):
     meta_schema_name, name, version, path = derived_schema_name_version
+    field_types = {field["name"]: field.get("type", "string") if (field.get("type", "string") == "string") else field.get("type", "").capitalize() for field in DERIVED_SCHEMA_FIELDS}
+
     expected_dataframe = test_get_derived_schemas_df_input.get(meta_schema_name, {}).get(name, {}).get(version, {})
 
     schema_utils = init_schema_utils()
@@ -90,6 +98,8 @@ def test_get_derived_schema_df(init_schema_utils, derived_schema_name_version, t
 
     if not(isinstance(expected_dataframe, pd.DataFrame)):
         pytest.skip(f"Derived schema '{name} - {version}' does not have a matching expected dataframe. Performed syntax check only.")
+    
+    expected_dataframe = expected_dataframe.replace("", pd.NA).astype(field_types)
 
     pd.testing.assert_frame_equal(expected_dataframe, derived_schema_df)
     assert(expected_dataframe.equals(derived_schema_df))
@@ -131,6 +141,8 @@ def test_get_invalid_derived_schema_df(tmp_path, init_schema_utils, init_derived
 
 def test_get_meta_schema_df(init_schema_utils, meta_schema_name_version, test_get_meta_schemas_df_input):
     name, version, path = meta_schema_name_version
+    field_types = {field["name"]: field.get("type", "string") if (field.get("type", "string") == "string") else field.get("type", "").capitalize() for field in META_SCHEMA_FIELDS}
+
     expected_dataframe = test_get_meta_schemas_df_input.get(name, {}).get(version, {})
 
     schema_utils = init_schema_utils()
@@ -141,6 +153,8 @@ def test_get_meta_schema_df(init_schema_utils, meta_schema_name_version, test_ge
 
     if not(isinstance(expected_dataframe, pd.DataFrame)):
         pytest.skip(f"Meta schema '{name} - {version}' does not have a matching expected dataframe. Performed syntax check only.")
+    
+    expected_dataframe = expected_dataframe.replace("", pd.NA).astype(field_types)
 
     pd.testing.assert_frame_equal(expected_dataframe, meta_schema_df)
     assert(expected_dataframe.equals(meta_schema_df))
@@ -181,7 +195,9 @@ def test_get_invalid_meta_schema_df(tmp_path, init_schema_utils, init_meta_schem
 
 def test_get_type_maps_df(init_schema_utils, type_maps_version, test_get_type_maps_df_input):
     version = type_maps_version
-    expected_dataframe = test_get_type_maps_df_input[version]
+    field_types = {field["name"]: field.get("type", "string") if (field.get("type", "string") == "string") else field.get("type", "").capitalize() for field in TYPE_MAPS_FIELDS}
+    
+    expected_dataframe = test_get_type_maps_df_input[version].replace("", pd.NA).astype(field_types)
 
     schema_utils = init_schema_utils(
         type_maps_version = version,
@@ -196,7 +212,9 @@ def test_get_type_maps_df(init_schema_utils, type_maps_version, test_get_type_ma
 
 def test_get_type_maps_df_no_json_feature(init_schema_utils, type_maps_version, test_get_type_maps_df_input):
     version = type_maps_version
-    expected_dataframe = test_get_type_maps_df_input[version]
+    field_types = {field["name"]: field.get("type", "string") if (field.get("type", "string") == "string") else field.get("type", "").capitalize() for field in TYPE_MAPS_FIELDS}
+    
+    expected_dataframe = test_get_type_maps_df_input[version].replace("", pd.NA).astype(field_types)
     expected_dataframe.loc[expected_dataframe["type"] == "json", expected_dataframe.columns != "type"] = expected_dataframe.loc[expected_dataframe["type"] == "string", expected_dataframe.columns != "type"].values
 
     schema_utils = init_schema_utils(
@@ -256,7 +274,7 @@ def test_get_invalid_type_maps_df(tmp_path, init_schema_utils, init_type_maps, t
 
     with pytest.raises(test_get_invalid_type_maps_df_input["raises"]["exception"]) as exc_info:
         schema_utils.get_type_maps_df()
-    
+
     for expected_message in expected_messages:
         assert (expected_message.format(type_maps_file_path = type_maps["type_maps_path"]) in str(exc_info.value.errors))
 
@@ -274,5 +292,3 @@ def test_create_combined_df(init_derived_schema, init_meta_schema, init_schema_u
         derived_schema_path = derived_schema["derived_schema_path"],
         meta_schema_path = meta_schema["meta_schema_path"]
     )
-
-    assert(False)

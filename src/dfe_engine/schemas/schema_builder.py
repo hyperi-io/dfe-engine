@@ -140,19 +140,17 @@ class SchemaBuilder:
 
             for schema_obj in schema_objs:
                 try:
-                    logger.info(f"Building ClickHouse DDL for schema {schema_obj.name}...")
+                    logger.info(f"Building ClickHouse DDL for schema '{schema_obj.name}'...")
 
                     schema_ddl = ch_ddl_generator.build_ddl(
                        meta_schema_path = schema_obj.meta_schema["path"],
                        derived_schema_path = schema_obj.derived_schema["path"]
                     )
                 
-                except SchemaBuilderMetaSchemaError as e:
+                except SchemaBuilderError as e:
                     for error in e.errors:
-                        logger.error(f"SchemaBuilderMetaSchemaError: {error}")
-                
-                except SchemaBuilderError:
-                    raise
+                        logger.error(f"{type(error).__name__}: {error}")
+                    logger.error(f"SchemaBuilderError: Schema '{schema_obj.name}' failed to build.")
 
         except Exception:
             raise

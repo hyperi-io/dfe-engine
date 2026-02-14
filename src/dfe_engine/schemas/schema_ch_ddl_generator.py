@@ -71,6 +71,5 @@ class SchemaCHDDLGenerator:
                 meta_schema_path = meta_schema_path
             )
         
-        except SchemaBuilderError as e:
-            for error in e.errors:
-                logger.error(f"{type(error).__name__}: {error}")
+        except SchemaBuilderError:
+            raise
