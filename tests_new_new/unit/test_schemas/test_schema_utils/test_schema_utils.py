@@ -1,5 +1,6 @@
 import pandas as pd
 import pytest
+import sys
 
 from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
@@ -7,10 +8,8 @@ from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DE
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.type_maps_fields import TYPE_MAPS_FIELDS
 from dfe_engine.schemas.schema_utils import SchemaUtils
+from hs_pylib.logger import logger
 from pathlib import Path
-
-from ..templates.derived_schema import LOGS_TEST_DERIVED_001_000_000
-from ..templates.meta_schema import LOGS_TEST_META_001_000_000
 
 
 @pytest.fixture
@@ -53,7 +52,7 @@ def test_get_common_header_df(init_schema_utils, common_header_version, test_get
 
 def test_get_invalid_common_header_version_df(init_schema_utils):
     invalid_common_header_version = "v000_000_000"
-    expected_message = f"An issue occured whilst reading common header version '{invalid_common_header_version}'."
+    expected_message = f"An issue occurred whilst reading common header version '{invalid_common_header_version}'."
 
     schema_utils = init_schema_utils(
         common_header_version = invalid_common_header_version
@@ -61,7 +60,7 @@ def test_get_invalid_common_header_version_df(init_schema_utils):
 
     with pytest.raises(SchemaError) as exc_info:
         schema_utils.get_common_header_df()
-    assert (expected_message.format() in str(exc_info.value))
+    assert (expected_message in str(exc_info.value))
 
 
 def test_get_invalid_common_header_df(tmp_path, init_schema_utils, init_common_header, test_get_invalid_common_header_df_input):
@@ -81,7 +80,9 @@ def test_get_invalid_common_header_df(tmp_path, init_schema_utils, init_common_h
         schema_utils.get_common_header_df()
     
     for expected_message in expected_messages:
-        assert (expected_message.format(common_header_file_path = common_header["common_header_path"]) in str(exc_info.value.errors))
+        assert (expected_message.format(
+            common_header_file_path = common_header["common_header_path"]
+        ) in str(exc_info.value.errors))
 
 
 def test_get_derived_schema_df(init_schema_utils, derived_schema_name_version, test_get_derived_schemas_df_input):
@@ -109,7 +110,7 @@ def test_get_invalid_derived_schema_path_df(init_schema_utils, tmp_path):
     invalid_derived_schema_name = "non-existant"
     invalid_meta_schema_name = "non-existant"
     invalid_derived_schema_path = tmp_path / invalid_meta_schema_name / invalid_derived_schema_name / "v001_000_000" / f"{invalid_derived_schema_name}.csv"
-    expected_message = f"An issue occured whilst reading the derived schema at '{invalid_derived_schema_path}'."
+    expected_message = f"An issue occurred whilst reading the derived schema at '{invalid_derived_schema_path}'."
 
     schema_utils = init_schema_utils()
 
@@ -117,7 +118,7 @@ def test_get_invalid_derived_schema_path_df(init_schema_utils, tmp_path):
         schema_utils.get_derived_schema_df(
             derived_schema_path = invalid_derived_schema_path
         )
-    assert (expected_message in str(exc_info.value))
+    assert (expected_message in str(exc_info.value.errors))
 
 
 def test_get_invalid_derived_schema_df(tmp_path, init_schema_utils, init_derived_schema, test_get_invalid_derived_schema_df_input):
@@ -136,7 +137,9 @@ def test_get_invalid_derived_schema_df(tmp_path, init_schema_utils, init_derived
         )
     
     for expected_message in expected_messages:
-        assert (expected_message.format(derived_schema_file_path = derived_schema["derived_schema_path"]) in str(exc_info.value.errors))
+        assert (expected_message.format(
+            derived_schema_file_path = derived_schema["derived_schema_path"]
+        ) in str(exc_info.value.errors))
 
 
 def test_get_meta_schema_df(init_schema_utils, meta_schema_name_version, test_get_meta_schemas_df_input):
@@ -163,7 +166,7 @@ def test_get_meta_schema_df(init_schema_utils, meta_schema_name_version, test_ge
 def test_get_invalid_meta_schema_path_df(init_schema_utils, tmp_path):
     invalid_meta_schema_name = "non-existant"
     invalid_meta_schema_path = tmp_path / invalid_meta_schema_name / "v001_000_000" / f"{invalid_meta_schema_name}.csv"
-    expected_message = f"An issue occured whilst reading the meta schema at '{invalid_meta_schema_path}'."
+    expected_message = f"An issue occurred whilst reading the meta schema at '{invalid_meta_schema_path}'."
 
     schema_utils = init_schema_utils()
 
@@ -190,7 +193,9 @@ def test_get_invalid_meta_schema_df(tmp_path, init_schema_utils, init_meta_schem
         )
     
     for expected_message in expected_messages:
-        assert (expected_message.format(meta_schema_file_path = meta_schema["meta_schema_path"]) in str(exc_info.value.errors))
+        assert (expected_message.format(
+            meta_schema_file_path = meta_schema["meta_schema_path"]
+        ) in str(exc_info.value.errors))
 
 
 def test_get_type_maps_df(init_schema_utils, type_maps_version, test_get_type_maps_df_input):
@@ -229,7 +234,7 @@ def test_get_type_maps_df_no_json_feature(init_schema_utils, type_maps_version, 
 
 def test_get_type_maps_df_no_json_feature_no_string_entry(tmp_path, init_schema_utils, init_type_maps, test_get_type_maps_no_string_df_input):
     type_maps_path = tmp_path / "type_maps"
-    expected_message = f"An issue occured whilst reading type maps version '{test_get_type_maps_no_string_df_input["type_maps_version"]}'."
+    expected_message = f"An issue occurred whilst reading type maps version '{test_get_type_maps_no_string_df_input["type_maps_version"]}'."
 
     init_type_maps(
         type_maps_dict = test_get_type_maps_no_string_df_input | {"type_maps_path": type_maps_path}
@@ -247,7 +252,7 @@ def test_get_type_maps_df_no_json_feature_no_string_entry(tmp_path, init_schema_
 
 def test_get_invalid_type_maps_version_df(init_schema_utils):
     invalid_type_maps_version = "v000_000_000"
-    expected_message = f"An issue occured whilst reading type maps version '{invalid_type_maps_version}'."
+    expected_message = f"An issue occurred whilst reading type maps version '{invalid_type_maps_version}'."
 
     schema_utils = init_schema_utils(
         type_maps_version = invalid_type_maps_version
@@ -276,19 +281,72 @@ def test_get_invalid_type_maps_df(tmp_path, init_schema_utils, init_type_maps, t
         schema_utils.get_type_maps_df()
 
     for expected_message in expected_messages:
-        assert (expected_message.format(type_maps_file_path = type_maps["type_maps_path"]) in str(exc_info.value.errors))
+        assert (expected_message.format(
+            type_maps_file_path = type_maps["type_maps_path"]
+        ) in str(exc_info.value.errors))
 
 
-def test_create_combined_df(init_derived_schema, init_meta_schema, init_schema_utils):
-    derived_schema = init_derived_schema(LOGS_TEST_DERIVED_001_000_000)
-    meta_schema = init_meta_schema(LOGS_TEST_META_001_000_000)
-    schema_utils = init_schema_utils()
+def test_create_combined_df(capsys, tmp_path, init_common_header, init_derived_schema, init_meta_schema, init_schema_utils, test_create_combined_df_input):
+    common_header_version = test_create_combined_df_input.get("common_header_version", None)
+    derived_schema_data = test_create_combined_df_input["derived_schema_data"]
+    meta_schema_data = test_create_combined_df_input["meta_schema_data"]
+    expected_combined_df = test_create_combined_df_input.get("expected_combined_df", None)
+    expected_exception = test_create_combined_df_input.get("raises", {}).get("exception", None)
+    expected_messages = test_create_combined_df_input.get("raises", {}).get("messages", None)
+    expected_warnings = test_create_combined_df_input.get("warnings", None)
 
+    derived_schema = init_derived_schema(derived_schema_data)
+    meta_schema = init_meta_schema(meta_schema_data)
+
+    if (common_header_version):
+        schema_utils = init_schema_utils(common_header_version = common_header_version)
+    else:
+        common_header_data = test_create_combined_df_input["common_header_data"]
+        common_header_data["common_header_path"] = tmp_path / "common_headers"
+        common_header_data["common_header_path"].mkdir(parents = True, exist_ok = True)
+        common_header = init_common_header(common_header_data)
+
+        schema_utils = init_schema_utils(
+            common_header_path = common_header_data["common_header_path"],
+            common_header_version = common_header["common_header_version"]
+        )
+    
     common_header_df = schema_utils.get_common_header_df()
-    type_maps_df = schema_utils.get_type_maps_df()
 
-    schema_utils.create_combined_df(
+    if (expected_exception):
+        with pytest.raises(expected_exception) as exc_info:
+            schema_utils.create_combined_df(
+                common_header_df = common_header_df,
+                derived_schema_path = derived_schema["derived_schema_path"],
+                meta_schema_path = meta_schema["meta_schema_path"]
+            )
+        
+        for expected_message in expected_messages:
+            assert (expected_message.format(
+                derived_schema_file_path = derived_schema["derived_schema_path"],
+                meta_schema_file_path = meta_schema["meta_schema_path"]
+            ) in str(exc_info.value.errors))
+        
+        return
+    
+    sink_id = logger.add(sys.stderr, level = "DEBUG")
+
+    combined_df = schema_utils.create_combined_df(
         common_header_df = common_header_df,
         derived_schema_path = derived_schema["derived_schema_path"],
         meta_schema_path = meta_schema["meta_schema_path"]
     )
+
+    logger.remove(sink_id)
+    captured = capsys.readouterr()
+    if (expected_warnings):
+        for expected_warning in expected_warnings:
+            assert (expected_warning.format(
+                derived_schema_file_path = derived_schema["derived_schema_path"],
+                meta_schema_file_path = meta_schema["meta_schema_path"]
+            ) in str(captured.err))
+
+    if (expected_combined_df is not None):
+        expected_combined_df = expected_combined_df.replace("", pd.NA)
+        pd.testing.assert_frame_equal(expected_combined_df, combined_df)
+        assert(expected_combined_df.equals(combined_df))

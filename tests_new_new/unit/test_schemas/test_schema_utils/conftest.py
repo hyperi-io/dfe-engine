@@ -2,10 +2,13 @@ import pandas as pd
 import pytest
 import textwrap
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderInvalidVersionError
+from dfe_engine.schemas.custom_exceptions import SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingMetaSchemaFieldError, SchemaBuilderTypeMapsError
 from dfe_engine.schemas.schema_utils import SchemaUtils
 from importlib import resources
 from pathlib import Path
+
+from ..templates.derived_schema import LOGS_TEST_DERIVED_001_000_000
+from ..templates.meta_schema import LOGS_TEST_META_001_000_000
 
 
 pd.set_option('future.no_silent_downcasting', True)
@@ -298,7 +301,7 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
             tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderCommonHeaderError,
             "messages": [
                 "Empty 'column' entries identified in '{common_header_file_path}'."
             ]
@@ -334,7 +337,7 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
             tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderCommonHeaderError,
             "messages": [
                 "Column name 'timestamp' is missing an entry for 'type' in '{common_header_file_path}'."
             ]
@@ -370,7 +373,7 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
             tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderCommonHeaderError,
             "messages": [
                 "Column names '[timestamp, timestamp_collector]' are missing an entry for 'type' in '{common_header_file_path}'."
             ]
@@ -406,10 +409,46 @@ TEST_GET_INVALID_COMMON_HEADER_DF_INPUT = [
             tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderCommonHeaderError,
             "messages": [
                 "Empty 'column' entries identified in '{common_header_file_path}'.",
                 "Column name 'timestamp' is missing an entry for 'type' in '{common_header_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_index_order",
+        "common_header_version": "v001_000_000",
+        "common_header_data": textwrap.dedent("""
+            column,type,index_order,index_type,os_order,comment
+            timestamp,timestamp,invalid_integer,,,Time the event occurred REQUIRED
+            timestamp_collector,timestamp,,,,Time the event was received by a HyperCollector
+            timestamp_load,timestamp,0,,,Time the event was loaded into the engine or store REQUIRED
+            timestamp_received,timestamp,,,,Time the event was accepted by the receiver
+            timestamp_finalise,timestamp,,,,Time the event was finalised in the ingest pipeline
+            timestamp_epochms,int64,,,,Epochms time the event occurred 
+            timestamp_collector_epochms,int64,,,,Epochms time the event was received by a HyperCollector
+            timestamp_load_epochms,int64,,,,Epochms time the event was loaded into the engine or store 
+            timestamp_received_epochms,int64,,,,Epochms time the event was accepted by the receiver
+            timestamp_finalise_epochms,int64,,,,Epochms time the event was finalised in the ingest pipeline
+            event_hash,string_fast,,,0,Unique hash of this event for reference and alerting REQUIRED
+            logoriginal,text,,,1,The original unparsed log line
+            org_id,string_fast_lowcardinality,,,2,The unique alphanumeric ID of the source organisations
+            tags.collector.host,string_fast_lowcardinality,,,7,Host ip and info of the HyperCollector
+            tags.collector.hostname,string_fast_lowcardinality,,,8,Hostname of the HyperCollector
+            tags.collector.source,string_fast_lowcardinality,,,9,The transport level source
+            tags.collector.timestamp,datetime,,,,The time the event was received by the HyperCollector
+            tags.collector.timezone,string,,,,The timezone the source HyperCollector is placed
+            tags.event.category,string_fast_lowcardinality,,,6,Category of the event selects topic and ingestion routing
+            tags.event.org_id,string_fast_lowcardinality,,,3,Source organisation ID maps directly to org_id 
+            tags.event.site_id,string_fast_lowcardinality,,,4,Optional site id within the source org_id
+            tags.event.type,string_fast_lowcardinality,,,5,Low level type of the message
+            tags.event.error,string_fast_lowcardinality,,,,Any parsing or time errors are placed here
+        """),
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "An issue occurred whilst reading common header version 'v001_000_000'. Invalid literal for int() with base 10: 'invalid_integer'."
             ]
         }
     }
@@ -606,7 +645,7 @@ TEST_GET_INVALID_DERIVED_SCHEMA_DF_INPUT = [
             logon_type,int32,,,windows_audit
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderDerivedSchemaError,
             "messages": [
                 "Empty 'column' entry identified in '{derived_schema_file_path}'."
             ]
@@ -702,9 +741,105 @@ TEST_GET_INVALID_DERIVED_SCHEMA_DF_INPUT = [
             logon_type,int32,,,windows_audit
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderDerivedSchemaError,
             "messages": [
                 "Empty 'column' entries identified in '{derived_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_index_order",
+        "derived_schema_name": "logs_alerts_derived",
+        "derived_schema_version": "v001_000_000",
+        "meta_schema_name": "logs_alerts",
+        "derived_schema_data": textwrap.dedent("""
+            column,type,index_order,os_order,comment
+            detection_time,,invalid_integer,,
+            event_id,,,,
+            event,,,,
+            remediation_steps,,,
+            rule_id,,,,
+            source_table,,0,,
+            tactics,,,,
+            techniques,,,,
+            alert_confidence_level,string_fast_lowcardinality,,,Reserved for SOC. Likelihood of this is a real alert vs false positive - This is for SOC to tag or fill in after investigation
+            alert_description,text,,,Description of the detection ( equiv. of threat.detection_description )
+            alert_framework,string,,,MITRE ATT&CK
+            alert_ratingtime_sla_applies,string,,,"true OR false ( In general , if it's aggregation + >= 30mins == false , if it's single message detection == true ) . Eg, priority_alert & runs every 10mins == true , SLA applies"
+            alert_rule_name,string_fast_lowcardinality,,,Add Rule Name. Equivalent of watcher_id in Elastic Watchers
+            alert_schedule,string_fast,,,"Identify whether it's single message detection OR aggregation detection ( eg, smd OR agg )"
+            alert_schedule_duration,string_fast,,,scheduled alert ( how often this detection rule is running such as every 10mins / 30mins / 1hr / 2hrs / 3hrs etc. )
+            alert_severity,string_fast,,,Detection Priority (equiv. of threat.severity such as Low / Medium / High / Critical )
+            alert_ticket_classification,string,,,"Reserved for SOC. ( Eg, SOC can add information such as BruteForce / Data Exfiltration /etc... )"
+            alert_ticket_id,int32,,,Ticket ID created for SOAR ( equiv. of ticket ID in RT Portal )
+            alert_ticket_priority,string_fast_lowcardinality,,,"Reserved for SOC - to use in SOAR ( Eg, P1 / P2 / P3 / P4 )"
+            alert_triage_score,int16,,,"Detection Triage score ( equiv. of threat.triage_score such as 20 = Low, 40 = Medium , 60 = High , 80 = Critical )"
+            alert_triage_steps,text,,,Reserved for SOC - to use in SOAR ( not used in Elastic Search at the moment )
+            alert_type,string_fast,,,Detection Use Case Name in detection ticket
+            alert_uid,string_fast,,,Generate UUID for this specific alert that has occurred
+            detected_time,timestamp,,,Time alert was generated by our detection system
+            event_original,string_fast,,,Extracted copy of raw event that triggered alert
+            org_id,string_fast_lowcardinality,,,Assigned UID / Customer ID that identifies the customer ( equiv. of tenant.name in Elastic )
+            source_table,string_fast_lowcardinality,,,source table the alert was generated from ( equiv. of index name in Elastic )
+            tactic_id,string_fast,,,comma sepeparate list of mitre att&ck tactic ID
+            tactic_name,string_fast,,,comma sepeparate list of mitre att&ck tactic Name
+            technique_id,string_fast,,,comma sepeparate list of mitre att&ck technique ID
+            technique_name,string_fast,,,comma sepeparate list of mitre att&ck technique Name
+            technique_reference,string_fast,,,comma sepeparate list of mitre att&ck technique reference links
+            tactic_reference,string_fast,,,comma sepeparate list of mitre att&ck tactic reference links
+            timestamp,timestamp,,,"Timeseries increasing timestamp (timestamp,timestamp_load) REQUIRED NOT NULLABLE"
+            account_name,string,,,windows_audit
+            destination_hostname,string_fast_lowcardinality,,,windows_audit
+            destination_ip,string_fast_lowcardinality,,,windows_audit
+            destination_ip_ip4,ipv4,,,windows_audit
+            destination_ip_ip6,ipv6,,,windows_audit
+            destination_is_ipv6,ipv6,,,windows_audit
+            destination_port,int32,,,windows_audit
+            destination_port_name,string_fast_lowcardinality,,,windows_audit
+            domain,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            event_id,int32,,,windows_audit
+            event_type,string_fast_lowcardinality,,,windows_audit
+            failure_reason,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            hostname,string_fast_lowcardinality,,,windows_audit
+            ip_address,string_fast_lowcardinality,,,windows_audit
+            ip_address_ip4,ipv4,,,windows_audit
+            ip_address_ip6,ipv6,,,windows_audit
+            ip_port,int32,,,windows_audit
+            member_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            message,text,,,windows_audit
+            new_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            old_target_user_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            reason,string,,,windows_audit
+            session_spn,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            source_hostname,string_fast_lowcardinality,,,windows_audit
+            source_ip,string_fast_lowcardinality,,,windows_audit
+            source_ip_ip4,ipv4,,,windows_audit
+            source_ip_ip6,ipv6,,,windows_audit
+            source_is_ipv6,ipv6,,,windows_audit
+            source_port,int32,,,windows_audit
+            source_port_name,string_fast_lowcardinality,,,windows_audit
+            status,string_fast_lowcardinality,,,windows_audit
+            subject_domain_name,string_fast_lowcardinality,,,windows_audit
+            subject_user_name,string_fast_lowcardinality,,,windows_audit
+            target_domain_name,string_fast_lowcardinality,,,windows_audit
+            target_user_name,string_fast_lowcardinality,,,windows_audit
+            user,string_fast_lowcardinality,,,windows_audit
+            workstation,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            workstation_name,string_fast_lowcardinality,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            parent_image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.parent_image,string_fast,,,windows_audit
+            parent_process_name,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            sysmon.image,string_fast,,,windows_audit
+            image,string_fast,,,"windows_audit and this field hasn't been mapped, need to update in core schema"
+            new_process_name,string,,,windows_audit
+            process_name,string_fast,,,windows_audit
+            logon_type,int32,,,windows_audit
+        """),
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "An issue occurred whilst reading the derived schema at '{derived_schema_file_path}'. Invalid literal for int() with base 10: 'invalid_integer'."
             ]
         }
     }
@@ -770,7 +905,7 @@ TEST_GET_INVALID_META_SCHEMA_DF_INPUT = [
             techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderMetaSchemaError,
             "messages": [
                 "Empty 'column' entry identified in '{meta_schema_file_path}'."
             ]
@@ -801,7 +936,7 @@ TEST_GET_INVALID_META_SCHEMA_DF_INPUT = [
             techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderMetaSchemaError,
             "messages": [
                 "Empty 'column' entries identified in '{meta_schema_file_path}'."
             ]
@@ -832,7 +967,7 @@ TEST_GET_INVALID_META_SCHEMA_DF_INPUT = [
             techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderMetaSchemaError,
             "messages": [
                 "Column name 'alert_uid' is missing an entry for 'type' in '{meta_schema_file_path}'."
             ]
@@ -863,7 +998,7 @@ TEST_GET_INVALID_META_SCHEMA_DF_INPUT = [
             techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderMetaSchemaError,
             "messages": [
                 "Column names '[alert_uid, tags_str]' are missing an entry for 'type' in '{meta_schema_file_path}'."
             ]
@@ -894,10 +1029,41 @@ TEST_GET_INVALID_META_SCHEMA_DF_INPUT = [
             techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderMetaSchemaError,
             "messages": [
                 "Empty 'column' entries identified in '{meta_schema_file_path}'.",
                 "Column name 'tags_str' is missing an entry for 'type' in '{meta_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_index_order",
+        "meta_schema_name": "logs_alerts",
+        "meta_schema_version": "v001_000_000",
+        "meta_schema_data": textwrap.dedent("""
+            column,type,index_order,os_order,comment
+            alert_uid,string_fast,invalid_integer,,"Generate UUID for this specific alert that has occurred"
+            tags_str,string_fast,,,"keywords that describe the event"
+            _source_event_hash,string_fast,,,"Extracted copy of event that triggered alert"
+            _source,string_fast_lowcardinality,,,"Add Rule Name"
+            alert_name,string_fast,,,"Name of the alert / Display Name"
+            alert_severity,string_fast,,,"enum Unassigned / Informational / Low / Medium / High / Critical"
+            alert_type,string_fast,,,"scheduled alert / adhoc alert"
+            confidence_level,string_fast_lowcardinality,,,"likelihood this is a real alert vs false positive"
+            confidence_score,int16,,,"int representation of above"
+            detection_time,timestamp,,,"Time alert was generated by our detection system"
+            event_id,string_fast,,,"Original event ID"
+            event,text,,,"Original event as JSON event string"
+            remediation_steps,string_fast,,,"Triggers for soar"
+            rule_id,uuid,,,"UUID of rule which triggered alert"
+            source_table,string_fast_lowcardinality,,,"source table the alert was generated from"
+            tactics,string_fast,,,"comma sep list of mtire att&ck tactics"
+            techniques,string_fast,,,"comma sep list of mtire att&ck techniques"
+        """),
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "An issue occurred whilst reading the meta schema at '{meta_schema_file_path}'. Invalid literal for int() with base 10: 'invalid_integer'."
             ]
         }
     }
@@ -1083,7 +1249,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Empty 'type' entry identified in '{type_maps_file_path}'."
             ]
@@ -1119,7 +1285,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Empty 'type' entries identified in '{type_maps_file_path}'."
             ]
@@ -1155,7 +1321,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Type name 'string' is missing an entry for 'clickhouse_type' in '{type_maps_file_path}'."
             ]
@@ -1191,7 +1357,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Type names '[string, string_fast]' are missing an entry for 'clickhouse_type' in '{type_maps_file_path}'."
             ]
@@ -1227,7 +1393,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Type name 'string' is missing an entry for 'clickhouse_type_index' in '{type_maps_file_path}'."
             ]
@@ -1263,7 +1429,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Type names '[string, string_fast]' are missing an entry for 'clickhouse_type_index' in '{type_maps_file_path}'."
             ]
@@ -1299,7 +1465,7 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
             uuid,Nullable(UUID) CODEC(ZSTD(1)),UUID CODEC(ZSTD(1)),"{""type"":""keyword"",""ignore_above"":68,""normalizer"": ""lowercase_normalizer""}",Support all GUID types on OpenSearch
         """),
         "raises": {
-            "exception": SchemaError,
+            "exception": SchemaBuilderTypeMapsError,
             "messages": [
                 "Empty 'type' entries identified in '{type_maps_file_path}'.",
                 "Type names '[json, string_fast]' are missing an entry for 'clickhouse_type' in '{type_maps_file_path}'.",
@@ -1311,4 +1477,2336 @@ TEST_GET_INVALID_TYPE_MAPS_DF_INPUT = [
 
 @pytest.fixture(params = TEST_GET_INVALID_TYPE_MAPS_DF_INPUT, ids = lambda x: x["name"])
 def test_get_invalid_type_maps_df_input(request):
+    return request.param
+
+
+TEST_CREATE_COMBINED_DF_INPUT = [
+    {
+        "name": "double_matching_entry_in_common_header",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_2", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_default",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,test_default,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_index_order",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,1,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_index_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,dimension,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_multiple_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,test_default,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_common_header_all_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": LOGS_TEST_DERIVED_001_000_000,
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderCommonHeaderError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in common_header version 'v001_000_000' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_blank_derived_schema_add_column_name",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                ,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Empty 'column' entry identified in '{derived_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "double_matching_entry_in_derived_schema_add",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.host", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.source", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timestamp", "type": "datetime", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timezone", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.category", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.error", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.site_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.type", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0, "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_default",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,test_default,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_index_order",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,1,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_index_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,dimension,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_multiple_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,test_default,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_add_all_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "double_matching_entry_from_common_header_in_derived_schema_add",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_2", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_12", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_13", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_14", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_15", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_16", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_17", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_18", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_19", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_20", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_default",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,test_default,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_index_order",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,1,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_index_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,dimension,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_multiple_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_add_all_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": LOGS_TEST_META_001_000_000,
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_blank_derived_schema_sub_column_name",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                ,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Empty 'column' entry identified in '{derived_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "invalid_blank_meta_schema_sub_column_name",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                ,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Empty 'column' entry identified in '{meta_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "no_matching_column_in_meta_from_derived_sub",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_2,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' cannot be found in '{meta_schema_file_path}'."
+            ]
+        }
+    },
+    {
+        "name": "double_matching_entry_in_derived_schema_sub",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_1,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.host", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.source", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timestamp", "type": "datetime", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timezone", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.category", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.error", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.site_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.type", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0, "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"}
+        ])
+    },
+    {
+        "name": "double_matching_entry_in_meta_schema",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.host", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.source", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timestamp", "type": "datetime", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timezone", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.category", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.error", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.site_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.type", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0, "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_2", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "meta_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_default",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,test_default,,,
+                test_field_1,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_default",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,test_default,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_index_order",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,1,,
+                test_field_1,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_index_order",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,1,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_index_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,dimension,
+                test_field_1,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_index_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string,,,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_multiple_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,,,
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_derived_schema_all_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,test_default,1,dimension,
+                test_field_1,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_in_meta_schema_all_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_2,,,,,
+                test_field_3,,,,,
+                test_field_4,,,,,
+                test_field_5,,,,,
+                test_field_6,,,,,
+                test_field_7,,,,,
+                test_field_8,,,,,
+                test_field_9,,,,,
+                test_field_10,,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderMetaSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'meta_schema'. Duplicate entry found in '{meta_schema_file_path}' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "double_matching_entry_from_common_header_in_derived_schema_sub",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_2", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_12", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_13", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_14", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_15", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_16", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_17", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_18", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_19", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_20", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_default",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,test_default,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_index_order",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,1,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_index_type",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_multiple_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_common_header_in_derived_schema_sub_all_columns",
+        "common_header_data": {
+            "common_header_version": "v001_000_000",
+            "common_header_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'common_header'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    },
+    {
+        "name": "double_matching_entry_from_derived_schema_add_in_derived_schema_sub",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,,,,,
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "warnings": [
+            "SchemaBuilderDuplicatePrimaryKeyWarning: Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' will be skipped..."
+        ],
+        "expected_combined_df": pd.DataFrame([
+            {"column": "event_hash", "type": "string_fast", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "logoriginal", "type": "text", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.host", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.hostname", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.source", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timestamp", "type": "datetime", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.collector.timezone", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.category", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.error", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.org_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.site_id", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "tags.event.type", "type": "string_fast_lowcardinality", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_collector_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_finalise_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load", "type": "timestamp", "default": "", "index_order": 0, "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_load_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received", "type": "timestamp", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "timestamp_received_epochms", "type": "int64", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "common_header"},
+            {"column": "test_field_1", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_10", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_2", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_3", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_4", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_5", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_6", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_7", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_8", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"},
+            {"column": "test_field_9", "type": "string", "default": "", "index_order": "", "index_type": "", "ddl_comment": "", "source": "derived_schema"}
+        ])
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_default",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,test_default,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'default'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_index_order",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,1,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_order'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_index_type",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing column: 'index_type'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_multiple_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,,,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default]'."
+            ]
+        }
+    },
+    {
+        "name": "double_non_matching_entry_from_derived_schema_add_in_derived_schema_sub_all_columns",
+        "common_header_version": "v001_000_000",
+        "derived_schema_data": {
+            "derived_schema_name": "logs_test_derived",
+            "derived_schema_version": "v001.000.000",
+            "derived_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string,,,,
+                test_field_1,,,,,
+                test_field_12,string,,,,
+                test_field_13,string,,,,
+                test_field_14,string,,,,
+                test_field_15,string,,,,
+                test_field_16,string,,,,
+                test_field_17,string,,,,
+                test_field_18,string,,,,
+                test_field_19,string,,,,
+                test_field_20,string,,,,
+            """),
+            "meta_schema_name": "logs_test_meta"
+        },
+        "meta_schema_data": {
+            "meta_schema_name": "logs_test_meta",
+            "meta_schema_version": "v001.000.000",
+            "meta_schema_data": textwrap.dedent("""
+                column,type,default,index_order,index_type,comment
+                test_field_1,string_fast,test_default,1,dimension,
+                test_field_2,string,,,,
+                test_field_3,string,,,,
+                test_field_4,string,,,,
+                test_field_5,string,,,,
+                test_field_6,string,,,,
+                test_field_7,string,,,,
+                test_field_8,string,,,,
+                test_field_9,string,,,,
+                test_field_10,string,,,,
+            """)
+        },
+        "raises": {
+            "exception": SchemaBuilderDerivedSchemaError,
+            "messages": [
+                "Column 'test_field_1' has already been sourced from 'derived_schema'. Duplicate entry found in '{derived_schema_file_path}' with unmatched metadata. Differing columns: '[type, default, index_order, index_type]'."
+            ]
+        }
+    }
+]
+
+@pytest.fixture(params = TEST_CREATE_COMBINED_DF_INPUT, ids = lambda x: x["name"])
+def test_create_combined_df_input(request):
     return request.param

@@ -213,8 +213,8 @@ def build_and_apply_schemas(dfe_config_fixtures):
         )
 
     except Exception as e:
-        logger.error(f"An error occured building and applying schemas: {str(e)}", exc_info=True)
-        raise AssertionError(f"An error occured building and applying schemas: {str(e)}")
+        logger.error(f"An error occurred building and applying schemas: {str(e)}", exc_info=True)
+        raise AssertionError(f"An error occurred building and applying schemas: {str(e)}")
 
 
 """ Loads the rule files of the given directory """
