@@ -1,3 +1,10 @@
+## [1.3.69](https://github.com/hyperi-io/dfe-engine/compare/v1.3.68...v1.3.69) (2026-02-16)
+
+
+### Bug Fixes
+
+* Mega unit tests for combined dataframe ([516f7e8](https://github.com/hyperi-io/dfe-engine/commit/516f7e8a7f720c2c7ca18cb5fb440bec9705892b))
+
 ## [1.3.68](https://github.com/hyperi-io/dfe-engine/compare/v1.3.67...v1.3.68) (2026-02-14)
 
 
