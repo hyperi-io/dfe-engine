@@ -67,17 +67,34 @@ class SchemaUtils:
         Internal function that combines the derived sub schema with the meta schema.
         """
         combined_sub_fields = {}
-        composite_key = [field["name"] for field in field_definitions]
+        composite_key = [field["name"] for field in field_definitions if (field["name"] != "type")]
         field_exceptions = []
 
         for _, row in derived_schema_sub_df.iterrows():
             key = row[lookup_key]
 
             if (key in combined_sub_fields):
-                if ((all(combined_sub_fields[key][field] == row[field] and not pd.isna(row[field])) for field in composite_key)):
-                    field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(key, "derived_schema", lookup_key, derived_schema_path))
+                if (all(self._na_equals(combined_sub_fields[key][field], row[field]) for field in composite_key)):
+                    field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(
+                        duplicate_field = key,
+                        existing_source = "derived_schema",
+                        primary_key = lookup_key,
+                        new_source = "derived_schema",
+                        schema_path = derived_schema_path
+                    ))
                 else:
-                    field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(key, "derived_schema", lookup_key, derived_schema_path))
+                    columns_to_drop = ["source", "type"]
+                    mask = combined_sub_fields[key].drop(columns_to_drop, errors = "ignore").fillna("").values != row.drop(columns_to_drop, errors = "ignore").fillna("").values
+                    differing_columns = combined_sub_fields[key].drop(columns_to_drop, errors = "ignore").fillna("").index[mask].tolist()
+
+                    field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(
+                        duplicate_field = key,
+                        existing_source = "derived_schema",
+                        primary_key = lookup_key,
+                        differing_columns = differing_columns,
+                        new_source = "derived_schema",
+                        schema_path = derived_schema_path
+                    ))
                     continue
             
             matching_fields = meta_schema_df[meta_schema_df[lookup_key] == row[lookup_key]]
@@ -106,7 +123,9 @@ class SchemaUtils:
                         field_exceptions.extend(e.errors)
                         continue
             
-            row = matching_fields.iloc[0].copy()
+            for field in field_definitions:
+                row[field["name"]] = matching_fields.iloc[0][field["name"]] if (self._na_equals(row[field["name"]], pd.NA)) else row[field["name"]]
+            
             row["source"] = "meta_schema"
             combined_sub_fields[row[lookup_key]] = row
 
@@ -115,7 +134,7 @@ class SchemaUtils:
                 if isinstance(exception, SchemaBuilderDuplicatePrimaryKeyWarning):
                     logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {exception}")
             
-            field_exceptions = [exception for exception in field_exceptions if (isinstance(exception, SchemaBuilderDuplicatePrimaryKeyError))]
+            field_exceptions = [exception for exception in field_exceptions if (isinstance(exception, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(exception, SchemaBuilderMissingMetaSchemaFieldError))]
             if (len(field_exceptions) > 0):
                 raise SchemaBuilderMetaSchemaError(meta_schema_path, field_exceptions)
 
@@ -142,10 +161,10 @@ class SchemaUtils:
         dataframe: pd.DataFrame,
         field_definitions: list[dict],
         on_error_exception: Exception,
-        schema_path: Path,
         source: str,
         unique_key: str,
         initial_row_dict: dict = None,
+        schema_path: str = None,
         schema_version: str = None
     ) -> dict: # pragma: no cover
         duplicate_field_exceptions = []
@@ -159,16 +178,34 @@ class SchemaUtils:
         for _, row in dataframe.iterrows():
             key = row[unique_key]
             if (key in row_dict):
-                if ((all(row_dict[key][field] == row[field] and not pd.isna(row[field])) for field in composite_key)):
-                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(key, row_dict[key]["source"], unique_key, schema_path))
+                
+                if (all(self._na_equals(row_dict[key][field], row[field]) for field in composite_key)):
+                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyWarning(
+                        duplicate_field = key,
+                        existing_source = row_dict[key]["source"],
+                        primary_key = unique_key,
+                        new_source = source,
+                        schema_path = schema_path,
+                        schema_version = schema_version
+                    ))
                 else:
-                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(key, row_dict[key]["source"], unique_key, schema_path))
+                    mask = row_dict[key].drop("source", errors = "ignore").fillna("").values != row.drop("source", errors = "ignore").fillna("").values
+                    differing_columns = row_dict[key].drop("source", errors = "ignore").fillna("").index[mask].tolist()
+                    duplicate_field_exceptions.append(SchemaBuilderDuplicatePrimaryKeyError(
+                        duplicate_field = key,
+                        existing_source = row_dict[key]["source"],
+                        primary_key = unique_key,
+                        differing_columns = differing_columns,
+                        new_source = source,
+                        schema_path = schema_path,
+                        schema_version = schema_version
+                    ))
             else:
                 row["source"] = source
                 row_dict[key] = row
         
         if (len(duplicate_field_exceptions) > 0):
-            if (isinstance(on_error_exception, SchemaBuilderCommonHeaderError)):
+            if (on_error_exception is SchemaBuilderCommonHeaderError):
                 raise on_error_exception(schema_version, duplicate_field_exceptions)
             else:
                 raise on_error_exception(schema_path, duplicate_field_exceptions)
@@ -234,6 +271,21 @@ class SchemaUtils:
             raise SchemaBuilderInvalidVersionError(version)
         
         return version
+
+
+    @staticmethod
+    def _na_equals(
+        value_a,
+        value_b
+    ): # pragma: no cover
+        """
+        Internal function to determine if a pd.NA value is equal to another without being ambiguous.
+        """
+        if (pd.isna(value_a) and pd.isna(value_b)):
+            return True
+        if (pd.isna(value_a) or pd.isna(value_b)):
+            return False
+        return (value_a == value_b)
     
 
     def create_combined_df(
@@ -249,98 +301,91 @@ class SchemaUtils:
             meta_schema_df = self.get_meta_schema_df(
                 meta_schema_path = meta_schema_path
             )
+
+            combined_rows = {}
+
+            try:
+                combined_rows = self._extract_duplicates(
+                    dataframe = common_header_df,
+                    field_definitions = COMMON_HEADER_FIELDS,
+                    on_error_exception = SchemaBuilderCommonHeaderError,
+                    source = "common_header",
+                    unique_key = next((field["name"] for field in COMMON_HEADER_FIELDS if (field.get("is_key"))), None),
+                    initial_row_dict = combined_rows,
+                    schema_version = self.common_header_version
+                )
+        
+            except SchemaBuilderError as e:
+                for error in e.errors:
+                    if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                        logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+                
+                e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
+                if (e.errors):
+                    raise e
+
+            derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
+
+            try:
+                combined_rows = combined_rows | self._extract_duplicates(
+                    dataframe = derived_schema_add_df,
+                    field_definitions = DERIVED_SCHEMA_FIELDS,
+                    on_error_exception = SchemaBuilderDerivedSchemaError,
+                    source = "derived_schema",
+                    unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                    initial_row_dict = combined_rows,
+                    schema_path = derived_schema_path
+                )
+        
+            except SchemaBuilderError as e:
+                for error in e.errors:
+                    if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                        logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+                
+                e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError))]
+                if (e.errors):
+                    raise e
+
+            derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
+
+            try:
+                derived_schema_meta_df = self._create_sub_from_meta(
+                    derived_schema_path = derived_schema_path,
+                    derived_schema_sub_df = derived_schema_sub_df,
+                    field_definitions = DERIVED_SCHEMA_FIELDS,
+                    lookup_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                    meta_schema_df = meta_schema_df,
+                    meta_schema_path = meta_schema_path
+                )
+
+                combined_rows = combined_rows | self._extract_duplicates(
+                    dataframe = derived_schema_meta_df,
+                    field_definitions = DERIVED_SCHEMA_FIELDS,
+                    on_error_exception = SchemaBuilderDerivedSchemaError,
+                    unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
+                    schema_path = derived_schema_path,
+                    source = "meta_schema",
+                    initial_row_dict = combined_rows
+                )
+        
+            except SchemaBuilderError as e:
+                for error in e.errors:
+                    if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
+                        logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
+                            
+                e.errors = [error for error in e.errors if (isinstance(error, (SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderMissingMetaSchemaFieldError, SchemaBuilderMetaSchemaError)))]
+                if (e.errors):
+                    raise e
+            
+            combined_rows_df = pd.DataFrame(combined_rows).T.reset_index(drop = True)
+            logger.success("Successfully combined schema data.")
+            with pd.option_context("display.max_rows", 100):
+                logger.debug(f"Using the following combined_rows_df...\n{combined_rows_df}")
+
+            return combined_rows_df
         
         except SchemaBuilderError as e:
-            for error in e.errors:
-                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
-                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
-            
-            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
-            if (e.errors):
-                raise e
-
-        combined_rows = {}
-
-        try:
-            combined_rows = self._extract_duplicates(
-                dataframe = common_header_df,
-                field_definitions = COMMON_HEADER_FIELDS,
-                on_error_exception = SchemaBuilderCommonHeaderError,
-                unique_key = next((field["name"] for field in COMMON_HEADER_FIELDS if (field.get("is_key"))), None),
-                schema_path = self.common_header_path,
-                source = "common_header",
-                initial_row_dict = combined_rows,
-                schema_version = self.common_header_version
-            )
-    
-        except SchemaBuilderError as e:
-            for error in e.errors:
-                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
-                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
-            
-            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
-            if (e.errors):
-                raise e
-
-        derived_schema_add_df = derived_schema_df[derived_schema_df["type"].notna()]
-
-        try:
-            combined_rows = combined_rows | self._extract_duplicates(
-                dataframe = derived_schema_add_df,
-                field_definitions = DERIVED_SCHEMA_FIELDS,
-                on_error_exception = SchemaBuilderDerivedSchemaError,
-                unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
-                schema_path = derived_schema_path,
-                source = "derived_schema",
-                initial_row_dict = combined_rows
-            )
-    
-        except SchemaBuilderError as e:
-            for error in e.errors:
-                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
-                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
-            
-            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
-            if (e.errors):
-                raise e
-
-        derived_schema_sub_df = derived_schema_df[derived_schema_df["type"].isna()]
-
-        try:
-            derived_schema_meta_df = self._create_sub_from_meta(
-                derived_schema_path = derived_schema_path,
-                derived_schema_sub_df = derived_schema_sub_df,
-                field_definitions = DERIVED_SCHEMA_FIELDS,
-                lookup_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
-                meta_schema_df = meta_schema_df,
-                meta_schema_path = meta_schema_path
-            )
-
-            combined_rows = combined_rows | self._extract_duplicates(
-                dataframe = derived_schema_meta_df,
-                field_definitions = DERIVED_SCHEMA_FIELDS,
-                on_error_exception = SchemaBuilderDerivedSchemaError,
-                unique_key = next((field["name"] for field in DERIVED_SCHEMA_FIELDS if (field.get("is_key"))), None),
-                schema_path = derived_schema_path,
-                source = "meta_schema",
-                initial_row_dict = combined_rows
-            )
-    
-        except SchemaBuilderError as e:
-            for error in e.errors:
-                if isinstance(error, SchemaBuilderDuplicatePrimaryKeyWarning):
-                    logger.warning(f"SchemaBuilderDuplicatePrimaryKeyWarning: {error}")
-                        
-            e.errors = [error for error in e.errors if (isinstance(error, SchemaBuilderDuplicatePrimaryKeyError) or isinstance(error, SchemaBuilderMissingMetaSchemaFieldError))]
-            if (e.errors):
-                raise e
-        
-        combined_rows_df = pd.DataFrame(combined_rows).T.reset_index(drop = True)
-        logger.success("Successfully combined schema data.")
-        with pd.option_context("display.max_rows", 100):
-            logger.debug(f"Using the following combined_rows_df...\n{combined_rows_df}")
-
-        return combined_rows_df
+            raise e
 
 
     def get_common_header_df(
@@ -372,14 +417,17 @@ class SchemaUtils:
             logger.success(f"Successfully imported common headers version '{self.common_header_version}'.")
             with pd.option_context("display.max_rows", 100):
                 logger.debug(f"Using the following common_header_df...\n{common_header_df}")
+                
+            return common_header_df
 
         except SchemaBuilderCommonHeaderError:
             raise
 
         except SchemaError:
             raise SchemaBuilderCommonHeaderError(self.common_header_version)
-                
-        return common_header_df
+
+        except ValueError as e:
+            raise SchemaBuilderCommonHeaderError(self.common_header_version, custom_message = f"{str(e).capitalize()}.")
 
 
     def get_derived_schema_df(
@@ -410,14 +458,17 @@ class SchemaUtils:
                 raise SchemaBuilderDerivedSchemaError(derived_schema_path, missing_field_errors)
             
             logger.success(f"Successfully imported derived schema from '{derived_schema_path}'.")
+                
+            return derived_schema_df
 
         except SchemaBuilderDerivedSchemaError:
             raise
 
         except SchemaError:
             raise SchemaBuilderDerivedSchemaError(derived_schema_path)
-                
-        return derived_schema_df
+
+        except ValueError as e:
+            raise SchemaBuilderDerivedSchemaError(derived_schema_path, custom_message = f"{str(e).capitalize()}.")
 
 
     def get_meta_schema_df(
@@ -448,14 +499,17 @@ class SchemaUtils:
                 raise SchemaBuilderMetaSchemaError(meta_schema_path, missing_field_errors)
             
             logger.success(f"Successfully imported meta schema from '{meta_schema_path}'.")
+                
+            return meta_schema_df
 
         except SchemaBuilderMetaSchemaError:
             raise
 
         except SchemaError:
             raise SchemaBuilderMetaSchemaError(meta_schema_path)
-                
-        return meta_schema_df
+
+        except ValueError as e:
+            raise SchemaBuilderMetaSchemaError(meta_schema_path, custom_message = f"{str(e).capitalize()}.")
 
 
     def get_type_maps_df(
@@ -497,11 +551,11 @@ class SchemaUtils:
             logger.success(f"Successfully imported type maps version '{self.type_maps_version}'.")
             with pd.option_context("display.max_rows", 100):
                 logger.debug(f"Using the following type_maps_df...\n{type_maps_df}")
+                
+            return type_maps_df
 
         except SchemaBuilderTypeMapsError:
             raise
 
         except SchemaError:
             raise SchemaBuilderTypeMapsError(self.type_maps_version)
-                
-        return type_maps_df
