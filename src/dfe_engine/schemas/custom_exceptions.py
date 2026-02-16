@@ -45,16 +45,20 @@ class SchemaBuilderCommonHeaderError(SchemaBuilderError):
     Raised when an issue occurs when reading a common header file.
     """
     def __init__(self, version: str = "", errors: list[Exception] = None, custom_message: str = ""):
-        self.errors = errors
-        super().__init__(f"An issue occured whilst reading common header version '{version}'.", custom_message)
+        self.errors = [self]
+        if (errors):
+            self.errors = errors
+        super().__init__(f"An issue occurred whilst reading common header version '{version}'.", custom_message)
 
 class SchemaBuilderDerivedSchemaError(SchemaBuilderError):
     """
     Raised when an issue occurs when reading a derived schema file.
     """
     def __init__(self, derived_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
-        self.errors = errors
-        super().__init__(f"An issue occured whilst reading the derived schema at '{derived_schema_path}'.", custom_message)
+        self.errors = [self]
+        if (errors):
+            self.errors = errors
+        super().__init__(f"An issue occurred whilst reading the derived schema at '{derived_schema_path}'.", custom_message)
 
 class SchemaBuilderDirNotFoundError(SchemaBuilderError):
     """
@@ -67,8 +71,8 @@ class SchemaBuilderDuplicatePrimaryKeyError(SchemaBuilderError):
     """
     Raised when a schema has a duplicate primary key entry and differening type.
     """
-    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, schema_path: str, custom_message: str = ""):
-        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found in '{schema_path}' with unmatched metadata.", custom_message)
+    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, differing_columns: list[str], new_source: str = None, schema_path: str = None, schema_version: str = None, custom_message: str = ""):
+        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found{f" in '{schema_path}'" if (schema_path) else (f" in {new_source} version '{schema_version}'" if (new_source and schema_version) else "")} with unmatched metadata. {f"Differing column{"s" if (len(differing_columns) > 1) else ""}: {f"'[{", ".join(differing_columns)}]'" if (len(differing_columns) > 1) else (f"'{differing_columns[0]}'" if (len(differing_columns) == 1) else "")}"}.", custom_message)
 
 class SchemaBuilderDuplicateSchemaNameError(SchemaBuilderError):
     """
@@ -89,8 +93,10 @@ class SchemaBuilderMetaSchemaError(SchemaBuilderError):
     Raised when an issue occurs when reading a meta schema file.
     """
     def __init__(self, meta_schema_path: str = "", errors: list[Exception] = None, custom_message: str = ""):
-        self.errors = errors
-        super().__init__(f"An issue occured whilst reading the meta schema at '{meta_schema_path}'.", custom_message)
+        self.errors = [self]
+        if (errors):
+            self.errors = errors
+        super().__init__(f"An issue occurred whilst reading the meta schema at '{meta_schema_path}'.", custom_message)
 
 class SchemaBuilderMissingMetaSchemaFieldError(SchemaBuilderMetaSchemaError):
     def __init__(self, field_name: str, key: str, meta_schema_path: str, custom_message: str = ""):
@@ -132,7 +138,7 @@ class SchemaBuilderTypeMapsError(SchemaBuilderError):
     """
     def __init__(self, version: str = "", errors: list[Exception] = None, custom_message: str = ""):
         self.errors = errors
-        super().__init__(f"An issue occured whilst reading type maps version '{version}'.", custom_message)
+        super().__init__(f"An issue occurred whilst reading type maps version '{version}'.", custom_message)
 
 class SchemaWarning(Exception):
     """
@@ -152,8 +158,8 @@ class SchemaBuilderDuplicatePrimaryKeyWarning(SchemaBuilderWarning):
     """
     Raised when a schema has a duplicate primary key entry but matching type.
     """
-    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, schema_path: str, custom_message: str = ""):
-        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found in '{schema_path}' will be skipped...", custom_message)
+    def __init__(self, duplicate_field: str, existing_source: str, primary_key: str, new_source: str = None, schema_path: str = None, schema_version: str = None, custom_message: str = ""):
+        super().__init__(f"{primary_key.capitalize()} '{duplicate_field}' has already been sourced from '{existing_source}'. Duplicate entry found{f" in '{schema_path}'" if (schema_path) else (f" in {new_source} version '{schema_version}'" if (new_source and schema_version) else "")} will be skipped...", custom_message)
 
 class SchemaBuilderJSONWarning(SchemaBuilderWarning):
     """
