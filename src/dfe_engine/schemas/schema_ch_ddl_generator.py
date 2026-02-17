@@ -70,6 +70,11 @@ class SchemaCHDDLGenerator:
                 derived_schema_path = derived_schema_path,
                 meta_schema_path = meta_schema_path
             )
+
+            typed_fields_df = self.schema_utils.map_field_types(
+                combined_df = fields_df,
+                type_maps_df = self.type_maps_df
+            )
         
         except SchemaBuilderError:
             raise

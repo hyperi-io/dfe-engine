@@ -137,8 +137,14 @@ class SchemaBuilderTypeMapsError(SchemaBuilderError):
     Raised when an issue occurs when reading a type maps file.
     """
     def __init__(self, version: str = "", errors: list[Exception] = None, custom_message: str = ""):
-        self.errors = errors
+        self.errors = [self]
+        if (errors):
+            self.errors = errors
         super().__init__(f"An issue occurred whilst reading type maps version '{version}'.", custom_message)
+
+class SchemaBuilderUnknownTypeError(SchemaBuilderTypeMapsError):
+    def __init__(self, column_name: str, source: str, unknown_type: str, custom_message: str = ""):
+        super().__init__(f"Column '{column_name}' from '{source}' has unknown type '{unknown_type}'.", custom_message)
 
 class SchemaWarning(Exception):
     """

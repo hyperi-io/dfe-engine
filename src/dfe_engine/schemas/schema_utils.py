@@ -1,7 +1,7 @@
 import pandas as pd
 import re
 
-from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingMetaSchemaFieldError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderWarning, SchemaBuilderDuplicatePrimaryKeyWarning, SchemaBuilderJSONWarning
+from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError, SchemaBuilderCommonHeaderError, SchemaBuilderDerivedSchemaError, SchemaBuilderDirNotFoundError, SchemaBuilderDuplicatePrimaryKeyError, SchemaBuilderInvalidVersionError, SchemaBuilderMetaSchemaError, SchemaBuilderMissingMetaSchemaFieldError, SchemaBuilderMissingRequiredFieldsError, SchemaBuilderTypeMapsError, SchemaBuilderUnknownTypeError, SchemaBuilderWarning, SchemaBuilderDuplicatePrimaryKeyWarning, SchemaBuilderJSONWarning
 from dfe_engine.schemas.schema_field_definitions.common_header_fields import COMMON_HEADER_FIELDS
 from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
@@ -386,6 +386,35 @@ class SchemaUtils:
         
         except SchemaBuilderError as e:
             raise e
+
+
+    def map_field_types(
+        self,
+        combined_df: pd.DataFrame,
+        type_maps_df: pd.DataFrame
+    ) -> pd.DataFrame:
+        type_mapped_rows_df = combined_df.copy()
+        type_exceptions = []
+
+        type_mapping = type_maps_df.set_index("type")
+
+        type_mapped_rows_df.loc[type_mapped_rows_df["index_order"].notna(), "type"] = type_mapped_rows_df["type"].map(type_mapping["clickhouse_type_index"])
+        type_mapped_rows_df.loc[type_mapped_rows_df["index_order"].isna(), "type"] = type_mapped_rows_df["type"].map(type_mapping["clickhouse_type"])
+
+        unmapped = type_mapped_rows_df[type_mapped_rows_df["type"].isna()]
+        if not(unmapped.empty):
+            unmapped_rows = combined_df.loc[unmapped.index]
+            for _, row in unmapped_rows.iterrows():
+                type_exceptions.append(SchemaBuilderUnknownTypeError(row["column"], row["source"], row["type"]))
+        
+        if (len(type_exceptions) > 0):
+            raise SchemaBuilderTypeMapsError(self.type_maps_version, type_exceptions)
+
+        logger.success("Successfully mapped types from the combined schema data.")
+        with pd.option_context("display.max_rows", 100):
+            logger.debug(f"Using the following type_mapped_rows...\n{type_mapped_rows_df}")
+        
+        return type_mapped_rows_df
 
 
     def get_common_header_df(
