@@ -1,0 +1,103 @@
+# Kubernetes Ingress for HyperDX with oauth2-proxy authentication
+#
+# This is the K8s-native alternative to the standalone nginx.conf.
+# Uses nginx-ingress controller annotations for oauth2-proxy integration.
+#
+# Prerequisites:
+#   - oauth2-proxy deployed as a Service (oauth2-proxy.monitoring.svc)
+#   - HyperDX API and App deployed as Services
+#   - TLS cert managed by cert-manager or similar
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hyperdx
+  namespace: monitoring
+  annotations:
+    # oauth2-proxy integration
+    nginx.ingress.kubernetes.io/auth-url: "https://$host/oauth2/auth"
+    nginx.ingress.kubernetes.io/auth-signin: "https://$host/oauth2/start?rd=$escaped_request_uri"
+
+    # Forward OIDC identity headers to upstream
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-User,X-Auth-Request-Email,X-Auth-Request-Groups"
+
+    # Map auth response headers to X-Forwarded-* headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      auth_request_set $auth_user   $upstream_http_x_auth_request_user;
+      auth_request_set $auth_email  $upstream_http_x_auth_request_email;
+      auth_request_set $auth_groups $upstream_http_x_auth_request_groups;
+      proxy_set_header X-Forwarded-User   $auth_user;
+      proxy_set_header X-Forwarded-Email  $auth_email;
+      proxy_set_header X-Forwarded-Groups $auth_groups;
+
+    # TLS
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - observability.hypersec.io
+      secretName: hyperdx-tls
+  rules:
+    - host: observability.hypersec.io
+      http:
+        paths:
+          # HyperDX UI
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hyperdx-app
+                port:
+                  number: 8080
+          # HyperDX API (includes /clickhouse-proxy)
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: hyperdx-api
+                port:
+                  number: 8000
+---
+# oauth2-proxy endpoints (must not be behind auth_request)
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hyperdx-oauth2
+  namespace: monitoring
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - observability.hypersec.io
+      secretName: hyperdx-tls
+  rules:
+    - host: observability.hypersec.io
+      http:
+        paths:
+          - path: /oauth2
+            pathType: Prefix
+            backend:
+              service:
+                name: oauth2-proxy
+                port:
+                  number: 4180
+---
+# OTLP ingestion — internal only, no auth, no Ingress
+# Pods push telemetry to this ClusterIP service directly
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  namespace: monitoring
+spec:
+  type: ClusterIP
+  ports:
+    - name: otlp-grpc
+      port: 4317
+      targetPort: 4317
+    - name: otlp-http
+      port: 4318
+      targetPort: 4318
+  selector:
+    app: otel-collector
