@@ -1,3 +1,10 @@
+## [1.3.70](https://github.com/hyperi-io/dfe-engine/compare/v1.3.69...v1.3.70) (2026-02-17)
+
+
+### Bug Fixes
+
+* Move old resources to deprecated (now submodule) and add in type mapping ([2088a83](https://github.com/hyperi-io/dfe-engine/commit/2088a839ec3bcc1329190a67f0e8ae9deab1a6f1))
+
 ## [1.3.69](https://github.com/hyperi-io/dfe-engine/compare/v1.3.68...v1.3.69) (2026-02-16)
 
 
