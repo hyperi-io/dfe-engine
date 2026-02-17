@@ -136,6 +136,28 @@ class StorageSettings(BaseModel):
     s3_region: str = Field(default="", description="AWS region (for s3 type)")
 
 
+class ServicesSettings(BaseModel):
+    """Endpoints for managed DFE Rust services (receiver, loader, archiver).
+
+    Used by ServiceStateClient to query health and metrics from running services.
+
+    Environment variables:
+    - DFE_SERVICES_RECEIVER_URL -> services.receiver_url
+    - DFE_SERVICES_RECEIVER_METRICS_URL -> services.receiver_metrics_url
+    - DFE_SERVICES_LOADER_URL -> services.loader_url
+    - DFE_SERVICES_ARCHIVER_METRICS_URL -> services.archiver_metrics_url
+    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
+    """
+
+    receiver_url: str = Field(default="http://localhost:8080")
+    receiver_metrics_url: str = Field(default="http://localhost:9090")
+    loader_url: str = Field(default="http://localhost:9090")
+    archiver_metrics_url: str = Field(default="http://localhost:9090")
+    config_yaml_dir: str = Field(
+        default="", description="YAML config replica directory for Rust services"
+    )
+
+
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
@@ -145,6 +167,7 @@ class DFESettings(BaseModel):
     postgres: PostgresSettings = Field(default_factory=PostgresSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    services: ServicesSettings = Field(default_factory=ServicesSettings)
 
 
 def _load_defaults() -> dict:
@@ -167,6 +190,7 @@ def _get_env_overrides() -> dict:
         "postgres": {},
         "kafka": {},
         "storage": {},
+        "services": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -230,6 +254,18 @@ def _get_env_overrides() -> dict:
         overrides["storage"]["s3_bucket"] = val
     if val := _get_env("DFE_S3_REGION"):
         overrides["storage"]["s3_region"] = val
+
+    # Services settings
+    if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
+        overrides["services"]["receiver_url"] = val
+    if val := _get_env("DFE_SERVICES_RECEIVER_METRICS_URL"):
+        overrides["services"]["receiver_metrics_url"] = val
+    if val := _get_env("DFE_SERVICES_LOADER_URL"):
+        overrides["services"]["loader_url"] = val
+    if val := _get_env("DFE_SERVICES_ARCHIVER_METRICS_URL"):
+        overrides["services"]["archiver_metrics_url"] = val
+    if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
+        overrides["services"]["config_yaml_dir"] = val
 
     # Remove empty sections
     return {k: v for k, v in overrides.items() if v}
