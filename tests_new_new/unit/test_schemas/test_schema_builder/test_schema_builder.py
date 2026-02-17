@@ -36,6 +36,8 @@ def test_schema_build(init_schema_config, init_derived_schema, init_meta_schema,
 
     schema_builder.build()
 
+    assert(False)
+
     # TODO: ADD BUILD VERIFICATIONS HERE
 
 

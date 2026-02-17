@@ -350,3 +350,75 @@ def test_create_combined_df(capsys, tmp_path, init_common_header, init_derived_s
         expected_combined_df = expected_combined_df.replace("", pd.NA)
         pd.testing.assert_frame_equal(expected_combined_df, combined_df)
         assert(expected_combined_df.equals(combined_df))
+
+
+def test_map_field_types(init_schema_utils, type_maps_version, test_map_field_types_input):
+    expected_tests = ["non_indexed", "indexed", "combined_index"]
+    version = type_maps_version
+
+    tests = test_map_field_types_input[version]
+
+    assert(all(test in tests for test in expected_tests))
+
+    schema_utils = init_schema_utils(
+        type_maps_version = version,
+        use_json_feature = True
+    )
+    
+    type_maps_df = schema_utils.get_type_maps_df()
+
+    for value in tests.values():
+        combined_df = value["combined_df"]
+        expected_type_mapped_rows_df = value["expected_type_mapped_rows_df"].replace("", pd.NA)
+
+        type_mapped_rows_df = schema_utils.map_field_types(
+            combined_df = combined_df.replace("", pd.NA),
+            type_maps_df = type_maps_df
+        )
+
+        pd.testing.assert_frame_equal(expected_type_mapped_rows_df, type_mapped_rows_df)
+        assert(expected_type_mapped_rows_df.equals(type_mapped_rows_df))
+
+
+def test_map_field_types_no_json_type(init_schema_utils, type_maps_version, test_map_field_types_no_json_types_input):
+    version = type_maps_version
+
+    schema_utils = init_schema_utils(
+        type_maps_version = version,
+        use_json_feature = False
+    )
+    
+    type_maps_df = schema_utils.get_type_maps_df()
+
+    combined_df = test_map_field_types_no_json_types_input[version]["combined_df"]
+    expected_type_mapped_rows_df = test_map_field_types_no_json_types_input[version]["expected_type_mapped_rows_df"].replace("", pd.NA)
+
+    type_mapped_rows_df = schema_utils.map_field_types(
+        combined_df = combined_df.replace("", pd.NA),
+        type_maps_df = type_maps_df
+    )
+
+    pd.testing.assert_frame_equal(expected_type_mapped_rows_df, type_mapped_rows_df)
+    assert(expected_type_mapped_rows_df.equals(type_mapped_rows_df))
+
+
+def test_invalid_map_field_types(init_schema_utils, test_invalid_map_field_types_input):
+    combined_df = test_invalid_map_field_types_input["combined_df"]
+    version = test_invalid_map_field_types_input["type_maps_version"]
+    expected_exception = test_invalid_map_field_types_input["raises"]["exception"]
+    expected_messages = test_invalid_map_field_types_input["raises"]["messages"]
+
+    schema_utils = init_schema_utils(
+        type_maps_version = version
+    )
+    
+    type_maps_df = schema_utils.get_type_maps_df()
+
+    with pytest.raises(expected_exception) as exc_info:
+        schema_utils.map_field_types(
+            combined_df = combined_df.replace("", pd.NA),
+            type_maps_df = type_maps_df
+        )
+    
+    for expected_message in expected_messages:
+        assert (expected_message in str(exc_info.value.errors))
