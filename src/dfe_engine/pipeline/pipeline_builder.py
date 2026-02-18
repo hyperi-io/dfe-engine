@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from .pipeline import Pipeline
 
 

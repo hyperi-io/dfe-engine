@@ -13,7 +13,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 from dfe_engine.query.models import (
     ParameterDefinition,

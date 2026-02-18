@@ -1,7 +1,7 @@
 from pydantic import StrictStr
 from typing import Dict
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 from .clickhouse_manager import ClickHouseManager
 

@@ -6,7 +6,7 @@ from ..clickhouse.clickhouse_manager import ClickHouseManager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Optional
 from .schema_util import SchemaUtils
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 
 class SchemaExecutor:

@@ -2,7 +2,7 @@ import copy
 import yaml
 
 from deepdiff import DeepDiff
-from hs_pylib import config, logger
+from hyperi_pylib import config, logger
 from pathlib import Path
 from typing import Optional
 

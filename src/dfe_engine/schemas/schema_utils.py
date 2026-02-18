@@ -6,7 +6,7 @@ from dfe_engine.schemas.schema_field_definitions.common_header_fields import COM
 from dfe_engine.schemas.schema_field_definitions.derived_schema_fields import DERIVED_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.meta_schema_fields import META_SCHEMA_FIELDS
 from dfe_engine.schemas.schema_field_definitions.type_maps_fields import TYPE_MAPS_FIELDS
-from hs_pylib import logger
+from hyperi_pylib import logger
 from importlib import resources
 from pathlib import Path
 

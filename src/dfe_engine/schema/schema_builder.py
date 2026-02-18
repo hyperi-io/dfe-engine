@@ -17,7 +17,7 @@ import sqlparse
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from .schema_util import SchemaUtils, SchemaValidationError, SchemaNameConflictError
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 
 class SchemaBuilderException(Exception):

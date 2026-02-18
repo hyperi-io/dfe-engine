@@ -14,13 +14,13 @@ This document tracks the remediation scope for migrating business logic from `df
 
 ## 1. Complete Logging Migration (Priority: HIGH)
 
-**Goal:** Replace ALL logging patterns with `hs_pylib.logger`
+**Goal:** Replace ALL logging patterns with `hyperi_pylib.logger`
 
 ### Target Pattern
 
 ```python
 # STANDARD PATTERN - Use everywhere
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 logger.info("Message")
 logger.error(f"Error: {e}")
@@ -75,7 +75,7 @@ logger.debug("Debug info")
 
 #### 1.5 Already Migrated (No Changes Needed)
 
-- `schema/schema_controller.py` - Uses `from hs_pylib.logger import logger`
+- `schema/schema_controller.py` - Uses `from hyperi_pylib.logger import logger`
 - `opensearch/opensearch_apply.py` - Uses hs-pylib logger
 - `sigma/sigma_converter.py` - Uses hs-pylib logger
 
@@ -107,7 +107,7 @@ host = os.getenv("DFE_CH_HOST")
 port = os.getenv("DFE_CH_PORT", "9000")
 
 # NEW - hs-pylib config cascade
-from hs_pylib.config import settings
+from hyperi_pylib.config import settings
 
 host = settings.get("clickhouse.host")
 port = settings.get("clickhouse.port", 9000)
@@ -441,6 +441,6 @@ python -c "import dfe_engine"
 ## References
 
 - [hs-pylib CONFIG.md](../hs-pylib/docs/CONFIG.md) - 7-level config cascade documentation
-- [hs-pylib Logger](../hs-pylib/src/hs_pylib/logger/) - Logger module
+- [hs-pylib Logger](../hs-pylib/src/hyperi_pylib/logger/) - Logger module
 - [Bandit B113](https://bandit.readthedocs.io/en/latest/plugins/b113_request_without_timeout.html) - Request without timeout
 - [Bandit B701](https://bandit.readthedocs.io/en/latest/plugins/b701_jinja2_autoescape_false.html) - Jinja2 autoescape
