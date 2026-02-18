@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from typing import Any, List, Dict, Optional
 from jinja2 import Environment
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from .hunts_checkpoint_manager import HuntCheckpointManager
 from ...clickhouse.clickhouse_manager import ClickHouseManager
 

@@ -4,7 +4,7 @@ from dfe_engine.schemas.custom_exceptions import SchemaError, SchemaBuilderError
 from dfe_engine.schemas.schema import Schema
 from dfe_engine.schemas.schema_ch_ddl_generator import SchemaCHDDLGenerator
 from dfe_engine.config.config import Config
-from hs_pylib import logger
+from hyperi_pylib import logger
 from pathlib import Path
 
 

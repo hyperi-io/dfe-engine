@@ -3,7 +3,7 @@ import asyncio
 import pytest
 from dfe_engine.hunts.runner.cron_runner import CronRunner
 from dfe_engine.config.config_loader import DFEConfigLoader
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 dfe_root_log_path = os.path.join(os.getcwd(), "tmp", "logs_path")
 os.makedirs(dfe_root_log_path, exist_ok=True)

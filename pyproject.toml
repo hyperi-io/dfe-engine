@@ -8,8 +8,8 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    # hs-pylib for logging and common utilities
-    "hs-pylib>=2.15.2",
+    # hyperi-pylib for logging and common utilities
+    "hyperi-pylib>=2.15.2",
     # Data processing
     "pyarrow>=22.0.0",
     "pandas>=2.2.3",
@@ -125,12 +125,13 @@ ignore = [
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
 
 [[tool.uv.index]]
-name = "hypersec-repo"
-url = "https://pypi.repo.hypersec.io/simple/"
+name = "hyperi-repo"
+url = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local/simple"
+publish-url = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local"
 explicit = true
 
 [tool.uv.sources]
-hs-pylib = { index = "hypersec-repo" }
+hyperi-pylib = { index = "hyperi-repo" }
 
 [tool.bandit]
 # Skip B608 (hardcoded SQL) - This is a database library that generates SQL queries.

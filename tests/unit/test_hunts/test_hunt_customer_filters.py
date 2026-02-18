@@ -7,7 +7,7 @@ from dfe_engine.hunts.hunts.hunts import Hunt
 import re
 import warnings
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 
 @pytest.fixture(scope="session")

@@ -1,6 +1,6 @@
 from dfe_engine.schemas.custom_exceptions import SchemaBuilderError, SchemaBuilderCommonHeaderError
 from dfe_engine.schemas.schema_utils import SchemaUtils
-from hs_pylib import logger
+from hyperi_pylib import logger
 from pathlib import Path
 
 
