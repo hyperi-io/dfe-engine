@@ -17,7 +17,7 @@ import pyarrow as pa
 
 from dfe_engine.query.datasources import DatasourceAdapter, register_adapter
 from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 # Arrow schema for directory listings
 LISTING_SCHEMA = pa.schema([

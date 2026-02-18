@@ -5,7 +5,7 @@ import glob
 from typing import List, Dict, Any, Set
 
 import pandas as pd
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from copy import deepcopy
 from . import cte_templates
 

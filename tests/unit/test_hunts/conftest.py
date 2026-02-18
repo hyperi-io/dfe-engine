@@ -5,7 +5,7 @@ import uuid
 import stat
 import shutil
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from dfe_engine.settings import get_settings, reset_settings
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 

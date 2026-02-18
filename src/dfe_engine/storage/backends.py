@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 
 class StorageError(Exception):

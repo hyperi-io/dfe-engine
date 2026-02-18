@@ -3,7 +3,7 @@ import os
 
 import pandas as pd
 import yaml
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from .watcher_parser import map_device_name
 
 

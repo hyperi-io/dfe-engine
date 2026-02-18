@@ -7,7 +7,7 @@ from zipfile import ZipFile
 import pandas as pd
 from tabulate import tabulate
 from typing import Any, List
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 from ..config.config_loader import DFEConfigLoader
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from .schema_builder import SchemaBuilder

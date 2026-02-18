@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import Any
 
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 from dfe_engine.query.models import (
     AuthContext,

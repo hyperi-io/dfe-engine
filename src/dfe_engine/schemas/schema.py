@@ -1,5 +1,5 @@
 from dfe_engine.schemas.custom_exceptions import SchemaFileNotFoundError
-from hs_pylib import logger
+from hyperi_pylib import logger
 from pathlib import Path
 from typing import Optional
 

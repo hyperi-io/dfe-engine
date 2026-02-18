@@ -18,7 +18,7 @@ from typing import Annotated, Optional
 import clickhouse_connect
 from clickhouse_connect.driver import Client
 from clickhouse_connect.driver import httputil
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 from ..settings import get_settings
 

@@ -2,7 +2,7 @@ import os
 import re
 
 import pandas as pd
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 HUNT_TEMPLATE = """
     name: "{name}"

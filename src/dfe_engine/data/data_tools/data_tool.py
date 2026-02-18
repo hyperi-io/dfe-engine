@@ -4,7 +4,7 @@ import datetime
 import pytz
 from clickhouse_connect.driver import Client
 from clickhouse_connect.driver.exceptions import ClickHouseError
-from hs_pylib.logger import logger
+from hyperi_pylib.logger import logger
 
 
 class DataTool:
