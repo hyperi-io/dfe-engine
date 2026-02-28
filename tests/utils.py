@@ -199,8 +199,8 @@ class TestConfigBuilder:
                     "ip_templates_path": "vector_templates",
                     "helm_template": "resources/pipeline_template/config_only.yaml",
                     "vector_config_mount_path": "/etc/vector",
-                    "hunt_config_path": "dfecli/stable/hunt",
-                    "hunt_rules_path": "dfecli/stable/rules",
+                    "hunt_config_path": "hunts/stable/hunt",
+                    "hunt_rules_path": "hunts/stable/rules",
                 }
             },
         }
