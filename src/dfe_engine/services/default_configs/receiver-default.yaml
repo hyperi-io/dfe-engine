@@ -1,0 +1,67 @@
+# DFE Receiver — Development defaults
+# Matches Rust defaults with dev-friendly overrides
+# See: dfe-receiver/config.example.yaml
+
+server:
+  bind_address: "0.0.0.0:8080"
+  max_body_size: 10485760  # 10 MB
+  request_timeout_ms: 30000
+  tls:
+    enabled: false
+  auth:
+    mode: none
+    accepted_headers:
+      - name: x-hyperi-agent
+        values: ["1.0"]
+
+grpc:
+  enabled: false
+  bind_address: "0.0.0.0:6000"
+
+validation:
+  require_json: true
+  required_fields: []
+  dlq_on_invalid: true
+
+routing:
+  topic_fields:
+    - tags.event.category
+    - event_category
+  default_topic: unmatched
+  topic_suffix: _land
+  category_to_topic: {}
+  dlq:
+    enabled: true
+    topic: dlq_land
+
+destinations:
+  default: kafka
+  rules: []
+
+kafka:
+  brokers:
+    - localhost:9092
+  client_id: dfe-receiver
+  tls:
+    enabled: false
+  producer:
+    batch_size: 8388608  # 8 MB
+    batch_messages: 10000
+    linger_ms: 20
+    compression: lz4
+    acks: all
+    retries: 5
+
+loader:
+  address: "localhost:9000"
+  transport: kafka
+  timeout_ms: 5000
+
+buffer:
+  memory_limit: 0  # auto-detect
+  pressure_threshold: 0.8
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics

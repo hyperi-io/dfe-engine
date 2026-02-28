@@ -1,0 +1,60 @@
+# DFE Archiver — Production (K8s)
+# S3 archive destination, large buffers, SASL+TLS, tuned compression
+#
+# K8s resource sizing (medium):
+#   requests: { cpu: 500m, memory: 1Gi }
+#   limits:   { cpu: 2000m, memory: 2Gi }
+# KEDA scaling:
+#   min_replicas: 1
+#   max_replicas: 4
+#   trigger: kafka consumer lag (threshold: 100000)
+
+kafka:
+  brokers:
+    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  group_id: dfe-archiver
+  topics:
+    - events
+  batch_size: 10000
+  max_poll_interval_ms: 300000
+  session_timeout_ms: 30000
+  security_protocol: SASL_SSL
+  sasl_mechanism: SCRAM-SHA-512
+  sasl_username: ""
+  sasl_password: ""
+
+archive:
+  destination: "s3://dfe-archive"
+  path_template: "{topic}/{year}/{month}/{day}/{hour}"
+  file_extension: jsonl
+  roll_size_bytes: 1073741824  # 1 GB final compressed
+  roll_interval_secs: 3600
+  s3:
+    region: ""
+    bucket: dfe-archive
+
+buffer:
+  flush_bytes: 134217728  # 128 MB
+  flush_age_secs: 60
+  flush_records: 100000
+  writer_parallelism: 8
+
+memory:
+  limit_bytes: 0  # auto-detect from K8s cgroup limits
+  pressure_threshold: 0.8
+  tracking_enabled: true
+
+routing:
+  mode: topic
+  expression_fields: []
+  default_segment: unknown
+
+compression:
+  codec: zstd
+  level: 6  # higher compression for cold storage
+  enabled: true
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics

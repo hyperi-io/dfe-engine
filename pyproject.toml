@@ -133,6 +133,14 @@ explicit = true
 [tool.uv.sources]
 hyperi-pylib = { index = "hyperi-repo" }
 
+[project.entry-points."dfe_engine.services"]
+receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"
+loader = "dfe_engine.services.plugins_builtin.loader:plugin"
+archiver = "dfe_engine.services.plugins_builtin.archiver:plugin"
+transform-vector = "dfe_engine.services.plugins_builtin.transform_vector:plugin"
+transform-wasm = "dfe_engine.services.plugins_builtin.transform_wasm:plugin"
+fetcher = "dfe_engine.services.plugins_builtin.fetcher:plugin"
+
 [tool.bandit]
 # Skip B608 (hardcoded SQL) - This is a database library that generates SQL queries.
 # All queries use internal data from configuration/templates, not user input.

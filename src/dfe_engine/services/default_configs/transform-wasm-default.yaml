@@ -1,0 +1,39 @@
+# DFE Transform WASM — Development defaults
+# Kafka-to-Kafka transform using WASM modules
+
+kafka:
+  consumer:
+    brokers:
+      - localhost:9092
+    group: dfe-transform-wasm
+    topics: []
+    topic_regex: null
+    client_id: dfe-transform-wasm
+  producer:
+    brokers:
+      - localhost:9092
+    client_id: dfe-transform-wasm
+    compression: lz4
+    batch_size: 8388608  # 8 MB
+    linger_ms: 20
+
+sources: []
+
+extra_env: {}
+
+ipc:
+  enabled: false
+  transport: memory
+  address: ""
+
+memory:
+  max_memory_mb: 0
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
+
+logging:
+  level: info
+  format: json

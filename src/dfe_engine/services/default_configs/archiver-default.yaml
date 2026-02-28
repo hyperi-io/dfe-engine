@@ -1,0 +1,47 @@
+# DFE Archiver — Development defaults
+# Local filesystem archive, small buffers for fast feedback
+# See: dfe-archiver/config.dev.yaml
+
+kafka:
+  brokers:
+    - localhost:9092
+  group_id: dfe-archiver
+  topics:
+    - events
+  batch_size: 1000
+  max_poll_interval_ms: 300000
+  session_timeout_ms: 30000
+  security_protocol: PLAINTEXT
+
+archive:
+  destination: "file:///tmp/dfe-archive"
+  path_template: "{topic}/{year}/{month}/{day}/{hour}"
+  file_extension: jsonl
+  roll_size_bytes: 1073741824  # 1 GB
+  roll_interval_secs: 3600
+
+buffer:
+  flush_bytes: 1048576  # 1 MB — smaller for dev
+  flush_age_secs: 5
+  flush_records: 1000
+  writer_parallelism: 2
+
+memory:
+  limit_bytes: 67108864  # 64 MB fixed cap
+  pressure_threshold: 0.8
+  tracking_enabled: true
+
+routing:
+  mode: topic
+  expression_fields: []
+  default_segment: unknown
+
+compression:
+  codec: zstd
+  level: 3
+  enabled: true
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
