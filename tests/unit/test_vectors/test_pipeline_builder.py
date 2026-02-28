@@ -7,10 +7,10 @@ import pytest
 import yaml
 from unittest.mock import patch
 
-# Skip all tests in this module - CLI tests belong to dfe-cli, not dfe-engine library
-pytestmark = pytest.mark.skip(reason="CLI tests belong to dfe-cli package, not dfe-engine library")
+# Skip all tests in this module - CLI integration tests require a CLI entrypoint
+pytestmark = pytest.mark.skip(reason="CLI integration tests require a CLI entrypoint")
 
-# Placeholder imports for skipped tests - actual implementations are in dfe-cli
+# Placeholder imports for skipped tests
 PipelineBuilder = None
 PipelineBuilderController = None
 CliRunner = None
@@ -414,7 +414,7 @@ class TestBuildIngestionPipelinesCLI:
     @pytest.fixture
     def mock_pipeline_controller(self):
         """Mock the PipelineBuilderController to avoid external dependencies."""
-        with patch("dfecli.main.PipelineBuilderController") as mock:
+        with patch("dfe_engine.pipeline.pipeline_controller.PipelineBuilderController") as mock:
             yield mock
 
     def test_build_ingestion_pipelines_cli_with_extra_config_valid_json(
@@ -707,7 +707,7 @@ class TestBuildIngestionPipelinesCLIExtended:
     @pytest.fixture
     def mock_pipeline_controller(self):
         """Mock the PipelineBuilderController to avoid external dependencies."""
-        with patch("dfecli.main.PipelineBuilderController") as mock:
+        with patch("dfe_engine.pipeline.pipeline_controller.PipelineBuilderController") as mock:
             yield mock
 
     def test_build_ingestion_pipelines_cli_with_invalid_json(

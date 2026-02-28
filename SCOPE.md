@@ -8,7 +8,7 @@
 
 ## Overview
 
-This document tracks the remediation scope for migrating business logic from `dfe-cli-core` to `dfe-engine`. Remediation includes logging migration, configuration modernization, and security fixes.
+This document tracks the remediation scope for `dfe-engine`. Remediation includes logging migration, configuration modernization, and security fixes.
 
 ---
 

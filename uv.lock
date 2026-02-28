@@ -448,7 +448,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.3.70"
+version = "1.3.71"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },
@@ -509,7 +509,7 @@ requires-dist = [
     { name = "deepdiff", specifier = ">=8.0.0" },
     { name = "gitpython", specifier = ">=3.1.45" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "hyperi-pylib", specifier = ">=2.15.2", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local/simple" },
+    { name = "hyperi-pylib", specifier = ">=2.19.0", index = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local/simple" },
     { name = "importlib-metadata", specifier = ">=8.7.0" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "numpy", specifier = ">=2.3.5" },

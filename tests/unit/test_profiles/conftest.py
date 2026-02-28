@@ -72,8 +72,8 @@ targets:
     ip_config_receiver_path: 'vector_templates/vector_receiver'
     ip_config_geo_ip_path: 'vector_templates/geoip'
     ip_templates_path: 'vector_templates'
-    hunt_config_path: 'dfecli/stable/hunt'
-    hunt_rules_path: 'dfecli/stable/rules'
+    hunt_config_path: 'hunts/stable/hunt'
+    hunt_rules_path: 'hunts/stable/rules'
   target_2:
     ch_host: 'localhost'
     ch_port: 8123
@@ -85,8 +85,8 @@ targets:
     ip_config_receiver_path: 'vector_templates/vector_receiver'
     ip_config_geo_ip_path: 'vector_templates/geoip'
     ip_templates_path: 'vector_templates'
-    hunt_config_path: 'dfecli/stable/hunts'
-    hunt_rules_path: 'dfecli/stable/rules'
+    hunt_config_path: 'hunts/stable/hunts'
+    hunt_rules_path: 'hunts/stable/rules'
 """
 
 
