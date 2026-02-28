@@ -54,13 +54,15 @@ A Source **contains** all source-scoped components:
 | Component | Required | Purpose |
 |-----------|----------|---------|
 | **identity** | Yes | `_source` label, display name, match rule |
-| **schema** | Yes | ClickHouse table definition (starts as common header only) |
+| **schema** | Yes | ClickHouse table definition (starts as common header only). See [SCHEMA.md](./SCHEMA.md) |
 | **fetcher** | No | SaaS API pull (CrowdStrike, M365, Okta, etc.) |
 | **transform** | No | Enrichment/normalisation stage (vector or wasm) |
+| **rules** | No | SQL detection queries against this source's table |
+| **sigma** | No | Sigma field mappings + auto-generated compatibility view |
 
-Instead of configuring fetchers, transforms, and schemas as independent
-systems, they are **nested inside the Source they belong to**. The API and UI
-revolve around Sources — not around services.
+Instead of configuring fetchers, transforms, schemas, and detection rules
+as independent systems, they are **nested inside the Source they belong to**.
+The API and UI revolve around Sources — not around services.
 
 ```
 Global (configure once)         Source (one per data stream)
@@ -69,17 +71,21 @@ Global (configure once)         Source (one per data stream)
 │ loader              │         │   ├── match rule            │
 │ archiver            │         │   ├── schema (mandatory)    │
 └─────────────────────┘         │   ├── transform (optional)  │
-                                │   └── fetcher (optional)    │
+                                │   ├── fetcher (optional)    │
+                                │   ├── rules (optional)      │
+                                │   └── sigma (optional)      │
                                 ├─────────────────────────────┤
                                 │ source: crowdstrike_edr     │
                                 │   ├── match rule            │
                                 │   ├── schema (mandatory)    │
                                 │   ├── transform (optional)  │
-                                │   └── fetcher (mandatory)   │
+                                │   ├── fetcher (mandatory)   │
+                                │   └── rules (optional)      │
                                 ├─────────────────────────────┤
                                 │ source: syslog              │
                                 │   ├── match rule            │
-                                │   └── schema (mandatory)    │
+                                │   ├── schema (mandatory)    │
+                                │   └── rules (optional)      │
                                 └─────────────────────────────┘
 ```
 
@@ -490,11 +496,137 @@ what needs to happen. The actual execution happens on shared service instances:
 | `source.fetcher` | Shared fetcher instance(s) | Fetcher loads source configs, polls each |
 | `source.transform` | Shared transform instance(s) | Transform loads source configs, processes each |
 | `source.schema` | dfe-engine | Schema DDL generated and applied by engine |
+| `source.rules` | Hunt scheduler | SQL queries executed on cron, matches → alerts |
+| `source.sigma` | dfe-engine | Generates compatibility view for Sigma field names |
 
 A single transform-vector deployment may process transforms for 20 different
 sources. The source definition says *this source needs a vector transform
 with this config* — the deployment layer decides *which transform instance
 runs it*.
+
+---
+
+## Rules
+
+A **Rule** is a SQL detection query tied to a Source. It runs against the
+source's ClickHouse table and produces matches (detections).
+
+```yaml
+# rules/brute_force_login.yaml
+rule: brute_force_login
+source: windows_audit                   # Tied to this source's table
+display_name: Brute Force Login Attempt
+severity: high
+
+query: |
+  SELECT
+    _timestamp,
+    _org_id,
+    user_name,
+    source_ip,
+    count() AS attempt_count
+  FROM {db}.{source}
+  WHERE event_id = 4625
+    AND _timestamp >= {from}
+    AND _timestamp < {to}
+  GROUP BY _timestamp, _org_id, user_name, source_ip
+  HAVING attempt_count >= {threshold}
+
+parameters:
+  threshold: 5
+
+schedule: "*/5 * * * *"                 # Cron schedule for hunt execution
+```
+
+Rules reference `{db}`, `{source}`, `{from}`, `{to}` — templated at
+execution time. The rule's SQL runs against the source's table, so it
+has access to exactly the columns defined in the source's schema.
+
+---
+
+## Hunts
+
+A **Hunt** is a scheduled batch execution of Rules. Hunt results
+(matches/detections) are written to the **alerts table**.
+
+```
+Rule (SQL query tied to a Source)
+  │
+  ▼
+Hunt Scheduler (cron)
+  │  Expands {from}/{to} time window
+  │  Runs rule SQL against {db}.{source}
+  │
+  ▼
+Matches (detection results)
+  │
+  ▼
+Alerts Table ({db}.alerts)
+  │  Common header (timeseries profile)
+  │  + rule_name, severity, source, match_data
+```
+
+The alerts table is itself a Source (`_source = "alerts"`) with
+`header.type: timeseries`. This gives it the same schema management,
+retention, and query capabilities as any other source — including the
+ability to write rules against alerts (meta-detection / correlation).
+
+---
+
+## Sigma
+
+Sigma rules reference fields by standardised names (`SourceIP`,
+`CommandLine`, `EventID`). Rather than embedding Sigma names in the base
+schema, each source can have a **Sigma compatibility view**:
+
+```sql
+-- Auto-generated from source schema + sigma field mapping
+CREATE VIEW {db}.{source}_sigma AS
+SELECT
+    source_ip AS SourceIP,
+    dest_ip AS DestinationIP,
+    user_name AS User,
+    command_line AS CommandLine,
+    event_id AS EventID,
+    *
+FROM {db}.{source}
+```
+
+Sigma rules query the view (standard field names). The base schema stays
+ClickHouse-native. The mapping is per-source — different sources map
+differently. Zero storage overhead.
+
+```yaml
+# In source definition
+sigma:
+  taxonomy: windows                     # Built-in mapping set
+  custom_mappings:                      # Per-source overrides
+    CommandLine: command_line
+    ParentCommandLine: parent_cmd
+```
+
+Converted Sigma rules become DFE Rules tied to the source, querying the
+`{source}_sigma` view. See [SCHEMA.md](./SCHEMA.md) for details.
+
+---
+
+## Elastic Index Template Converter
+
+The existing Elastic/OpenSearch index template converter generates a source
+schema from a supplied Elastic template JSON. This is the primary onboarding
+path for migrating from Elastic:
+
+```
+Elastic Template JSON → Converter → Source schema CSV → Source definition
+```
+
+The converter maps Elastic types to primitives, Elastic analyzers to
+use_cases, and preserves the field hierarchy as flat columns. See
+[SCHEMA.md](./SCHEMA.md) for the type mapping table.
+
+This is tied to a Source — when creating a source from an Elastic data
+stream, the converter bootstraps the schema so the user doesn't start from
+scratch.
 
 ---
 
@@ -533,6 +665,13 @@ DELETE /api/v1/sources/{source}/transform  # Remove transform
 GET    /api/v1/sources/{source}/fetcher    # Get fetcher config
 PUT    /api/v1/sources/{source}/fetcher    # Set/update fetcher
 DELETE /api/v1/sources/{source}/fetcher    # Remove fetcher
+GET    /api/v1/sources/{source}/rules      # List rules for this source
+POST   /api/v1/sources/{source}/rules      # Create rule
+GET    /api/v1/sources/{source}/rules/{rule}  # Get rule
+PUT    /api/v1/sources/{source}/rules/{rule}  # Update rule
+DELETE /api/v1/sources/{source}/rules/{rule}  # Delete rule
+GET    /api/v1/sources/{source}/sigma      # Get sigma mapping + view status
+PUT    /api/v1/sources/{source}/sigma      # Set/update sigma mapping
 GET    /api/v1/sources/{source}/status     # Health: topics, table, transform, fetcher
 ```
 
