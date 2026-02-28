@@ -1,3 +1,23 @@
+# [1.4.0](https://github.com/hyperi-io/dfe-engine/compare/v1.3.71...v1.4.0) (2026-02-28)
+
+
+### Features
+
+* add abstract service plugin layer with 6 service types ([d38e22c](https://github.com/hyperi-io/dfe-engine/commit/d38e22cf1f8a1c92cdbad81f56bb0713842d820b))
+* add services module with YAML-backed config registry ([aea3c60](https://github.com/hyperi-io/dfe-engine/commit/aea3c60f24a3005dff7e3358307d50771e77ff23))
+* rename hs-pylib to hyperi-pylib for HyperI rebrand ([bbc39be](https://github.com/hyperi-io/dfe-engine/commit/bbc39be02a160c6d0d915bca147fbf75dec208c6))
+* replace query registry with ClickHouse parameterized views ([ab15177](https://github.com/hyperi-io/dfe-engine/commit/ab151770b7eed91098d36c7febfaf3c25cee48ac))
+
+
+### BREAKING CHANGES
+
+* All imports changed from hs_pylib to hyperi_pylib.
+
+- Update dependency from hs-pylib to hyperi-pylib in pyproject.toml
+- Rename all Python imports from hs_pylib to hyperi_pylib
+- Update brand references from HyperSec to HyperI in docs/comments
+- Update author/email to HyperI Team / dev@hyperi.io
+
 ## [1.3.71](https://github.com/hyperi-io/dfe-engine/compare/v1.3.70...v1.3.71) (2026-02-18)
 
 
