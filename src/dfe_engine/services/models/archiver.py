@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
-from dfe_engine.services.models.common import MemoryConfig, MetricsConfig
+from dfe_engine.services.models.base import BaseServiceConfig
+from dfe_engine.services.models.common import MemoryConfig
 
 
 # ---------------------------------------------------------------------------
@@ -182,18 +183,15 @@ class CompressionConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ArchiverConfig(BaseModel):
+class ArchiverConfig(BaseServiceConfig):
     """Complete configuration for dfe-archiver.
 
     Mirrors the Rust Config struct in dfe-archiver/src/config/types.rs.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     kafka: ArchiverKafkaConfig = Field(default_factory=ArchiverKafkaConfig)
     archive: ArchiveConfig = Field(default_factory=ArchiveConfig)
     buffer: ArchiverBufferConfig = Field(default_factory=ArchiverBufferConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     routing: ArchiverRoutingConfig = Field(default_factory=ArchiverRoutingConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
     compression: CompressionConfig = Field(default_factory=CompressionConfig)

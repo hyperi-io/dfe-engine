@@ -1,0 +1,53 @@
+# DFE Transform Vector — Production defaults
+# Kafka-to-Kafka transform using vector.dev pipelines
+
+kafka:
+  consumer:
+    brokers:
+      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    group: dfe-transform-vector
+    topics: []
+    client_id: dfe-transform-vector
+    sasl:
+      enabled: true
+      mechanism: scram_sha_512
+      username: ""
+      password: ""
+    tls:
+      enabled: true
+  producer:
+    brokers:
+      - kafka-bootstrap.kafka.svc.cluster.local:9092
+    client_id: dfe-transform-vector
+    compression: lz4
+    batch_size: 8388608
+    linger_ms: 20
+    sasl:
+      enabled: true
+      mechanism: scram_sha_512
+      username: ""
+      password: ""
+    tls:
+      enabled: true
+
+sources: []
+
+extra_yaml_files: []
+extra_env: {}
+
+ipc:
+  enabled: false
+  transport: memory
+  address: ""
+
+memory:
+  max_memory_mb: 2048
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
+
+logging:
+  level: info
+  format: json

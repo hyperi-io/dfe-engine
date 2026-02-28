@@ -1,0 +1,39 @@
+# DFE Fetcher — Development defaults
+# SaaS API fetcher — pulls from cloud APIs and routes to Kafka
+
+sources: []
+
+kafka:
+  brokers:
+    - localhost:9092
+  client_id: dfe-fetcher
+  compression: lz4
+  batch_size: 8388608  # 8 MB
+  linger_ms: 20
+  tls:
+    enabled: false
+
+routing:
+  topic_fields:
+    - tags.event.category
+    - event_category
+  default_topic: unmatched
+  topic_suffix: _land
+  category_to_topic: {}
+  dlq:
+    enabled: true
+    topic: dlq_land
+
+extra_env: {}
+
+memory:
+  max_memory_mb: 0
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
+
+logging:
+  level: info
+  format: json
