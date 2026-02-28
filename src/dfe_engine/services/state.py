@@ -206,21 +206,21 @@ class ServiceStateClient:
     # -------------------------------------------------------------------------
 
     def _liveness_paths(self) -> list[str]:
-        """Get liveness probe paths for this service type."""
-        if self.service == "receiver":
-            return ["/health/live"]
-        elif self.service == "loader":
-            return ["/live", "/health"]
-        else:
-            # Archiver has no health API — try metrics endpoint as liveness
+        """Get liveness probe paths for this service type (from plugin descriptor)."""
+        try:
+            from dfe_engine.services.plugins import get_plugin
+
+            plugin = get_plugin(self.service)
+            return list(plugin.descriptor.liveness_paths)
+        except KeyError:
             return ["/metrics"]
 
     def _readiness_paths(self) -> list[str]:
-        """Get readiness probe paths for this service type."""
-        if self.service == "receiver":
-            return ["/health/ready"]
-        elif self.service == "loader":
-            return ["/ready", "/health"]
-        else:
-            # Archiver: metrics availability implies readiness
+        """Get readiness probe paths for this service type (from plugin descriptor)."""
+        try:
+            from dfe_engine.services.plugins import get_plugin
+
+            plugin = get_plugin(self.service)
+            return list(plugin.descriptor.readiness_paths)
+        except KeyError:
             return ["/metrics"]

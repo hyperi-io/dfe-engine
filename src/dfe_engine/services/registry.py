@@ -23,13 +23,7 @@ from typing import Any
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
-from dfe_engine.services.models import (
-    SERVICE_CONFIG_CLASSES,
-    VALID_SERVICES,
-    ArchiverConfig,
-    LoaderConfig,
-    ReceiverConfig,
-)
+from dfe_engine.services.plugins import get_plugin, valid_services
 from dfe_engine.services.validators import ValidationResult, validate_config
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -142,7 +136,7 @@ class ServiceConfigRegistry:
 
         Returns None if the table name doesn't match a known service.
         """
-        for svc in sorted(VALID_SERVICES, key=len, reverse=True):
+        for svc in sorted(valid_services(), key=len, reverse=True):
             prefix = f"{svc}-"
             if table.startswith(prefix):
                 instance = table[len(prefix):]
@@ -156,7 +150,7 @@ class ServiceConfigRegistry:
 
     def get_config(
         self, service: str, instance: str = "default"
-    ) -> ReceiverConfig | LoaderConfig | ArchiverConfig:
+    ):
         """Get a service configuration.
 
         Reads from the DirectoryConfigStore in-memory cache (backed by YAML).
@@ -172,7 +166,7 @@ class ServiceConfigRegistry:
             ConfigNotFoundError: Config not found
         """
         self._validate_service(service)
-        config_cls = SERVICE_CONFIG_CLASSES[service]
+        plugin = get_plugin(service)
         table = self._table_name(service, instance)
 
         config_data = self._store.get(table)
@@ -181,12 +175,12 @@ class ServiceConfigRegistry:
                 f"Config not found for {service}/{instance}"
             )
 
-        return config_cls.model_validate(config_data)
+        return plugin.config_class.model_validate(config_data)
 
     def save_config(
         self,
         service: str,
-        config: ReceiverConfig | LoaderConfig | ArchiverConfig | dict,
+        config,
         instance: str = "default",
         created_by: str | None = None,
         description: str | None = None,
@@ -206,8 +200,8 @@ class ServiceConfigRegistry:
 
         # Normalize to dict via Pydantic validation
         if isinstance(config, dict):
-            config_cls = SERVICE_CONFIG_CLASSES[service]
-            validated = config_cls.model_validate(config)
+            plugin = get_plugin(service)
+            validated = plugin.config_class.model_validate(config)
             config_data = validated.model_dump(mode="json")
         else:
             config_data = config.model_dump(mode="json")
@@ -474,13 +468,63 @@ class ServiceConfigRegistry:
         self._store.on_change(table, callback)
 
     # -------------------------------------------------------------------------
+    # Seed Defaults
+    # -------------------------------------------------------------------------
+
+    def seed_defaults(self, overwrite: bool = False) -> int:
+        """Seed the config directory with built-in default configurations.
+
+        Copies default YAML files from package resources into the config
+        directory. Non-destructive by default — skips files that already exist.
+
+        Args:
+            overwrite: If True, overwrite existing configs with defaults.
+
+        Returns:
+            Number of configs seeded.
+        """
+        import importlib.resources as resources
+
+        try:
+            defaults_dir = resources.files("dfe_engine.services") / "default_configs"
+            if not defaults_dir.is_dir():
+                logger.warning("No default_configs package resource found")
+                return 0
+        except Exception as e:
+            logger.warning(f"Failed to locate default configs: {e}")
+            return 0
+
+        count = 0
+        for item in defaults_dir.iterdir():
+            if not item.name.endswith(".yaml"):
+                continue
+
+            target = self._config_directory / item.name
+            if target.exists() and not overwrite:
+                logger.debug(f"Skipping existing config: {item.name}")
+                continue
+
+            # Read from package resource and write to config directory
+            content = item.read_text(encoding="utf-8")
+            target.write_text(content, encoding="utf-8")
+            count += 1
+            logger.info(f"Seeded default config: {item.name}")
+
+        # Refresh cache to pick up new files
+        if count > 0:
+            self._store._refresh_all()
+
+        return count
+
+    # -------------------------------------------------------------------------
     # Helpers
     # -------------------------------------------------------------------------
 
     @staticmethod
     def _validate_service(service: str) -> None:
-        if service not in VALID_SERVICES:
-            msg = f"Unknown service: {service}. Valid: {', '.join(sorted(VALID_SERVICES))}"
+        services = valid_services()
+        if service not in services:
+            msg = f"Unknown service: {service}. Valid: {', '.join(sorted(services))}"
             raise ValueError(msg)
 
     def close(self) -> None:

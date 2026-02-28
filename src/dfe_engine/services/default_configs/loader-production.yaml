@@ -1,0 +1,130 @@
+# DFE Loader — Production (K8s)
+# Tuned buffers, SASL+TLS, K8s service DNS, JSON logging
+#
+# K8s resource sizing (medium):
+#   requests: { cpu: 1000m, memory: 1Gi }
+#   limits:   { cpu: 4000m, memory: 2Gi }
+# KEDA scaling:
+#   min_replicas: 2
+#   max_replicas: 8
+#   trigger: kafka consumer lag (threshold: 50000)
+
+kafka:
+  brokers:
+    - kafka-bootstrap.kafka.svc.cluster.local:9092
+  group: clickhouse-loader
+  topics:
+    - events
+  client_id: clickhouse-loader
+  sasl:
+    enabled: true
+    mechanism: scram_sha_512
+    username: ""
+    password: ""
+  tls:
+    enabled: true
+    ca_file: /etc/tls/kafka-ca.crt
+
+clickhouse:
+  hosts:
+    - clickhouse.clickhouse.svc.cluster.local:9000
+  database: default
+  username: default
+  password: ""
+  protocol: native
+
+payload:
+  format: auto
+  mismatch_threshold: 10
+
+routing:
+  db_fields: []
+  table_fields:
+    - event_category
+    - tags.event_category
+  default_db: common
+  default_table: common
+  org_id_field: org_id
+  routed_orgs: []
+  route_all_by_org: false
+  category_to_table: {}
+  dlq:
+    enabled: true
+    topic_suffix: .dlq
+
+buffer:
+  flush_bytes: 4194304  # 4 MB
+  flush_rows: 50000
+  flush_age_secs: 5
+
+memory:
+  limit_bytes: 0  # auto-detect from K8s cgroup limits
+  pressure_threshold: 0.8
+  tracking_enabled: true
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
+
+logging:
+  level: info
+  format: json
+
+timestamp_dq:
+  enabled: true
+  max_future_seconds: 600
+  max_past_seconds: 0
+  invalid_action: replace_with_now
+  correct_known_bad: true
+
+field_sanitization:
+  strip_at_prefix: true
+  handle_numeric_prefix: true
+  numeric_prefix: col_
+  collapse_underscores: true
+  trim_underscores: true
+  collision_strategy: last_wins
+
+metadata:
+  inject_timestamp_load: true
+  extract_timestamp_collector: true
+  collector_timestamp_path: tags.collector.timestamp
+  tags_fields:
+    - tags
+    - _tags
+    - meta
+    - metadata.tags
+  tags_output: _tags
+  drop_tags: false
+  capture_json: true
+  json_output: _json
+  capture_raw: true
+  raw_source_fields:
+    - logoriginal
+  raw_output: _raw
+  disable_json_tables: []
+  disable_raw_tables: []
+  remove_routing_fields: true
+
+coercion:
+  unknown_type_fallback: String
+  null_handling: default
+  default_timezone: UTC
+  timezone_fields:
+    - tags_collector_timezone
+  array_to_json: true
+  strict: false
+
+schema:
+  cache_ttl_secs: 300
+  refresh_on_error: true
+
+auto_init:
+  enabled: true
+  create_topics: true
+  topic_partitions: 6
+  topic_replication_factor: 3
+  create_database: true
+  create_table: true
+  create_text_index: true

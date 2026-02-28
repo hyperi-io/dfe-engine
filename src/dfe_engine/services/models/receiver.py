@@ -8,10 +8,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     DlqConfig,
     KafkaTlsConfig,
-    MetricsConfig,
     SaslConfig,
 )
 
@@ -263,13 +263,11 @@ class ReceiverBufferConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ReceiverConfig(BaseModel):
+class ReceiverConfig(BaseServiceConfig):
     """Complete configuration for dfe-receiver.
 
     Mirrors the Rust Config struct in dfe-receiver/src/config/mod.rs.
     """
-
-    model_config = ConfigDict(extra="forbid")
 
     server: ServerConfig = Field(default_factory=ServerConfig)
     grpc: GrpcConfig = Field(default_factory=GrpcConfig)
@@ -279,4 +277,3 @@ class ReceiverConfig(BaseModel):
     kafka: ReceiverKafkaConfig = Field(default_factory=ReceiverKafkaConfig)
     loader: LoaderConnectionConfig = Field(default_factory=LoaderConnectionConfig)
     buffer: ReceiverBufferConfig = Field(default_factory=ReceiverBufferConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)

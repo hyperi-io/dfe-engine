@@ -212,7 +212,7 @@ class DeploymentSettings(BaseModel):
 
 
 class ServicesSettings(BaseModel):
-    """Endpoints for managed DFE Rust services (receiver, loader, archiver).
+    """Endpoints for managed DFE services.
 
     Used by ServiceStateClient to query health and metrics from running services.
 
@@ -221,6 +221,9 @@ class ServicesSettings(BaseModel):
     - DFE_SERVICES_RECEIVER_METRICS_URL -> services.receiver_metrics_url
     - DFE_SERVICES_LOADER_URL -> services.loader_url
     - DFE_SERVICES_ARCHIVER_METRICS_URL -> services.archiver_metrics_url
+    - DFE_SERVICES_TRANSFORM_VECTOR_URL -> services.transform_vector_url
+    - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
+    - DFE_SERVICES_FETCHER_URL -> services.fetcher_url
     - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     """
 
@@ -228,6 +231,9 @@ class ServicesSettings(BaseModel):
     receiver_metrics_url: str = Field(default="http://localhost:9090")
     loader_url: str = Field(default="http://localhost:9090")
     archiver_metrics_url: str = Field(default="http://localhost:9090")
+    transform_vector_url: str = Field(default="http://localhost:8080")
+    transform_wasm_url: str = Field(default="http://localhost:8080")
+    fetcher_url: str = Field(default="http://localhost:8080")
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
     )
@@ -361,6 +367,12 @@ def _get_env_overrides() -> dict:
         overrides["services"]["loader_url"] = val
     if val := _get_env("DFE_SERVICES_ARCHIVER_METRICS_URL"):
         overrides["services"]["archiver_metrics_url"] = val
+    if val := _get_env("DFE_SERVICES_TRANSFORM_VECTOR_URL"):
+        overrides["services"]["transform_vector_url"] = val
+    if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
+        overrides["services"]["transform_wasm_url"] = val
+    if val := _get_env("DFE_SERVICES_FETCHER_URL"):
+        overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
 

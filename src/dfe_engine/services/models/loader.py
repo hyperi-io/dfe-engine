@@ -8,11 +8,10 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
+from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     KafkaTlsConfig,
-    LoggingConfig,
     MemoryConfig,
-    MetricsConfig,
     SaslConfig,
 )
 
@@ -292,7 +291,7 @@ class AutoInitConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class LoaderConfig(BaseModel):
+class LoaderConfig(BaseServiceConfig):
     """Complete configuration for dfe-loader.
 
     Mirrors the Rust Config struct in dfe-loader/src/config/loader.rs.
@@ -306,8 +305,6 @@ class LoaderConfig(BaseModel):
     routing: LoaderRoutingConfig = Field(default_factory=LoaderRoutingConfig)
     buffer: LoaderBufferConfig = Field(default_factory=LoaderBufferConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
-    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
-    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     timestamp_dq: TimestampDqConfig = Field(default_factory=TimestampDqConfig)
     field_sanitization: FieldSanitizationConfig = Field(
         default_factory=FieldSanitizationConfig

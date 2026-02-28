@@ -1,0 +1,40 @@
+# DFE Transform Vector — Development defaults
+# Kafka-to-Kafka transform using vector.dev pipelines
+
+kafka:
+  consumer:
+    brokers:
+      - localhost:9092
+    group: dfe-transform-vector
+    topics: []
+    topic_regex: null
+    client_id: dfe-transform-vector
+  producer:
+    brokers:
+      - localhost:9092
+    client_id: dfe-transform-vector
+    compression: lz4
+    batch_size: 8388608  # 8 MB
+    linger_ms: 20
+
+sources: []
+
+extra_yaml_files: []
+extra_env: {}
+
+ipc:
+  enabled: false
+  transport: memory
+  address: ""
+
+memory:
+  max_memory_mb: 0
+
+metrics:
+  enabled: true
+  address: "0.0.0.0:9090"
+  path: /metrics
+
+logging:
+  level: info
+  format: json
