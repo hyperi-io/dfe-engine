@@ -2,12 +2,12 @@
 Query API client for consuming the DFE Query API.
 
 Clients reference queries by label and pass parameters.
-SQL is never exposed to clients - it's resolved server-side.
+SQL is never exposed to clients - it's resolved server-side
+via ClickHouse parameterized views.
 """
 
 from __future__ import annotations
 
-import time
 import uuid
 from typing import TYPE_CHECKING, Any, Iterator
 
@@ -79,6 +79,7 @@ class QueryClient:
         self.direct = direct
         self.timeout_seconds = timeout_seconds
         self._http_client = None
+        self._view_executor = None
 
     @property
     def http_client(self):
@@ -227,72 +228,96 @@ class QueryClient:
         else:
             return self._execute_http(query_label, params, options)
 
+    def _get_view_executor(self):
+        """Get ViewExecutor, creating it lazily if possible.
+
+        Returns None if the restricted ClickHouse connection cannot be established
+        (e.g. no ClickHouse available, no restricted user configured).
+        """
+        if self._view_executor is None:
+            try:
+                from dfe_engine.query.catalog import ViewCatalog
+                from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
+                from dfe_engine.query.executor import ViewExecutor
+                from dfe_engine.settings import get_settings
+
+                settings = get_settings()
+                qv = settings.query_views
+
+                adapter = ClickHouseAdapter(target=settings.clickhouse.database)
+                restricted_client = adapter.get_restricted_client()
+                admin_client = adapter.manager.get_clickhouse_client()
+
+                catalog = ViewCatalog(
+                    client=admin_client,
+                    database=settings.clickhouse.database,
+                    cache_ttl=qv.catalog_cache_ttl,
+                    view_prefix=qv.view_prefix,
+                )
+
+                self._view_executor = ViewExecutor(
+                    restricted_client=restricted_client,
+                    catalog=catalog,
+                    database=settings.clickhouse.database,
+                    default_limit=qv.default_limit,
+                    max_limit=qv.max_limit,
+                    default_timeout=qv.default_timeout,
+                    max_timeout=qv.max_timeout,
+                )
+            except Exception:
+                return None
+
+        return self._view_executor
+
     def _execute_direct(
         self,
         query_label: str,
         params: dict[str, Any] | None,
         options: QueryOptions,
     ) -> QueryResult:
-        """Execute query directly (in-process)."""
-        from dfe_engine.query.datasources import get_adapter
-        from dfe_engine.query.registry import get_registry
-        from dfe_engine.query.validator import validate_params
+        """Execute query directly (in-process) via ViewExecutor.
 
-        registry = get_registry()
-        query_def = registry.get(query_label)
+        Routes queries through ClickHouse parameterized views.
+        AuthorizationError propagates to the caller.
+        """
+        return self._execute_view(query_label, params, options)
 
-        # For direct mode, create a synthetic auth context
-        # In production, this would come from the calling service's context
+    def _execute_view(
+        self,
+        query_label: str,
+        params: dict[str, Any] | None,
+        options: QueryOptions,
+    ) -> QueryResult:
+        """Execute a parameterized view via ViewExecutor.
+
+        Args:
+            query_label: View label (e.g. "analytics/user_activity")
+            params: Client parameters
+            options: Query options
+
+        Returns:
+            QueryResult
+
+        Raises:
+            RuntimeError: If ViewExecutor cannot be initialized
+            KeyError: If view not found in catalog
+        """
+        executor = self._get_view_executor()
+        if executor is None:
+            raise RuntimeError(
+                "ViewExecutor not available — check ClickHouse connection "
+                "and restricted user configuration"
+            )
+
+        # Direct mode uses synthetic admin auth
         auth = AuthContext(
-            org_id="direct",  # Direct mode bypasses multi-tenancy
+            org_id="direct",
             user_id="direct",
-            roles=["admin"],  # Direct mode has full access
+            roles=["admin"],
             request_id=str(uuid.uuid4()),
         )
 
-        # Validate and build parameters
-        final_params = validate_params(query_def, params, options, auth)
-
-        # Resolve store
-        stores = registry.resolve_store(query_def, options.store)
-        store = stores[0]  # For now, use first match
-
-        # Render SQL
-        sql = registry.render_sql(query_def, final_params, store)
-
-        # Get adapter and execute
-        adapter = get_adapter(query_def.datasource)
-
-        start = time.perf_counter()
-
-        timeout = final_params.get("timeout_seconds", self.timeout_seconds)
-
-        if options.include_explain:
-            table, explain = adapter.execute_with_explain(
-                sql,
-                final_params,
-                timeout,
-                parallel=options.explain_parallel,
-            )
-            explain_duration = int((time.perf_counter() - start) * 1000)
-        else:
-            table = adapter.execute(sql, final_params, timeout)
-            explain = None
-            explain_duration = None
-
-        duration_ms = int((time.perf_counter() - start) * 1000)
-
-        metadata = QueryMetadata(
-            row_count=table.num_rows,
-            query_duration_ms=duration_ms,
-            query_label=query_label,
-            datasource=query_def.datasource,
-            store=store,
-            explain_duration_ms=explain_duration,
-            request_id=auth.request_id,
-        )
-
-        return QueryResult(table=table, metadata=metadata, explain=explain)
+        return executor.execute(query_label, params, auth, options)
 
     def _execute_http(
         self,

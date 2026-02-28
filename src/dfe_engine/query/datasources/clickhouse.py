@@ -24,6 +24,7 @@ class ClickHouseAdapter(DatasourceAdapter):
     def __init__(self, target: str, config: dict[str, Any] | None = None):
         super().__init__(target, config)
         self._manager = None
+        self._restricted_client = None
 
     @property
     def manager(self):
@@ -37,6 +38,40 @@ class ClickHouseAdapter(DatasourceAdapter):
             else:
                 self._manager = ClickHouseManager.get_instance_by_target(self.target)
         return self._manager
+
+    def get_restricted_client(self) -> Any:
+        """Get a restricted clickhouse-connect client for parameterized view execution.
+
+        Creates a separate connection authenticated as the restricted query user.
+        This client can ONLY SELECT from dfe_v_* views (enforced by ClickHouse RBAC).
+
+        Returns:
+            clickhouse-connect Client instance
+        """
+        if self._restricted_client is None:
+            import clickhouse_connect
+
+            from dfe_engine.settings import get_settings
+
+            settings = get_settings()
+            ch = settings.clickhouse
+            qv = settings.query_views
+
+            connect_params: dict[str, Any] = {
+                "host": ch.host,
+                "port": ch.port,
+                "username": qv.restricted_user,
+                "password": qv.restricted_password,
+                "database": ch.database,
+            }
+
+            if ch.secure:
+                connect_params["secure"] = True
+                connect_params["verify"] = ch.verify
+
+            self._restricted_client = clickhouse_connect.get_client(**connect_params)
+
+        return self._restricted_client
 
     def execute(
         self,
@@ -174,7 +209,10 @@ class ClickHouseAdapter(DatasourceAdapter):
             return False
 
     def close(self) -> None:
-        """Close ClickHouse connection."""
+        """Close ClickHouse connections."""
+        if self._restricted_client:
+            self._restricted_client.close()
+            self._restricted_client = None
         if self._manager:
             self._manager.close()
             self._manager = None

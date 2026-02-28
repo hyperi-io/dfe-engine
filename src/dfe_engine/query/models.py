@@ -3,18 +3,28 @@ Pydantic models for Query API requests and metadata.
 
 This module defines the data structures for the secure Query API where:
 - Clients reference queries by label (not raw SQL)
-- SQL is defined server-side in query registry
-- Parameters are validated against schemas
-- Multi-tenant isolation is enforced via _org_id from JWT
+- ClickHouse parameterized views are the primary execution path
+- Parameters are validated against view definitions
+- Multi-tenant isolation is enforced via org_id from JWT
 """
 
 from __future__ import annotations
 
-import re
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
+
+
+# =============================================================================
+# Exceptions
+# =============================================================================
+
+
+class AuthorizationError(Exception):
+    """User not authorized for this query/view."""
+
+    pass
 
 
 # =============================================================================
@@ -27,7 +37,7 @@ class QueryRequest(BaseModel):
     Request payload for query execution.
 
     Clients specify a query label and parameters - never raw SQL.
-    The SQL is resolved server-side from the query registry.
+    The SQL is resolved server-side via parameterized views.
     """
 
     query: str = Field(
@@ -38,7 +48,7 @@ class QueryRequest(BaseModel):
     )
     params: dict[str, Any] | None = Field(
         default=None,
-        description="Query parameters (validated against query schema)",
+        description="Query parameters (validated against view definition)",
     )
     options: QueryOptions | None = Field(
         default=None,
@@ -102,128 +112,6 @@ class QueryOptions(BaseModel):
         default=None,
         description="Target store (database/schema/topic) - only if query allows",
     )
-
-
-# =============================================================================
-# Query Definition Models (Server-Side Registry)
-# =============================================================================
-
-
-class ParameterType(str, Enum):
-    """Supported parameter types for query definitions."""
-
-    STRING = "string"
-    INTEGER = "integer"
-    FLOAT = "float"
-    BOOLEAN = "boolean"
-    DATETIME = "datetime"
-    DATE = "date"
-    ARRAY = "array"
-    UUID = "uuid"
-
-
-class ParameterDefinition(BaseModel):
-    """Definition of a query parameter in the registry."""
-
-    type: ParameterType
-    required: bool = False
-    default: Any | None = None
-    description: str | None = None
-
-    # Type-specific constraints
-    min: int | float | None = None
-    max: int | float | None = None
-    max_length: int | None = None
-    pattern: str | None = None  # Regex for strings
-    enum: list[Any] | None = None  # Allowed values
-
-    # Array-specific
-    items: ParameterType | None = None  # Type of array elements
-    max_items: int | None = None
-
-    @field_validator("pattern")
-    @classmethod
-    def validate_pattern(cls, v: str | None) -> str | None:
-        if v is not None:
-            try:
-                re.compile(v)
-            except re.error as e:
-                raise ValueError(f"Invalid regex pattern: {e}") from e
-        return v
-
-
-class QueryDefinition(BaseModel):
-    """
-    Server-side query definition loaded from registry.
-
-    SQL is Jinja2 templated with validated parameters.
-    """
-
-    # Datasource
-    datasource: str = Field(
-        ...,
-        description="Adapter type (clickhouse, postgres, prometheus)",
-        examples=["clickhouse", "postgres"],
-    )
-    store: str = Field(
-        ...,
-        description="Database/schema/topic - literal, glob, regex, or '*' for client-specified",
-        examples=["events", "logs_*", "/^tenant_\\d+$/", "*"],
-    )
-
-    # SQL Template (Jinja2)
-    sql: str = Field(..., description="Jinja2 SQL template")
-
-    # Parameters
-    parameters: dict[str, ParameterDefinition] = Field(default_factory=dict)
-
-    # Standard parameter defaults/limits
-    defaults: QueryDefaults | None = None
-    limits: QueryLimits | None = None
-
-    # Time bounding
-    time_column: str | None = Field(
-        default=None,
-        description="Column for time_from/time_to bounds",
-    )
-    time_required: bool = False
-    max_time_range_days: int | None = None
-
-    # Security
-    tenant_isolated: bool = Field(
-        default=True,
-        description="If true, SQL must contain {{ _org_id }}",
-    )
-    required_roles: list[str] = Field(default_factory=list)
-    required_permissions: list[str] = Field(default_factory=list)
-
-    # Caching
-    cache_ttl_seconds: int | None = None
-    cache_namespace: str | None = None
-
-    # Audit
-    audit_level: Literal["none", "basic", "full"] = "full"
-    pii_columns: list[str] = Field(default_factory=list)
-
-    # Metadata
-    description: str | None = None
-    tags: list[str] = Field(default_factory=list)
-
-
-class QueryDefaults(BaseModel):
-    """Default values for standard parameters."""
-
-    limit: int | None = None
-    timeout_seconds: int | None = None
-    cache_ttl: int | None = None
-
-
-class QueryLimits(BaseModel):
-    """Maximum values for standard parameters."""
-
-    max_limit: int | None = None
-    max_timeout: int | None = None
-    max_time_range_days: int | None = None
 
 
 # =============================================================================
@@ -379,3 +267,93 @@ class QueryAuditLog(BaseModel):
     client_ip: str | None
     user_agent: str | None
     error: str | None = None
+
+
+# =============================================================================
+# Parameterized View Models
+# =============================================================================
+
+
+class ViewParameter(BaseModel):
+    """Parameter discovered from a ClickHouse parameterized view.
+
+    Extracted from the view's CREATE SQL by parsing {param:Type} patterns.
+    Provides type metadata across the full stack (ClickHouse → Python → TypeScript → HTML).
+    """
+
+    name: str = Field(..., description="Parameter name as declared in the view")
+    clickhouse_type: str = Field(
+        ...,
+        description="ClickHouse type (String, UInt64, DateTime64(3), Array(UInt64))",
+    )
+    python_type: str = Field(
+        ...,
+        description="Python type mapping (string, integer, float, datetime, date, uuid, boolean, array)",
+    )
+    typescript_type: str = Field(
+        default="string",
+        description="TypeScript type mapping (string, number, boolean, string[], number[])",
+    )
+    input_type: str = Field(
+        default="text",
+        description="HTML input type hint (text, number, datetime-local, date, checkbox, select, multiselect)",
+    )
+    required: bool = Field(
+        default=True,
+        description="Whether the parameter is required (all CH view params are required)",
+    )
+    reserved: bool = Field(
+        default=False,
+        description="If true, parameter is injected server-side (e.g. org_id) and hidden from UI",
+    )
+    description: str | None = Field(default=None, description="Human-readable description")
+    placeholder: str | None = Field(default=None, description="Example value for UI input fields")
+    enum: list[Any] | None = Field(
+        default=None,
+        description="Allowed values (renders as dropdown in UI)",
+    )
+
+
+class ViewDefinition(BaseModel):
+    """A parameterized view discovered from ClickHouse system.tables.
+
+    Views follow the naming convention: dfe_v_{namespace}_{name}
+    e.g. dfe_v_analytics_user_activity → label: analytics/user_activity
+    """
+
+    name: str = Field(..., description="Full view name (e.g. dfe_v_analytics_user_activity)")
+    label: str = Field(
+        ...,
+        description="Derived label for API consumers (e.g. analytics/user_activity)",
+    )
+    database: str = Field(..., description="ClickHouse database containing the view")
+    parameters: list[ViewParameter] = Field(default_factory=list)
+    create_sql: str = Field(..., description="CREATE VIEW statement from system.tables")
+    modified_at: str | None = Field(
+        default=None,
+        description="Last modification timestamp from system.tables",
+    )
+    namespace: str = Field(..., description="Namespace derived from view name (e.g. analytics)")
+    short_name: str = Field(
+        ...,
+        description="Short name within namespace (e.g. user_activity)",
+    )
+    description: str | None = Field(default=None, description="View description")
+    tenant_isolated: bool = Field(
+        default=True,
+        description="Whether view contains org_id parameter for tenant isolation",
+    )
+    required_roles: list[str] = Field(default_factory=list)
+
+
+class ViewExecuteRequest(BaseModel):
+    """Request to execute a parameterized view."""
+
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        description="View parameters (validated against view definition)",
+    )
+    options: QueryOptions | None = Field(
+        default=None,
+        description="Execution options (limit, offset, timeout, etc.)",
+    )
