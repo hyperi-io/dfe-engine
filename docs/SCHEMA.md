@@ -5,6 +5,21 @@
 
 ---
 
+## Audience
+
+This document is written for **data subject matter experts** — people who
+understand their data, their queries, and their retention requirements. You
+do NOT need to be a ClickHouse expert. The schema system handles ClickHouse
+internals (codecs, index tuning, Nullable wrapping, type widths) under the
+hood. You pick meaningful types and describe how your data will be queried.
+The engine does the rest.
+
+If you need a specific ClickHouse type that the primitives don't cover,
+there's an escape hatch (`ch_override`). But you shouldn't need it for 95%
+of columns.
+
+---
+
 ## Problem
 
 The current schema type system conflates three separate concerns into a
@@ -19,18 +34,19 @@ category,string_lowcardinality,,dimension,
 ```
 
 - `string_fast` = type (string) + codec hint (LZ4 for speed)
-- `string_lowcardinality` = type (string) + attribute (LowCardinality)
+- `string_lowcardinality` = type (string) + storage attribute (LowCardinality)
 - `string_fast_lowcardinality` = type + codec + attribute (all combined)
-- `text` = type (string) + use case hint (large text)
-- `text_search` in `index_type` = another use case layer
 
-This leads to a combinatorial explosion of types. Adding a new attribute
-(e.g. `Nullable` control) or a new codec preference means creating new
-compound type names. The type system also has no way to:
+This leads to a combinatorial explosion. Adding a new attribute means
+creating new compound type names. The format is CSV with no structure for
+nested properties. The type system also has no way to:
 
 - Express loader field mapping directives (`@source`, `@renamed`, etc.)
 - Specify exact ClickHouse types when the primitive isn't enough
 - Attach use-case metadata separately from storage decisions
+- Validate that a use case makes sense for a given type
+
+---
 
 ## Design Principles
 
@@ -62,6 +78,17 @@ any intermediate store. This means there is **never an in-flight
 mismatch**: the engine deploys DDL, ClickHouse stores it, Rust services
 read it. No sync, no cache invalidation race, no drift.
 
+### Schema Format: YAML
+
+Schema definitions are **YAML**, not CSV. YAML supports structured data
+(lists of attributes, nested overrides) and is consistent with the rest
+of the Source definition format. The old CSV format is deprecated for
+schema definitions.
+
+**CSVs remain only for enrichment files** used by transform stages
+(e.g. GeoIP lookups, threat intelligence feeds, asset inventories).
+These are data files, not schema definitions.
+
 ### Schema Lifecycle
 
 | Event | Action |
@@ -90,155 +117,398 @@ Each axis is optional where it has sensible defaults.
 
 ---
 
-## New Column Definition Format
+## Schema Definition Format (YAML)
 
-```csv
-column,type,attribute,use_case,default,index_order,comment
+```yaml
+# meta_schema.yaml
+columns:
+  - name: _timestamp_load
+    type: timestamp
+    default: "now64(3)"
+    order: 0
+    comment: "@generated: now64(3)"
+
+  - name: _timestamp
+    type: datetime
+    use_case: range
+    order: 1
+    comment: "@source: timestamp | now()"
+
+  - name: _uuid
+    type: uuid
+    default: "generateUUIDv7()"
+    comment: "@generated: generateUUIDv7()"
+
+  - name: _org_id
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    comment: "@source: org_id"
+
+  - name: _source
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    comment: "@source: first(_source) | topic_name"
+
+  - name: _raw
+    type: text
+    use_case: text_search
+    comment: "@captured: raw_payload"
+
+  - name: _json
+    type: json
+    comment: "@captured: raw_payload as JSON"
+
+  - name: _tags
+    type: json
+    comment: "@source: first(tags/_tags/meta/metadata.tags)"
+
+  - name: user_name
+    type: string
+    use_case: dimension
+    comment: "@source: first(user_id/uid/id)"
+
+  - name: source_ip
+    type: ip
+    use_case: range
+    comment: "@source: src_ip"
+
+  - name: severity
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+
+  - name: message
+    type: text
+    use_case: fulltext
+
+  - name: event_id
+    type: integer
+    comment: "@source: event_id"
+
+  - name: latency_ms
+    type: float
+    use_case: range
 ```
+
+### Column Fields
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `column` | Yes | Column name |
-| `type` | Yes | Primitive type OR exact ClickHouse type |
-| `attribute` | No | Storage attribute (e.g. `lowcardinality`, `nullable`) |
-| `use_case` | No | Query/index hint (e.g. `dimension`, `text_search`, `fulltext`) |
+| `name` | Yes | Column name |
+| `type` | Yes | Primitive type (see below) |
+| `attribute` | No | List of storage attributes (e.g. `[lowcardinality]`) |
+| `use_case` | No | Query pattern hint — determines indexing (see below) |
 | `default` | No | DEFAULT expression |
-| `index_order` | No | Position in ORDER BY / PRIMARY KEY |
+| `order` | No | Position in ORDER BY / PRIMARY KEY |
 | `comment` | No | Human description + loader directives |
-
-### Example
-
-```csv
-column,type,attribute,use_case,default,index_order,comment
-_timestamp_load,DateTime64(3),,,now64(3),0,@generated: now64(3)
-_timestamp,DateTime64(3),,range,,1,@source: timestamp | now()
-_uuid,UUID,,,generateUUIDv7(),,@generated: generateUUIDv7()
-_org_id,string,lowcardinality,dimension,,,@source: org_id
-_source,string,lowcardinality,dimension,,,@source: first(_source) | topic_name
-_raw,string,nullable,text_search,,,@captured: raw_payload
-_json,json,nullable,,,,@captured: raw_payload as JSON
-_tags,json,nullable,,,,@source: first(tags/_tags/meta/metadata.tags)
-user_name,string,,dimension,,,@source: first(user_id/uid/id)
-source_ip,ip,,range,,,@source: src_ip
-severity,string,lowcardinality,dimension,,,
-message,string,,fulltext,,,
-event_id,int32,,,,,"@source: event_id"
-latency_ms,Float64,,range,,,
-```
+| `ch_override` | No | Exact ClickHouse type — bypasses primitive mapping |
 
 ---
 
-## Type Axis: Primitives and Exact Types
+## Type Axis: Primitives
 
-### Primitives
+Primitives are **human-readable type names** that map to ClickHouse types
+with sensible defaults. You don't need to know what `Int64` or `ZSTD(1)`
+means — pick the primitive that describes your data.
 
-The type field accepts **primitives** — abstract types that map to ClickHouse
-types with sensible defaults:
+| Primitive | What It Is | Default ClickHouse Type |
+|-----------|-----------|------------------------|
+| `string` | Short-to-medium text (names, IDs, codes) | `String` |
+| `text` | Large text (log messages, bodies, descriptions) | `String` |
+| `integer` | Whole number (counts, IDs, event codes) | `Int64` |
+| `float` | Decimal number (scores, latency, percentages) | `Float64` |
+| `boolean` | True/false | `Bool` |
+| `datetime` | Date and time with timezone | `DateTime64(3,'UTC')` |
+| `timestamp` | Date and time — never null (for ORDER BY / time columns) | `DateTime64(3,'UTC')` |
+| `date` | Date only (no time component) | `Date` |
+| `ip` | IP address (v4 or v6) | `IPv6` |
+| `uuid` | Unique identifier (GUID, trace ID) | `UUID` |
+| `json` | Structured/semi-structured data | `JSON` |
+| `geo_point` | Latitude/longitude pair | `Point` |
+| `enum` | Fixed set of allowed values (values defined in `default` field) | `Enum8(...)` |
 
-| Primitive | ClickHouse Type | Codec | Notes |
-|-----------|----------------|-------|-------|
-| `string` | `String` | `ZSTD(1)` | General purpose |
-| `text` | `String` | `ZSTD(3)` | Large text, higher compression |
-| `json` | `JSON` | `ZSTD(3)` | Native ClickHouse JSON (25.3+) |
-| `bool` | `Bool` | `LZ4` | |
-| `int8` | `Int8` | `ZSTD(1)` | |
-| `int16` | `Int16` | `ZSTD(1)` | |
-| `int32` | `Int32` | `ZSTD(1)` | |
-| `int64` | `Int64` | `ZSTD(1)` | |
-| `uint8` | `UInt8` | `ZSTD(1)` | |
-| `uint16` | `UInt16` | `ZSTD(1)` | |
-| `uint32` | `UInt32` | `ZSTD(1)` | |
-| `uint64` | `UInt64` | `ZSTD(1)` | |
-| `float32` | `Float32` | `ZSTD(1)` | |
-| `float64` | `Float64` | `ZSTD(1)` | |
-| `datetime` | `DateTime64(3,'UTC')` | `Delta, ZSTD(1)` | Nullable by default |
-| `timestamp` | `DateTime64(3,'UTC')` | `Delta, LZ4` | NOT NULL — for ORDER BY |
-| `date` | `Date` | `Delta, ZSTD(1)` | |
-| `ip` | `IPv6` | `LZ4` | Stores both v4 and v6 |
-| `ipv4` | `IPv4` | `T64, LZ4` | Explicit v4 only |
-| `ipv6` | `IPv6` | `LZ4` | Explicit v6 only |
-| `uuid` | `UUID` | — | No codec (already compact) |
-| `geo_point` | `Point` | `ZSTD(1)` | |
-| `enum8` | `Enum8(...)` | `ZSTD(1)` | Values in default field |
-| `enum16` | `Enum16(...)` | `ZSTD(1)` | Values in default field |
+### Why simplified primitives?
 
-### Exact ClickHouse Types
+A data expert knows they have an "integer" column. They don't need to
+decide between `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`,
+`UInt32`, or `UInt64` — that's 8 choices that require understanding
+ClickHouse storage internals. The engine picks `Int64` because it covers
+the vast majority of use cases without overflow risk.
 
-When a primitive isn't sufficient, specify the **exact ClickHouse type**
-directly. The engine detects this by checking if the type string contains
-parentheses or is a known CH type not in the primitive list:
+If you genuinely need a narrower or unsigned type (performance-critical
+high-volume tables), use `ch_override`:
 
-```csv
-column,type,attribute,use_case,default,index_order,comment
-precision_ts,DateTime64(6,'UTC'),,,,,"Microsecond precision timestamp"
-nested_data,"Nested(key String, value String)",,,,,
-bitmap,AggregateFunction(groupBitmap UInt32),,,,,
+```yaml
+  - name: http_status
+    type: integer
+    ch_override: UInt16       # Override: HTTP status codes fit in UInt16
+    use_case: dimension
 ```
 
-When an exact type is specified:
+### ClickHouse Type Override
+
+When a primitive isn't sufficient, specify the exact ClickHouse type via
+`ch_override`. When set:
+
 - No automatic Nullable wrapping
 - No automatic codec selection
 - The type string is used verbatim in DDL
 - Attributes are still applied if specified
 
-This replaces the need for compound types like `string_fast` — if you want
-LZ4 on a string, either use the `string` primitive (which gets ZSTD by default
-and the engine picks codec based on use_case) or specify the exact CH type.
+```yaml
+  - name: precision_ts
+    ch_override: "DateTime64(6,'UTC')"
+    comment: "Microsecond precision timestamp"
+
+  - name: nested_data
+    ch_override: "Nested(key String, value String)"
+
+  - name: bitmap
+    ch_override: "AggregateFunction(groupBitmap, UInt32)"
+```
+
+---
+
+## ClickHouse Type Registry
+
+The engine maintains a **canonical type registry** — a YAML file that maps
+each primitive to its ClickHouse implementation details. This is internal
+to the engine (data SMEs don't edit it), but it's documented here for
+completeness.
+
+```yaml
+# type_registry.yaml — maintained by the engine, NOT by users
+primitives:
+  string:
+    ch_type: String
+    codec: ZSTD(1)
+    nullable: true
+
+  text:
+    ch_type: String
+    codec: ZSTD(3)
+    nullable: true
+
+  integer:
+    ch_type: Int64
+    codec: ZSTD(1)
+    nullable: true
+
+  float:
+    ch_type: Float64
+    codec: ZSTD(1)
+    nullable: true
+
+  boolean:
+    ch_type: Bool
+    codec: LZ4
+    nullable: false
+
+  datetime:
+    ch_type: "DateTime64(3,'UTC')"
+    codec: "Delta, ZSTD(1)"
+    nullable: true
+
+  timestamp:
+    ch_type: "DateTime64(3,'UTC')"
+    codec: "Delta, LZ4"
+    nullable: false         # Never null — used in ORDER BY
+
+  date:
+    ch_type: Date
+    codec: "Delta, ZSTD(1)"
+    nullable: true
+
+  ip:
+    ch_type: IPv6           # Stores both v4 and v6
+    codec: LZ4
+    nullable: true
+
+  uuid:
+    ch_type: UUID
+    codec: ~                # No codec (already compact)
+    nullable: true
+
+  json:
+    ch_type: JSON           # Native ClickHouse JSON (v25.3+)
+    codec: ZSTD(3)
+    nullable: true
+
+  geo_point:
+    ch_type: Point
+    codec: ZSTD(1)
+    nullable: true
+
+  enum:
+    ch_type: "Enum8(...)"   # Values from `default` field
+    codec: ZSTD(1)
+    nullable: false
+```
+
+### ClickHouse Type Overrides Catalogue
+
+For users who need `ch_override`, these are the supported ClickHouse
+types. The engine validates that `ch_override` values are in this
+catalogue:
+
+| Category | Types |
+|----------|-------|
+| **Integers** | `Int8`, `Int16`, `Int32`, `Int64`, `Int128`, `Int256` |
+| **Unsigned** | `UInt8`, `UInt16`, `UInt32`, `UInt64`, `UInt128`, `UInt256` |
+| **Floats** | `Float32`, `Float64` |
+| **Decimal** | `Decimal(P,S)`, `Decimal32(S)`, `Decimal64(S)`, `Decimal128(S)` |
+| **Strings** | `String`, `FixedString(N)` |
+| **Dates** | `Date`, `Date32`, `DateTime`, `DateTime64(P)`, `DateTime64(P,'TZ')` |
+| **Boolean** | `Bool` |
+| **IP** | `IPv4`, `IPv6` |
+| **UUID** | `UUID` |
+| **JSON** | `JSON` |
+| **Geo** | `Point`, `Ring`, `Polygon`, `MultiPolygon` |
+| **Complex** | `Array(T)`, `Map(K,V)`, `Tuple(...)`, `Nested(...)` |
+| **Enum** | `Enum8(...)`, `Enum16(...)` |
+| **Special** | `Dynamic`, `Variant(...)`, `AggregateFunction(...)`, `SimpleAggregateFunction(...)` |
 
 ---
 
 ## Attribute Axis
 
-Attributes modify how the type is stored. Multiple attributes can be
-comma-separated:
+Attributes modify how the type is stored. Specified as a **list** in
+YAML — multiple attributes can be combined:
 
-| Attribute | Effect | Applicable To |
-|-----------|--------|---------------|
-| `lowcardinality` | Wraps in `LowCardinality(...)` | string, most types |
-| `nullable` | Wraps in `Nullable(...)` | any type (default for most primitives) |
-| `not_null` | Removes Nullable wrapper | overrides default |
-| `materialized` | `MATERIALIZED` column | any type |
-| `alias` | `ALIAS` column | any type |
+| Attribute | What It Does |
+|-----------|-------------|
+| `lowcardinality` | Dictionary encoding — huge performance gain for <10K distinct values |
+| `nullable` | Allows NULL values (2x performance cost — use only when NULL ≠ empty) |
+| `not_null` | Explicitly prevents NULL (overrides the primitive's default) |
+| `materialized` | Column computed on insert, not stored in source data |
+| `alias` | Virtual column computed at query time |
+
+### Attributes Are Tied to Primitives
+
+Like use cases, not every attribute applies to every type. The engine
+enforces valid combinations:
+
+| Attribute | Valid Primitives | Why |
+|-----------|-----------------|-----|
+| `lowcardinality` | `string`, `text`, `integer`, `float`, `date`, `ip` | Dictionary encoding only works on types with a finite value space. `json`, `geo_point` are not supported. |
+| `nullable` | all | Any type can be nullable |
+| `not_null` | all | Any type can be forced non-null |
+| `materialized` | all | Computed on insert — any type |
+| `alias` | all | Computed at query time — any type |
+
+If you specify `lowcardinality` on a `json` column, the engine rejects it
+at validation time.
 
 ### Nullability Defaults
 
-- **Primitives** default to `Nullable` (except `timestamp`, `bool`)
-- **Exact types** have no automatic wrapping
-- Override with `not_null` or `nullable` attribute
+Each primitive has a default nullability (defined in the type registry):
+
+- **Nullable by default:** `string`, `text`, `integer`, `float`, `datetime`, `date`, `ip`, `uuid`, `json`, `geo_point`
+- **NOT null by default:** `timestamp`, `boolean`, `enum`
+
+Override with `nullable` or `not_null` in the attribute list.
+
+### Why nullable is not the default for everything
+
+ClickHouse stores `Nullable(T)` as two columns — the data column plus a
+UInt8 bitmap tracking which rows are null. This **doubles storage** and
+**halves query speed** (measured: 229M rows/s → 98M rows/s on GROUP BY
+with Nullable(Int64)). The engine defaults ORDER BY columns and booleans
+to NOT NULL because null in these positions destroys index effectiveness
+and wastes storage for no benefit.
+
+For payload columns where NULL genuinely means "not provided" (as opposed
+to empty string or zero), Nullable is correct. Don't fight it — just
+keep it off your ORDER BY and high-filter columns.
 
 ### Examples
 
-```csv
+```yaml
 # LowCardinality string, not nullable
-category,string,"lowcardinality,not_null",dimension,,,
+  - name: category
+    type: string
+    attribute: [lowcardinality, not_null]
+    use_case: dimension
 
-# Nullable datetime (default)
-last_seen,datetime,,,,,"@source: last_seen_at"
+# Multiple attributes
+  - name: region_code
+    type: string
+    attribute: [lowcardinality, not_null]
+    use_case: dimension
 
-# Materialized column (computed from other columns)
-day,Date,materialized,,toDate(_timestamp),,
+# Materialized column (computed from other columns at insert time)
+  - name: day
+    type: date
+    attribute: [materialized]
+    default: "toDate(_timestamp)"
 ```
 
 ---
 
 ## Use Case Axis
 
-Use cases determine **indexing and query optimisation** — separated from
-the type and attribute:
+Use cases describe **how you query the column** — not how it's stored.
+The engine translates use cases into ClickHouse indexes and optimisations
+under the hood. You don't need to know what a `set(0)` or
+`tokenbf_v1(8192, 4, 0)` index is — just pick the use case that matches
+your query pattern.
 
-| Use Case | Index Generated | Granularity | When to Use |
-|----------|----------------|-------------|-------------|
-| `dimension` | `set(0)` | 4 | Exact match on low-medium cardinality values (status, category) |
-| `fulltext` | `tokenbf_v1(8192, 4, 0)` | 4 | Token-based search on log messages |
-| `text_search` | `ngrambf_v1(3, 256, 2, 0)` | 64 | Substring search on syslog/Windows messages |
-| `bloom` | `bloom_filter` | 4 | General probabilistic filtering |
-| `range` | `minmax` | 4 | Range queries on numeric/datetime values |
-| `full_text_ga` | `full_text(0)` | 1 | ClickHouse 25.1+ native full-text (replaces fulltext) |
-| _(empty)_ | No index | — | No query optimisation needed |
+### Use Cases
 
-Use case is **independent of type** — you can add `dimension` to a string,
-an int, or a boolean. The engine generates the appropriate index based on
-the combination.
+| Use Case | When to Use | Example Columns |
+|----------|------------|-----------------|
+| `dimension` | Filter by exact value: `WHERE status = 'error'` | status, severity, region, org_id, category |
+| `fulltext` | Search words in log messages: `WHERE hasToken(message, 'error')` | message, log_body, description |
+| `text_search` | Substring search: `WHERE message LIKE '%connection refused%'` | syslog_message, windows_event_data |
+| `range` | Numeric/time ranges: `WHERE latency > 100` | latency_ms, timestamp, bytes, risk_score |
+| `bloom` | Find specific IDs in high-cardinality columns | trace_id, request_id, span_id |
+| _(empty)_ | No special query optimisation needed | raw payload, metadata |
+
+### Use Cases Are Tied to Primitives
+
+Not every use case makes sense on every type. The engine enforces valid
+combinations:
+
+| Use Case | Valid Primitives | Why |
+|----------|-----------------|-----|
+| `dimension` | `string`, `integer`, `boolean`, `enum`, `ip`, `uuid` | Exact match — needs discrete values |
+| `fulltext` | `string`, `text` | Token search — only applies to text |
+| `text_search` | `string`, `text` | Substring matching — only applies to text |
+| `range` | `integer`, `float`, `datetime`, `timestamp`, `date`, `ip` | Range queries — needs orderable values |
+| `bloom` | `string`, `uuid` | Point lookups on high-cardinality identifiers |
+
+If you specify `fulltext` on an `integer` column, the engine rejects it
+at validation time with a clear error.
+
+### What the Engine Generates (Under the Hood)
+
+You don't need to know this to use the schema system. This section is for
+engine developers and anyone curious about what happens behind the scenes.
+
+| Use Case | ClickHouse Index Generated | Granularity | Notes |
+|----------|---------------------------|-------------|-------|
+| `dimension` | `set(0)` | 4 | Exact distinct values per granule |
+| `fulltext` | `text(tokenizer=splitByNonAlpha)` | 1 | Native text index (GA v26.2). Deterministic, no false positives, row-level filtering. 45x faster than without index. |
+| `text_search` | `text(tokenizer=ngrams(3))` | 1 | Character n-gram text index for substring matching |
+| `range` | `minmax` | 4 | Stores min/max per granule |
+| `bloom` | `bloom_filter` | 4 | Probabilistic — has false positives, no false negatives |
+| _(empty)_ | No index | — | |
+
+**Note on text indexes:** The `fulltext` and `text_search` use cases now
+generate the GA text index (inverted index, v26.2+) instead of the older
+bloom-filter based `tokenbf_v1` and `ngrambf_v1`. The text index is
+deterministic (no false positives), provides row-level filtering instead
+of granule-level, and is 10-100x faster for text search workloads. For
+ClickHouse versions before v25.10, the engine falls back to the legacy
+bloom-filter indexes automatically.
+
+**Note on fulltext vs text_search:** Both use the text index but with
+different tokenizers. `fulltext` uses word-level tokenization
+(`splitByNonAlpha`) — good for searching whole words in log messages.
+`text_search` uses character n-grams — good for substring matching like
+partial hostnames or error codes embedded in longer strings.
 
 ---
 
@@ -307,7 +577,7 @@ Each Source selects a profile via the `header.type` field:
 # sources/filebeat.yaml
 header:
   type: timeseries              # Profile name
-  version: v001.000.000         # Common header version
+  version: 1.0.0                # Common header version (semver)
 ```
 
 When a source is created with `header.type: timeseries`, the schema starts
@@ -332,7 +602,7 @@ COLUMN` — safe, non-destructive, and automated.
 Sigma rules reference fields by standardised names (e.g. `SourceIP`,
 `CommandLine`, `EventID`). These must map to actual ClickHouse column names.
 
-### Approach: Materialised View per Sigma Taxonomy
+### Approach: ClickHouse View per Sigma Taxonomy
 
 Rather than embedding Sigma field names in the base schema, create
 **ClickHouse views** that expose Sigma-compatible column aliases:
@@ -379,7 +649,7 @@ The engine generates the Sigma view from source schema + mapping config.
 
 The existing Elastic/OpenSearch index template converter generates a
 source meta schema from a supplied Elastic template JSON. This remains —
-but now outputs into the Source schema format:
+but now outputs YAML in the Source schema format:
 
 ```
 Elastic Template JSON
@@ -391,8 +661,8 @@ Template Converter (dfe-engine)
   │  Preserves field hierarchy as flat columns
   │
   ▼
-Source schema CSV (new format)
-  │  column, type, attribute, use_case, comment
+Source schema YAML (new format)
+  │  name, type, attribute, use_case, comment
   │
   ▼
 Attached to a Source definition
@@ -400,19 +670,19 @@ Attached to a Source definition
 
 ### Elastic → Primitive Type Mapping
 
-| Elastic Type | Primitive | Attribute | Use Case |
-|-------------|-----------|-----------|----------|
-| `keyword` | `string` | | `dimension` |
-| `text` | `string` | | `fulltext` |
-| `long` | `int64` | | |
-| `integer` | `int32` | | |
-| `short` | `int16` | | |
-| `byte` | `int8` | | |
-| `double` | `float64` | | |
-| `float` | `float32` | | |
-| `boolean` | `bool` | | |
+| Elastic Type | Primitive | Use Case | Notes |
+|-------------|-----------|----------|-------|
+| `keyword` | `string` | `dimension` | Exact match filtering |
+| `text` | `text` | `fulltext` | Full-text search |
+| `long` | `integer` | | Default Int64 matches |
+| `integer` | `integer` | | |
+| `short` | `integer` | | ch_override: Int16 if needed |
+| `byte` | `integer` | | ch_override: Int8 if needed |
+| `double` | `float` | | |
+| `float` | `float` | | ch_override: Float32 if needed |
+| `boolean` | `boolean` | | |
 | `date` | `datetime` | | |
-| `ip` | `ip` | | `range` |
+| `ip` | `ip` | `range` | |
 | `geo_point` | `geo_point` | | |
 | `object` | `json` | | |
 | `nested` | `json` | | |
@@ -505,46 +775,61 @@ The conversion produces a Rule definition with:
 
 ### Type Mapping (old → new)
 
-| Old Type | New Type | Attribute | Use Case |
-|----------|----------|-----------|----------|
+| Old Type | New Primitive | Attribute | Notes |
+|----------|--------------|-----------|-------|
 | `string` | `string` | | |
-| `string_fast` | `string` | | _(codec auto-selected)_ |
+| `string_fast` | `string` | | Codec auto-selected |
 | `string_lowcardinality` | `string` | `lowcardinality` | |
 | `string_fast_lowcardinality` | `string` | `lowcardinality` | |
 | `text` | `text` | | |
-| `json` | `json` | `nullable` | |
-| `int8` | `int8` | | |
-| `int16` | `int16` | | |
-| `int32` | `int32` | | |
-| `int64` | `int64` | | |
-| `float32` | `float32` | | |
-| `float64` | `float64` | | |
-| `boolean` | `bool` | | |
+| `json` | `json` | | |
+| `int8` | `integer` | | ch_override: Int8 |
+| `int16` | `integer` | | ch_override: Int16 |
+| `int32` | `integer` | | ch_override: Int32 |
+| `int64` | `integer` | | Default — no override needed |
+| `int128` | `integer` | | ch_override: Int128 |
+| `int256` | `integer` | | ch_override: Int256 |
+| `float32` | `float` | | ch_override: Float32 |
+| `float64` | `float` | | Default — no override needed |
+| `boolean` | `boolean` | | |
 | `timestamp` | `timestamp` | | |
 | `datetime` | `datetime` | | |
-| `ipv4` | `ipv4` | | |
-| `ipv6` | `ipv6` | | |
+| `ipv4` | `ip` | | ch_override: IPv4 if v4-only needed |
+| `ipv6` | `ip` | | Default IPv6 stores both |
 | `ip_field` | `ip` | | |
 | `geo_point` | `geo_point` | | |
 | `uuid` | `uuid` | | |
+| `tuple` | _(use ch_override)_ | | `ch_override: Tuple(...)` |
+| `map` | _(use ch_override)_ | | `ch_override: Map(K,V)` |
 
-### Index Type Mapping (unchanged)
+### Index Type Mapping
 
 | Old `index_type` | New `use_case` | Notes |
 |-----------------|----------------|-------|
 | `dimension` | `dimension` | Same |
-| `fulltext` | `fulltext` | Same |
-| `text_search` | `text_search` | Same |
+| `fulltext` | `fulltext` | Now generates text index (was tokenbf_v1) |
+| `text_search` | `text_search` | Now generates ngram text index (was ngrambf_v1) |
 | `hc` | `bloom` | Renamed for clarity |
 | `range` | `range` | Same |
 | `minmax` | `range` | Merged (both generated minmax) |
 
-### CSV Format Change
+### Format Change
 
 ```
-# Old: column,type,default,index_order,index_type,comment
-# New: column,type,attribute,use_case,default,index_order,comment
+# Old: CSV
+# column,type,default,index_order,index_type,comment
+
+# New: YAML
+# columns:
+#   - name: ...
+#     type: ...
+#     attribute: [...]
+#     use_case: ...
+#     default: ...
+#     order: ...
+#     comment: ...
 ```
 
 The migration is mechanical — a script maps old compound types to new
-(type, attribute) pairs and renames `index_type` to `use_case`.
+primitives (+ ch_override where the old type was narrower than the
+default), renames `index_type` to `use_case`, and converts CSV to YAML.
