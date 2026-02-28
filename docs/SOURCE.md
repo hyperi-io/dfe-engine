@@ -106,7 +106,7 @@ enabled: true
 # Source-specific fields are added incrementally.
 header:
   type: time_series                     # Schema type (time_series, metric, alert, etc.)
-  version: v001.000.000                 # Common header version
+  version: 1.0.0                        # Common header version (semver)
 
 # --- Receiver Match ---
 # How the receiver identifies this source from incoming data.
@@ -147,13 +147,12 @@ transform:
 # On creation, the schema is just the common header for the selected type+version.
 # Source-specific fields are added over time.
 schema:
-  meta_schema: logs_beats_filebeat.csv  # Base field definitions (CSV)
-  meta_schema_version: v001.000.000
-  derived_schema: filebeat/derived.csv  # Source-specific field overrides (optional)
-  additional_fields: filebeat/add.csv   # Extra fields, indexes (optional)
+  meta_schema: logs_beats_filebeat      # Base field definitions (YAML)
+  meta_schema_version: 1.0.0
+  derived_schema: filebeat/derived      # Source-specific field overrides (optional)
+  additional_fields: filebeat/add       # Extra fields, indexes (optional)
   ttl_days: 90                          # Data retention
   engine: MergeTree                     # MergeTree | ReplicatedMergeTree | SharedMergeTree
-  # comment metadata is embedded in the CSV files as the `comment` column
 ```
 
 ### Minimal Source (just match + common header)
@@ -169,7 +168,7 @@ match:
   value: syslog
 header:
   type: time_series
-  version: v001.000.000
+  version: 1.0.0
 schema:
   ttl_days: 90
 ```
@@ -331,11 +330,13 @@ Each Source owns exactly one ClickHouse table schema. The relationship is 1:1:
 ```
 Source: filebeat
   └── Schema: logs_beats_filebeat
-        ├── meta_schema.csv        (base columns, types, indexes)
-        ├── derived_schema.csv     (source-specific overrides)
-        ├── additional_fields.csv  (enrichment fields)
-        └── type_maps.csv          (logical type → CH type mapping)
+        ├── meta_schema.yaml       (base columns, types, use cases)
+        ├── derived_schema.yaml    (source-specific overrides)
+        └── additional_fields.yaml (enrichment fields)
 ```
+
+The global **type registry** (`type_registry.yaml`) maps primitives to
+ClickHouse types — it's shared across all sources, not per-source.
 
 The schema section in the Source definition feeds directly into the existing
 `SchemaBuilder` / `ClickHouseSchema` pipeline. The only change is that schema
@@ -344,23 +345,38 @@ standalone schema config.
 
 ### Schema Metadata
 
-The `comment` column in CSV schema files serves as inline documentation:
+Schema definitions are YAML. See [SCHEMA.md](./SCHEMA.md) for the full
+type system, primitive-to-ClickHouse mapping, and use case definitions.
 
-```csv
-column,type,index_order,comment
-timestamp,datetime64_3,0,"Event timestamp from source"
-_source,string_fast,1,"Source identifier — set by receiver"
-severity,string_fast,,"Event severity level (info/warn/error/critical)"
+```yaml
+# meta_schema.yaml example (excerpt)
+columns:
+  - name: user_name
+    type: string
+    use_case: dimension
+    comment: "@source: first(user_id/uid/id)"
+  - name: source_ip
+    type: ip
+    use_case: range
+    comment: "@source: src_ip"
+  - name: severity
+    type: string
+    attribute: lowcardinality
+    use_case: dimension
+  - name: message
+    type: text
+    use_case: fulltext
 ```
 
-These comments are preserved through to ClickHouse column comments in DDL.
+Loader directives in the `comment` field are preserved through to
+ClickHouse column comments in DDL.
 
 ### Schema Lifecycle
 
 | Source Event | Schema Action |
 |-------------|---------------|
 | Source created | `CREATE TABLE IF NOT EXISTS` |
-| Schema CSV updated | `ALTER TABLE` via SchemaModifier (add/modify columns) |
+| Schema YAML updated | `ALTER TABLE` via SchemaModifier (add/modify columns) |
 | Source disabled | No action (table remains, no new data) |
 | Source deleted | Table retained (data preservation) — manual DROP if needed |
 
@@ -400,7 +416,7 @@ store used by `ServiceConfigRegistry`.
 - `_source` label must match naming rules (`[a-z][a-z0-9_]*`, max 64 chars)
 - Match rules must not conflict (two sources matching the same field+value)
 - If transform is specified, engine must be `vector` or `wasm`
-- Schema CSV files must exist and pass SchemaBuilder validation
+- Schema YAML files must exist and pass SchemaBuilder validation
 - Schema must include `_source` as a column (injected if missing)
 
 ---
@@ -432,7 +448,7 @@ standalone service-level sources:
 | `transform-vector` service config with `sources: [...]` list | Each Source's `transform:` section (if needed) |
 | `transform-wasm` service config with `sources: [...]` list | Each Source's `transform:` section (if needed) |
 | `fetcher` service config with `sources: [...]` list | Each Source's `fetcher:` section (if needed) |
-| Standalone schema definitions in `dfe_package.yaml` | Each Source's `schema:` section (mandatory) |
+| Standalone schema definitions in `dfe_package.yaml` | Each Source's `schema:` section (mandatory, YAML) |
 
 The service-level config for transform/fetcher reduces to just infrastructure:
 Kafka brokers, resource limits, IPC settings. The per-source config (what to
@@ -617,7 +633,7 @@ schema from a supplied Elastic template JSON. This is the primary onboarding
 path for migrating from Elastic:
 
 ```
-Elastic Template JSON → Converter → Source schema CSV → Source definition
+Elastic Template JSON → Converter → Source schema YAML → Source definition
 ```
 
 The converter maps Elastic types to primitives, Elastic analyzers to
