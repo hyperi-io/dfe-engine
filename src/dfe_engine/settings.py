@@ -136,6 +136,81 @@ class StorageSettings(BaseModel):
     s3_region: str = Field(default="", description="AWS region (for s3 type)")
 
 
+class QuerySettings(BaseModel):
+    """Query registry settings.
+
+    Environment variables:
+    - DFE_QUERY_YAML_DIR -> query.yaml_dir
+    """
+
+    yaml_dir: str = Field(
+        default="", description="YAML directory for query definitions (SSoT)"
+    )
+
+
+class QueryViewSettings(BaseModel):
+    """Settings for ClickHouse parameterized view execution.
+
+    Controls the restricted RBAC user, resource limits, and catalog caching.
+
+    Environment variables:
+    - DFE_QUERY_VIEWS_RESTRICTED_USER -> query_views.restricted_user
+    - DFE_QUERY_VIEWS_RESTRICTED_PASSWORD -> query_views.restricted_password
+    - DFE_QUERY_VIEWS_MAX_EXECUTION_TIME -> query_views.max_execution_time
+    - DFE_QUERY_VIEWS_MAX_ROWS_TO_READ -> query_views.max_rows_to_read
+    - DFE_QUERY_VIEWS_MAX_MEMORY_USAGE -> query_views.max_memory_usage
+    """
+
+    restricted_user: str = Field(
+        default="dfe_query_user", description="Username for restricted query user"
+    )
+    restricted_password: str = Field(
+        default="", description="Password for restricted query user"
+    )
+    auto_bootstrap: bool = Field(
+        default=True,
+        description="Automatically bootstrap RBAC and builtin views on startup",
+    )
+    view_prefix: str = Field(
+        default="dfe_v_", description="Prefix for parameterized view names"
+    )
+    catalog_cache_ttl: int = Field(
+        default=60, description="View catalog cache TTL in seconds"
+    )
+    default_limit: int = Field(default=1000, description="Default row limit")
+    max_limit: int = Field(default=100_000, description="Maximum allowed row limit")
+    default_timeout: int = Field(
+        default=30, description="Default query timeout in seconds"
+    )
+    max_timeout: int = Field(
+        default=300, description="Maximum allowed timeout in seconds"
+    )
+    max_execution_time: int = Field(
+        default=30,
+        description="ClickHouse settings profile max_execution_time (seconds)",
+    )
+    max_rows_to_read: int = Field(
+        default=10_000_000,
+        description="ClickHouse settings profile max_rows_to_read",
+    )
+    max_memory_usage: str = Field(
+        default="2G",
+        description="ClickHouse settings profile max_memory_usage",
+    )
+
+
+class DeploymentSettings(BaseModel):
+    """Deployment configuration settings.
+
+    Environment variables:
+    - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
+    """
+
+    config_dir: str = Field(
+        default="", description="YAML directory for deployment configurations"
+    )
+
+
 class ServicesSettings(BaseModel):
     """Endpoints for managed DFE Rust services (receiver, loader, archiver).
 
@@ -167,7 +242,10 @@ class DFESettings(BaseModel):
     postgres: PostgresSettings = Field(default_factory=PostgresSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
+    query: QuerySettings = Field(default_factory=QuerySettings)
+    query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
+    deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
 
 
 def _load_defaults() -> dict:
@@ -190,7 +268,10 @@ def _get_env_overrides() -> dict:
         "postgres": {},
         "kafka": {},
         "storage": {},
+        "query": {},
+        "query_views": {},
         "services": {},
+        "deployment": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -255,6 +336,22 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_S3_REGION"):
         overrides["storage"]["s3_region"] = val
 
+    # Query settings
+    if val := _get_env("DFE_QUERY_YAML_DIR"):
+        overrides["query"]["yaml_dir"] = val
+
+    # Query views settings (parameterized views)
+    if val := _get_env("DFE_QUERY_VIEWS_RESTRICTED_USER"):
+        overrides["query_views"]["restricted_user"] = val
+    if val := _get_env("DFE_QUERY_VIEWS_RESTRICTED_PASSWORD"):
+        overrides["query_views"]["restricted_password"] = val
+    if val := _get_env("DFE_QUERY_VIEWS_MAX_EXECUTION_TIME"):
+        overrides["query_views"]["max_execution_time"] = int(val)
+    if val := _get_env("DFE_QUERY_VIEWS_MAX_ROWS_TO_READ"):
+        overrides["query_views"]["max_rows_to_read"] = int(val)
+    if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
+        overrides["query_views"]["max_memory_usage"] = val
+
     # Services settings
     if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
         overrides["services"]["receiver_url"] = val
@@ -266,6 +363,10 @@ def _get_env_overrides() -> dict:
         overrides["services"]["archiver_metrics_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
+
+    # Deployment settings
+    if val := _get_env("DFE_DEPLOYMENT_CONFIG_DIR"):
+        overrides["deployment"]["config_dir"] = val
 
     # Remove empty sections
     return {k: v for k, v in overrides.items() if v}
