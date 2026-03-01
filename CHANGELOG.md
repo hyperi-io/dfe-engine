@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/hyperi-io/dfe-engine/compare/v1.4.0...v1.5.0) (2026-03-01)
+
+
+### Features
+
+* implement WBS Phases 1-8c — Source model, schema v2, helm compiler, Argo CD ([69d860c](https://github.com/hyperi-io/dfe-engine/commit/69d860cf6cb70dc417e762d094e83711926a71ea))
+
 # [1.4.0](https://github.com/hyperi-io/dfe-engine/compare/v1.3.71...v1.4.0) (2026-02-28)
 
 
