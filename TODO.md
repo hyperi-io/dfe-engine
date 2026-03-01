@@ -18,6 +18,7 @@ Design docs: [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md]
 - **Phase 7: Cleanup** — DFEConfigLoader shim, pythonpath fix, test123 fix, dependency update
 - **Phase 8: Helm + Auth** — HelmValuesCompiler, bespoke RBAC, auth module (71 tests, 971 total)
 - **Phase 8b: Helm + Auth Enhancements** — Argo RBAC gen, OTEL env config, KEDA scalers, deepmerge, infra_admin role (1026 total)
+- **Phase 8c: Argo CD App Generator** — Application + AppProject CRD generation, ArgoSyncPolicy/ArgoEnvironment models, compiler integration (1075 total)
 
 ### Remaining WBS Work
 
@@ -46,7 +47,7 @@ Design docs: [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md]
 
 ### Verification Checklist
 
-- [x] `pytest tests/unit/` — 1026 passed, 26 skipped, 0 errors, 0 failures
+- [x] `pytest tests/unit/` — 1075 passed, 26 skipped, 0 errors, 0 failures
 - [ ] `ruff check src/` — clean
 - [ ] `grep -r "dfe_package" src/dfe_engine/` — zero results
 - [x] `src/deprecated/` does not exist
@@ -80,7 +81,6 @@ Shared git repo mounted as submodule by each component:
 ### Near-Term
 
 - [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io) — real Argo CD, KEDA, OTEL, ClickHouse, Kafka
-- [ ] Argo CD Application manifest generator (generate Application CRDs alongside Helm values)
 - [ ] More efficient hunt query spreading (EXPLAIN cost estimation, staggered scheduling)
 
 ### Future Enhancements
@@ -111,4 +111,4 @@ Shared git repo mounted as submodule by each component:
 
 ---
 
-**Last Updated:** 2026-03-01 (Phase 8b complete)
+**Last Updated:** 2026-03-02 (Phase 8c complete)

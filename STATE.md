@@ -3,7 +3,7 @@
 **Project:** DFE Engine
 **Version:** 1.4.0
 **Status:** Active Development
-**Branch:** `main` (uncommitted changes from WBS Phases 1-7)
+**Branch:** `main`
 
 ---
 
@@ -82,46 +82,31 @@
 
 ---
 
-## Current Session (2026-03-01)
+## Current Session (2026-03-02)
 
-### Completed — Phase 8b: Helm + Auth Enhancements
+### Completed — Phase 8c: Argo CD Application & AppProject Generator
 
-**deepmerge library** — replaced custom `_deep_merge()` in settings.py with `deepmerge.always_merger`
+Committed and pushed as `69d860c` — all WBS Phases 1-8c in one commit.
 
-**OTEL environment config** — `OTelEnvironment` model in `helm/environment.py` with collector endpoint, protocol, prometheus_port, resource attributes. Injected into Helm values via compiler when `otel.enabled=True`.
+**Argo CD Application CRD generator** — `helm/argo_app.py` with three pure functions:
 
-**KEDA scalers** — `KedaTriggerPrometheus` for OTEL Collector metrics + `KedaTriggerGeneric` for any KEDA scaler type (open-ended, not hardcoded). Generic triggers support both service-component level (e.g. dfe-loader) and KEDA service level.
+- `generate_application()` — single Application CRD with labels, finalizers, source, destination, syncPolicy
+- `generate_applications()` — batch generation from `(service, instance)` tuples, convention `dfe-{service}` chart naming with overrides
+- `generate_appproject()` — complete AppProject CRD wrapping roles from `generate_appproject_roles()`
 
-**infra_admin role** — new engine RBAC role for infrastructure engineers. Gets config:read/write, helm:*, and comprehensive `argo:*` actions. Open-ended `argo:<resource>:<action>` namespace — no hardcoded lookup table.
+**ArgoSyncPolicy + ArgoEnvironment models** — added to `helm/environment.py`, wired into `EnvironmentConfig` with `argo.enabled=False` default for backward compatibility.
 
-**Argo CD RBAC generator** — `helm/argo_rbac.py` generates `argocd-rbac-cm` Casbin policy CSV and AppProject `.spec.roles` from engine role definitions. Maps `argo:` permissions to Casbin lines, skips engine-only actions silently.
+**Compiler integration** — `compile_all()` collects `(service, instance)` tuples during compilation loop, generates Application/AppProject CRDs when `argo.enabled`. `write_all()` writes to `applications/` subdirectory + `appproject-{name}.yaml`.
 
-**Compiler updates** — OTEL env var injection, Prometheus trigger, generic trigger pass-through, `merge_overrides()` method using deepmerge, Argo RBAC generation in `compile_all()`, RBAC CSV output in `write_all()`.
+**Housekeeping** — consolidated `.env.sample` into `.env.example` (best practice naming).
 
-**Cedar removed** — `.cedar` file support moved to TODO backlog. cedarpy was lazy-import only, no dependency to remove.
+**Test results:** 1075 passed, 26 skipped, 0 errors, 0 failures (49 new tests)
 
-**Integration testing** — `.env.example` updated with DevEx cluster config (k8s-{1,2,3}.devex.hyperi.io, Argo CD, OTEL, ClickHouse, Kafka).
+### Previous Sessions
 
-**Test results:** 1026 passed, 26 skipped, 0 errors, 0 failures
-
-### Previous Session (2026-02-28)
-
-Completed WBS Phases 1-7 (Foundation through Cleanup). 900 tests passing.
-
-- Phase 1: TypeRegistry, Source model, SourceRegistry (112 tests)
-- Phase 2: Schema v2 YAML→DDL pipeline
-- Phase 3: Sigma + Hunts integration (24 tests)
-- Phase 4: Service model updates (17 tests)
-- Phase 5: v1 code removal (hard deletes)
-- Phase 7: Cleanup — DFEConfigLoader shim, pythonpath fix, dependency update
-- Phase 8: Helm Values Compiler + bespoke RBAC (71 tests, 971 total)
-
-### Earlier Sessions
-
-- hyperi-pylib updated to 2.19.0, ServiceConfigRegistry refactored (PG removed)
-- Services module created with Pydantic models mirroring Rust config structs
-- QueryRegistry migrated to YAML SSoT, default service configs created
-- HyperDX OIDC middleware scoped in `docs/oauth2/`
+- **2026-03-01:** Phase 8b — OTEL env config, KEDA scalers (Prometheus + generic), Argo RBAC generator, deepmerge, infra_admin role (1026 tests)
+- **2026-02-28:** Phases 1-8 — Source model, schema v2, sigma mapper, service routing, v1 removal, cleanup, Helm compiler + RBAC (971 tests)
+- **Earlier:** hyperi-pylib 2.19.0, ServiceConfigRegistry (PG removed), services module, QueryRegistry YAML SSoT, HyperDX OIDC scoped
 
 ---
 
@@ -130,7 +115,7 @@ Completed WBS Phases 1-7 (Foundation through Cleanup). 900 tests passing.
 | Module        | Status | Notes                                                            |
 | ------------- | ------ | ---------------------------------------------------------------- |
 | `source/`     | Ready  | TypeRegistry, Source model, SourceRegistry — 112 tests           |
-| `schema/`     | Ready  | v2 YAML→DDL pipeline + v1 still functional                      |
+| `schema/`     | Ready  | v2 YAML→DDL pipeline (v1 removed)                               |
 | `clickhouse/` | Ready  | clickhouse-connect migration complete                            |
 | `config/`     | Ready  | DFEConfigLoader shim delegating to settings.py                   |
 | `pipeline/`   | Ready  | Vector pipeline generation (core build/render logic)             |
@@ -139,7 +124,7 @@ Completed WBS Phases 1-7 (Foundation through Cleanup). 900 tests passing.
 | `query/`      | Ready  | YAML SSoT registry, Arrow-native output, built-in queries        |
 | `services/`   | Ready  | YAML SSoT registry, source routing, default configs, validators  |
 | `auth/`       | Ready  | Engine RBAC, open-ended argo: namespace, infra_admin role        |
-| `helm/`       | Ready  | Values compiler, OTEL injection, Argo RBAC gen, merge_overrides  |
+| `helm/`       | Ready  | Values compiler, Argo CD app/project CRDs, RBAC gen, OTEL       |
 | `deployment/` | Ready  | Pydantic models for K8s/KEDA, Prometheus + generic triggers      |
 | `settings.py` | Ready  | Pydantic config cascade + deepmerge                              |
 | `yaml_utils.py` | Ready | Consolidated YAML operations                                   |
@@ -181,4 +166,4 @@ Completed WBS Phases 1-7 (Foundation through Cleanup). 900 tests passing.
 
 ---
 
-**Last Updated:** 2026-03-01
+**Last Updated:** 2026-03-02
