@@ -1,7 +1,0 @@
-{
-  "EventId_123": "eventid_123",
-  "field.with.many.dots": "field_with_many_dots",
-  "host.cpu.usage": "host_cpu_usage",
-  "o365.audit.Severity": "o365_audit_severity",
-  "user-name": "user_name"
-}

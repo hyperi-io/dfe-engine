@@ -134,11 +134,37 @@ class ValidationConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ReceiverRoutingConfig(BaseModel):
-    """Message routing configuration for the receiver."""
+class SourceMatchRule(BaseModel):
+    """A compiled match rule for source_routing mode.
+
+    Compiled from Source.match definitions by the config generator.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    field: str = Field(..., description="JSON field to inspect")
+    value: str = Field(..., description="Expected value (exact match)")
+    topic: str = Field(..., description="Target Kafka topic")
+
+
+class ReceiverRoutingConfig(BaseModel):
+    """Message routing configuration for the receiver.
+
+    Two modes:
+    - Legacy: inspect topic_fields, look up category_to_topic map.
+    - Source routing: evaluate source_match_table compiled from SourceRegistry.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    source_routing: bool = Field(
+        default=False,
+        description="Use Source match rules instead of category_to_topic",
+    )
+    source_match_table: list[SourceMatchRule] = Field(
+        default_factory=list,
+        description="Compiled match rules (populated by config generator when source_routing=True)",
+    )
     topic_fields: list[str] = Field(
         default_factory=lambda: ["tags.event.category", "event_category"]
     )

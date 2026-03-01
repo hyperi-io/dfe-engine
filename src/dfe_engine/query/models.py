@@ -17,14 +17,10 @@ from pydantic import BaseModel, Field
 
 
 # =============================================================================
-# Exceptions
+# Exceptions — re-exported from auth.models for backward compat
 # =============================================================================
 
-
-class AuthorizationError(Exception):
-    """User not authorized for this query/view."""
-
-    pass
+from dfe_engine.auth.models import AuthorizationError as AuthorizationError  # noqa: E402
 
 
 # =============================================================================
@@ -226,23 +222,8 @@ class ExplainPlan(BaseModel):
 # =============================================================================
 
 
-class AuthContext(BaseModel):
-    """
-    Authentication context extracted from JWT.
-
-    These values are injected as reserved parameters (_org_id, etc.)
-    and cannot be overridden by clients.
-    """
-
-    org_id: str = Field(..., description="Tenant organization ID")
-    user_id: str = Field(..., description="User ID")
-    roles: list[str] = Field(default_factory=list)
-    permissions: list[str] = Field(default_factory=list)
-
-    # Request context (not from JWT)
-    request_id: str | None = None
-    client_ip: str | None = None
-    user_agent: str | None = None
+# AuthContext moved to auth.models — re-export for backward compat
+from dfe_engine.auth.models import AuthContext as AuthContext  # noqa: E402
 
 
 # =============================================================================

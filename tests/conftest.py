@@ -3,7 +3,7 @@ Root conftest.py for DFE Engine tests.
 
 Test structure:
 - tests/unit/       - Unit tests (no external dependencies)
-- tests/integration/ - Integration tests (require ClickHouse/OpenSearch)
+- tests/integration/ - Integration tests (require ClickHouse)
 - tests/e2e/        - End-to-end tests
 
 Markers:

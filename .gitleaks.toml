@@ -19,7 +19,6 @@ paths = [
     '''tests/fixtures/.*''',
     # Example configuration files
     '''.env.example''',
-    '''.env.sample''',
 ]
 
 # Regex patterns for known false positives

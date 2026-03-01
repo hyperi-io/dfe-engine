@@ -1,5 +1,0 @@
-column,type,default,index_order,index_type,os_order,comment,normalized_column
-timestamp,datetime,,,,,Time,timestamp
-org_id,string,,,,,Org,org_id
-timestamp_load,datetime,,,,,Load time,timestamp_load
-custom_field,string,,,,,Custom,

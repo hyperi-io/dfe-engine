@@ -7,11 +7,9 @@ Returns Arrow format with consistent schema across storage backends.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import pyarrow as pa
 

@@ -75,6 +75,50 @@ class KedaTriggerCpu(BaseModel):
         return v
 
 
+class KedaTriggerPrometheus(BaseModel):
+    """KEDA Prometheus/OTEL metrics trigger.
+
+    KEDA's prometheus scaler queries a Prometheus-compatible endpoint.
+    The OTEL Collector exposes Prometheus metrics on its metrics endpoint,
+    so this works for both Prometheus and OTEL-based metrics.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    server_address: str = Field(
+        default="",
+        description="Prometheus-compatible endpoint (e.g. http://otel-collector:8889)",
+    )
+    query: str = Field(
+        default="",
+        description="PromQL query (e.g. sum(rate(dfe_receiver_events_total[5m])))",
+    )
+    threshold: int = Field(default=100, gt=0)
+    activation_threshold: int = Field(
+        default=0, ge=0, description="Value below which scaler is inactive"
+    )
+    metric_name: str = Field(default="", description="Custom metric name for KEDA")
+
+
+class KedaTriggerGeneric(BaseModel):
+    """Generic KEDA trigger for any scaler type.
+
+    Use this for KEDA scalers not covered by the typed trigger models.
+    The type and metadata are passed through to the Helm values as-is.
+    See https://keda.sh/docs/scalers/ for available types.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: str = Field(..., description="KEDA scaler type (e.g. 'cron', 'rabbitmq')")
+    metadata: dict[str, str] = Field(
+        default_factory=dict, description="Scaler metadata key-value pairs"
+    )
+    authentication_ref: str = Field(
+        default="", description="TriggerAuthentication resource name"
+    )
+
+
 class KedaConfig(BaseModel):
     """KEDA ScaledObject configuration."""
 
@@ -87,6 +131,11 @@ class KedaConfig(BaseModel):
     cooldown_period: int = Field(default=300, ge=0, description="Seconds before scale-down")
     kafka_trigger: KedaTriggerKafka | None = None
     cpu_trigger: KedaTriggerCpu | None = None
+    prometheus_trigger: KedaTriggerPrometheus | None = None
+    extra_triggers: list[KedaTriggerGeneric] = Field(
+        default_factory=list,
+        description="Additional KEDA triggers (any scaler type)",
+    )
     fallback_replicas: int = Field(
         default=2, ge=1, description="Replicas when all triggers fail"
     )

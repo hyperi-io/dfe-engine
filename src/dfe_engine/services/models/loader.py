@@ -92,10 +92,24 @@ class LoaderDlqConfig(BaseModel):
 
 
 class LoaderRoutingConfig(BaseModel):
-    """Database/table routing configuration for the loader."""
+    """Database/table routing configuration for the loader.
+
+    Two modes:
+    - Legacy: inspect table_fields, look up category_to_table map.
+    - Source routing: the ``_source`` field directly determines the table name.
+      When enabled, table_fields and category_to_table are ignored.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    source_routing: bool = Field(
+        default=False,
+        description="Use _source field for direct table routing",
+    )
+    source_field: str = Field(
+        default="_source",
+        description="JSON field containing the source name (when source_routing=True)",
+    )
     db_fields: list[str] = []
     table_fields: list[str] = Field(
         default_factory=lambda: ["event_category", "tags.event_category"]

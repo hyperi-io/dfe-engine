@@ -94,7 +94,7 @@ class SchemaUtils:
         "comment",
     ]
     COLUMNS_SUB_SCHEMA = ["column", "index_order"]
-    COLUMNS_TYPE_MAPS_ES = ["es_type", "type"]
+
     COLUMNS_UNFIED_SCHEMA = [
         "source_device_schema",
         "source_field_name",
@@ -860,7 +860,7 @@ class SchemaUtils:
             logger.error(msg)
             raise SchemaValidationError(msg)
 
-        # Check for extra columns (info only - for backward compatibility with OpenSearch fields like search_order)
+        # Check for extra columns (info only)
         extra_columns = actual_columns - required_columns
         if extra_columns:
             logger.info(
