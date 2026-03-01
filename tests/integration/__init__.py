@@ -1,1 +1,1 @@
-# Integration tests - require external services (ClickHouse, OpenSearch)
+# Integration tests - require external services (ClickHouse)

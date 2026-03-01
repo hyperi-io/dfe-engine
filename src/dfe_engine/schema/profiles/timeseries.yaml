@@ -1,0 +1,54 @@
+# Common header profile: timeseries (default)
+#
+# Full event ingestion — logs, alerts, audit trails.
+# Fields: _timestamp_load, _timestamp, _timestamp_received, _uuid,
+#         _org_id, _source, _raw, _json, _tags
+
+columns:
+  - name: _timestamp_load
+    type: timestamp
+    default: "now64(3)"
+    order: 0
+    comment: "@generated: now64(3)"
+
+  - name: _timestamp
+    type: datetime
+    use_case: range
+    order: 1
+    comment: "@source: timestamp | now()"
+
+  - name: _timestamp_received
+    type: datetime
+    comment: "@source: first(timestamp_received/received_at)"
+
+  - name: _uuid
+    type: uuid
+    default: "generateUUIDv7()"
+    comment: "@generated: generateUUIDv7()"
+
+  - name: _org_id
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    order: 2
+    comment: "@source: org_id"
+
+  - name: _source
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    order: 3
+    comment: "@source: first(_source) | topic_name"
+
+  - name: _raw
+    type: text
+    use_case: text_search
+    comment: "@captured: raw_payload"
+
+  - name: _json
+    type: json
+    comment: "@captured: raw_payload as JSON"
+
+  - name: _tags
+    type: json
+    comment: "@source: first(tags/_tags/meta/metadata.tags)"

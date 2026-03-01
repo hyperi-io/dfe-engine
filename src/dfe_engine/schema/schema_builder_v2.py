@@ -1,0 +1,226 @@
+"""Schema Builder v2 — Orchestrates schema YAML → DDL pipeline.
+
+Replaces the dfe_package.yaml-based SchemaBuilder in schema_builder.py.
+Accepts a Source model and produces DDL using the v2 schema pipeline:
+
+    Source → SchemaLoader (YAML) → DDLGenerator (DDL)
+
+Usage:
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+    from dfe_engine.source.models import Source
+
+    builder = SchemaBuilderV2()
+    result = builder.build(source)
+    print(result.create_table_ddl)
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from hyperi_pylib.logger import logger
+
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
+from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
+from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.type_registry import TypeRegistry
+
+
+class SchemaBuildError(Exception):
+    """Error during schema build."""
+
+
+@dataclass
+class SchemaBuildResult:
+    """Result of a schema build operation."""
+
+    source_name: str
+    columns: list[SchemaColumn]
+    create_table_ddl: str
+    sigma_view_ddl: str | None = None
+    validation_errors: list[str] = field(default_factory=list)
+
+
+class SchemaBuilderV2:
+    """Orchestrates the schema v2 build pipeline.
+
+    Given a Source model:
+    1. Loads the common header profile (timeseries, minimal, passthrough)
+    2. Loads source schema columns (meta_schema + derived + additional)
+    3. Composes profile + source columns
+    4. Validates against TypeRegistry
+    5. Generates CREATE TABLE DDL
+    6. Generates Sigma view DDL (if sigma config present)
+    """
+
+    def __init__(
+        self,
+        registry: TypeRegistry | None = None,
+        *,
+        schemas_base_dir: str | Path | None = None,
+        use_legacy_indexes: bool = False,
+    ) -> None:
+        """Initialize the schema builder.
+
+        Args:
+            registry: TypeRegistry for type resolution. Defaults to TypeRegistry.default().
+            schemas_base_dir: Base directory for schema YAML files (meta_schema,
+                              derived_schema, additional_fields). Schema file paths
+                              in the Source model are resolved relative to this.
+                              If None, paths must be absolute.
+            use_legacy_indexes: Use tokenbf/ngrambf instead of GA text indexes.
+        """
+        self._registry = registry or TypeRegistry.default()
+        self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
+        self._ddl_gen = DDLGenerator(
+            self._registry, use_legacy_indexes=use_legacy_indexes
+        )
+
+    # ── Main entry points ───────────────────────────────────────────
+
+    def build(self, source: Source) -> SchemaBuildResult:
+        """Build the complete schema for a Source.
+
+        Args:
+            source: Source model.
+
+        Returns:
+            SchemaBuildResult with columns, DDL, and any validation errors.
+
+        Raises:
+            SchemaBuildError: If a required schema file is missing.
+        """
+        # 1. Load profile header columns
+        profile_columns = self._load_profile(source)
+
+        # 2. Load source-specific schema columns
+        source_columns = self._load_source_columns(source)
+
+        # 3. Compose: profile + source
+        columns = SchemaLoader.compose(profile_columns, source_columns)
+
+        # 4. Validate
+        errors = SchemaLoader.validate_columns(columns, self._registry)
+        if errors:
+            for err in errors:
+                logger.warning(f"Schema validation: {err}")
+
+        # 5. Generate CREATE TABLE DDL
+        ddl_config = self._build_ddl_config(source)
+        create_ddl = self._ddl_gen.generate_create_table(
+            source.table_name, columns, ddl_config
+        )
+
+        # 6. Generate Sigma view DDL
+        sigma_ddl = None
+        if source.sigma and source.sigma.custom_mappings:
+            sigma_ddl = self._ddl_gen.generate_sigma_view(
+                source.table_name, source.sigma.custom_mappings, ddl_config
+            )
+
+        return SchemaBuildResult(
+            source_name=source.source,
+            columns=columns,
+            create_table_ddl=create_ddl,
+            sigma_view_ddl=sigma_ddl,
+            validation_errors=errors,
+        )
+
+    def build_ddl_only(
+        self,
+        columns: list[SchemaColumn],
+        table_name: str,
+        config: DDLConfig | None = None,
+    ) -> str:
+        """Generate DDL from pre-composed columns (skip Source loading).
+
+        Useful when columns are already assembled (e.g. in tests).
+        """
+        return self._ddl_gen.generate_create_table(table_name, columns, config)
+
+    def generate_alter_add(
+        self,
+        source: Source,
+        column: SchemaColumn,
+        *,
+        after: str | None = None,
+    ) -> str:
+        """Generate ALTER TABLE ADD COLUMN for a Source."""
+        cfg = self._build_ddl_config(source)
+        return self._ddl_gen.generate_alter_add_column(
+            source.table_name, column, cfg, after=after
+        )
+
+    def generate_alter_modify(
+        self,
+        source: Source,
+        column: SchemaColumn,
+    ) -> str:
+        """Generate ALTER TABLE MODIFY COLUMN for a Source."""
+        cfg = self._build_ddl_config(source)
+        return self._ddl_gen.generate_alter_modify_column(
+            source.table_name, column, cfg
+        )
+
+    # ── Internal: loading ───────────────────────────────────────────
+
+    def _load_profile(self, source: Source) -> list[SchemaColumn]:
+        """Load the common header profile for the source."""
+        profile_name = source.header.type
+        try:
+            return SchemaLoader.load_profile(profile_name)
+        except SchemaLoadError as e:
+            raise SchemaBuildError(
+                f"Failed to load profile '{profile_name}' for source "
+                f"'{source.source}': {e}"
+            ) from e
+
+    def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
+        """Load source-specific schema columns (meta + derived + additional)."""
+        schema_cfg = source.schema_config
+        columns: list[SchemaColumn] = []
+
+        # Load meta_schema (base columns)
+        if schema_cfg.meta_schema:
+            meta_path = self._resolve_path(schema_cfg.meta_schema)
+            try:
+                columns = SchemaLoader.load_columns(meta_path)
+            except SchemaLoadError as e:
+                raise SchemaBuildError(
+                    f"Failed to load meta_schema for source "
+                    f"'{source.source}': {e}"
+                ) from e
+
+        # Apply derived_schema (overrides)
+        if schema_cfg.derived_schema:
+            derived_path = self._resolve_path(schema_cfg.derived_schema)
+            columns = SchemaLoader.apply_derived_schema(columns, derived_path)
+
+        # Apply additional_fields (append)
+        if schema_cfg.additional_fields:
+            additional_path = self._resolve_path(schema_cfg.additional_fields)
+            columns = SchemaLoader.apply_additional_fields(columns, additional_path)
+
+        return columns
+
+    def _resolve_path(self, path_str: str) -> Path:
+        """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
+        path = Path(path_str)
+        if path.is_absolute():
+            return path
+        if self._schemas_base_dir:
+            return self._schemas_base_dir / path
+        return path
+
+    # ── Internal: DDL config ────────────────────────────────────────
+
+    def _build_ddl_config(self, source: Source) -> DDLConfig:
+        """Build DDLConfig from the Source model."""
+        schema_cfg = source.schema_config
+        return DDLConfig(
+            engine=schema_cfg.engine,
+            ttl_days=schema_cfg.ttl_days,
+            profile=source.header.type,
+            profile_version=source.header.version,
+        )

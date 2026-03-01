@@ -183,12 +183,12 @@ class TestIpFieldTypeMap:
     @pytest.fixture(autouse=True)
     def setup_type_maps_data(self):
         """Setup mock type maps CSV data."""
-        self.type_maps_csv_content = """type,clickhouse_type,clickhouse_type_index,opensearch_type,description
-ipv4,IPv4,IPv4,ip,IPv4 address
-ipv6,IPv6,IPv6,ip,IPv6 address
-ip_field,"Nullable(Variant(IPv4, IPv6)) CODEC(LZ4)","Variant(IPv4, IPv6) CODEC(LZ4)",ip,Unified IPv4 + IPv6 field
-text,String,String,text,Text field
-timestamp,DateTime,DateTime,date,Timestamp field"""
+        self.type_maps_csv_content = """type,clickhouse_type,clickhouse_type_index,description
+ipv4,IPv4,IPv4,IPv4 address
+ipv6,IPv6,IPv6,IPv6 address
+ip_field,"Nullable(Variant(IPv4, IPv6)) CODEC(LZ4)","Variant(IPv4, IPv6) CODEC(LZ4)",Unified IPv4 + IPv6 field
+text,String,String,Text field
+timestamp,DateTime,DateTime,Timestamp field"""
 
     def test_ip_field_in_type_maps(self):
         """Test that ip_field type exists in type_maps.csv."""
@@ -205,7 +205,7 @@ timestamp,DateTime,DateTime,date,Timestamp field"""
         row = ip_field_row.iloc[0]
         assert "Variant(IPv4, IPv6)" in row["clickhouse_type"]
         assert "Variant(IPv4, IPv6)" in row["clickhouse_type_index"]
-        assert "ip" in row["opensearch_type"]
+        assert "Unified" in row["description"]
 
     def test_ip_field_codec_correct(self):
         """Test that ip_field has correct CODEC."""
@@ -223,10 +223,10 @@ class TestBackwardCompatibility:
     @pytest.fixture(autouse=True)
     def setup_type_maps_data(self):
         """Setup mock type maps CSV data."""
-        self.type_maps_csv_content = """type,clickhouse_type,clickhouse_type_index,opensearch_type,description
-ipv4,IPv4,IPv4,ip,IPv4 address
-ipv6,IPv6,IPv6,ip,IPv6 address
-ip_field,"Nullable(Variant(IPv4, IPv6)) CODEC(LZ4)","Variant(IPv4, IPv6) CODEC(LZ4)",ip,Unified IPv4 + IPv6 field"""
+        self.type_maps_csv_content = """type,clickhouse_type,clickhouse_type_index,description
+ipv4,IPv4,IPv4,IPv4 address
+ipv6,IPv6,IPv6,IPv6 address
+ip_field,"Nullable(Variant(IPv4, IPv6)) CODEC(LZ4)","Variant(IPv4, IPv6) CODEC(LZ4)",Unified IPv4 + IPv6 field"""
 
     def test_ipv4_type_still_exists(self):
         """Test that ipv4 type is still in type_maps."""

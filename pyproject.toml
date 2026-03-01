@@ -11,20 +11,20 @@ dependencies = [
     # hyperi-pylib for logging and common utilities
     "hyperi-pylib>=2.19.0",
     # Data processing
-    "pyarrow>=22.0.0",
-    "pandas>=2.2.3",
-    "numpy>=2.3.5",
+    "pyarrow>=23.0.1",
+    "pandas>=3.0.1",
+    "numpy>=2.4.2",
     # Database connections
-    "clickhouse-connect>=0.10.0",
-    "sqlalchemy>=2.0.43",
+    "clickhouse-connect>=0.13.0",
+    "sqlalchemy>=2.0.47",
     # Configuration and parsing
-    "ruamel-yaml>=0.18.6",
-    "pydantic>=2.12.0",
-    "sqlparse>=0.5.4",
+    "ruamel-yaml>=0.19.1",
+    "pydantic>=2.12.5",
+    "sqlparse>=0.5.5",
     # AWS
-    "boto3>=1.42.4",
+    "boto3>=1.42.57",
     # Scheduling
-    "apscheduler>=3.11.1",
+    "apscheduler>=3.11.2",
     "aiocron>=2.1",
     "croniter>=6.0.0",
     # HTTP clients
@@ -34,17 +34,18 @@ dependencies = [
     # Templating
     "Jinja2>=3.1.6",
     # Sigma rules
-    "pysigma>=1.0.2",
+    "pysigma>=1.1.1",
     "valhallaapi>=0.6.0",
     # Utilities
     "python-dateutil>=2.9.0",
     "tabulate>=0.9.0",
-    "pyparsing>=3.2.5",
-    "platformdirs>=4.5.1",
-    "psutil>=7.1.3",
-    "importlib-metadata>=8.7.0",
-    "gitpython>=3.1.45",
-    "deepdiff>=8.0.0",
+    "pyparsing>=3.3.2",
+    "platformdirs>=4.9.2",
+    "psutil>=7.2.2",
+    "importlib-metadata>=8.7.1",
+    "gitpython>=3.1.46",
+    "deepdiff>=8.6.1",
+    "deepmerge>=2.0",
 ]
 
 [project.urls]
@@ -59,25 +60,25 @@ packages = ["src/dfe_engine"]
 
 [dependency-groups]
 dev = [
-    "pytest>=8.3.0",
-    "pytest-cov>=6.0.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-benchmark>=5.1.0",
-    "pytest-mock>=3.14.0",
-    "pytest-xdist>=3.5.0",
-    "coverage>=7.6.0",
+    "pytest>=9.0.2",
+    "pytest-cov>=7.0.0",
+    "pytest-asyncio>=1.3.0",
+    "pytest-benchmark>=5.2.3",
+    "pytest-mock>=3.15.1",
+    "pytest-xdist>=3.8.0",
+    "coverage>=7.13.4",
     "defusedxml>=0.7.1",
-    "moto[s3]>=5.1.20",
-    "werkzeug>=3.1.5",  # Explicit constraint to fix CVE in moto's transitive dep
-    "ruff>=0.8.0",
-    "Faker>=33.0.0",
-    "types-requests>=2.32.0",
-    "psycopg[binary]>=3.2.0",
-    "python-dotenv>=1.0.0",
+    "moto[s3]>=5.1.21",
+    "werkzeug>=3.1.6",
+    "ruff>=0.15.4",
+    "Faker>=40.5.1",
+    "types-requests>=2.32.4",
+    "psycopg[binary]>=3.3.3",
+    "python-dotenv>=1.2.1",
 ]
 
 [tool.pytest.ini_options]
-pythonpath = ["src/dfe_engine", "tests"]
+pythonpath = ["src", "tests"]
 minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
@@ -86,7 +87,7 @@ addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=
 testpaths = ["tests"]
 markers = [
     "unit: Unit tests (no external dependencies)",
-    "integration: Integration tests (require ClickHouse/OpenSearch)",
+    "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
 ]
@@ -114,6 +115,7 @@ ignore = [
     "S608",  # S608=SQL (ClickHouse queries)
     "S105",  # S105=hardcoded passwords (test fixtures)
     "S110",  # S110=try-except-pass
+    "S112",  # S112=try-except-continue (intentional skip of invalid configs)
     "S603",  # S603=subprocess shell (CI scripts)
     "S607",  # S607=subprocess partial exec (CI scripts)
     "B017",  # B017=pytest.raises without match (legacy tests)

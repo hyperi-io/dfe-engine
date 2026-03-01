@@ -1,0 +1,29 @@
+# Common header profile: minimal
+#
+# High-volume structured data — metrics, flow records.
+# Fields: _timestamp_load, _timestamp, _uuid, _org_id
+
+columns:
+  - name: _timestamp_load
+    type: timestamp
+    default: "now64(3)"
+    order: 0
+    comment: "@generated: now64(3)"
+
+  - name: _timestamp
+    type: datetime
+    use_case: range
+    order: 1
+    comment: "@source: timestamp | now()"
+
+  - name: _uuid
+    type: uuid
+    default: "generateUUIDv7()"
+    comment: "@generated: generateUUIDv7()"
+
+  - name: _org_id
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    order: 2
+    comment: "@source: org_id"
