@@ -1,7 +1,0 @@
-{
-  "observer.os.name.fields.text": {
-    "ignore_above": 1024,
-    "normalizer": "lowercase_normalizer",
-    "type": "keyword"
-  }
-}

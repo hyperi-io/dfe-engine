@@ -211,6 +211,18 @@ class DeploymentSettings(BaseModel):
     )
 
 
+class SourceSettings(BaseModel):
+    """Source registry settings.
+
+    Environment variables:
+    - DFE_SOURCES_DIR -> source.sources_dir
+    """
+
+    sources_dir: str = Field(
+        default="", description="YAML directory for Source definitions (SSoT)"
+    )
+
+
 class ServicesSettings(BaseModel):
     """Endpoints for managed DFE services.
 
@@ -239,6 +251,45 @@ class ServicesSettings(BaseModel):
     )
 
 
+class HelmSettings(BaseModel):
+    """Helm values compiler settings.
+
+    Environment variables:
+    - DFE_HELM_OUTPUT_DIR -> helm.output_dir
+    - DFE_HELM_ENVIRONMENT_FILE -> helm.environment_file
+    """
+
+    output_dir: str = Field(
+        default="", description="Output directory for compiled Helm values"
+    )
+    environment_file: str = Field(
+        default="", description="Path to environment config YAML"
+    )
+
+
+class AuthSettings(BaseModel):
+    """Authorization settings.
+
+    Bespoke role→permission RBAC. Zero external dependencies.
+
+    Environment variables:
+    - DFE_AUTH_ENABLED -> auth.enabled
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description="Enable authorization (default off for dev/test)",
+    )
+    role_permissions: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="Role → permitted actions mapping. Empty = built-in defaults.",
+    )
+    group_role_mapping: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="OIDC group → roles mapping (Entra ID GUIDs, Okta names, etc.)",
+    )
+
+
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
@@ -250,8 +301,11 @@ class DFESettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
+    source: SourceSettings = Field(default_factory=SourceSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
+    helm: HelmSettings = Field(default_factory=HelmSettings)
+    auth: AuthSettings = Field(default_factory=AuthSettings)
 
 
 def _load_defaults() -> dict:
@@ -276,8 +330,11 @@ def _get_env_overrides() -> dict:
         "storage": {},
         "query": {},
         "query_views": {},
+        "source": {},
         "services": {},
         "deployment": {},
+        "helm": {},
+        "auth": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -358,6 +415,10 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
         overrides["query_views"]["max_memory_usage"] = val
 
+    # Source settings
+    if val := _get_env("DFE_SOURCES_DIR"):
+        overrides["source"]["sources_dir"] = val
+
     # Services settings
     if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
         overrides["services"]["receiver_url"] = val
@@ -380,18 +441,27 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_DEPLOYMENT_CONFIG_DIR"):
         overrides["deployment"]["config_dir"] = val
 
+    # Helm settings
+    if val := _get_env("DFE_HELM_OUTPUT_DIR"):
+        overrides["helm"]["output_dir"] = val
+    if val := _get_env("DFE_HELM_ENVIRONMENT_FILE"):
+        overrides["helm"]["environment_file"] = val
+
+    # Auth settings
+    if val := _get_env("DFE_AUTH_ENABLED"):
+        overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
     # Remove empty sections
     return {k: v for k, v in overrides.items() if v}
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dictionaries, with override taking precedence."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
+    """Deep merge two dicts. Override wins on conflicts."""
+    import copy
+
+    from deepmerge import always_merger
+
+    result = copy.deepcopy(base)
+    always_merger.merge(result, override)
     return result
 
 

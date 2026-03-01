@@ -127,7 +127,7 @@ class TestConfigBuilder:
                         },
                         {
                             "name": "load_os",
-                            "description": "OpenSearch loading stage",
+                            "description": "Loading stage",
                             "config": {
                                 "kafka_source_topic": "test_topic",
                                 "kafka_source_topic_suffix": "_load",

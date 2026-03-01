@@ -1,12 +1,13 @@
 import os
 from typing import Dict, List, Tuple
-from sqlalchemy import text
-from ..sigma.sigma_pipelines import SigmaPipeline
-from ..sigma.sigma_backend_clickhouse import SqlBackend
-from sigma.collection import SigmaCollection
+
 from hyperi_pylib.logger import logger
+from sigma.collection import SigmaCollection
+
 from ..sigma.field_mapping_service import FieldMappingService
-from ..yaml_utils import yaml_load, yaml_dump
+from ..sigma.sigma_backend_clickhouse import SqlBackend
+from ..sigma.sigma_pipelines import SigmaPipeline
+from ..yaml_utils import yaml_dump, yaml_load
 
 
 class SigmaRuleConverter:
@@ -239,8 +240,10 @@ class SigmaRuleConverter:
             if self.is_api_mode and self.db_session:
                 rule_name = os.path.basename(file_path)
 
+                from sqlalchemy import text as sa_text
+
                 result = self.db_session.execute(
-                    text("SELECT rule_content FROM sigma_rules WHERE rule_name = :rule_name"),
+                    sa_text("SELECT rule_content FROM sigma_rules WHERE rule_name = :rule_name"),
                     {"rule_name": rule_name},
                 ).fetchone()
 
@@ -403,14 +406,14 @@ class SigmaRuleConverter:
         optimized_info = {"schema_metadata": schema_metadata.copy(), "field_hints": {}}
 
         for field, info in schema_metadata.items():
-            if info["type"] in ["string_fast", "string_fast_lowcardinality"]:
+            if info.get("use_case") == "dimension" and info["type"] == "string":
                 optimized_info["field_hints"][field] = {"matching": "exact", "index_priority": 1}
-            elif info["type"] == "text" and info["index_type"] == "text_search":
+            elif info["type"] == "text" and info.get("use_case") in ("fulltext", "text_search"):
                 optimized_info["field_hints"][field] = {
                     "matching": "text_search",
                     "index_priority": 2,
                 }
-            elif info["type"] in ["int32", "int64"]:
+            elif info["type"] in ("integer", "float"):
                 optimized_info["field_hints"][field] = {"matching": "numeric", "index_priority": 1}
 
         return optimized_info

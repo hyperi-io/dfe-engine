@@ -1,9 +1,10 @@
 import os
 import csv
 from pathlib import Path
-from typing import Dict, Tuple, List, Any, Set
+from typing import Any, Dict, List, Set, Tuple
+
 from hyperi_pylib.logger import logger
-from sqlalchemy import text
+
 from ..yaml_utils import yaml_load
 
 
@@ -349,8 +350,10 @@ class FieldMappingService:
 
         mappings = {}
         try:
+            from sqlalchemy import text as sa_text
+
             result = db_session.execute(
-                text("SELECT sigma_field, schema_field FROM sigma_mappings WHERE device = :device"),
+                sa_text("SELECT sigma_field, schema_field FROM sigma_mappings WHERE device = :device"),
                 {"device": device},
             )
 
@@ -382,8 +385,10 @@ class FieldMappingService:
 
         schema_metadata = {}
         try:
+            from sqlalchemy import text as sa_text
+
             result = db_session.execute(
-                text("""
+                sa_text("""
                     SELECT column_name, column_type, index_order
                     FROM meta_schemas
                     WHERE name = :schema_name
@@ -426,8 +431,10 @@ class FieldMappingService:
 
         schema_metadata = {}
         try:
+            from sqlalchemy import text as sa_text
+
             result = db_session.execute(
-                text("""
+                sa_text("""
                     SELECT column_name, column_type, index_order
                     FROM derived_schemas
                     WHERE name = :schema_name

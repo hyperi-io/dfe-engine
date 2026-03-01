@@ -169,6 +169,22 @@ class ViewExecutor:
         self, view_def: ViewDefinition, auth: AuthContext
     ) -> None:
         """Check if user is authorized to execute this view."""
+        from dfe_engine.auth import authorize
+        from dfe_engine.settings import get_settings
+
+        settings = get_settings()
+        result = authorize(
+            auth,
+            "query:execute",
+            view_def.label,
+            enabled=settings.auth.enabled,
+        )
+        if not result.allowed:
+            raise AuthorizationError(
+                f"View '{view_def.label}': access denied ({result.reason})"
+            )
+
+        # View-level role gate (separate from global RBAC)
         if view_def.required_roles:
             if not any(role in auth.roles for role in view_def.required_roles):
                 raise AuthorizationError(

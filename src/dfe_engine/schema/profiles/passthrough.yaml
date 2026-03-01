@@ -1,0 +1,27 @@
+# Common header profile: passthrough
+#
+# Transparent bridge — no timestamp injection.
+# Fields: _timestamp_load, _uuid, _org_id, _json
+
+columns:
+  - name: _timestamp_load
+    type: timestamp
+    default: "now64(3)"
+    order: 0
+    comment: "@generated: now64(3)"
+
+  - name: _uuid
+    type: uuid
+    default: "generateUUIDv7()"
+    comment: "@generated: generateUUIDv7()"
+
+  - name: _org_id
+    type: string
+    attribute: [lowcardinality]
+    use_case: dimension
+    order: 1
+    comment: "@source: org_id"
+
+  - name: _json
+    type: json
+    comment: "@captured: raw_payload as JSON"
