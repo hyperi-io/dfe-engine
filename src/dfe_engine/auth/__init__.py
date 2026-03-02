@@ -26,8 +26,10 @@ from dfe_engine.auth.engine import (
     ENGINE_ACTIONS,
     authorize,
 )
+from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.models import (
     AuthContext,
+    AuthenticationError,
     AuthorizationError,
     AuthzRequest,
     AuthzResult,
@@ -37,10 +39,12 @@ __all__ = [
     "ALL_ACTIONS",
     "ARGO_ACTION_PREFIX",
     "AuthContext",
+    "AuthenticationError",
     "AuthorizationError",
     "AuthzRequest",
     "AuthzResult",
     "DEFAULT_ROLE_PERMISSIONS",
     "ENGINE_ACTIONS",
+    "LocalAuthProvider",
     "authorize",
 ]

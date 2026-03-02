@@ -41,6 +41,8 @@ dependencies = [
     "platformdirs>=4.9.2",
     "psutil>=7.2.2",
     "deepmerge>=2.0",
+    # Authentication
+    "bcrypt>=4.2.0",
 ]
 
 [project.urls]
