@@ -46,35 +46,33 @@
 
 Generic standard-to-schema field mapping layer. Two-tier resolution (default table map + source-specific overrides). YAML-managed in config repo. See [DESIGN.md](docs/DESIGN.md) §5.
 
-**Phase 1: Core field mapping models + resolver**
+**Phase 1: Core field mapping models + resolver** — DONE (`8761e3e`)
 
-- [ ] `FieldMap` Pydantic model (standard, source, inherits, mappings dict)
-- [ ] `FieldMapRegistry` — DirectoryConfigStore-backed, loads from `field-maps/` directory
-- [ ] `FieldMapResolver` — two-tier resolution: source-specific > default > passthrough
-- [ ] Default table map support (`_default.yaml` per standard)
-- [ ] Unit tests
+- [x] `FieldMap` Pydantic model (standard, source, inherits, mappings dict)
+- [x] `FieldMapRegistry` — DirectoryConfigStore-backed, loads from `field-maps/` directory
+- [x] `resolve_field_map()` — two-tier resolution: source-specific > default > passthrough
+- [x] Default table maps (`_default.yaml` per standard: Sigma, ECS, CIM)
+- [x] 60 unit tests
 
-**Phase 2: Standard adapters**
+**Phase 2+3: View DDL generation** — DONE (`6ec3491`)
 
-- [ ] Sigma adapter — refactor `SigmaSourceMapper` to use `FieldMapResolver` instead of `Source.sigma.custom_mappings`
-- [ ] ECS adapter — ship default ECS 8.x field map as package resource, seed to config repo
-- [ ] CIM adapter — ship default Splunk CIM field map as package resource, seed to config repo
-- [ ] Unit tests per adapter
+- [x] `ViewGenerator` — generate `CREATE VIEW` DDL from resolved field maps
+- [x] Generic `DDLGenerator.generate_view()` with configurable suffix
+- [x] `SchemaBuildResult.view_ddls` for multi-standard view output
+- [x] View naming: `{table_name}_{standard}` (e.g. `windows_audit_sigma`)
+- [x] Drop view support (`generate_drop_view`)
+- [x] 26 new tests (1120 total)
 
-**Phase 3: View DDL generation**
+**Phase 4: Integration**
 
-- [ ] `ViewGenerator` — generate `CREATE VIEW` DDL from resolved field maps
-- [ ] View naming convention: `{standard}_{source}` (e.g. `ecs_windows_audit`)
-- [ ] Integrate into `DDLGenerator` — views generated alongside table DDL
-- [ ] View lifecycle: create/update/drop as field maps change
-- [ ] Unit tests
+- [ ] Wire `ViewGenerator` into `SchemaBuilderV2.build()` (optional FieldMapRegistry)
+- [ ] Source model: `mapping_standards` field (list of standards a source publishes views for)
+- [ ] Sigma adapter: refactor `SigmaSourceMapper` to use FieldMapRegistry as primary source
+- [ ] Schema compiler: populate `view_ddls` in build output
 
-**Phase 4: Integration + UI support**
+**Future (control-plane scope)**
 
-- [ ] Source model: `mapping_profiles` field (list of standards a source supports)
-- [ ] Schema compiler: generate view DDL in compile output
-- [ ] Helm compiler: include view DDL in output
-- [ ] API model for field mapping CRUD (used by control plane)
+- [ ] API model for field mapping CRUD (dfe-control-plane, not engine)
 - [ ] Field mapping UI data model (standard fields + DFE columns + inheritance indicator)
 
 ---

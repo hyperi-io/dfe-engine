@@ -285,6 +285,24 @@ class TestSource:
         s = Source(source="crowdstrike_edr", display_name="CrowdStrike EDR")
         assert s.display_name == "CrowdStrike EDR"
 
+    def test_mapping_standards_default_empty(self):
+        s = Source(source="syslog")
+        assert s.mapping_standards == []
+
+    def test_mapping_standards_set(self):
+        s = Source(source="syslog", mapping_standards=["sigma", "ecs"])
+        assert s.mapping_standards == ["sigma", "ecs"]
+
+    def test_mapping_standards_in_yaml_dict(self):
+        s = Source(source="syslog", mapping_standards=["sigma"])
+        d = s.to_yaml_dict()
+        assert d["mapping_standards"] == ["sigma"]
+
+    def test_mapping_standards_excluded_when_empty(self):
+        s = Source(source="syslog")
+        d = s.to_yaml_dict()
+        assert "mapping_standards" not in d
+
 
 # ---------------------------------------------------------------------------
 # Source — Naming Validation
