@@ -1,4 +1,3 @@
-import asyncio
 import os
 import re
 from pathlib import Path
@@ -8,11 +7,9 @@ from tabulate import tabulate
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 from hyperi_pylib.logger import logger
-from .scheduler import HuntScheduler
 from .cron_runner import CronRunner
 from ..settings import get_settings
 from ..yaml_utils import yaml_load_string
-import multiprocessing
 import time
 
 
@@ -273,90 +270,34 @@ class HuntController:
         target_config_data: dict,
         test_mode: bool,
     ) -> None:
-        """Start hunt schedulers for each directory pair."""
-        processes = []
+        """Start hunt schedulers via HuntEngine background thread."""
+        from .hunt_engine import HuntEngine
 
-        for hunt_dir, rule_dir in zip(hunt_dirs, rule_dirs, strict=False):
-            logger.info(
-                f"Starting scheduler for paired hunt directory: {hunt_dir} and rule directory: {rule_dir}"
-            )
+        settings = get_settings()
+        # Override settings with resolved config values (supports legacy dfe_package.yaml path)
+        settings.hunts.hunt_dir = ",".join(hunt_dirs)
+        settings.hunts.rule_repo_dir = ",".join(rule_dirs)
+        settings.hunts.checkpoint_path = config_values.get("hunt_checkpoint_path", "")
+        settings.hunts.cron_task_timeout = config_values.get("hunt_cron_task_timeout", 300)
+        settings.hunts.checkpoint_destination = config_values.get(
+            "checkpoint_destination", "clickhouse"
+        )
+        settings.hunts.checkpoint_timestamp_field = config_values.get(
+            "checkpoint_timestamp_field", "timestamp_load"
+        )
+        settings.hunts.log_path = hunt_log_path
 
-            if test_mode:
-                HuntController._run_scheduler(
-                    hunt_dir,
-                    rule_dir,
-                    config_values["hunt_checkpoint_path"],
-                    config_values["hunt_cron_task_timeout"],
-                    config_values["hunt_num_threads"],
-                    config_values["checkpoint_destination"],
-                    hunt_log_path,
-                    logger,
-                    config_values["checkpoint_timestamp_field"],
-                    target_config_data,
-                )
-            else:
-                process = multiprocessing.Process(
-                    target=HuntController._run_scheduler,
-                    args=(
-                        hunt_dir,
-                        rule_dir,
-                        config_values["hunt_checkpoint_path"],
-                        config_values["hunt_cron_task_timeout"],
-                        config_values["hunt_num_threads"],
-                        config_values["checkpoint_destination"],
-                        hunt_log_path,
-                        logger,
-                        config_values["checkpoint_timestamp_field"],
-                        target_config_data,
-                    ),
-                )
-                process.start()
-                processes.append(process)
-                time.sleep(1)
-
-        logger.info("Hunt scheduler processes started.")
+        engine = HuntEngine(settings=settings)
+        engine.start()
+        logger.info("HuntEngine started via HuntController.")
 
         if not test_mode:
             try:
-                while True:
+                while engine.is_running:
                     time.sleep(1)
             except KeyboardInterrupt:
-                logger.info("Exiting main process. Hunt scheduler daemons will continue running.")
-
-    @staticmethod
-    def _run_scheduler(
-        hunt_dir,
-        rule_dir,
-        hunt_checkpoint_path,
-        hunt_cron_task_timeout,
-        hunt_num_threads,
-        checkpoint_destination,
-        hunt_log_path,
-        logger,
-        checkpoint_timestamp_field,
-        target_config_data,
-    ):
-        try:
-            scheduler = HuntScheduler(
-                hunt_dir=hunt_dir,
-                rule_repo_dir=rule_dir,
-                hunt_checkpoint_path=hunt_checkpoint_path,
-                hunt_cron_task_timeout=hunt_cron_task_timeout,
-                num_threads=hunt_num_threads,
-                checkpoint_destination=checkpoint_destination,
-                hunt_log_path=hunt_log_path,
-                logger=logger,
-                checkpoint_timestamp_field=checkpoint_timestamp_field,
-                target_config_data=target_config_data,
-            )
-
-            scheduler.print_hunt_parameters()
-            asyncio.run(scheduler.schedule_hunts_async())
-        except Exception as e:
-            logger.error(
-                f"Error running scheduler for hunt directory {hunt_dir} and rule directory {rule_dir}: {e}",
-                exc_info=True,
-            )
+                engine.stop()
+                logger.info("HuntEngine stopped.")
 
     @staticmethod
     def _get_config_value(
