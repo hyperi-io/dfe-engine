@@ -139,7 +139,12 @@ See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
 ### Near-Term
 
 - [ ] Absorb dfe-control-plane into dfe-engine (REST API + CLI + logging + hunt management)
-- [ ] Rules + Hunts workflow: API for rule CRUD (SQL match → strip time bounds → output record ID + rule ID + time to hunt results table with common header)
+- [ ] Rules + Hunts workflow (see SQL-CLICKHOUSE.md § DFE Hunts):
+  - [ ] Hunt results table schema (common header + lean detection columns: matched_uuid, rule_id, rule_name, source_table, hunt_name, severity)
+  - [ ] Rule model — user-supplied SQL SELECT, time bounds stripped, output rewritten to `_uuid` + rule metadata only (never `SELECT *`)
+  - [ ] Rule CRUD API (create from HyperDX SQL, validate, store as Jinja2 template)
+  - [ ] Migrate existing Jinja2 templates from `INSERT INTO ... SELECT *` to lean `matched_uuid` pattern
+  - [ ] Hunt results → source table join-back for full record lookup (UI concern)
 - [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
 
 ### Future Enhancements
