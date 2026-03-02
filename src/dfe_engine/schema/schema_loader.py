@@ -4,6 +4,12 @@ Loads schema definitions from YAML files into SchemaColumn models.
 Handles meta_schema, derived_schema, additional_fields, and common
 header profiles.
 
+Profile resolution order (first match wins):
+1. Explicit ``profiles_dir`` argument
+2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
+3. ``schemas/common-header/`` submodule (relative to project root)
+4. Bundled ``schema/profiles/`` inside the package
+
 Usage:
     from dfe_engine.schema.schema_loader import SchemaLoader
 
@@ -17,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +31,93 @@ from hyperi_pylib.logger import logger
 
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_load
+
+# Submodule location relative to project root.
+_SUBMODULE_COMMON_HEADER = "schemas/common-header"
+_SUBMODULE_ROOT = "schemas"
+
+# Bundled profiles inside the package (fallback).
+_BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
+
+
+def _find_project_root() -> Path | None:
+    """Walk up from this file to find the project root (contains pyproject.toml)."""
+    current = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (current / "pyproject.toml").exists():
+            return current
+        parent = current.parent
+        if parent == current:
+            break
+        current = parent
+    return None
+
+
+def _resolve_profiles_dir() -> Path:
+    """Resolve the common-header profiles directory.
+
+    Order: DFE_SCHEMAS_DIR env var → submodule → bundled.
+    """
+    # 1. Env var override
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        candidate = Path(env_dir) / "common-header"
+        if candidate.is_dir():
+            return candidate
+
+    # 2. Submodule (relative to project root)
+    root = _find_project_root()
+    if root:
+        candidate = root / _SUBMODULE_COMMON_HEADER
+        if candidate.is_dir():
+            return candidate
+
+    # 3. Bundled fallback
+    return _BUNDLED_PROFILES_DIR
+
+
+def _resolve_schemas_root() -> Path | None:
+    """Resolve the dfe-schemas root directory (submodule or env var).
+
+    Returns None if only bundled profiles are available.
+    """
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        candidate = Path(env_dir)
+        if candidate.is_dir():
+            return candidate
+
+    root = _find_project_root()
+    if root:
+        candidate = root / _SUBMODULE_ROOT
+        if candidate.is_dir():
+            return candidate
+
+    return None
+
+
+def is_shipped_schema(path: str | Path) -> bool:
+    """Check whether a path is inside the shipped (read-only) schemas.
+
+    Shipped schemas live in the dfe-schemas submodule or the bundled
+    profiles directory. Users should create their own files rather than
+    modifying shipped ones.
+
+    Returns True if the path resolves to a location inside the shipped
+    schema directories.
+    """
+    resolved = Path(path).resolve()
+
+    # Check submodule / env var root
+    schemas_root = _resolve_schemas_root()
+    if schemas_root and resolved.is_relative_to(schemas_root.resolve()):
+        return True
+
+    # Check bundled profiles
+    if resolved.is_relative_to(_BUNDLED_PROFILES_DIR.resolve()):
+        return True
+
+    return False
 
 
 class SchemaLoadError(Exception):
@@ -101,10 +195,16 @@ class SchemaLoader:
         Profiles define the standard columns injected at the start of
         every schema (timeseries, minimal, passthrough).
 
+        Resolution order (first match wins):
+        1. Explicit ``profiles_dir`` argument
+        2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
+        3. ``schemas/common-header/`` submodule (relative to project root)
+        4. Bundled ``schema/profiles/`` inside the package
+
         Args:
             profile_name: Profile name (e.g. 'timeseries').
             profiles_dir: Directory containing profile YAML files.
-                          Defaults to package resource directory.
+                          When provided, skips the resolution chain.
 
         Returns:
             List of SchemaColumn models for the profile.
@@ -115,8 +215,8 @@ class SchemaLoader:
         if profiles_dir:
             profile_path = Path(profiles_dir) / f"{profile_name}.yaml"
         else:
-            # Default: look in package resources
-            profile_path = Path(__file__).parent / "profiles" / f"{profile_name}.yaml"
+            resolved_dir = _resolve_profiles_dir()
+            profile_path = resolved_dir / f"{profile_name}.yaml"
 
         if not profile_path.exists():
             raise SchemaLoadError(

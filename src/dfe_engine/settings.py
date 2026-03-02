@@ -46,6 +46,9 @@ Kafka:
 - DFE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
 - DFE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
 
+Schemas:
+- DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas submodule root)
+
 Storage:
 - DFE_STORAGE_TYPE -> storage.type (local, s3, http - auto-detected from path if not set)
 - DFE_STORAGE_PATH -> storage.path (local path, S3 URI, or HTTP URL)
@@ -219,6 +222,19 @@ class DeploymentSettings(BaseModel):
     )
 
 
+class SchemasSettings(BaseModel):
+    """Shared schemas settings (dfe-schemas submodule).
+
+    Environment variables:
+    - DFE_SCHEMAS_DIR -> schemas.schemas_dir
+    """
+
+    schemas_dir: str = Field(
+        default="",
+        description="Root of dfe-schemas directory (submodule or standalone checkout)",
+    )
+
+
 class SourceSettings(BaseModel):
     """Source registry settings.
 
@@ -308,6 +324,7 @@ class DFESettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
+    schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
@@ -336,6 +353,7 @@ def _get_env_overrides() -> dict:
         "storage": {},
         "query": {},
         "query_views": {},
+        "schemas": {},
         "source": {},
         "services": {},
         "deployment": {},
@@ -424,6 +442,10 @@ def _get_env_overrides() -> dict:
         overrides["query_views"]["max_rows_to_read"] = int(val)
     if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
         overrides["query_views"]["max_memory_usage"] = val
+
+    # Schemas settings (dfe-schemas submodule)
+    if val := _get_env("DFE_SCHEMAS_DIR"):
+        overrides["schemas"]["schemas_dir"] = val
 
     # Source settings
     if val := _get_env("DFE_SOURCES_DIR"):
