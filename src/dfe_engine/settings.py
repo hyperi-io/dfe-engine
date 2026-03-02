@@ -27,6 +27,14 @@ ClickHouse:
 
 Hunts:
 - DFE_HUNT_LOG_PATH -> hunts.log_path
+- DFE_HUNTS_DIR -> hunts.hunt_dir
+- DFE_HUNTS_RULE_REPO_DIR -> hunts.rule_repo_dir
+- DFE_HUNTS_NUM_THREADS -> hunts.num_threads
+- DFE_HUNTS_CHECKPOINT_DESTINATION -> hunts.checkpoint_destination
+- DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD -> hunts.checkpoint_timestamp_field
+- DFE_HUNTS_CHECKPOINT_PATH -> hunts.checkpoint_path
+- DFE_HUNTS_CRON_TASK_TIMEOUT -> hunts.cron_task_timeout
+- DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -83,7 +91,23 @@ class HuntsSettings(BaseModel):
 
     log_path: str = Field(default="hunt_log_path")
     checkpoint_path: str = Field(default="")
-    cron_task_timeout: int = Field(default=300)
+    cron_task_timeout: int = Field(
+        default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
+    )
+    hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
+    rule_repo_dir: str = Field(
+        default="", description="Directory containing Jinja2 rule templates"
+    )
+    num_threads: int = Field(default=1, description="Number of concurrent hunt threads")
+    checkpoint_destination: str = Field(
+        default="clickhouse", description="Checkpoint storage: 'clickhouse' or 'file'"
+    )
+    checkpoint_timestamp_field: str = Field(
+        default="timestamp_load", description="Timestamp field for checkpointing"
+    )
+    jitter_seconds: int = Field(
+        default=15, description="Max random jitter in seconds for sub-minute stagger"
+    )
 
 
 class ArtifactorySettings(BaseModel):
@@ -342,6 +366,22 @@ def _get_env_overrides() -> dict:
     # Hunts settings
     if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
         overrides["hunts"]["log_path"] = val
+    if val := _get_env("DFE_HUNTS_DIR"):
+        overrides["hunts"]["hunt_dir"] = val
+    if val := _get_env("DFE_HUNTS_RULE_REPO_DIR"):
+        overrides["hunts"]["rule_repo_dir"] = val
+    if val := _get_env("DFE_HUNTS_NUM_THREADS"):
+        overrides["hunts"]["num_threads"] = int(val)
+    if val := _get_env("DFE_HUNTS_CHECKPOINT_DESTINATION"):
+        overrides["hunts"]["checkpoint_destination"] = val
+    if val := _get_env("DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD"):
+        overrides["hunts"]["checkpoint_timestamp_field"] = val
+    if val := _get_env("DFE_HUNTS_CHECKPOINT_PATH"):
+        overrides["hunts"]["checkpoint_path"] = val
+    if val := _get_env("DFE_HUNTS_CRON_TASK_TIMEOUT"):
+        overrides["hunts"]["cron_task_timeout"] = int(val)
+    if val := _get_env("DFE_HUNTS_JITTER_SECONDS"):
+        overrides["hunts"]["jitter_seconds"] = int(val)
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):

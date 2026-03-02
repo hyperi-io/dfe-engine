@@ -7,6 +7,13 @@ from .cron_runner import CronRunner
 
 
 class HuntScheduler:
+    """
+    .. deprecated::
+        Use ``HuntEngine`` instead. HuntScheduler delegates to CronRunner
+        which previously used os.fork() daemonization. HuntEngine uses a
+        background daemon thread for resilient scheduling.
+    """
+
     def __init__(
         self,
         hunt_dir: str,
@@ -18,7 +25,15 @@ class HuntScheduler:
         hunt_cron_task_timeout: int,
         checkpoint_timestamp_field: str,
         target_config_data: dict = None,
+        logger=None,
     ):
+        import warnings
+
+        warnings.warn(
+            "HuntScheduler is deprecated. Use HuntEngine instead.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         self.hunt_dir = hunt_dir
         self.rule_repo_dir = rule_repo_dir
         self.hunt_checkpoint_path = hunt_checkpoint_path

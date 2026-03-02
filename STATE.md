@@ -84,6 +84,27 @@
 
 ## Current Session (2026-03-02)
 
+### Completed — Hunt Engine + Even Load Spreading
+
+Replaced fragile `HuntScheduler` + `CronRunner` (os.fork()) architecture with `HuntEngine` — single daemon thread running an asyncio event loop.
+
+**HuntEngine** (`hunts/hunt_engine.py`):
+- `threading.Thread(daemon=True)` replaces `os.fork()` — visible to parent, cross-platform
+- `start()`/`stop()`/`is_running` lifecycle with `threading.Event` + `asyncio.Event`
+- Reads all config from `DFESettings.hunts` (no dfe_package.yaml dependency)
+- `asyncio.wait_for()` replaces busy-loop timeout
+
+**Even load spreading** (`compute_stagger_offsets()`):
+- Even distribution formula: `offset_i = (F / N) * i` for N jobs over frequency F
+- APScheduler `jitter` parameter for sub-minute randomization (default 15s)
+- Handles per-minute, step-minute, fixed-minute, and long-interval cron expressions
+
+**Settings expanded**: `HuntsSettings` gained `hunt_dir`, `rule_repo_dir`, `num_threads`, `checkpoint_destination`, `checkpoint_timestamp_field`, `jitter_seconds` with env var mappings.
+
+**Deprecations**: `CronRunner.run()` (removed os.fork, added warning), `HuntScheduler` (added warning). Both remain importable.
+
+**Test results:** 1163 passed, 0 failures (27 new tests: 15 stagger + 12 engine lifecycle)
+
 ### Completed — Field Mapping Layer (Phases 1-5)
 
 Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom standards.
@@ -120,7 +141,7 @@ Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom sta
 
 ### Previous Sessions
 
-- **2026-03-02 (earlier):** Clean-slate restructure (8 phases), DESIGN.md
+- **2026-03-02 (earlier):** Field Mapping Layer (5 phases), clean-slate restructure, DESIGN.md (1136 tests)
 - **2026-03-02 (earlier):** Phase 8c — Argo CD Application/AppProject CRD generator (1075 passed)
 - **2026-03-01:** Phase 8b — OTEL env config, KEDA scalers, Argo RBAC generator (1026 tests)
 - **2026-02-28:** Phases 1-8 — Source model, schema v2, sigma mapper, service routing, v1 removal, Helm compiler + RBAC (971 tests)
@@ -137,7 +158,7 @@ Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom sta
 | `clickhouse/` | Ready  | clickhouse-connect client management                             |
 | `pipeline/`   | Ready  | Vector pipeline generation (core build/render logic)             |
 | `sigma/`      | Ready  | SigmaSourceMapper + converter, FieldMapRegistry integration      |
-| `hunts/`      | Ready  | Flat structure: hunt, controller, checkpoint, scheduler, validator, cron_runner, cron_job, job |
+| `hunts/`      | Ready  | HuntEngine daemon thread, even stagger, APScheduler jitter — 27 tests |
 | `query/`      | Ready  | YAML SSoT registry, Arrow-native output, built-in queries        |
 | `services/`   | Ready  | YAML SSoT registry, source routing, default configs, validators  |
 | `auth/`       | Ready  | Engine RBAC, open-ended argo: namespace, infra_admin role        |

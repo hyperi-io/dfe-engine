@@ -83,6 +83,18 @@ Generic standard-to-schema field mapping layer. Two-tier resolution (default tab
 
 ---
 
+## Completed — Hunt Engine + Even Load Spreading (2026-03-02)
+
+- [x] HuntsSettings expanded (hunt_dir, rule_repo_dir, checkpoint_destination, jitter_seconds, etc.)
+- [x] `compute_stagger_offsets()` — even distribution algorithm with APScheduler jitter
+- [x] `HuntEngine` class — daemon thread scheduler replacing os.fork() architecture
+- [x] CronJob wired to new stagger, jitter passthrough to APScheduler
+- [x] HuntController updated to use HuntEngine (no multiprocessing)
+- [x] CronRunner + HuntScheduler deprecated with warnings
+- [x] 27 new tests (15 stagger + 12 engine lifecycle), 1163 total passing
+
+---
+
 ## Remaining Source Model Work
 
 **3.3 Hunts** (update `hunts/hunt.py`)
@@ -126,8 +138,9 @@ See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
 
 ### Near-Term
 
+- [ ] Absorb dfe-control-plane into dfe-engine (REST API + CLI + logging + hunt management)
+- [ ] Rules + Hunts workflow: API for rule CRUD (SQL match → strip time bounds → output record ID + rule ID + time to hunt results table with common header)
 - [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
-- [ ] More efficient hunt query spreading (EXPLAIN cost estimation, staggered scheduling)
 
 ### Future Enhancements
 

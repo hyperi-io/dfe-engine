@@ -65,10 +65,17 @@ class JobScheduler:
             logger.debug(details)
 
     async def add_job_with_cron(
-        self, job_function: Callable, cron_expression: str, job_name: str
+        self, job_function: Callable, cron_expression: str, job_name: str,
+        jitter: int = 0,
     ) -> Any:
         """
         Add a job to the scheduler based on a cron expression.
+
+        Args:
+            job_function: The function to execute.
+            cron_expression: Cron schedule string.
+            job_name: Human-readable job name.
+            jitter: Max random delay in seconds added to each fire time (0 = disabled).
         """
         if self.active_jobs is None:
             logger.warning("No active jobs list available. Skipping job addition.")
@@ -77,18 +84,19 @@ class JobScheduler:
         try:
             trigger = CronTrigger.from_crontab(cron_expression)
             job_id = f"{job_name}-{len(self.active_jobs)}"
-            job = self.scheduler.add_job(
-                job_function,
-                trigger,
-                id=job_id,
-                name=job_name,
-                misfire_grace_time=5,
-                coalesce=True,
-                max_instances=1,
-                replace_existing=False,
-            )
+            kwargs = {
+                "id": job_id,
+                "name": job_name,
+                "misfire_grace_time": 5,
+                "coalesce": True,
+                "max_instances": 1,
+                "replace_existing": False,
+            }
+            if jitter > 0:
+                kwargs["jitter"] = jitter
+            job = self.scheduler.add_job(job_function, trigger, **kwargs)
             self.active_jobs.append(job)
-            logger.debug(f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}")
+            logger.debug(f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}, jitter: {jitter}s")
             return job
         except Exception as e:
             logger.error(f"Error adding job with cron job : {e}")
