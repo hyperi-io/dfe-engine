@@ -1,0 +1,20 @@
+standard: cim
+version: "5.0"
+description: Default CIM (Splunk Common Information Model) field mappings for DFE platform
+mappings:
+  src_ip: source_ip
+  dest_ip: destination_ip
+  src_port: source_port
+  dest_port: destination_port
+  user: user_name
+  dest: destination_hostname
+  src: source_hostname
+  process_name: process_name
+  process: command_line
+  process_id: process_id
+  parent_process_name: parent_process_name
+  parent_process_id: parent_process_id
+  file_name: target_filename
+  file_path: file_path
+  service_name: service_name
+  action: event_action
