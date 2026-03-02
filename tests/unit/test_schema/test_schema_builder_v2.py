@@ -2,6 +2,8 @@
 
 import pytest
 
+from dfe_engine.fieldmap.models import FieldMap
+from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.schema.schema_builder_v2 import (
     SchemaBuildError,
     SchemaBuildResult,
@@ -70,6 +72,7 @@ def _make_source(
     ttl_days=90,
     engine="MergeTree",
     sigma_mappings=None,
+    mapping_standards=None,
 ) -> Source:
     """Helper to create a Source with schema config."""
     schema_config = {}
@@ -89,6 +92,8 @@ def _make_source(
     }
     if sigma_mappings:
         data["sigma"] = {"custom_mappings": sigma_mappings}
+    if mapping_standards:
+        data["mapping_standards"] = mapping_standards
 
     return Source.model_validate(data)
 
@@ -292,3 +297,162 @@ class TestBuildDDLOnly:
         assert "CREATE TABLE IF NOT EXISTS {db}.my_table" in ddl
         assert "`_ts`" in ddl
         assert "`x`" in ddl
+
+
+# ── View DDL Integration (FieldMapRegistry) ────────────────────────
+
+
+@pytest.fixture
+def field_maps_dir(tmp_path):
+    d = tmp_path / "field-maps"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def fm_registry(field_maps_dir):
+    FieldMapRegistry.reset_instance()
+    reg = FieldMapRegistry(
+        field_maps_directory=field_maps_dir,
+        writable=True,
+        refresh_interval=0,
+    )
+    yield reg
+    reg.close()
+    FieldMapRegistry.reset_instance()
+
+
+class TestViewDDLIntegration:
+    def test_no_views_without_registry(self, registry, schemas_dir):
+        """Without field_map_registry, view_ddls is empty."""
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(
+            meta_schema="meta.yaml",
+            mapping_standards=["sigma"],
+        )
+        result = builder.build(source)
+        assert result.view_ddls == {}
+
+    def test_no_views_without_mapping_standards(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """With registry but no mapping_standards on source, no views."""
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(meta_schema="meta.yaml")
+        result = builder.build(source)
+        assert result.view_ddls == {}
+
+    def test_generates_views_for_declared_standards(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """With registry + mapping_standards, views are generated."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"EventID": "event_id", "User": "user_name"},
+            )
+        )
+        fm_registry.save_map(
+            FieldMap(
+                standard="ecs",
+                mappings={"source.ip": "source_ip"},
+            )
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            mapping_standards=["sigma", "ecs"],
+        )
+        result = builder.build(source)
+
+        assert "sigma" in result.view_ddls
+        assert "ecs" in result.view_ddls
+        assert "test_source_sigma" in result.view_ddls["sigma"]
+        assert "test_source_ecs" in result.view_ddls["ecs"]
+        assert "`user_name` AS `User`" in result.view_ddls["sigma"]
+
+    def test_skips_standard_with_no_maps(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """If a declared standard has no maps, it's excluded from view_ddls."""
+        fm_registry.save_map(
+            FieldMap(standard="sigma", mappings={"X": "x"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            mapping_standards=["sigma", "ecs"],
+        )
+        result = builder.build(source)
+
+        assert "sigma" in result.view_ddls
+        assert "ecs" not in result.view_ddls
+
+    def test_legacy_sigma_view_coexists_with_view_ddls(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """Legacy sigma_view_ddl and new view_ddls are both populated."""
+        fm_registry.save_map(
+            FieldMap(standard="sigma", mappings={"EventID": "event_id"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            sigma_mappings={"User": "user_name"},
+            mapping_standards=["sigma"],
+        )
+        result = builder.build(source)
+
+        # Legacy path
+        assert result.sigma_view_ddl is not None
+        assert "`user_name` AS `User`" in result.sigma_view_ddl
+        # New path
+        assert "sigma" in result.view_ddls
+        assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
+
+    def test_source_specific_overrides_in_views(
+        self, registry, schemas_dir, fm_registry
+    ):
+        """Source-specific field map overrides default in view DDL."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"EventID": "event_id", "User": "user_name"},
+            )
+        )
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                source="test_source",
+                mappings={"EventID": "cs_event_id"},
+            )
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            mapping_standards=["sigma"],
+        )
+        result = builder.build(source)
+
+        assert "`cs_event_id` AS `EventID`" in result.view_ddls["sigma"]
+        assert "`user_name` AS `User`" in result.view_ddls["sigma"]
