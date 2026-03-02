@@ -33,6 +33,7 @@ from dfe_engine.fieldmap.resolver import (
     resolve_field,
     resolve_field_map,
 )
+from dfe_engine.fieldmap.view_generator import ViewGenerator
 
 __all__ = [
     # Models
@@ -47,4 +48,6 @@ __all__ = [
     # Resolver
     "resolve_field",
     "resolve_field_map",
+    # View generation
+    "ViewGenerator",
 ]
