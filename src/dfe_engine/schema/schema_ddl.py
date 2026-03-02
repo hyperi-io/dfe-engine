@@ -225,31 +225,35 @@ class DDLGenerator:
             f"MODIFY COLUMN {col_def};\n"
         )
 
-    # ── Sigma View ──────────────────────────────────────────────────
+    # ── Standard Views ─────────────────────────────────────────────
 
-    def generate_sigma_view(
+    def generate_view(
         self,
         table_name: str,
         mappings: dict[str, str],
+        suffix: str,
         config: DDLConfig | None = None,
     ) -> str:
-        """Generate CREATE OR REPLACE VIEW for Sigma field aliases.
+        """Generate CREATE OR REPLACE VIEW with field aliases.
+
+        View name: ``{table_name}_{suffix}``
+        (e.g. ``windows_audit_sigma``, ``windows_audit_ecs``).
 
         Args:
             table_name: Base table name.
-            mappings: Sigma field → column name mapping
-                      (e.g. {"SourceIP": "source_ip"}).
+            mappings: standard_field → column_name mapping.
+            suffix: View name suffix (e.g. "sigma", "ecs", "cim").
             config: DDL configuration.
 
         Returns:
             CREATE VIEW DDL string.
         """
         cfg = config or DDLConfig()
-        view_name = f"{table_name}_sigma"
+        view_name = f"{table_name}_{suffix}"
 
         aliases = []
-        for sigma_field, column_name in sorted(mappings.items()):
-            aliases.append(f"    `{column_name}` AS `{sigma_field}`")
+        for standard_field, column_name in sorted(mappings.items()):
+            aliases.append(f"    `{column_name}` AS `{standard_field}`")
 
         if aliases:
             select_parts = ",\n".join(aliases) + ",\n    *"
@@ -262,6 +266,15 @@ class DDLGenerator:
             f"{select_parts}\n"
             f"FROM {cfg.db}.{table_name};\n"
         )
+
+    def generate_sigma_view(
+        self,
+        table_name: str,
+        mappings: dict[str, str],
+        config: DDLConfig | None = None,
+    ) -> str:
+        """Generate Sigma view (convenience wrapper for generate_view)."""
+        return self.generate_view(table_name, mappings, "sigma", config)
 
     # ── Internal: body lines ────────────────────────────────────────
 

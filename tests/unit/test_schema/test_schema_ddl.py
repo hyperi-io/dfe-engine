@@ -342,6 +342,30 @@ class TestAlterTable:
         assert "LowCardinality(Nullable(String))" in ddl
 
 
+# ── Standard Views (generic) ─────────────────────────────────────────
+
+
+class TestGenerateView:
+    def test_generic_view_with_suffix(self, gen: DDLGenerator):
+        mappings = {"source.ip": "source_ip", "user.name": "user_name"}
+        ddl = gen.generate_view("syslog", mappings, "ecs")
+        assert "CREATE OR REPLACE VIEW {db}.syslog_ecs AS" in ddl
+        assert "`source_ip` AS `source.ip`" in ddl
+        assert "`user_name` AS `user.name`" in ddl
+        assert "FROM {db}.syslog" in ddl
+
+    def test_cim_suffix(self, gen: DDLGenerator):
+        ddl = gen.generate_view("t", {"src_ip": "source_ip"}, "cim")
+        assert "t_cim" in ddl
+
+    def test_sigma_via_generic(self, gen: DDLGenerator):
+        """generate_view with suffix='sigma' matches generate_sigma_view output."""
+        mappings = {"EventID": "event_id"}
+        via_generic = gen.generate_view("t", mappings, "sigma")
+        via_sigma = gen.generate_sigma_view("t", mappings)
+        assert via_generic == via_sigma
+
+
 # ── Sigma View ──────────────────────────────────────────────────────
 
 
