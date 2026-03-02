@@ -151,7 +151,10 @@ class HuntCheckpointManager:
                     query_checkpoint_time DateTime CODEC(DoubleDelta, LZ4),
                     execution_time_ms Int32 CODEC(Delta, ZSTD),
                     hunt_name LowCardinality(String) CODEC(LZ4),
-                    query_id LowCardinality(String) CODEC(LZ4)
+                    query_id LowCardinality(String) CODEC(LZ4),
+                    explain_plan String DEFAULT '' CODEC(ZSTD),
+                    explain_duration_ms Int32 DEFAULT 0 CODEC(Delta, ZSTD),
+                    scheduling_mode LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4)
                 ) ENGINE = {engine}
                 PARTITION BY toYYYYMM(query_checkpoint_time)
                 ORDER BY (customer_name, hunt_name, rule_name, query_checkpoint_time);
@@ -165,6 +168,25 @@ class HuntCheckpointManager:
             return False
 
         return True
+
+    def migrate_table_if_needed(self, ch_client) -> None:
+        """Add new columns to existing checkpoint tables (idempotent).
+
+        Safe to call on tables created before the adaptive scheduling update.
+        """
+        new_columns = [
+            ("explain_plan", "String DEFAULT '' CODEC(ZSTD)"),
+            ("explain_duration_ms", "Int32 DEFAULT 0 CODEC(Delta, ZSTD)"),
+            ("scheduling_mode", "LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4)"),
+        ]
+        for col_name, col_def in new_columns:
+            try:
+                ch_client.execute(
+                    f"ALTER TABLE {self.database_name}.{self.table_name} "
+                    f"ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
+                )
+            except Exception as e:
+                logger.warning(f"Checkpoint column migration {col_name}: {e}")
 
     def get_last_successful_run(
         self,
@@ -540,26 +562,32 @@ class HuntCheckpointManager:
                     int(checkpoint.get("execution_time_ms", 0)),
                     str(checkpoint.get("hunt_name", "na")),
                     str(checkpoint.get("query_id", "na")),
+                    str(checkpoint.get("explain_plan") or ""),
+                    int(checkpoint.get("explain_duration_ms") or 0),
+                    str(checkpoint.get("scheduling_mode", "adaptive")),
                 )
                 for checkpoint in checkpoints
             ]
 
             ch_client.execute(
                 f"""
-                INSERT INTO {self.database_name}.{self.table_name} 
+                INSERT INTO {self.database_name}.{self.table_name}
                 (
-                    customer_name, 
+                    customer_name,
                     rule_name,
-                    thread_id, 
-                    log_buffer, 
-                    query_schedule_time, 
-                    execution_time, 
-                    end_time, 
-                    previous_successful_checkpoint, 
-                    query_checkpoint_time, 
-                    execution_time_ms, 
-                    hunt_name, 
-                    query_id
+                    thread_id,
+                    log_buffer,
+                    query_schedule_time,
+                    execution_time,
+                    end_time,
+                    previous_successful_checkpoint,
+                    query_checkpoint_time,
+                    execution_time_ms,
+                    hunt_name,
+                    query_id,
+                    explain_plan,
+                    explain_duration_ms,
+                    scheduling_mode
                 ) VALUES
                 """,
                 data,

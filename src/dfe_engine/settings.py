@@ -121,6 +121,18 @@ class HuntsSettings(BaseModel):
     jitter_seconds: int = Field(
         default=15, description="Max random jitter in seconds for sub-minute stagger"
     )
+    scheduling_mode: str = Field(
+        default="adaptive",
+        description="'adaptive' (REFRESH AFTER backpressure) or 'cron' (rigid, deprecated)",
+    )
+    min_interval_seconds: int = Field(
+        default=0,
+        description="Min seconds between completion and next start (adaptive mode). 0 = derive from cron frequency",
+    )
+    explain_queries: bool = Field(
+        default=False,
+        description="Run EXPLAIN PLAN before each hunt query and log the plan",
+    )
 
 
 class ArtifactorySettings(BaseModel):
@@ -440,6 +452,12 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["cron_task_timeout"] = int(val)
     if val := _get_env("DFE_HUNTS_JITTER_SECONDS"):
         overrides["hunts"]["jitter_seconds"] = int(val)
+    if val := _get_env("DFE_HUNTS_SCHEDULING_MODE"):
+        overrides["hunts"]["scheduling_mode"] = val
+    if val := _get_env("DFE_HUNTS_MIN_INTERVAL_SECONDS"):
+        overrides["hunts"]["min_interval_seconds"] = int(val)
+    if val := _get_env("DFE_HUNTS_EXPLAIN_QUERIES"):
+        overrides["hunts"]["explain_queries"] = val.lower() in ("true", "1", "yes")
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):

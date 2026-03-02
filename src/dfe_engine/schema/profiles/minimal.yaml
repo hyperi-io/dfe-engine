@@ -8,7 +8,7 @@ versions:
   "1.0.0":
     date: "2026-01-15"
     type: model
-    summary: "Initial 4-column minimal header"
+    summary: "Initial 5-column minimal header"
     columns:
       - name: _timestamp_load
         type: timestamp
@@ -37,3 +37,8 @@ versions:
         order: 2
         expr: "@source: org_id"
         comment: "Tenant/organisation identifier"
+
+      - name: _json
+        type: json
+        expr: "@captured: raw_payload as JSON"
+        comment: "Original event payload as structured JSON"
