@@ -63,12 +63,18 @@ Generic standard-to-schema field mapping layer. Two-tier resolution (default tab
 - [x] Drop view support (`generate_drop_view`)
 - [x] 26 new tests (1120 total)
 
-**Phase 4: Integration**
+**Phase 4: Integration** — DONE (`6becc28`)
 
-- [ ] Wire `ViewGenerator` into `SchemaBuilderV2.build()` (optional FieldMapRegistry)
-- [ ] Source model: `mapping_standards` field (list of standards a source publishes views for)
-- [ ] Sigma adapter: refactor `SigmaSourceMapper` to use FieldMapRegistry as primary source
-- [ ] Schema compiler: populate `view_ddls` in build output
+- [x] Wire `ViewGenerator` into `SchemaBuilderV2.build()` (optional FieldMapRegistry)
+- [x] Source model: `mapping_standards` field (list of standards a source publishes views for)
+- [x] Schema compiler: populate `view_ddls` in build output
+- [x] 10 new tests (1130 total)
+
+**Phase 5: Sigma adapter refactoring**
+
+- [ ] Refactor `SigmaSourceMapper` to use FieldMapRegistry as primary source
+- [ ] Fallback to `Source.sigma.custom_mappings` for backward compatibility
+- [ ] Unit tests
 
 **Future (control-plane scope)**
 
