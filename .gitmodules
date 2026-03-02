@@ -11,3 +11,6 @@
 [submodule "schemas"]
 	path = schemas
 	url = https://github.com/hyperi-io/dfe-schemas.git
+[submodule "config"]
+	path = config
+	url = /projects/dfe-devex
