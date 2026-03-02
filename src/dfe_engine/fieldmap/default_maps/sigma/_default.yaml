@@ -1,0 +1,22 @@
+standard: sigma
+description: Default Sigma field mappings for DFE platform
+mappings:
+  EventID: event_id
+  CommandLine: command_line
+  Image: process_name
+  ParentImage: parent_process_name
+  ParentCommandLine: parent_command_line
+  ParentProcessId: parent_process_id
+  ProcessId: process_id
+  User: user_name
+  SourceIp: source_ip
+  DestinationIp: destination_ip
+  SourcePort: source_port
+  DestinationPort: destination_port
+  TargetFilename: target_filename
+  SourceHostname: source_hostname
+  DestinationHostname: destination_hostname
+  LogonType: logon_type
+  ServiceName: service_name
+  RegistryKey: registry_key
+  RegistryValue: registry_value
