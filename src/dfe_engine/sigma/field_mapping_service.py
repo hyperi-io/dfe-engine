@@ -1,7 +1,7 @@
 import os
 import csv
 from pathlib import Path
-from typing import Any, Dict, List, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
 from hyperi_pylib.logger import logger
 
@@ -334,181 +334,19 @@ class FieldMappingService:
 
         return missing_mappings
 
-    def get_db_schema_mappings(self, device: str, db_session=None) -> Dict[str, str]:
-        """
-        Gets field mappings from database for a specific device type.
-
-        Args:
-            device: Device type (windows, linux, etc.)
-            db_session: Database session for accessing sigma_mappings table
-
-        Returns:
-            Dictionary mapping sigma field names to schema field names
-        """
-        if not db_session:
-            return {}
-
-        mappings = {}
-        try:
-            from sqlalchemy import text as sa_text
-
-            result = db_session.execute(
-                sa_text("SELECT sigma_field, schema_field FROM sigma_mappings WHERE device = :device"),
-                {"device": device},
-            )
-
-            for row in result:
-                mappings[row.sigma_field] = row.schema_field
-
-            logger.info(
-                f"Loaded {len(mappings)} field mappings from database for device '{device}'"
-            )
-
-        except Exception as e:
-            logger.error(f"Error fetching field mappings from database: {e}")
-
-        return mappings
-
-    def get_db_meta_schema(self, schema_name: str, db_session=None) -> Dict[str, Dict[str, str]]:
-        """
-        Gets meta schema information from database.
-
-        Args:
-            schema_name: Name of the meta schema
-            db_session: Database session for accessing meta_schemas table
-
-        Returns:
-            Dictionary mapping column_names to their metadata
-        """
-        if not db_session:
-            return {}
-
-        schema_metadata = {}
-        try:
-            from sqlalchemy import text as sa_text
-
-            result = db_session.execute(
-                sa_text("""
-                    SELECT column_name, column_type, index_order
-                    FROM meta_schemas
-                    WHERE name = :schema_name
-                    ORDER BY index_order
-                """),
-                {"schema_name": schema_name},
-            )
-
-            for row in result:
-                schema_metadata[row.column_name] = {
-                    "type": row.column_type,
-                    "index_type": "text_search" if row.column_type == "text" else "",
-                    "index_order": row.index_order,
-                }
-
-            logger.info(
-                f"Loaded meta schema '{schema_name}' from database with {len(schema_metadata)} columns"
-            )
-
-        except Exception as e:
-            logger.error(f"Error fetching meta schema from database: {e}")
-
-        return schema_metadata
-
-    def get_db_derived_schema_additions(
-        self, schema_name: str, db_session=None
-    ) -> Dict[str, Dict[str, str]]:
-        """
-        Gets derived schema additional columns from database.
-
-        Args:
-            schema_name: Name of the derived schema
-            db_session: Database session for accessing derived_schemas table
-
-        Returns:
-            Dictionary mapping column_names to their metadata
-        """
-        if not db_session:
-            return {}
-
-        schema_metadata = {}
-        try:
-            from sqlalchemy import text as sa_text
-
-            result = db_session.execute(
-                sa_text("""
-                    SELECT column_name, column_type, index_order
-                    FROM derived_schemas
-                    WHERE name = :schema_name
-                    ORDER BY index_order
-                """),
-                {"schema_name": schema_name},
-            )
-
-            for row in result:
-                schema_metadata[row.column_name] = {
-                    "type": row.column_type,
-                    "index_type": "text_search" if row.column_type == "text" else "",
-                    "index_order": row.index_order,
-                }
-
-            logger.info(
-                f"Loaded derived schema additions for '{schema_name}' from database with {len(schema_metadata)} columns"
-            )
-
-        except Exception as e:
-            logger.error(f"Error fetching derived schema additions from database: {e}")
-
-        return schema_metadata
-
-    def get_db_derived_schema_overrides(self, schema_name: str, db_session=None) -> Set[str]:
-        """
-        Gets derived schema column overrides from database.
-
-        Args:
-            schema_name: Name of the derived schema
-            db_session: Database session for accessing derived_schemas table
-
-        Returns:
-            Set of column names that should be excluded from the meta schema
-        """
-        if not db_session:
-            return set()
-
-        excluded_columns = set()
-        try:
-            logger.info(
-                f"No column overrides available for derived schema '{schema_name}' in unified table structure"
-            )
-
-        except Exception as e:
-            logger.error(f"Error fetching derived schema overrides from database: {e}")
-
-        return excluded_columns
-
     def get_combined_schema_mappings(
-        self, schema_config: dict, rule_name: str, db_session=None
+        self, schema_config: dict, rule_name: str
     ) -> Dict[str, str]:
         """
-        Gets field mappings from either database (if db_session provided) or files (CLI mode).
-
-        This method acts as a facade to switch between database and file-based operations.
+        Gets field mappings from schema files.
 
         Args:
             schema_config: Schema configuration dictionary
             rule_name: Name of the sigma rule
-            db_session: Database session (if None, uses file-based approach for CLI)
 
         Returns:
             Dictionary mapping sigma fields to schema fields
         """
-        device = schema_config.get("device", "windows")
-
-        if db_session:
-            mappings = self.get_db_schema_mappings(device, db_session)
-            logger.info(
-                f"Using database-based mappings with {len(mappings)} entries for device '{device}'"
-            )
-            return mappings
-
         file_mappings, _ = self.get_schema_mappings(schema_config, rule_name)
         logger.info(f"Using file-based mappings with {len(file_mappings)} entries")
         return file_mappings

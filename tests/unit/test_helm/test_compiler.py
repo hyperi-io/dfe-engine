@@ -4,7 +4,6 @@ import pytest
 
 from dfe_engine.helm.compiler import HelmValuesCompiler, _scrub_secrets
 from dfe_engine.helm.environment import (
-    ArgoEnvironment,
     ClickHouseEnvironment,
     EnvironmentConfig,
     KafkaEnvironment,
@@ -315,7 +314,7 @@ class TestOtelInjection:
             otel = env.otel
             extra_env["OTEL_EXPORTER_OTLP_ENDPOINT"] = otel.collector_endpoint
             extra_env["OTEL_EXPORTER_OTLP_PROTOCOL"] = otel.protocol
-            extra_env["OTEL_SERVICE_NAME"] = f"dfe-receiver"
+            extra_env["OTEL_SERVICE_NAME"] = "dfe-receiver"
             attrs = f"service.namespace=dfe,deployment.environment={env.name}"
             for k, v in otel.resource_attributes.items():
                 attrs += f",{k}={v}"

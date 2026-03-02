@@ -34,13 +34,6 @@ Artifactory:
 - DFE_ARTIFACTORY_PASSWORD -> artifactory.password
 - DFE_TEMPLATES_VERSION -> artifactory.templates_version
 
-Postgres:
-- DFE_POSTGRES_HOST (legacy: POSTGRES_HOST) -> postgres.host
-- DFE_POSTGRES_PORT (legacy: POSTGRES_PORT) -> postgres.port
-- DFE_POSTGRES_USER (legacy: POSTGRES_USER) -> postgres.username
-- DFE_POSTGRES_PASSWORD (legacy: POSTGRES_PASSWORD) -> postgres.password
-- DFE_POSTGRES_DATABASE (legacy: POSTGRES_DATABASE) -> postgres.database
-
 Kafka:
 - DFE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
 - DFE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
@@ -101,15 +94,6 @@ class ArtifactorySettings(BaseModel):
     password: str = Field(default="")
     templates_version: str = Field(default="latest")
 
-
-class PostgresSettings(BaseModel):
-    """PostgreSQL connection settings."""
-
-    host: str = Field(default="localhost")
-    port: int = Field(default=5432)
-    username: str = Field(default="postgres")
-    password: str = Field(default="")
-    database: str = Field(default="dfe_engine")
 
 
 class KafkaSettings(BaseModel):
@@ -296,7 +280,6 @@ class DFESettings(BaseModel):
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     hunts: HuntsSettings = Field(default_factory=HuntsSettings)
     artifactory: ArtifactorySettings = Field(default_factory=ArtifactorySettings)
-    postgres: PostgresSettings = Field(default_factory=PostgresSettings)
     kafka: KafkaSettings = Field(default_factory=KafkaSettings)
     storage: StorageSettings = Field(default_factory=StorageSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
@@ -325,7 +308,6 @@ def _get_env_overrides() -> dict:
         "clickhouse": {},
         "hunts": {},
         "artifactory": {},
-        "postgres": {},
         "kafka": {},
         "storage": {},
         "query": {},
@@ -370,18 +352,6 @@ def _get_env_overrides() -> dict:
         overrides["artifactory"]["password"] = val
     if val := _get_env("DFE_TEMPLATES_VERSION", "TEMPLATES_VERSION"):
         overrides["artifactory"]["templates_version"] = val
-
-    # PostgreSQL settings (DFE_ prefix with legacy fallbacks)
-    if val := _get_env("DFE_POSTGRES_HOST", "POSTGRES_HOST"):
-        overrides["postgres"]["host"] = val
-    if val := _get_env("DFE_POSTGRES_PORT", "POSTGRES_PORT"):
-        overrides["postgres"]["port"] = int(val)
-    if val := _get_env("DFE_POSTGRES_USER", "POSTGRES_USER"):
-        overrides["postgres"]["username"] = val
-    if val := _get_env("DFE_POSTGRES_PASSWORD", "POSTGRES_PASSWORD"):
-        overrides["postgres"]["password"] = val
-    if val := _get_env("DFE_POSTGRES_DATABASE", "POSTGRES_DATABASE"):
-        overrides["postgres"]["database"] = val
 
     # Kafka settings (DFE_ prefix with legacy fallbacks)
     if val := _get_env("DFE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS"):

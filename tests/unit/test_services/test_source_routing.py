@@ -13,7 +13,7 @@ from dfe_engine.services.source_routing import (
     compile_loader_routing,
     compile_receiver_routing,
 )
-from dfe_engine.source.models import Source, SourceMatch, SourceSigma
+from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceNotFoundError
 
 

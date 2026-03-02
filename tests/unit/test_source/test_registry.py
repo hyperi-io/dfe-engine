@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.source.models import Source, SourceMatch
+from dfe_engine.source.models import Source
 from dfe_engine.source.registry import (
     SourceNotFoundError,
     SourceRegistry,
