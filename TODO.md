@@ -70,11 +70,11 @@ Generic standard-to-schema field mapping layer. Two-tier resolution (default tab
 - [x] Schema compiler: populate `view_ddls` in build output
 - [x] 10 new tests (1130 total)
 
-**Phase 5: Sigma adapter refactoring**
+**Phase 5: Sigma adapter refactoring** — DONE (`3976d08`)
 
-- [ ] Refactor `SigmaSourceMapper` to use FieldMapRegistry as primary source
-- [ ] Fallback to `Source.sigma.custom_mappings` for backward compatibility
-- [ ] Unit tests
+- [x] `SigmaSourceMapper` accepts optional `field_map_registry` parameter
+- [x] Two-tier registry resolution with fallback to `Source.sigma.custom_mappings`
+- [x] 6 new tests (1136 total)
 
 **Future (control-plane scope)**
 

@@ -84,32 +84,44 @@
 
 ## Current Session (2026-03-02)
 
-### Completed — Clean-Slate Restructure
+### Completed — Field Mapping Layer (Phases 1-5)
 
-8-phase restructure eliminating all legacy code, shims, and tech debt:
+Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom standards.
 
-**Phase 1:** Deleted dead modules (`config/config.py`, `config/custom_exceptions.py`, `targets/`, `data/`), 5 skipped test suites, phantom deps (deepdiff, gitpython, sqlparse)
+**Phase 1** (`8761e3e`): Core models + resolver
+- `FieldMap` Pydantic model, `FieldMapRegistry` (DirectoryConfigStore-backed)
+- `resolve_field_map()` — two-tier resolution (default + source-specific)
+- Default seed maps for Sigma, ECS, CIM as package resources
+- 60 tests
 
-**Phase 2:** Deleted v1 schema code — 6,427 lines across 8 files (schema_builder.py, schema_ch.py, schema_controller.py, schema_executor.py, schema_plan.py, schema_update.py, schema_util.py, schema_version_manager.py) + v1 test suites
+**Phase 2+3** (`6ec3491`): View DDL generation
+- `ViewGenerator` — CREATE VIEW DDL from resolved field maps
+- Generic `DDLGenerator.generate_view()` with configurable suffix
+- `SchemaBuildResult.view_ddls` for multi-standard view output
+- 26 tests
 
-**Phase 3:** Removed sqlalchemy/DB mode from sigma module — deleted 4 DB methods from field_mapping_service.py, removed db_session/API mode from sigma_converter.py, removed sqlalchemy dependency
+**Phase 4** (`6becc28`): Schema compiler integration
+- `Source.mapping_standards` field for declaring view standards
+- `SchemaBuilderV2` accepts optional `field_map_registry`, auto-generates views
+- Legacy `sigma_view_ddl` preserved for backward compatibility
+- 10 tests
 
-**Phase 4:** Deleted DFEConfigLoader compatibility shim — rewrote hunts_controller.py and pipeline_controller.py to use `get_settings()` + `yaml_load()` directly. Replaced `DFEConfigLoader.read_target_config()` with settings-based target config.
+**Phase 5** (`3976d08`): Sigma adapter refactoring
+- `SigmaSourceMapper` accepts optional `field_map_registry`
+- Two-tier registry resolution → fallback to `Source.sigma.custom_mappings`
+- 6 tests
 
-**Phase 5:** Flattened hunts/ triple nesting (`hunts/hunts/hunts.py` → `hunts/hunt.py`, etc.). 8 files moved, all imports updated.
+**Test results:** 1136 passed, 0 failures
 
-**Phase 6:** Added ExternalComponent model for two-mode Helm/Argo CD management. `ChartSource` + `ExternalComponent` on `EnvironmentConfig`, compiler generates values and Argo CD Application CRDs for external components.
+### Completed — Clean-Slate Restructure + DESIGN.md
 
-**Phase 7:** Added proper `__init__.py` exports to schema/, clickhouse/, pipeline/, sigma/, hunts/. Fixed `__version__` to use `importlib.metadata.version()`. Removed `PostgresSettings` from settings.py and defaults.yaml. Removed importlib-metadata dependency.
-
-**Phase 8:** Lint cleanup (ruff), final verification.
-
-**Test results:** 1034 passed, 0 skipped, 0 errors, 0 failures
-**Dependencies removed:** deepdiff, gitpython, sqlparse, sqlalchemy, importlib-metadata (5 deps)
+- 8-phase restructure: deleted legacy code, shims, tech debt (1034 tests)
+- DESIGN.md with 11 mermaid diagrams (GitOps, CRUD, field mapping, deployment)
 
 ### Previous Sessions
 
-- **2026-03-02 (earlier):** Phase 8c — Argo CD Application/AppProject CRD generator (1075 passed, 26 skipped)
+- **2026-03-02 (earlier):** Clean-slate restructure (8 phases), DESIGN.md
+- **2026-03-02 (earlier):** Phase 8c — Argo CD Application/AppProject CRD generator (1075 passed)
 - **2026-03-01:** Phase 8b — OTEL env config, KEDA scalers, Argo RBAC generator (1026 tests)
 - **2026-02-28:** Phases 1-8 — Source model, schema v2, sigma mapper, service routing, v1 removal, Helm compiler + RBAC (971 tests)
 
@@ -120,10 +132,11 @@
 | Module        | Status | Notes                                                            |
 | ------------- | ------ | ---------------------------------------------------------------- |
 | `source/`     | Ready  | TypeRegistry, Source model, SourceRegistry — 112 tests           |
-| `schema/`     | Ready  | v2 YAML→DDL pipeline (v1 deleted)                               |
+| `schema/`     | Ready  | v2 YAML→DDL pipeline, ViewGenerator integration                  |
+| `fieldmap/`   | Ready  | FieldMap model, registry, resolver, ViewGenerator — 96 tests     |
 | `clickhouse/` | Ready  | clickhouse-connect client management                             |
 | `pipeline/`   | Ready  | Vector pipeline generation (core build/render logic)             |
-| `sigma/`      | Ready  | SigmaSourceMapper + converter + field mapping (file-based only)  |
+| `sigma/`      | Ready  | SigmaSourceMapper + converter, FieldMapRegistry integration      |
 | `hunts/`      | Ready  | Flat structure: hunt, controller, checkpoint, scheduler, validator, cron_runner, cron_job, job |
 | `query/`      | Ready  | YAML SSoT registry, Arrow-native output, built-in queries        |
 | `services/`   | Ready  | YAML SSoT registry, source routing, default configs, validators  |
