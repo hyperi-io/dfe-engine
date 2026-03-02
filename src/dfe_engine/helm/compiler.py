@@ -16,7 +16,7 @@ from typing import Any
 from pydantic import SecretStr
 
 from dfe_engine.deployment.registry import DeploymentConfigRegistry
-from dfe_engine.helm.environment import EnvironmentConfig
+from dfe_engine.helm.environment import EnvironmentConfig, ExternalComponent
 from dfe_engine.helm.models import (
     CompilationResult,
     HelmKedaConfig,
@@ -25,7 +25,7 @@ from dfe_engine.helm.models import (
 )
 from dfe_engine.services.registry import ServiceConfigRegistry
 from dfe_engine.source.registry import SourceRegistry
-from dfe_engine.yaml_utils import yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 class HelmValuesCompiler:
@@ -144,6 +144,18 @@ class HelmValuesCompiler:
                 roles=result.argo_appproject_roles,
             )
 
+        # Compile external (Mode 2) components
+        for component in self._env.components:
+            if not component.enabled:
+                continue
+            comp_values = self.compile_external_component(component)
+            for inst_key, values_dict in comp_values.items():
+                result.helm_values[inst_key] = values_dict
+            # Generate Argo CD Application CRDs for external components
+            if self._env.argo.enabled:
+                comp_apps = self._compile_external_argo_apps(component)
+                result.argo_applications.extend(comp_apps)
+
         return result
 
     def compile_service(self, service: str, instance: str) -> HelmServiceValues:
@@ -211,6 +223,70 @@ class HelmValuesCompiler:
         )
 
         return values
+
+    def compile_external_component(
+        self, component: "ExternalComponent"
+    ) -> dict[str, dict[str, Any]]:
+        """Compile Helm values for an external (Mode 2) component.
+
+        Loads base values from each instance's values file path, then
+        deep-merges any ``values_overrides`` for that instance on top.
+
+        Args:
+            component: ExternalComponent model from EnvironmentConfig.
+
+        Returns:
+            Dict mapping ``{component.name}-{instance}`` to merged values dict.
+        """
+        import copy
+
+        from deepmerge import always_merger
+
+        results: dict[str, dict[str, Any]] = {}
+        for inst_name, values_path in component.instances.items():
+            key = f"{component.name}-{inst_name}"
+            try:
+                base = yaml_load(values_path) or {}
+            except FileNotFoundError:
+                base = {}
+
+            overrides = component.values_overrides.get(inst_name, {})
+            if overrides:
+                merged = copy.deepcopy(base)
+                always_merger.merge(merged, overrides)
+            else:
+                merged = base
+
+            results[key] = merged
+        return results
+
+    def _compile_external_argo_apps(
+        self, component: "ExternalComponent"
+    ) -> list[dict[str, Any]]:
+        """Generate Argo CD Application CRDs for an external component."""
+        from dfe_engine.helm.argo_app import generate_application
+
+        apps: list[dict[str, Any]] = []
+        argo = self._env.argo
+        for inst_name in component.instances:
+            app_name = f"{component.name}-{inst_name}"
+            values_path = f"{argo.values_path_prefix}/{app_name}-values.yaml"
+            app = generate_application(
+                service=component.name,
+                instance=inst_name,
+                environment_name=self._env.name,
+                namespace=component.namespace,
+                argo_project=argo.project,
+                chart_repo_url=component.chart.repo_url,
+                chart_name=component.chart.name,
+                chart_version=component.chart.version or "latest",
+                values_path=values_path,
+                destination_server=argo.destination_server,
+                sync_policy=argo.sync_policy.to_argo_dict(),
+                extra_labels=argo.labels or None,
+            )
+            apps.append(app)
+        return apps
 
     def compile_ddl(self) -> list[str]:
         """Compile CREATE TABLE DDL for all enabled sources.
@@ -300,7 +376,10 @@ class HelmValuesCompiler:
 
         for key, values in sorted(result.helm_values.items()):
             path = output_dir / f"{key}-values.yaml"
-            data = values.model_dump(mode="json")
+            if hasattr(values, "model_dump"):
+                data = values.model_dump(mode="json")
+            else:
+                data = values  # External component — already a dict
             yaml_dump(data, path)
             written.append(path)
 

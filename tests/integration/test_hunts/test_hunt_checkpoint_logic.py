@@ -1,8 +1,7 @@
 import uuid
 import pytest
-from pytz import utc
-from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
-from dfe_engine.config.config_loader import DFEConfigLoader
+from dfe_engine.hunts.checkpoint import HuntCheckpointManager
+from dfe_engine.settings import get_settings
 import time
 from hyperi_pylib.logger import logger as hs_logger
 from datetime import datetime, timezone, timedelta
@@ -34,13 +33,17 @@ def load_config(file_path: Path) -> dict:
 
 
 @pytest.fixture(scope="module")
-def ch_client(dfe_config_fixtures):
+def ch_client():
     """Fixture for setting up the ClickHouse client."""
-    config = DFEConfigLoader.read_clickhouse_config(
-        target_name=dfe_config_fixtures["global_settings"]["default_target"],
-        targets_file_path=dfe_config_fixtures["global_settings"]["target_path"],
-    )
-    print(f"*** using config {config}")
+    settings = get_settings()
+    config = {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+    }
     ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
     yield ch_client
 
@@ -211,7 +214,7 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
         assert query_checkpoint_time is not None
 
         if query_checkpoint_time.tzinfo is None:
-            query_checkpoint_time = utc.localize(query_checkpoint_time)
+            query_checkpoint_time = query_checkpoint_time.replace(tzinfo=timezone.utc)
 
         logger.info(f"Retrieved previous successful run time: {previous_success_time}")
         logger.info(f"Retrieved last successful run time: {query_checkpoint_time}")

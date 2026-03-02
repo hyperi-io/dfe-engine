@@ -1,5 +1,5 @@
 import pytest
-from dfe_engine.hunts.hunts.hunts_controller import HuntController
+from dfe_engine.hunts.controller import HuntController
 
 
 def test_print_hunt_parameters(dfe_config_fixtures, setup_paths, dfe_package):

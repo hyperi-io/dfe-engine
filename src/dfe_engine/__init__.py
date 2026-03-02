@@ -8,12 +8,21 @@
 
 """DFE Engine - Core library for Data Fusion Engine.
 
-This package provides the core functionality for:
-- Schema management (ClickHouse)
-- Pipeline building (Vector configurations)
-- Hunt scheduling and execution
-- Sigma rule conversion
-- Configuration management
+Modules:
+    source      — Source model, type registry, source registry
+    schema      — Schema v2 YAML→DDL pipeline
+    clickhouse  — ClickHouse client management
+    pipeline    — Vector pipeline generation
+    hunts       — Hunt scheduling and execution
+    sigma       — Sigma rule conversion and field mapping
+    services    — Service config registry and source routing
+    helm        — Helm values compiler and Argo CD generators
+    deployment  — K8s deployment config models
+    auth        — Engine RBAC
+    query       — Query registry and execution
+    settings    — Pydantic settings cascade
 """
 
-__version__ = "1.0.0"
+from importlib.metadata import version
+
+__version__ = version("dfe-engine")

@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import pytest
 
-from dfe_engine.source.models import Source, SourceSchema, SourceSigma
+from dfe_engine.source.models import Source, SourceSigma
 from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.source.type_registry import TypeRegistry
 
