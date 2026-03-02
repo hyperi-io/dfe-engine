@@ -4,25 +4,84 @@
 
 ---
 
-## WBS: Source + Schema v2 Implementation
+## Completed — Clean-Slate Restructure (2026-03-02)
 
-Design docs: [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md](docs/SYNC.md).
+- [x] Phase 1: Delete dead modules (config.py, targets/, data/) + skipped tests + phantom deps
+- [x] Phase 2: Delete v1 schema code (6,427 lines) + v1 tests
+- [x] Phase 3: Clean up sigma module — remove sqlalchemy/DB mode
+- [x] Phase 4: Delete DFEConfigLoader + rewrite controllers to settings/Source
+- [x] Phase 5: Flatten hunts/ structure (triple nesting → flat)
+- [x] Phase 6: Add ExternalComponent model for two-mode Helm/Argo CD
+- [x] Phase 7: Add proper `__init__.py` exports + fix package metadata + remove PostgresSettings
+- [x] Phase 8: Final lint + test verification (1034 passed, 0 skipped)
+- [x] Dependencies removed: deepdiff, gitpython, sqlparse, sqlalchemy, importlib-metadata
 
-### Completed Phases
+## Completed — Source + Schema v2 WBS
 
-- **Phase 1: Foundation** — TypeRegistry, Source model, SourceRegistry (112 tests)
-- **Phase 2: Schema v2** — SchemaLoader, DDLGenerator, SchemaBuilderV2
-- **Phase 3: Sigma** — SigmaSourceMapper, sigma_converter updated, lazy sqlalchemy (24 tests)
-- **Phase 4: Service Models** — source_routing for receiver + loader (17 tests)
-- **Phase 5: v1 Removal** — deprecated/, schemas/, CSV resources, dead tests deleted
-- **Phase 7: Cleanup** — DFEConfigLoader shim, pythonpath fix, test123 fix, dependency update
-- **Phase 8: Helm + Auth** — HelmValuesCompiler, bespoke RBAC, auth module (71 tests, 971 total)
-- **Phase 8b: Helm + Auth Enhancements** — Argo RBAC gen, OTEL env config, KEDA scalers, deepmerge, infra_admin role (1026 total)
-- **Phase 8c: Argo CD App Generator** — Application + AppProject CRD generation, ArgoSyncPolicy/ArgoEnvironment models, compiler integration (1075 total)
+- [x] Phase 1: TypeRegistry, Source model, SourceRegistry (112 tests)
+- [x] Phase 2: SchemaLoader, DDLGenerator, SchemaBuilderV2
+- [x] Phase 3: SigmaSourceMapper, sigma_converter updated (24 tests)
+- [x] Phase 4: Service routing for receiver + loader (17 tests)
+- [x] Phase 5: v1 removal — deprecated/, schemas/, CSV resources
+- [x] Phase 7: Cleanup — pythonpath fix, dependency update
+- [x] Phase 8: Helm + Auth — HelmValuesCompiler, RBAC, auth module (71 tests)
+- [x] Phase 8b: OTEL env config, KEDA scalers, Argo RBAC gen
+- [x] Phase 8c: Argo CD Application + AppProject CRD generation
 
-### Remaining WBS Work
+---
 
-**3.3 Hunts** (update `hunts/hunts/hunts.py`)
+## Completed — DESIGN.md + Architecture Documentation
+
+- [x] `/docs/DESIGN.md` created with mermaid diagrams covering:
+  - GitOps config repo model (engine preferred but not exclusive, read-before-write, blob SHA ETag)
+  - Git-native CRUD for UI (REST API, change preview, audit trail, conflict modal)
+  - API layer architecture (FastAPI, generic CRUD router factory, engine stays library)
+  - Field mapping layer (two-tier default + source-specific, YAML-managed, Sigma/ECS/CIM)
+  - Deployment architecture (two-mode Helm/Argo CD, runtime data flow)
+  - Source model integration diagram
+
+---
+
+## WBS: Field Mapping Layer (Sigma/ECS/CIM)
+
+Generic standard-to-schema field mapping layer. Two-tier resolution (default table map + source-specific overrides). YAML-managed in config repo. See [DESIGN.md](docs/DESIGN.md) §5.
+
+**Phase 1: Core field mapping models + resolver**
+
+- [ ] `FieldMap` Pydantic model (standard, source, inherits, mappings dict)
+- [ ] `FieldMapRegistry` — DirectoryConfigStore-backed, loads from `field-maps/` directory
+- [ ] `FieldMapResolver` — two-tier resolution: source-specific > default > passthrough
+- [ ] Default table map support (`_default.yaml` per standard)
+- [ ] Unit tests
+
+**Phase 2: Standard adapters**
+
+- [ ] Sigma adapter — refactor `SigmaSourceMapper` to use `FieldMapResolver` instead of `Source.sigma.custom_mappings`
+- [ ] ECS adapter — ship default ECS 8.x field map as package resource, seed to config repo
+- [ ] CIM adapter — ship default Splunk CIM field map as package resource, seed to config repo
+- [ ] Unit tests per adapter
+
+**Phase 3: View DDL generation**
+
+- [ ] `ViewGenerator` — generate `CREATE VIEW` DDL from resolved field maps
+- [ ] View naming convention: `{standard}_{source}` (e.g. `ecs_windows_audit`)
+- [ ] Integrate into `DDLGenerator` — views generated alongside table DDL
+- [ ] View lifecycle: create/update/drop as field maps change
+- [ ] Unit tests
+
+**Phase 4: Integration + UI support**
+
+- [ ] Source model: `mapping_profiles` field (list of standards a source supports)
+- [ ] Schema compiler: generate view DDL in compile output
+- [ ] Helm compiler: include view DDL in output
+- [ ] API model for field mapping CRUD (used by control plane)
+- [ ] Field mapping UI data model (standard fields + DFE columns + inheritance indicator)
+
+---
+
+## Remaining Source Model Work
+
+**3.3 Hunts** (update `hunts/hunt.py`)
 
 - [ ] Wire hunt rule loading to Source model (rule.source → SourceRegistry)
 - [ ] Template variables: `{db}`, `{source}` resolved from Source
@@ -30,45 +89,29 @@ Design docs: [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md]
 - [ ] Update hunt validator for new schema format
 - [ ] Unit tests
 
-**7.4 Remove dfe_package.yaml dependencies** (6 source files)
+**7.4 Remove dfe_package.yaml dependencies** (remaining files)
 
 - [ ] `sigma/field_mapping_service.py` → Source model
 - [ ] `sigma/sigma_converter.py` → Source model
-- [ ] `schema/schema_controller.py` → Source model
-- [ ] `hunts/hunts/hunts_controller.py` → Source model
 - [ ] `pipeline/pipeline_controller.py` → Source model
 - [ ] `pipeline/pipeline_util.py` → Source model
 
-**7.5 Final lint pass**
+---
 
-- [ ] `ruff check src/` — clean
-- [ ] `ruff check tests/` — clean
-- [ ] Remove unused imports across codebase
+## Config Repo Implementation (Planning)
 
-### Verification Checklist
+See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
 
-- [x] `pytest tests/unit/` — 1075 passed, 26 skipped, 0 errors, 0 failures
-- [ ] `ruff check src/` — clean
-- [ ] `grep -r "dfe_package" src/dfe_engine/` — zero results
-- [x] `src/deprecated/` does not exist
-- [x] `src/dfe_engine/schemas/` does not exist
-- [x] `src/dfe_engine/dfe-data-resources/` does not exist
+- [ ] Create `dfe-config` repo with directory structure from DESIGN.md §2.2
+- [ ] Seed default field maps (Sigma/ECS/CIM) as package resources
+- [ ] Implement blob SHA ETag computation for conflict detection
+- [ ] Implement read-before-write pattern in DirectoryConfigStore writes
+- [ ] Dev workflow: DevEx cluster config repo with default values
+- [ ] AWS alternative: S3-backed config store with versioning
 
 ---
 
-## Config Subrepo Design (Planning)
-
-Shared git repo mounted as submodule by each component:
-
-- [ ] Design repo structure (subdirs per component: engine/, loader/, receiver/, hunts/)
-- [ ] Define write access model (each component masters its own domain)
-- [ ] Source definitions mastered by engine, readable by all
-- [ ] Dev workflow: components work in isolation via submodule, together on same machine
-- [ ] Consider repurposing existing `dfe-data-resources` submodule
-
----
-
-## Backlog (post-WBS)
+## Backlog
 
 ### Architecture (decided, not yet implemented)
 
@@ -76,28 +119,23 @@ Shared git repo mounted as submodule by each component:
 - [ ] Implement HyperDX OIDC middleware (docs/oauth2/HYPERDX-MIDDLEWARE.md)
 - [ ] Deploy Envoy Gateway with native OIDC (replaces nginx-ingress + oauth2-proxy)
 - [ ] OTEL metrics in Rust services (replace Prometheus)
-- [ ] Service properties from Helm chart with config cascade (concept)
 
 ### Near-Term
 
-- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io) — real Argo CD, KEDA, OTEL, ClickHouse, Kafka
+- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
 - [ ] More efficient hunt query spreading (EXPLAIN cost estimation, staggered scheduling)
 
 ### Future Enhancements
 
-- [ ] Cedar policy backend for auth (optional .cedar files + cedarpy, YAML stays default)
-- [ ] Dev/test mode: auth disabled, root mode, seed defaults for dfe-docker compose
-- [ ] Hunt query staggering (EXPLAIN cost estimation)
+- [ ] Cedar policy backend for auth (optional .cedar files + cedarpy)
+- [ ] Dev/test mode: auth disabled, root mode, seed defaults
 - [ ] Async ClickHouse operations
 - [ ] Schema diff visualization
-- [ ] Storage abstraction layer (local, S3, HTTP)
 
 ### Technical Debt
 
-- [ ] Replace mock-heavy tests with integration tests (engine is an integration layer — mocks have low value)
 - [ ] Increase test coverage to 90%+
 - [ ] Add type hints to all public APIs
-- [ ] SPDX-compliant headers on all source files
 
 ---
 
@@ -105,10 +143,9 @@ Shared git repo mounted as submodule by each component:
 
 - Use `uv` for all Python package management (NOT pip)
 - Virtual environment: `~/.venv` (Python 3.12)
-- `psycopg[binary]>=3.3.3` is psycopg v3 (async-capable, pure-Python + C-accelerated)
 - See STATE.md for project status and architecture decisions
-- Design docs: [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md](docs/SYNC.md)
+- Design docs: [DESIGN.md](docs/DESIGN.md), [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md](docs/SYNC.md)
 
 ---
 
-**Last Updated:** 2026-03-02 (Phase 8c complete)
+**Last Updated:** 2026-03-02
