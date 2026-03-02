@@ -157,11 +157,69 @@ class ArgoEnvironment(BaseModel):
     )
 
 
+class ChartSource(BaseModel):
+    """Helm chart source for an external component."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    repo_url: str = Field(..., description="Helm chart repository URL")
+    name: str = Field(..., description="Chart name (e.g. vector, kafbat-ui)")
+    version: str = Field(default="", description="Chart version constraint")
+
+
+class ExternalComponent(BaseModel):
+    """An externally-sourced component managed via Helm + Argo CD.
+
+    Mode 2 deployment: the chart comes from an upstream repository
+    (e.g. vector.dev, kafbat, HyperDX). Engine provides a base values
+    file per instance plus ``values_overrides`` deep-merged on top.
+
+    Example YAML::
+
+        components:
+          - name: vector
+            chart:
+              repo_url: https://helm.vector.dev
+              name: vector
+              version: "0.42.1"
+            namespace: dfe
+            instances:
+              receiver: values/vector-receiver.yaml
+              pipelines: values/vector-pipelines.yaml
+            values_overrides:
+              receiver:
+                customConfig:
+                  api:
+                    enabled: true
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(..., description="Component name (e.g. vector, kafbat-ui)")
+    chart: ChartSource = Field(..., description="Upstream Helm chart source")
+    namespace: str = Field(default="dfe", description="K8s namespace for this component")
+    instances: dict[str, str] = Field(
+        default_factory=dict,
+        description="Instance name → base values file path",
+    )
+    values_overrides: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Instance name → values dict deep-merged onto base",
+    )
+    enabled: bool = Field(default=True, description="Whether this component is deployed")
+
+
 class EnvironmentConfig(BaseModel):
     """Deployment environment configuration.
 
     Contains infrastructure connection details shared by all services
     in a single deployment environment.
+
+    Services are deployed in two modes:
+      - Mode 1 (DFE-managed): built from engine Pydantic models, chart in our repo
+      - Mode 2 (External): upstream charts with base values + engine overrides
+
+    Mode 2 components are listed under ``components``.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -184,6 +242,10 @@ class EnvironmentConfig(BaseModel):
     )
     argo: ArgoEnvironment = Field(
         default_factory=ArgoEnvironment, description="Argo CD configuration"
+    )
+    components: list[ExternalComponent] = Field(
+        default_factory=list,
+        description="External (Mode 2) components — upstream charts with engine overrides",
     )
 
     @classmethod

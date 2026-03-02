@@ -1,6 +1,6 @@
 import asyncio
 import os
-import sys
+import re
 from pathlib import Path
 import signal
 import pandas as pd
@@ -8,12 +8,39 @@ from tabulate import tabulate
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Union
 from hyperi_pylib.logger import logger
-from .hunts_scheduler import HuntScheduler
-from ..runner.cron_runner import CronRunner
-from ...config.config_loader import DFEConfigLoader
-from ...settings import get_settings
+from .scheduler import HuntScheduler
+from .cron_runner import CronRunner
+from ..settings import get_settings
+from ..yaml_utils import yaml_load_string
 import multiprocessing
 import time
+
+
+def _load_yaml_config(config_file_path: str | None = None, require: bool = True) -> dict:
+    """Load a YAML config file with environment variable substitution."""
+    path = Path(config_file_path) if config_file_path else Path.cwd() / "dfe_package.yaml"
+    if not path.exists():
+        if require:
+            raise FileNotFoundError(f"Configuration file [{path}] not found")
+        return {}
+    content = path.read_text()
+    content = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), content)
+    return yaml_load_string(content) or {}
+
+
+def _get_target_config(target_name: str | None = None) -> dict:
+    """Build a target config dict from settings (replaces DFEConfigLoader.read_target_config)."""
+    settings = get_settings()
+    return {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+        "ch_database": getattr(settings.clickhouse, "database", "default"),
+        "target_name": target_name or "settings",
+    }
 
 
 class HuntController:
@@ -80,21 +107,19 @@ class HuntController:
     def _load_dfe_config(config_path: str, target_file_path: Optional[str]) -> Optional[dict]:
         """Load DFE config and perform initial validation."""
         try:
-            dfe_config = DFEConfigLoader.load_dfe_package(
-                config_path, require_config=False, logger=logger
-            )
+            dfe_config = _load_yaml_config(config_path, require=False)
         except FileNotFoundError as error:
             logger.error(f"Error loading the dfe config package: {error}")
             return None
 
         if target_file_path is None:
             logger.warning(
-                f" the arg_target_file_path is None. Please review the parameters.  Value [{target_file_path}]"
+                f"arg_target_file_path is None. Please review the parameters. Value [{target_file_path}]"
             )
 
         if dfe_config.get("hunt_scheduler") is None:
             logger.warning(
-                " the dfe_package.yaml has no hunt scheduler configration files is None. You will need to ensure that you have passed in all settings via the CLI."
+                "dfe_package.yaml has no hunt_scheduler config. Ensure all settings are passed via CLI."
             )
 
         return dfe_config
@@ -158,32 +183,15 @@ class HuntController:
     def _load_target_config(
         target_name: Optional[str], targets_file_path: Optional[str]
     ) -> Optional[dict]:
-        """Load target configuration."""
-        if targets_file_path is None:
-            logger.warning(
-                f" the targets_file_path is still set to None. Please review the parameters and the dfe_package file. Value [{targets_file_path}]"
-            )
-
-        try:
-            logger.info(
-                f" Reading Target Config of {target_name} from this file {targets_file_path}"
-            )
-            target_config_data = DFEConfigLoader.read_target_config(
-                target_name=target_name, targets_file_path=targets_file_path
-            )
-
-            DFEConfigLoader.print_target(
-                logger=logger,
-                targets_file_path=targets_file_path,
-                target_name=target_name,
-            )
-            return target_config_data
-        except FileNotFoundError as error:
-            logger.error(
-                f"Unable to load target or retrieve the hunt config paths: {error}",
-                exc_info=True,
-            )
-            raise
+        """Load target configuration from settings."""
+        target_config_data = _get_target_config(target_name)
+        settings = get_settings()
+        logger.info(
+            f"Target [{target_config_data.get('target_name', '?')}]: "
+            f"host={settings.clickhouse.host} port={settings.clickhouse.port} "
+            f"user={settings.clickhouse.username}"
+        )
+        return target_config_data
 
     @staticmethod
     def _resolve_hunt_paths(config_values: dict, target_config_data: dict) -> Optional[dict]:
@@ -395,15 +403,6 @@ class HuntController:
                 os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
 
-        try:
-            config = DFEConfigLoader.load_dfe_package(require_config=False, logger=logger)
-        except FileNotFoundError as error:
-            logger.error(f"Error loading DFE package: {error}")
-            return
-
-        args_log_path or config.get("global_settings", {}).get(
-            "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
-        )
         hunt_log_file_path = os.path.join(args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG)
 
         start_time = datetime.now(timezone.utc) - timedelta(hours=args_look_back_hours)
@@ -471,15 +470,6 @@ class HuntController:
                 os.getcwd(), CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
             )
 
-        try:
-            config = DFEConfigLoader.load_dfe_package(require_config=False, logger=logger)
-        except FileNotFoundError as error:
-            logger.error(f"Error loading DFE package: {error}")
-            return
-
-        args_log_path or config.get("global_settings", {}).get(
-            "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
-        )
         pids = [args_pid] if not isinstance(args_pid, list) else args_pid
 
         hunt_log_file_path = os.path.join(args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG)
@@ -543,42 +533,16 @@ class HuntController:
         args_target: Optional[str],
         args_target_file_path: Optional[str],
     ) -> None:
-        """
-        Logs configuration settings including hunt directory, rule repository directory, timeout, number of threads, log paths, and credentials file path.
-
-        Parameters:
-            args_dfe_package_file_path (str): Path to the DFE package configuration file.
-            args_log_path (str): Path to the DFE log directory.
-            args_hunt_log_path (Optional[str]): Path to the hunt logs directory.
-            args_target (Optional[str]): The name of the target environment.
-            args_target_file_path (Optional[str]): The location of the dfe_target file.
-        """
-
+        """Logs hunt configuration settings."""
         try:
-            dfe_config = DFEConfigLoader.load_dfe_package(
-                config_file_path=args_dfe_package_file_path,
-                require_config=False,
-            )
-            dfe_config_target_path = dfe_config["global_settings"].get("target_path", None)
+            dfe_config = _load_yaml_config(args_dfe_package_file_path, require=False)
         except FileNotFoundError as error:
             logger.error(f"Error: Was not able to load the dfe_package.yaml:\n{error}")
             return
 
-        try:
-            target_path = args_target_file_path if args_target_file_path else dfe_config_target_path
-            target_config_data = DFEConfigLoader.read_target_config(
-                target_name=args_target, targets_file_path=target_path
-            )
-            hunt_config_path = target_config_data["hunt_config_path"]
-            hunt_rules_path = target_config_data["hunt_rules_path"]
-        except FileNotFoundError as error:
-            logger.error(f"Unable to load target: {error}")
-            sys.exit(1)
-
-        num_threads = dfe_config["hunt_scheduler"]["num_threads"]
-        credentials_file_path = dfe_config["global_settings"]["target_path"]
-        dfe_package_hunt_dir = dfe_config["hunt_scheduler"]["hunt_dir"]
-        dfe_package_rule_repo_dir = dfe_config["hunt_scheduler"]["rule_repo_dir"]
+        hunt_config_path = dfe_config.get("hunt_scheduler", {}).get("hunt_dir", "")
+        hunt_rules_path = dfe_config.get("hunt_scheduler", {}).get("rule_repo_dir", "")
+        num_threads = dfe_config.get("hunt_scheduler", {}).get("num_threads", 1)
 
         if not args_hunt_log_path:
             settings = get_settings()
@@ -586,16 +550,14 @@ class HuntController:
                 os.getcwd(), "default_hunt_log_path"
             )
 
+        settings = get_settings()
         hunt_configuration_settings = {
-            "Configuration Data:": dfe_config,
-            "Root target file Hunt directory:": hunt_config_path,
-            "Root target file Rule repository directory:": hunt_rules_path,
-            "DFE package hunt directory:": dfe_package_hunt_dir,
-            "DFE package rule repository directory:": dfe_package_rule_repo_dir,
+            "Hunt directory:": hunt_config_path,
+            "Rule repository directory:": hunt_rules_path,
             "Number of threads:": num_threads,
             "Common log path:": args_log_path,
-            "Target Hunt logs directory:": args_hunt_log_path,
-            "Configuration root path:": credentials_file_path,
+            "Hunt logs directory:": args_hunt_log_path,
+            "ClickHouse host:": settings.clickhouse.host,
         }
 
         logger.info("\n--- Hunt Configuration Settings ---\n")
@@ -604,11 +566,12 @@ class HuntController:
         logger.info("-----------------------------------\n")
 
         try:
-            rules = os.listdir(hunt_rules_path)
-            for entry in rules:
-                entry_path = os.path.join(hunt_rules_path, entry)
-                if os.path.isfile(entry_path):
-                    logger.info(f"Rule Template Loading: {entry}")
+            if hunt_rules_path and os.path.isdir(hunt_rules_path):
+                rules = os.listdir(hunt_rules_path)
+                for entry in rules:
+                    entry_path = os.path.join(hunt_rules_path, entry)
+                    if os.path.isfile(entry_path):
+                        logger.info(f"Rule Template Loading: {entry}")
         except FileNotFoundError as e:
             logger.error(f"Error accessing directory '{hunt_rules_path}': {e}")
 
@@ -652,34 +615,15 @@ class HuntController:
 
     @staticmethod
     def kill_hunt(
-        args_dfe_package_file_path: str,
         args_kill_pid: Optional[int],
-        args_log_path: Optional[str],
+        args_log_path: Optional[str] = None,
     ) -> None:
-        """
-        Kill Hunt
-
-        Kills a hunt associated with a specified PID.
-
-        Parameters:
-            args_dfe_package_file_path (str): Path to the DFE package configuration file.
-            args_kill_pid (Optional[int]): PID of the process to stop.
-            args_log_path (Optional[str]): Path to the common directory for log files.
-        """
-
-        try:
-            dfe_package_config = DFEConfigLoader.load_dfe_package(
-                args_dfe_package_file_path, require_config=False, logger=logger
-            )
-        except FileNotFoundError as error:
-            logger.error(f"Error loading DFE package: {error}")
-            return
-
-        args_log_path = args_log_path or dfe_package_config.get("global_settings", {}).get(
-            "tmp/logs/", os.path.join(os.getcwd(), "tmp/logs/")
+        """Kill a hunt associated with a specified PID."""
+        settings = get_settings()
+        logger.info(
+            f"Target: host={settings.clickhouse.host} "
+            f"port={settings.clickhouse.port} user={settings.clickhouse.username}"
         )
-
-        DFEConfigLoader.print_default_target(logger=logger)
 
         try:
             os.kill(args_kill_pid, signal.SIGTERM)

@@ -4,8 +4,8 @@ from datetime import datetime, timezone, timedelta
 from typing import Any, List, Dict, Optional
 from jinja2 import Environment
 from hyperi_pylib.logger import logger
-from .hunts_checkpoint_manager import HuntCheckpointManager
-from ...clickhouse.clickhouse_manager import ClickHouseManager
+from .checkpoint import HuntCheckpointManager
+from ..clickhouse.clickhouse_manager import ClickHouseManager
 
 
 class Hunt:

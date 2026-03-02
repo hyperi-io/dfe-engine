@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import os
 from hyperi_pylib.logger import logger
-from ..runner.cron_runner import CronRunner
+from .cron_runner import CronRunner
 
 
 class HuntScheduler:

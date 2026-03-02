@@ -8,7 +8,6 @@ from dfe_engine.auth import (
     DEFAULT_ROLE_PERMISSIONS,
     ENGINE_ACTIONS,
     AuthContext,
-    AuthorizationError,
     AuthzResult,
     authorize,
 )

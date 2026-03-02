@@ -1,7 +1,7 @@
 import uuid
 import pytest
-from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
-from dfe_engine.config.config_loader import DFEConfigLoader
+from dfe_engine.hunts.checkpoint import HuntCheckpointManager
+from dfe_engine.settings import get_settings
 import time
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -20,15 +20,17 @@ def setup_paths(tmp_path) -> dict:
 
 
 @pytest.fixture(scope="module")
-def ch_client(dfe_config_fixtures):
-    config = DFEConfigLoader.read_clickhouse_config(
-        target_name=dfe_config_fixtures["global_settings"]["default_target"],
-        targets_file_path=dfe_config_fixtures["global_settings"]["target_path"],
-    )
-    print(f"*** using config {config}")
-
+def ch_client():
+    settings = get_settings()
+    config = {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+    }
     ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-
     yield ch_client
 
 

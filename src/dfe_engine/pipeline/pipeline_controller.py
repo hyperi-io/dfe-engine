@@ -1,4 +1,6 @@
 import os
+import re
+from pathlib import Path
 from typing import Optional, List, Dict
 from importlib import resources
 from zipfile import ZipFile
@@ -6,11 +8,23 @@ from zipfile import ZipFile
 from hyperi_pylib.logger import logger
 from tabulate import tabulate
 
-from ..config.config_loader import DFEConfigLoader
 from ..settings import get_settings
 from ..storage import get_storage_backend, StorageError
+from ..yaml_utils import yaml_load_string
 from .pipeline_builder import PipelineBuilder
 from .pipeline_util import merge_configs
+
+
+def _load_yaml_config(config_file_path: str | None = None, require: bool = True) -> dict:
+    """Load a YAML config file with environment variable substitution."""
+    path = Path(config_file_path) if config_file_path else Path.cwd() / "dfe_package.yaml"
+    if not path.exists():
+        if require:
+            raise FileNotFoundError(f"Configuration file [{path}] not found")
+        return {}
+    content = path.read_text()
+    content = re.sub(r"\$\{(\w+)\}", lambda m: os.environ.get(m.group(1), m.group(0)), content)
+    return yaml_load_string(content) or {}
 
 
 class PipelineBuilderController:
@@ -39,9 +53,7 @@ class PipelineBuilderController:
             Dict[str, List[str]]: A dictionary with template types as keys and lists of template names as values.
         """
         try:
-            dfe_config_data = DFEConfigLoader.load_dfe_package(
-                config_file_path=args_dfe_package_file_path
-            )
+            dfe_config_data = _load_yaml_config(args_dfe_package_file_path)
         except FileNotFoundError as error:
             logger.error(f"Error: {error} reading package data using default values", exc_info=True)
             dfe_config_data = {
@@ -126,7 +138,7 @@ class PipelineBuilderController:
             if not args_core_config:
                 args_core_config = os.path.join(os.path.dirname(__file__), "core_config.yaml")
 
-            default_dfe_config = DFEConfigLoader.load_dfe_package(config_file_path=args_core_config)
+            default_dfe_config = _load_yaml_config(args_core_config)
         except FileNotFoundError:
             logger.error(
                 f"Default DFE package file not found at {args_core_config}. "
@@ -140,9 +152,7 @@ class PipelineBuilderController:
             default_dfe_config.pop("ingestion_pipelines")
             logger.debug("Attempting to load DFE package configuration...")
             try:
-                dfe_config = DFEConfigLoader.load_dfe_package(
-                    config_file_path=args_dfe_package_file_path
-                )
+                dfe_config = _load_yaml_config(args_dfe_package_file_path)
                 # only keep the ingestion pipelines from the incoming config
                 default_dfe_config.pop("ingestion_pipelines", None)
             except FileNotFoundError as error:

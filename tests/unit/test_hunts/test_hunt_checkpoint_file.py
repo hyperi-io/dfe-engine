@@ -5,7 +5,7 @@ import os
 import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
-from dfe_engine.hunts.hunts.hunts_checkpoint_manager import HuntCheckpointManager
+from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 from hyperi_pylib.logger import logger as hs_logger
 import shutil
 

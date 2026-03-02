@@ -1,6 +1,6 @@
 """Unit tests for datasource adapters."""
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pyarrow as pa
 import pytest

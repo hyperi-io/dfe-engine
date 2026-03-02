@@ -28,14 +28,6 @@ artifactory:
   password: ""
   templates_version: "latest"
 
-# PostgreSQL connection settings
-postgres:
-  host: "localhost"
-  port: 5432
-  username: "postgres"
-  password: ""
-  database: "dfe_engine"
-
 # Kafka connection settings
 kafka:
   bootstrap_servers: "localhost:9092"

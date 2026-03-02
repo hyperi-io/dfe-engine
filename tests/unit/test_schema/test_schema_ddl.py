@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator, DDLGenerationError
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -233,7 +233,7 @@ class TestExpressions:
     def test_no_default(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
         ddl = gen.generate_create_table("t", cols)
-        line = [l for l in ddl.split("\n") if "`x`" in l][0]
+        line = [ln for ln in ddl.split("\n") if "`x`" in ln][0]
         assert "DEFAULT" not in line
         assert "MATERIALIZED" not in line
         assert "ALIAS" not in line
@@ -256,7 +256,7 @@ class TestComments:
     def test_no_comment(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
         ddl = gen.generate_create_table("t", cols)
-        line = [l for l in ddl.split("\n") if "`x`" in l][0]
+        line = [ln for ln in ddl.split("\n") if "`x`" in ln][0]
         assert "COMMENT" not in line
 
 

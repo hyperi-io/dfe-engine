@@ -1,7 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
 from jinja2 import Environment, FileSystemLoader
-from dfe_engine.hunts.hunts.hunts import Hunt
+from dfe_engine.hunts.hunt import Hunt
 import yaml
 from pathlib import Path
 import shutil

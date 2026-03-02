@@ -5,8 +5,8 @@ import yaml
 from pathlib import Path
 from datetime import datetime, timezone, timedelta
 from jinja2 import Environment, FileSystemLoader
-from dfe_engine.hunts.hunts.hunts import Hunt
-from dfe_engine.config.config_loader import DFEConfigLoader
+from dfe_engine.hunts.hunt import Hunt
+from dfe_engine.settings import get_settings
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
@@ -110,8 +110,16 @@ def test_basic_hunt_alerts(
     file_and_folder_paths["default_test_params"]
     env = Environment(loader=FileSystemLoader(template_dir))
     target_name = dfe_config_fixtures["global_settings"]["default_target"]
-    targets_file_path = dfe_config_fixtures["global_settings"]["target_path"]
-    target_config_data = DFEConfigLoader.read_target_config(target_name, targets_file_path)
+    settings = get_settings()
+    target_config_data = {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+        "target_name": target_name,
+    }
 
     cronlist = ["* * * * *", "*/2 * * * *"]
 

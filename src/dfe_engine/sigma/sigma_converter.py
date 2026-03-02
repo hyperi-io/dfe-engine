@@ -7,7 +7,7 @@ from sigma.collection import SigmaCollection
 from ..sigma.field_mapping_service import FieldMappingService
 from ..sigma.sigma_backend_clickhouse import SqlBackend
 from ..sigma.sigma_pipelines import SigmaPipeline
-from ..yaml_utils import yaml_dump, yaml_load
+from ..yaml_utils import yaml_load
 
 
 class SigmaRuleConverter:
@@ -17,16 +17,14 @@ class SigmaRuleConverter:
         input_directory: str,
         output_directory: str,
         dfe_root_log_path: str,
-        db_session=None,
     ) -> None:
         """
         Initializes the SigmaRuleConverter with the input and output directories and DFE configuration file path.
 
+        :param args_dfe_package_file_path: Path to the DFE package configuration file.
         :param input_directory: Directory to scan for Sigma rule files.
         :param output_directory: Directory to write the converted rules.
         :param dfe_root_log_path: Directory for logging.
-        :param args_dfe_package_file_path: Path to the DFE package configuration file.
-        :param db_session: Optional database session for FastAPI mode. If provided, uses database tables instead of files.
         """
         self.input_directory = input_directory
         self.output_directory = output_directory
@@ -34,13 +32,6 @@ class SigmaRuleConverter:
         self._ensure_output_directory_exists()
         self.config = self._load_dfe_config()
         self.field_mapping_service = FieldMappingService(self.config)
-        self.db_session = db_session
-        self.is_api_mode = db_session is not None
-
-        if self.is_api_mode:
-            logger.info("Initializing in FastAPI mode - using database tables for field mappings")
-        else:
-            logger.info("Initializing in CLI mode - using file-based field mappings")
 
     def _ensure_output_directory_exists(self) -> None:
         """Creates the output directory if it does not exist."""
@@ -192,39 +183,7 @@ class SigmaRuleConverter:
         :param rule_name: Name of the sigma rule
         :return: Tuple of (field mappings dictionary, schema metadata dictionary)
         """
-        if self.is_api_mode:
-            device = schema_config.get("device", "windows")
-            mappings = self.field_mapping_service.get_db_schema_mappings(device, self.db_session)
-
-            meta_schema_name = schema_config.get("meta_schema", "")
-            derived_schema_name = schema_config.get("derived_schema", "")
-
-            schema_metadata = {}
-
-            if meta_schema_name:
-                meta_metadata = self.field_mapping_service.get_db_meta_schema(
-                    meta_schema_name, self.db_session
-                )
-                schema_metadata.update(meta_metadata)
-
-            if derived_schema_name:
-                add_metadata = self.field_mapping_service.get_db_derived_schema_additions(
-                    derived_schema_name, self.db_session
-                )
-                schema_metadata.update(add_metadata)
-
-                excluded_columns = self.field_mapping_service.get_db_derived_schema_overrides(
-                    derived_schema_name, self.db_session
-                )
-
-                for column in excluded_columns:
-                    if column in schema_metadata:
-                        logger.debug(f"Removing overridden column '{column}' from schema metadata")
-                        schema_metadata.pop(column)
-
-            return mappings, schema_metadata
-        else:
-            return self.field_mapping_service.get_schema_mappings(schema_config, rule_name)
+        return self.field_mapping_service.get_schema_mappings(schema_config, rule_name)
 
     def convert(self, file_path: str, schema_config: dict) -> None:
         """
@@ -237,36 +196,16 @@ class SigmaRuleConverter:
         logger.info(f"Converting rule: {rule_name}")
 
         try:
-            if self.is_api_mode and self.db_session:
-                rule_name = os.path.basename(file_path)
+            if not os.path.exists(file_path):
+                logger.error(f"File not found: {file_path}")
+                raise FileNotFoundError(f"File not found: {file_path}")
 
-                from sqlalchemy import text as sa_text
+            rule = yaml_load(file_path)
 
-                result = self.db_session.execute(
-                    sa_text("SELECT rule_content FROM sigma_rules WHERE rule_name = :rule_name"),
-                    {"rule_name": rule_name},
-                ).fetchone()
-
-                if not result:
-                    logger.error(f"Rule '{rule_name}' not found in database")
-                    raise ValueError(f"Rule '{rule_name}' not found in database")
-
-                rule = result.rule_content
-
-                logger.info(f"Rule content type: {type(rule)}")
-
-                rel_path = rule_name
-            else:
-                if not os.path.exists(file_path):
-                    logger.error(f"File not found: {file_path}")
-                    raise FileNotFoundError(f"File not found: {file_path}")
-
-                rule = yaml_load(file_path)
-
-                rel_path = os.path.relpath(file_path, self.input_directory)
-                if not rel_path:
-                    logger.error(f"Could not get relative path for: {file_path}")
-                    return
+            rel_path = os.path.relpath(file_path, self.input_directory)
+            if not rel_path:
+                logger.error(f"Could not get relative path for: {file_path}")
+                return
 
             field_mappings, schema_metadata = self._get_schema_mappings(schema_config, rel_path)
             if not field_mappings:
@@ -349,48 +288,20 @@ class SigmaRuleConverter:
                 field_mappings=all_mappings,
             )
 
-            if self.is_api_mode:
-                import tempfile
+            rules = SigmaCollection.load_ruleset([file_path])
+            converted_rules = backend.convert(rules, output_format="full_alert")
+            cleaned_rules = " ".join(
+                converted_rules.replace("\n", " ").replace("\r", " ").split()
+            )
+            formatted_rules = self.format_rules(cleaned_rules)
 
-                temp_file = tempfile.NamedTemporaryFile(mode="w", suffix=".yml", delete=False)
-                temp_path = temp_file.name
-                temp_file.close()
-                yaml_dump(rule, temp_path)
+            filename = os.path.splitext(os.path.basename(file_path))[0]
+            output_file_path = os.path.join(self.output_directory, f"{filename}.jinja2")
 
-                try:
-                    sigma_rule_yaml = [temp_path]
-                    rules = SigmaCollection.load_ruleset(sigma_rule_yaml)
-                    converted_rules = backend.convert(rules, output_format="full_alert")
-                    cleaned_rules = " ".join(
-                        converted_rules.replace("\n", " ").replace("\r", " ").split()
-                    )
-                    formatted_rules = self.format_rules(cleaned_rules)
+            with open(output_file_path, "w") as output_file:
+                output_file.write(formatted_rules)
 
-                    filename = os.path.splitext(rule_name)[0]
-                    output_file_path = os.path.join(self.output_directory, f"{filename}.jinja2")
-
-                    with open(output_file_path, "w") as output_file:
-                        output_file.write(formatted_rules)
-
-                    logger.info(f"Rule converted and saved to: {output_file_path}")
-                finally:
-                    if os.path.exists(temp_path):
-                        os.unlink(temp_path)
-            else:
-                rules = SigmaCollection.load_ruleset([file_path])
-                converted_rules = backend.convert(rules, output_format="full_alert")
-                cleaned_rules = " ".join(
-                    converted_rules.replace("\n", " ").replace("\r", " ").split()
-                )
-                formatted_rules = self.format_rules(cleaned_rules)
-
-                filename = os.path.splitext(os.path.basename(file_path))[0]
-                output_file_path = os.path.join(self.output_directory, f"{filename}.jinja2")
-
-                with open(output_file_path, "w") as output_file:
-                    output_file.write(formatted_rules)
-
-                logger.info(f"Rule converted: {output_file_path}")
+            logger.info(f"Rule converted: {output_file_path}")
 
         except Exception as e:
             logger.error(f"Exception during conversion: {e}")

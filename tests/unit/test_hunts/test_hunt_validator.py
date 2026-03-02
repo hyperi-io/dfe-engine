@@ -3,7 +3,7 @@ import yaml
 import pathlib
 import logging
 from jinja2 import Environment
-from dfe_engine.hunts.hunts.hunts_validator import HuntValidator
+from dfe_engine.hunts.validator import HuntValidator
 
 
 class ListHandler(logging.Handler):

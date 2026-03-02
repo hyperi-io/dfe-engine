@@ -3,7 +3,7 @@ import pytest
 import textwrap
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
-from dfe_engine.hunts.hunts.hunts import Hunt
+from dfe_engine.hunts.hunt import Hunt
 import re
 import warnings
 

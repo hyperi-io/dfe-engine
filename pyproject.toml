@@ -16,11 +16,9 @@ dependencies = [
     "numpy>=2.4.2",
     # Database connections
     "clickhouse-connect>=0.13.0",
-    "sqlalchemy>=2.0.47",
     # Configuration and parsing
     "ruamel-yaml>=0.19.1",
     "pydantic>=2.12.5",
-    "sqlparse>=0.5.5",
     # AWS
     "boto3>=1.42.57",
     # Scheduling
@@ -42,9 +40,6 @@ dependencies = [
     "pyparsing>=3.3.2",
     "platformdirs>=4.9.2",
     "psutil>=7.2.2",
-    "importlib-metadata>=8.7.1",
-    "gitpython>=3.1.46",
-    "deepdiff>=8.6.1",
     "deepmerge>=2.0",
 ]
 

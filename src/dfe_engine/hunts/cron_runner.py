@@ -9,7 +9,7 @@ from typing import Optional
 from jinja2 import Environment, FileSystemLoader
 from .cron_job import CronJob
 from hyperi_pylib.logger import logger
-from ...settings import get_settings
+from ..settings import get_settings
 
 
 class CronRunner:

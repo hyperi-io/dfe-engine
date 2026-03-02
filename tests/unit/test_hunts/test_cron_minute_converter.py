@@ -1,5 +1,5 @@
 import pytest
-from dfe_engine.hunts.hunts.hunts import Hunt
+from dfe_engine.hunts.hunt import Hunt
 
 TESTS = [
     {"name": "Testing Specification", "cron": "* * * * *", "minutes": 1},
