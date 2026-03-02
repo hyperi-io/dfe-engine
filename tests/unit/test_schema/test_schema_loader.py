@@ -2,7 +2,13 @@
 
 import pytest
 
-from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
+from dfe_engine.schema.schema_loader import (
+    SchemaLoader,
+    SchemaLoadError,
+    _resolve_profiles_dir,
+    _resolve_schemas_root,
+    is_shipped_schema,
+)
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -302,3 +308,113 @@ class TestGetOrderByColumns:
         ]
         result = SchemaLoader.get_order_by_columns(columns)
         assert result == []
+
+
+# ── Submodule resolution ──────────────────────────────────────────
+
+
+class TestSubmoduleResolution:
+    """Test profile resolution chain: env var → submodule → bundled."""
+
+    def test_resolve_profiles_dir_finds_submodule(self):
+        """When submodule exists, resolution should return submodule path."""
+        from pathlib import Path
+
+        resolved = _resolve_profiles_dir()
+        # Should end with common-header (either submodule or bundled)
+        assert resolved.is_dir()
+        # Should contain timeseries.yaml
+        assert (resolved / "timeseries.yaml").exists()
+
+    def test_resolve_schemas_root(self):
+        """Should find the schemas/ submodule root."""
+        from pathlib import Path
+
+        root = _resolve_schemas_root()
+        # In the test environment, schemas/ submodule is checked out
+        if root is not None:
+            assert root.is_dir()
+            assert (root / "common-header").is_dir()
+
+    def test_env_var_override(self, tmp_path, monkeypatch):
+        """DFE_SCHEMAS_DIR env var should override submodule path."""
+        # Create a custom schemas dir with common-header
+        header_dir = tmp_path / "common-header"
+        header_dir.mkdir()
+        yaml_dump(
+            {"columns": [{"name": "_custom", "type": "string"}]},
+            header_dir / "custom_profile.yaml",
+        )
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+
+        columns = SchemaLoader.load_profile("custom_profile")
+        assert len(columns) == 1
+        assert columns[0].name == "_custom"
+
+    def test_env_var_profiles_dir_resolution(self, tmp_path, monkeypatch):
+        """DFE_SCHEMAS_DIR should be checked for common-header subdir."""
+        header_dir = tmp_path / "common-header"
+        header_dir.mkdir()
+        yaml_dump(
+            {"columns": [{"name": "_ts", "type": "timestamp"}]},
+            header_dir / "timeseries.yaml",
+        )
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(tmp_path))
+
+        resolved = _resolve_profiles_dir()
+        assert resolved == header_dir
+
+    def test_explicit_profiles_dir_wins(self, tmp_path):
+        """Explicit profiles_dir argument should skip resolution chain."""
+        yaml_dump(
+            {"columns": [{"name": "explicit", "type": "string"}]},
+            tmp_path / "test.yaml",
+        )
+        columns = SchemaLoader.load_profile("test", profiles_dir=tmp_path)
+        assert columns[0].name == "explicit"
+
+    def test_submodule_profiles_identical_to_bundled(self):
+        """Submodule and bundled profiles should have the same columns."""
+        from pathlib import Path
+
+        bundled_dir = Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles"
+        submodule_dir = Path(__file__).resolve().parents[3] / "schemas" / "common-header"
+
+        if not submodule_dir.is_dir():
+            pytest.skip("Submodule not checked out")
+
+        for profile in ("timeseries", "minimal", "passthrough"):
+            bundled = SchemaLoader.load_profile(profile, profiles_dir=bundled_dir)
+            submodule = SchemaLoader.load_profile(profile, profiles_dir=submodule_dir)
+            bundled_names = [c.name for c in bundled]
+            submodule_names = [c.name for c in submodule]
+            assert bundled_names == submodule_names, f"Mismatch in {profile} profile"
+
+
+# ── is_shipped_schema ────────────────────────────────────────────
+
+
+class TestIsShippedSchema:
+    """Test read-only shipped schema detection."""
+
+    def test_bundled_profile_is_shipped(self):
+        """Bundled profile files should be identified as shipped."""
+        from pathlib import Path
+
+        bundled = Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles" / "timeseries.yaml"
+        assert is_shipped_schema(bundled) is True
+
+    def test_submodule_file_is_shipped(self):
+        """Submodule files should be identified as shipped."""
+        from pathlib import Path
+
+        submodule = Path(__file__).resolve().parents[3] / "schemas" / "common-header" / "timeseries.yaml"
+        if not submodule.exists():
+            pytest.skip("Submodule not checked out")
+        assert is_shipped_schema(submodule) is True
+
+    def test_user_file_is_not_shipped(self, tmp_path):
+        """User-created files should NOT be identified as shipped."""
+        user_file = tmp_path / "my_profile.yaml"
+        user_file.write_text("columns: []")
+        assert is_shipped_schema(user_file) is False
