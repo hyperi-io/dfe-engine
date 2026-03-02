@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from hyperi_pylib.logger import logger
 
@@ -25,6 +26,9 @@ from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
+
+if TYPE_CHECKING:
+    from dfe_engine.fieldmap.registry import FieldMapRegistry
 
 
 class SchemaBuildError(Exception):
@@ -68,6 +72,7 @@ class SchemaBuilderV2:
         *,
         schemas_base_dir: str | Path | None = None,
         use_legacy_indexes: bool = False,
+        field_map_registry: FieldMapRegistry | None = None,
     ) -> None:
         """Initialize the schema builder.
 
@@ -78,12 +83,17 @@ class SchemaBuilderV2:
                               in the Source model are resolved relative to this.
                               If None, paths must be absolute.
             use_legacy_indexes: Use tokenbf/ngrambf instead of GA text indexes.
+            field_map_registry: Optional FieldMapRegistry for generating standard
+                                views (sigma, ecs, cim). When provided and the source
+                                declares mapping_standards, view DDLs are included
+                                in the build result.
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
         self._ddl_gen = DDLGenerator(
             self._registry, use_legacy_indexes=use_legacy_indexes
         )
+        self._field_map_registry = field_map_registry
 
     # ── Main entry points ───────────────────────────────────────────
 
@@ -120,18 +130,22 @@ class SchemaBuilderV2:
             source.table_name, columns, ddl_config
         )
 
-        # 6. Generate Sigma view DDL
+        # 6. Generate Sigma view DDL (legacy path)
         sigma_ddl = None
         if source.sigma and source.sigma.custom_mappings:
             sigma_ddl = self._ddl_gen.generate_sigma_view(
                 source.table_name, source.sigma.custom_mappings, ddl_config
             )
 
+        # 7. Generate standard views from FieldMapRegistry
+        view_ddls = self._generate_view_ddls(source, ddl_config)
+
         return SchemaBuildResult(
             source_name=source.source,
             columns=columns,
             create_table_ddl=create_ddl,
             sigma_view_ddl=sigma_ddl,
+            view_ddls=view_ddls,
             validation_errors=errors,
         )
 
@@ -169,6 +183,29 @@ class SchemaBuilderV2:
         cfg = self._build_ddl_config(source)
         return self._ddl_gen.generate_alter_modify_column(
             source.table_name, column, cfg
+        )
+
+    # ── Internal: view generation ──────────────────────────────────
+
+    def _generate_view_ddls(
+        self, source: Source, config: DDLConfig
+    ) -> dict[str, str]:
+        """Generate standard view DDLs from the FieldMapRegistry.
+
+        Only runs when a field_map_registry was provided and the source
+        declares mapping_standards.
+        """
+        if not self._field_map_registry or not source.mapping_standards:
+            return {}
+
+        from dfe_engine.fieldmap.view_generator import ViewGenerator
+
+        view_gen = ViewGenerator(self._field_map_registry, self._registry)
+        return view_gen.generate_views_for_source(
+            source_name=source.source,
+            table_name=source.table_name,
+            standards=source.mapping_standards,
+            config=config,
         )
 
     # ── Internal: loading ───────────────────────────────────────────

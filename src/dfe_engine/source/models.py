@@ -275,6 +275,10 @@ class Source(BaseModel):
     sigma: SourceSigma | None = Field(
         default=None, description="Sigma field mappings (optional)"
     )
+    mapping_standards: list[str] = Field(
+        default_factory=list,
+        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
+    )
 
     model_config = {
         "populate_by_name": True,
