@@ -37,10 +37,14 @@ def hunt_dirs(tmp_path):
     with open(hunt_dir / "test_hunt.yaml", "w") as f:
         yaml.dump(hunt_config, f)
 
-    # Create a minimal Jinja2 rule template
+    # Create a minimal Jinja2 rule template (lean output — never SELECT *)
     rule_template = (
         "INSERT INTO {{org_id}}.{{target_table_name}} "
-        "SELECT * FROM {{org_id}}.{{source_table_name}} "
+        "(_timestamp, _org_id, matched_uuid, rule_id, rule_name, source_table) "
+        "SELECT _timestamp, _org_id, _uuid AS matched_uuid, "
+        "'test_rule' AS rule_id, 'test_rule' AS rule_name, "
+        "'{{source_table_name}}' AS source_table "
+        "FROM {{org_id}}.{{source_table_name}} "
         "WHERE {timestamp_condition}"
     )
     with open(rule_dir / "test_rule.jinja2", "w") as f:
