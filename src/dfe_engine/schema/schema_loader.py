@@ -4,6 +4,11 @@ Loads schema definitions from YAML files into SchemaColumn models.
 Handles meta_schema, derived_schema, additional_fields, and common
 header profiles.
 
+Supports per-file schema versioning via a **version tree**: each version
+has its own complete column snapshot under ``versions.<ver>.columns``.
+The ``current`` key names the default version.  Consumers can pin any
+version; the engine returns the exact column snapshot for that version.
+
 Profile resolution order (first match wins):
 1. Explicit ``profiles_dir`` argument
 2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
@@ -17,7 +22,7 @@ Usage:
     columns = loader.load_meta_schema("/path/to/meta_schema.yaml")
     columns = loader.apply_derived_schema(columns, "/path/to/derived.yaml")
     columns = loader.apply_additional_fields(columns, "/path/to/additional.yaml")
-    header = loader.load_profile("timeseries")
+    header = loader.load_profile("timeseries", version="1.0.0")
     full = loader.compose(header, columns)
 """
 
@@ -120,6 +125,29 @@ def is_shipped_schema(path: str | Path) -> bool:
     return False
 
 
+def _extract_version_columns(
+    data: dict[str, Any], version: str, path: Path
+) -> list[dict]:
+    """Extract the column list for a specific version from a version tree.
+
+    The version tree lives under ``versions.<ver>.columns``.
+    Raises SchemaLoadError if the requested version is not found.
+    """
+    versions = data.get("versions", {})
+    if version not in versions:
+        available = ", ".join(sorted(versions.keys())) or "(none)"
+        raise SchemaLoadError(
+            f"Version '{version}' not found in {path}. "
+            f"Available versions: {available}"
+        )
+    ver_entry = versions[version]
+    if not isinstance(ver_entry, dict) or "columns" not in ver_entry:
+        raise SchemaLoadError(
+            f"Version '{version}' in {path} must contain a 'columns' key"
+        )
+    return ver_entry["columns"]
+
+
 class SchemaLoadError(Exception):
     """Error loading or validating a schema YAML file."""
 
@@ -137,23 +165,45 @@ class SchemaLoader:
     # -----------------------------------------------------------------
 
     @staticmethod
-    def load_columns(source: str | Path) -> list[SchemaColumn]:
+    def load_columns(
+        source: str | Path,
+        *,
+        version: str | None = None,
+    ) -> list[SchemaColumn]:
         """Load a schema YAML file into a list of SchemaColumn models.
 
-        Expected YAML format:
+        Supports two YAML layouts:
+
+        **Version tree** (preferred for versioned schemas)::
+
+            current: "1.0.0"
+            versions:
+              "1.0.0":
+                date: "2026-01-15"
+                type: model
+                summary: "Initial schema"
+                columns:
+                  - name: _timestamp
+                    type: datetime
+
+        **Flat** (backward-compatible, unversioned)::
+
             columns:
-              - name: user_name
-                type: string
-                use_case: dimension
-              - name: source_ip
-                type: ip
-                ...
+              - name: _timestamp
+                type: datetime
+
+        When *version* is given, the column snapshot for that version is
+        returned from the version tree.  When ``None``, the file's
+        ``current`` marker selects the version.  Files without a
+        ``versions`` key fall through to the flat ``columns`` list.
 
         Args:
             source: Path to YAML file.
+            version: Target schema version (semver).  When ``None``,
+                     uses the file's ``current`` marker.
 
         Returns:
-            List of SchemaColumn models.
+            List of SchemaColumn models for the requested version.
 
         Raises:
             SchemaLoadError: If file missing or invalid.
@@ -167,13 +217,25 @@ class SchemaLoader:
         except Exception as e:
             raise SchemaLoadError(f"Failed to parse YAML: {path}: {e}") from e
 
-        if not data or "columns" not in data:
+        if not data:
+            raise SchemaLoadError(f"Schema YAML is empty: {path}")
+
+        # Resolve target version: explicit arg > file's current > None
+        target_version = version or data.get("current")
+
+        # Version tree path: versions.<ver>.columns
+        if target_version and "versions" in data:
+            raw_columns = _extract_version_columns(data, target_version, path)
+        elif "columns" in data:
+            # Flat layout (unversioned or no version requested)
+            raw_columns = data["columns"]
+        else:
             raise SchemaLoadError(
-                f"Schema YAML must contain a 'columns' key: {path}"
+                f"Schema YAML must contain 'columns' or 'versions' key: {path}"
             )
 
         columns = []
-        for i, col_data in enumerate(data["columns"]):
+        for i, col_data in enumerate(raw_columns):
             if not isinstance(col_data, dict):
                 raise SchemaLoadError(
                     f"Column {i} in {path} must be a dict, got {type(col_data).__name__}"
@@ -189,7 +251,48 @@ class SchemaLoader:
         return columns
 
     @staticmethod
-    def load_profile(profile_name: str, profiles_dir: str | Path | None = None) -> list[SchemaColumn]:
+    def load_version_metadata(source: str | Path) -> dict[str, Any]:
+        """Load version metadata from a schema YAML file.
+
+        Returns a dict with ``current`` (str) and ``versions`` (dict of
+        version → metadata without columns).  Returns an empty dict for
+        unversioned files.
+
+        Raises:
+            SchemaLoadError: If file missing or unparseable.
+        """
+        path = Path(source)
+        if not path.exists():
+            raise SchemaLoadError(f"Schema file not found: {path}")
+
+        try:
+            data = yaml_load(path)
+        except Exception as e:
+            raise SchemaLoadError(f"Failed to parse YAML: {path}: {e}") from e
+
+        result: dict[str, Any] = {}
+        if data and "current" in data:
+            result["current"] = data["current"]
+        if data and "versions" in data:
+            # Return metadata only (strip columns to keep output lean)
+            versions_meta: dict[str, Any] = {}
+            for ver, entry in data["versions"].items():
+                if isinstance(entry, dict):
+                    versions_meta[ver] = {
+                        k: v for k, v in entry.items() if k != "columns"
+                    }
+                else:
+                    versions_meta[ver] = entry
+            result["versions"] = versions_meta
+        return result
+
+    @staticmethod
+    def load_profile(
+        profile_name: str,
+        profiles_dir: str | Path | None = None,
+        *,
+        version: str | None = None,
+    ) -> list[SchemaColumn]:
         """Load a common header profile YAML.
 
         Profiles define the standard columns injected at the start of
@@ -205,9 +308,11 @@ class SchemaLoader:
             profile_name: Profile name (e.g. 'timeseries').
             profiles_dir: Directory containing profile YAML files.
                           When provided, skips the resolution chain.
+            version: Target schema version (semver).  When ``None``,
+                     uses the file's ``current`` marker.
 
         Returns:
-            List of SchemaColumn models for the profile.
+            List of SchemaColumn models for the profile at the given version.
 
         Raises:
             SchemaLoadError: If profile not found.
@@ -223,7 +328,7 @@ class SchemaLoader:
                 f"Profile '{profile_name}' not found at {profile_path}"
             )
 
-        return SchemaLoader.load_columns(profile_path)
+        return SchemaLoader.load_columns(profile_path, version=version)
 
     # -----------------------------------------------------------------
     # Composition

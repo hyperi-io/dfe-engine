@@ -211,10 +211,14 @@ class SchemaBuilderV2:
     # ── Internal: loading ───────────────────────────────────────────
 
     def _load_profile(self, source: Source) -> list[SchemaColumn]:
-        """Load the common header profile for the source."""
+        """Load the common header profile for the source.
+
+        Uses ``source.header.version`` to select a specific profile version.
+        """
         profile_name = source.header.type
+        profile_version = source.header.version
         try:
-            return SchemaLoader.load_profile(profile_name)
+            return SchemaLoader.load_profile(profile_name, version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
                 f"Failed to load profile '{profile_name}' for source "
@@ -222,15 +226,20 @@ class SchemaBuilderV2:
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
-        """Load source-specific schema columns (meta + derived + additional)."""
+        """Load source-specific schema columns (meta + derived + additional).
+
+        Uses ``schema.meta_schema_version`` to pin meta schema columns.
+        """
         schema_cfg = source.schema_config
         columns: list[SchemaColumn] = []
 
-        # Load meta_schema (base columns)
+        # Load meta_schema (base columns) — version-aware
         if schema_cfg.meta_schema:
             meta_path = self._resolve_path(schema_cfg.meta_schema)
             try:
-                columns = SchemaLoader.load_columns(meta_path)
+                columns = SchemaLoader.load_columns(
+                    meta_path, version=schema_cfg.meta_schema_version
+                )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
                     f"Failed to load meta_schema for source "
