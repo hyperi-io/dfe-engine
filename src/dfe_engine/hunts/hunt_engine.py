@@ -110,6 +110,12 @@ class HuntEngine:
         hunts_cfg = self._settings.hunts
         target_config = get_clickhouse_config(self._settings)
 
+        logger.info(
+            f"HuntEngine scheduling_mode={hunts_cfg.scheduling_mode}, "
+            f"min_interval={hunts_cfg.min_interval_seconds}s, "
+            f"explain_queries={hunts_cfg.explain_queries}"
+        )
+
         hunt_dirs = self._parse_dirs(hunts_cfg.hunt_dir)
         rule_dirs = self._parse_dirs(hunts_cfg.rule_repo_dir)
 
@@ -184,6 +190,9 @@ class HuntEngine:
                 target_config_data=target_config,
                 checkpoint_timestamp_field=hunts_cfg.checkpoint_timestamp_field,
                 jitter_seconds=hunts_cfg.jitter_seconds,
+                scheduling_mode=hunts_cfg.scheduling_mode,
+                min_interval_seconds=hunts_cfg.min_interval_seconds,
+                explain_queries=hunts_cfg.explain_queries,
             )
 
             thread_tracking_path = os.path.join(

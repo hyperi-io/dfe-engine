@@ -145,6 +145,18 @@ See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
   - [ ] Rule CRUD API (create from HyperDX SQL, validate, store as Jinja2 template)
   - [ ] Migrate existing Jinja2 templates from `INSERT INTO ... SELECT *` to lean `matched_uuid` pattern
   - [ ] Hunt results → source table join-back for full record lookup (UI concern)
+- [ ] Hunt adaptive scheduling + backpressure:
+  - [ ] **Overlap guard**: Skip/defer cron fire if previous execution of same `(customer, hunt, rule)` is still running — stretch the window using checkpoint instead of stacking parallel executions
+  - [ ] **Adaptive interval**: When hunt takes longer than its cron interval, next execution uses the last checkpoint as window start (natural catch-up) — `REFRESH AFTER`-style semantics vs rigid cron
+  - [ ] **Concurrency limit**: Max concurrent hunt queries per cluster (configurable), queue excess — prevents ClickHouse overload cascade
+  - [ ] **Backpressure signal**: Expose hunt execution lag metric (scheduled_time - actual_start_time) via OTEL for alerting on cluster overload
+  - [ ] Reference: [RunReveal checkpoint windowing](https://docs.runreveal.com/detections/detection-as-code), [ClickHouse RMV REFRESH AFTER](https://clickhouse.com/docs/materialized-view/refreshable-materialized-view)
+- [ ] Hunt EXPLAIN + execution metrics logging:
+  - [ ] **EXPLAIN output**: Run `EXPLAIN PLAN` (or `EXPLAIN pipeline`) before execution, log the query plan alongside the hunt execution record
+  - [ ] **Execution profile**: After query completes, capture `read_rows`, `read_bytes`, `elapsed_ms`, `memory_usage` from ClickHouse query log (`system.query_log`) or client result profile
+  - [ ] **Resource hog detection**: Flag hunts exceeding configurable thresholds (rows scanned, memory, duration) — log warning + optional metric
+  - [ ] **AI query improvement**: Store execution profiles in structured format (JSON in checkpoint table or separate table) so LLM-based tools can analyse and suggest query optimisations (index usage, partition pruning, predicate pushdown)
+  - [ ] **Query fingerprinting**: Normalise query text for grouping execution stats across runs (same rule, different time windows)
 - [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
 
 ### Future Enhancements

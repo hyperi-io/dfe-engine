@@ -128,6 +128,9 @@ class CronJob:
         checkpoint_timestamp_field: str,
         max_workers=None,
         jitter_seconds: int = 15,
+        scheduling_mode: str = "cron",
+        min_interval_seconds: int = 0,
+        explain_queries: bool = False,
     ):
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
@@ -138,6 +141,9 @@ class CronJob:
         self.hunt_log_path = hunt_log_path
         self.hunts = []
         self._jitter_seconds = jitter_seconds
+        self._scheduling_mode = scheduling_mode
+        self._min_interval_seconds = min_interval_seconds
+        self._explain_queries = explain_queries
         logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -240,6 +246,11 @@ class CronJob:
         cron_expressions = self._parse_cron_config(hunt_data.get("cron", []))
         actual_checkpoint_timestamp_field = self._get_checkpoint_field(hunt_data)
 
+        # Per-hunt overrides (fall back to CronJob-level defaults)
+        hunt_scheduling_mode = hunt_data.get("scheduling_mode", self._scheduling_mode)
+        hunt_min_interval = hunt_data.get("min_interval_seconds", self._min_interval_seconds)
+        hunt_explain = hunt_data.get("explain_queries", self._explain_queries)
+
         for cron_expression in cron_expressions:
             # Compute evenly-distributed stagger offsets for all customers
             offsets = compute_stagger_offsets(
@@ -261,6 +272,9 @@ class CronJob:
                     checkpoint_destination=checkpoint_destination,
                     hunt_directory=hunt_directory,
                     thread_tracking_file_path=thread_tracking_file_path,
+                    scheduling_mode=hunt_scheduling_mode,
+                    min_interval_seconds=hunt_min_interval,
+                    explain_queries=hunt_explain,
                 )
 
     def _parse_cron_config(self, cron_config) -> list:
@@ -331,6 +345,9 @@ class CronJob:
         checkpoint_destination: str,
         hunt_directory: str,
         thread_tracking_file_path: str,
+        scheduling_mode: str = "cron",
+        min_interval_seconds: int = 0,
+        explain_queries: bool = False,
     ) -> None:
         """Schedule a hunt for a specific customer with even load spreading."""
         logger.debug(
@@ -361,14 +378,25 @@ class CronJob:
             checkpoint_destination=checkpoint_destination,
             hunt_checkpoint_path=hunt_checkpoint_path,
             thread_id=thread_id_customer,
+            explain_queries=explain_queries,
         )
 
         hunt.build_sql_queries_for_customers(env)
         job_func = partial(self._run_hunt_for_customer, hunt, customer)
-        await self.add_cron_job(
-            job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}",
-            jitter=jitter,
-        )
+        job_name = f"{hunt.name}-{customer}-{staggered_cron}"
+        job = await self.add_cron_job(job_func, staggered_cron, job_name, jitter=jitter)
+
+        # Enable adaptive REFRESH AFTER scheduling
+        if scheduling_mode == "adaptive" and job is not None:
+            interval = min_interval_seconds
+            if interval <= 0:
+                freq_minutes = self._get_hunt_frequency(staggered_cron)
+                interval = int((freq_minutes or 5) * 60)
+            self.scheduler.enable_adaptive_mode(job.id, interval)
+            logger.info(
+                f"Adaptive scheduling for {job_name}: interval={interval}s after completion"
+            )
+
         self.hunts.append(hunt)
         logger.debug(f"Total hunts: {len(self.hunts)} - {hunt.description}")
 
@@ -483,7 +511,7 @@ class CronJob:
     async def add_cron_job(
         self, job_function: Callable, cron_expression: str, job_name: str,
         jitter: int = 0,
-    ) -> None:
+    ):
         """
         Adds a cron job to the scheduler.
 
@@ -491,17 +519,20 @@ class CronJob:
         :param cron_expression: A cron expression that defines the job schedule.
         :param job_name: The name of the job.
         :param jitter: Max random delay in seconds added to each fire time.
+        :return: The APScheduler job object, or None on error.
         """
         try:
-            await self.scheduler.add_job_with_cron(
+            job = await self.scheduler.add_job_with_cron(
                 job_function, cron_expression, job_name, jitter=jitter
             )
             logger.debug(f"get_scheduled_jobs - [{self.get_scheduled_jobs()}]")
             logger.debug(
                 f"describe_all_job_functions - [{self.scheduler.describe_all_job_functions()}]"
             )
+            return job
         except Exception as e:
             logger.error(f"Error adding cron job: {e}", exc_info=True)
+            return None
 
     async def stop_scheduler(self):
         """

@@ -96,11 +96,11 @@ class TestInsertColumns:
         matched_idx = cols.index("matched_uuid")
         assert ts_idx < matched_idx
 
-    def test_minimal_profile_no_json(self):
-        """Minimal profile has no _json — should not appear even with flag."""
+    def test_minimal_profile_has_json(self):
+        """Minimal profile includes _json for structured payload capture."""
         schema = HuntResultSchema(profile_name="minimal", include_json_copy=True)
         cols = schema.insert_columns()
-        assert "_json" not in cols
+        assert "_json" in cols
 
 
 class TestSelectExpression:
