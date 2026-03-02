@@ -42,13 +42,16 @@ class TestSchemaColumn:
             use_case="range",
             default="'::'",
             order=3,
-            comment="@source: src_ip",
+            expr="@source: src_ip",
+            comment="Source IP address",
             ch_override=None,
         )
         assert col.name == "source_ip"
         assert col.attribute == ["lowcardinality"]
         assert col.use_case == "range"
         assert col.order == 3
+        assert col.expr == "@source: src_ip"
+        assert col.comment == "Source IP address"
 
     def test_attribute_coercion_from_string(self):
         col = SchemaColumn(name="x", type="string", attribute="lowcardinality")

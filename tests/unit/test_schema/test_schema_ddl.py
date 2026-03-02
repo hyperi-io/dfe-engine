@@ -243,10 +243,20 @@ class TestExpressions:
 
 
 class TestComments:
-    def test_column_comment(self, gen: DDLGenerator):
-        cols = [_col(name="x", type="string", comment="@source: user_id")]
+    def test_expr_only(self, gen: DDLGenerator):
+        cols = [_col(name="x", type="string", expr="@source: user_id")]
         ddl = gen.generate_create_table("t", cols)
         assert "COMMENT '@source: user_id'" in ddl
+
+    def test_comment_only(self, gen: DDLGenerator):
+        cols = [_col(name="x", type="string", comment="User identifier")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "COMMENT 'User identifier'" in ddl
+
+    def test_expr_and_comment_combined(self, gen: DDLGenerator):
+        cols = [_col(name="x", type="string", expr="@source: user_id", comment="User identifier")]
+        ddl = gen.generate_create_table("t", cols)
+        assert "COMMENT '@source: user_id — User identifier'" in ddl
 
     def test_column_comment_escaped(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", comment="it's a test")]

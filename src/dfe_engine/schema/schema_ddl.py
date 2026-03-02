@@ -73,6 +73,19 @@ _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
 }
 
 
+def _build_column_comment(
+    expr: str | None, comment: str | None
+) -> str | None:
+    """Combine DFE directive and human comment into a single ClickHouse COMMENT.
+
+    When both are present, the expr comes first (loader parses it),
+    followed by the human comment separated by `` — ``.
+    """
+    if expr and comment:
+        return f"{expr} — {comment}"
+    return expr or comment or None
+
+
 class DDLGenerator:
     """Generates ClickHouse DDL from SchemaColumn models.
 
@@ -327,9 +340,10 @@ class DDLGenerator:
         if codec:
             parts.append(f"CODEC({codec})")
 
-        # COMMENT
-        if col.comment:
-            escaped = col.comment.replace("'", "\\'")
+        # COMMENT — combines expr (DFE directive) + comment (human description)
+        comment_text = _build_column_comment(col.expr, col.comment)
+        if comment_text:
+            escaped = comment_text.replace("'", "\\'")
             parts.append(f"COMMENT '{escaped}'")
 
         return " ".join(parts)

@@ -33,8 +33,8 @@ _SOURCE_MAX_LENGTH = 64
 class SchemaColumn(BaseModel):
     """A single column in a schema definition.
 
-    See docs/SCHEMA.md for the four-axis model:
-    type + attribute + use_case + comment
+    See docs/SCHEMA.md for the column model:
+    type + attribute + use_case + expr + comment
     """
 
     name: str = Field(..., description="Column name")
@@ -55,9 +55,13 @@ class SchemaColumn(BaseModel):
         default=None,
         description="Position in ORDER BY / PRIMARY KEY",
     )
+    expr: str | None = Field(
+        default=None,
+        description="DFE directive (@source, @generated, @captured, @computed, @config)",
+    )
     comment: str | None = Field(
         default=None,
-        description="Human description + loader directives (@source, @generated, etc.)",
+        description="Human-readable column description",
     )
     ch_override: str | None = Field(
         default=None,

@@ -278,6 +278,7 @@ class HuntResultSchema:
                 "type": col.type,
                 "attribute": col.attribute,
                 "default": col.default,
+                "expr": col.expr,
                 "comment": col.comment,
             })
 
