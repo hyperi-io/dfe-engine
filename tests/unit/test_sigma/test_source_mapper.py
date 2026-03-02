@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import pytest
 
+from dfe_engine.fieldmap.models import FieldMap
+from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.source.models import Source, SourceSigma
 from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.source.type_registry import TypeRegistry
@@ -295,3 +297,121 @@ class TestGetSourcesForLogsource:
         names = [s.source for s in matches]
         # disabled_source has windows taxonomy but is disabled
         assert "disabled_source" not in names
+
+
+# ---------------------------------------------------------------------------
+# Tests: FieldMapRegistry integration
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def field_maps_dir(tmp_path):
+    d = tmp_path / "field-maps"
+    d.mkdir()
+    return d
+
+
+@pytest.fixture
+def fm_registry(field_maps_dir):
+    FieldMapRegistry.reset_instance()
+    reg = FieldMapRegistry(
+        field_maps_directory=field_maps_dir,
+        writable=True,
+        refresh_interval=0,
+    )
+    yield reg
+    reg.close()
+    FieldMapRegistry.reset_instance()
+
+
+@pytest.fixture
+def mapper_with_registry(source_registry, type_registry, fm_registry):
+    from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+    return SigmaSourceMapper(
+        source_registry, registry=type_registry, field_map_registry=fm_registry
+    )
+
+
+class TestFieldMapRegistryIntegration:
+    def test_registry_mappings_preferred_over_legacy(
+        self, mapper_with_registry, fm_registry
+    ):
+        """FieldMapRegistry mappings take priority over Source.sigma.custom_mappings."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"EventID": "registry_event_id"},
+            )
+        )
+        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        # Registry mapping should win over Source.sigma.custom_mappings
+        assert mappings["EventID"] == "registry_event_id"
+
+    def test_falls_back_to_legacy_when_no_registry_maps(
+        self, mapper_with_registry
+    ):
+        """When registry has no sigma maps, falls back to Source.sigma.custom_mappings."""
+        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        # No maps in registry → falls back to Source.sigma.custom_mappings
+        assert mappings["EventID"] == "event_id"
+
+    def test_source_specific_override_from_registry(
+        self, mapper_with_registry, fm_registry
+    ):
+        """Source-specific registry map overrides default registry map."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"EventID": "default_eid", "User": "user_name"},
+            )
+        )
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                source="windows_audit",
+                mappings={"EventID": "win_event_id"},
+            )
+        )
+        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        assert mappings["EventID"] == "win_event_id"
+        assert mappings["User"] == "user_name"
+
+    def test_generate_view_uses_registry(
+        self, mapper_with_registry, fm_registry
+    ):
+        """generate_sigma_view uses registry mappings when available."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"RegistryField": "registry_col"},
+            )
+        )
+        ddl = mapper_with_registry.generate_sigma_view("windows_audit")
+        assert ddl is not None
+        assert "`registry_col` AS `RegistryField`" in ddl
+
+    def test_generate_all_views_uses_registry(
+        self, mapper_with_registry, fm_registry
+    ):
+        """generate_all_sigma_views picks up registry mappings for all sources."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                mappings={"CommonField": "common_col"},
+            )
+        )
+        views = mapper_with_registry.generate_all_sigma_views()
+        # All sources with sigma config OR registry maps should have views
+        for _source_name, ddl in views.items():
+            assert "`common_col` AS `CommonField`" in ddl
+
+    def test_no_registry_behaves_like_legacy(self, mapper):
+        """Without field_map_registry, mapper behaves identically to legacy."""
+        mappings = mapper.get_field_mappings("windows_audit")
+        assert mappings == {
+            "EventID": "event_id",
+            "CommandLine": "command_line",
+            "Image": "process_name",
+            "ParentImage": "parent_process_name",
+        }
