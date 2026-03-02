@@ -11,6 +11,10 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
+class AuthenticationError(Exception):
+    """Authentication failed (bad credentials, disabled account, etc.)."""
+
+
 class AuthorizationError(Exception):
     """User not authorized for the requested action."""
 

@@ -45,6 +45,16 @@ storage:
   s3_bucket: ""
   s3_region: ""
 
+# Authorization settings
+auth:
+  enabled: false
+  local:
+    enabled: true
+    admin_password: "changeme"
+    operator_password: "changeme"
+    viewer_password: "changeme"
+    org_id: "default"
+
 # Logging settings (handled by hyperi-pylib)
 logging:
   level: "INFO"
