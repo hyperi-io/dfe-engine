@@ -14,6 +14,9 @@ Configuration priority: Environment Variables > Config Files > Defaults
 
 Environment variable mapping (DFE_ prefixed, with legacy fallbacks):
 
+Config Directory:
+- DFE_CONFIG_DIR -> config_dir (auto-resolves registry subdirectories)
+
 ClickHouse:
 - DFE_CLICKHOUSE_HOST (legacy: CLICKHOUSE_HOST) -> clickhouse.host
 - DFE_CLICKHOUSE_PORT (legacy: CLICKHOUSE_PORT) -> clickhouse.port
@@ -48,6 +51,13 @@ Kafka:
 
 Schemas:
 - DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas submodule root)
+
+Auth (local):
+- DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
+- DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
+- DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
+- DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
+- DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 
 Storage:
 - DFE_STORAGE_TYPE -> storage.type (local, s3, http - auto-detected from path if not set)
@@ -291,6 +301,31 @@ class HelmSettings(BaseModel):
     )
 
 
+class LocalAuthSettings(BaseModel):
+    """Local authentication for simple deploy + break-glass admin.
+
+    Three fixed accounts (admin, operator, viewer) configured via env vars.
+    Passwords support both plaintext (dev) and pre-hashed bcrypt (production).
+
+    Environment variables:
+    - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
+    - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
+    - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
+    - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
+    - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
+    """
+
+    enabled: bool = Field(default=True, description="Enable local authentication")
+    admin_password: str = Field(default="changeme", description="Admin account password or bcrypt hash")
+    operator_password: str = Field(
+        default="changeme", description="Operator account password or bcrypt hash"
+    )
+    viewer_password: str = Field(
+        default="changeme", description="Viewer account password or bcrypt hash"
+    )
+    org_id: str = Field(default="default", description="Organisation ID for local accounts")
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -312,11 +347,16 @@ class AuthSettings(BaseModel):
         default_factory=dict,
         description="OIDC group → roles mapping (Entra ID GUIDs, Okta names, etc.)",
     )
+    local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
 
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
+    config_dir: str = Field(
+        default="",
+        description="Root config directory (dfe-devex submodule). Auto-resolves registry subdirs.",
+    )
     clickhouse: ClickHouseSettings = Field(default_factory=ClickHouseSettings)
     hunts: HuntsSettings = Field(default_factory=HuntsSettings)
     artifactory: ArtifactorySettings = Field(default_factory=ArtifactorySettings)
@@ -482,6 +522,36 @@ def _get_env_overrides() -> dict:
     # Auth settings
     if val := _get_env("DFE_AUTH_ENABLED"):
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
+
+    # Local auth settings (nested under auth.local)
+    if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):
+        overrides["auth"].setdefault("local", {})["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD"):
+        overrides["auth"].setdefault("local", {})["admin_password"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_OPERATOR_PASSWORD"):
+        overrides["auth"].setdefault("local", {})["operator_password"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_VIEWER_PASSWORD"):
+        overrides["auth"].setdefault("local", {})["viewer_password"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
+        overrides["auth"].setdefault("local", {})["org_id"] = val
+
+    # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
+    # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
+    config_dir = _get_env("DFE_CONFIG_DIR")
+    if config_dir:
+        overrides["config_dir"] = config_dir
+        _config_dir_subdirs = {
+            ("services", "config_yaml_dir"): "services",
+            ("source", "sources_dir"): "sources",
+            ("deployment", "config_dir"): "deployment",
+            ("hunts", "hunt_dir"): "hunts",
+            ("hunts", "rule_repo_dir"): "hunt-rules",
+            ("query", "yaml_dir"): "queries",
+        }
+        for (section, key), subdir in _config_dir_subdirs.items():
+            if key not in overrides.get(section, {}):
+                overrides.setdefault(section, {})[key] = str(Path(config_dir) / subdir)
+
     # Remove empty sections
     return {k: v for k, v in overrides.items() if v}
 
