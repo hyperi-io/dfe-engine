@@ -1,6 +1,6 @@
 import asyncio
 import uuid
-from typing import List, Callable
+from typing import List, Callable, Tuple
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 
@@ -16,6 +16,106 @@ from hyperi_pylib.logger import logger
 from ..yaml_utils import yaml_load, YAMLError
 
 
+def compute_stagger_offsets(
+    cron_expression: str,
+    total_jobs: int,
+    jitter_seconds: int = 15,
+) -> List[Tuple[str, int]]:
+    """
+    Compute evenly-distributed staggered cron expressions for N jobs.
+
+    For N jobs with frequency F minutes: offset_i = (F / N) * i.
+    Each job gets a modified cron expression with its offset baked in,
+    plus a jitter value for sub-minute randomization.
+
+    Args:
+        cron_expression: Base cron expression (5-field).
+        total_jobs: Number of jobs to distribute.
+        jitter_seconds: Max random jitter in seconds per job.
+
+    Returns:
+        List of (modified_cron_expression, jitter_seconds) tuples.
+    """
+    if total_jobs <= 0:
+        return []
+    if total_jobs == 1:
+        return [(cron_expression, jitter_seconds)]
+
+    parts = cron_expression.split()
+    if len(parts) != 5:
+        return [(cron_expression, jitter_seconds)] * total_jobs
+
+    # Per-minute cron: no stagger possible, jitter only
+    if parts[0] == "*" and parts[1] == "*":
+        return [(cron_expression, jitter_seconds)] * total_jobs
+
+    # Calculate frequency in minutes using croniter
+    frequency_minutes = _calculate_frequency(cron_expression)
+    if frequency_minutes <= 0:
+        return [(cron_expression, jitter_seconds)] * total_jobs
+
+    results = []
+    for i in range(total_jobs):
+        offset_minutes = (frequency_minutes / total_jobs) * i
+        modified_cron = _apply_offset(parts[:], offset_minutes, frequency_minutes)
+        results.append((modified_cron, jitter_seconds))
+
+    return results
+
+
+def _calculate_frequency(cron_expression: str) -> float:
+    """Calculate frequency in minutes from a cron expression using croniter."""
+    try:
+        base = datetime(2025, 1, 1)
+        cron_iter = croniter.croniter(cron_expression, base)
+        num_intervals = 24
+        total_seconds = 0
+        previous_time = base
+
+        for _ in range(num_intervals):
+            next_time = cron_iter.get_next(datetime)
+            total_seconds += (next_time - previous_time).total_seconds()
+            previous_time = next_time
+
+        return total_seconds / num_intervals / 60
+    except Exception:
+        return 0
+
+
+def _apply_offset(parts: list, offset_minutes: float, frequency_minutes: float) -> str:
+    """Apply a minute/hour offset to a cron expression."""
+    # Step-minute cron: */N * * * *
+    if "*/" in parts[0]:
+        step = int(parts[0].split("/")[1])
+        minute_offset = int(offset_minutes) % step
+        parts[0] = f"{minute_offset}/{step}"
+        return " ".join(parts)
+
+    # Fixed-minute cron with hour step: M */H * * *  or  M H * * *
+    if parts[1] != "*" and "*/" in parts[1]:
+        hour_step = int(parts[1].split("/")[1])
+        total_interval_minutes = hour_step * 60
+        total_offset = int(offset_minutes) % total_interval_minutes
+        hour_offset = total_offset // 60
+        minute_value = total_offset % 60
+        parts[0] = str(minute_value)
+        parts[1] = f"{hour_offset}/{hour_step}"
+        return " ".join(parts)
+
+    if offset_minutes == 0:
+        return " ".join(parts)
+
+    # Fixed minute(s): e.g. "0,30 * * * *" or "15 * * * *"
+    try:
+        minutes = [int(m) for m in parts[0].split(",")]
+        offset = int(offset_minutes)
+        new_minutes = sorted(set((m + offset) % 60 for m in minutes))
+        parts[0] = ",".join(str(m) for m in new_minutes)
+        return " ".join(parts)
+    except ValueError:
+        return " ".join(parts)
+
+
 class CronJob:
     """
     A class to manage the execution of scheduled hunts.
@@ -27,6 +127,7 @@ class CronJob:
         target_config_data: dict,
         checkpoint_timestamp_field: str,
         max_workers=None,
+        jitter_seconds: int = 15,
     ):
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
@@ -36,6 +137,7 @@ class CronJob:
         self.target_config_data = target_config_data
         self.hunt_log_path = hunt_log_path
         self.hunts = []
+        self._jitter_seconds = jitter_seconds
         logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -138,36 +240,28 @@ class CronJob:
         cron_expressions = self._parse_cron_config(hunt_data.get("cron", []))
         actual_checkpoint_timestamp_field = self._get_checkpoint_field(hunt_data)
 
-        total_customers = len(customers)
-        customer_counter = 0
-        tasks = []
-
         for cron_expression in cron_expressions:
-            hunt_frequency_minutes = self._get_hunt_frequency(cron_expression)
-            if hunt_frequency_minutes is None:
-                continue
+            # Compute evenly-distributed stagger offsets for all customers
+            offsets = compute_stagger_offsets(
+                cron_expression,
+                total_jobs=len(customers),
+                jitter_seconds=self._jitter_seconds,
+            )
 
-            self._calculate_stagger_interval(hunt_frequency_minutes, total_customers)
-
-            for customer in customers:
+            for i, customer in enumerate(customers):
+                staggered_cron, jitter = offsets[i]
                 await self._schedule_customer_hunt(
                     hunt_data=hunt_data,
                     env=env,
                     customer=customer,
-                    cron_expression=cron_expression,
-                    hunt_frequency_minutes=hunt_frequency_minutes,
-                    customer_counter=customer_counter,
-                    total_customers=total_customers,
+                    staggered_cron=staggered_cron,
+                    jitter=jitter,
                     actual_checkpoint_timestamp_field=actual_checkpoint_timestamp_field,
                     hunt_checkpoint_path=hunt_checkpoint_path,
                     checkpoint_destination=checkpoint_destination,
                     hunt_directory=hunt_directory,
                     thread_tracking_file_path=thread_tracking_file_path,
                 )
-                customer_counter += 1
-
-        if tasks:
-            await asyncio.gather(*tasks)
 
     def _parse_cron_config(self, cron_config) -> list:
         """Parse cron configuration into a list of expressions."""
@@ -230,19 +324,18 @@ class CronJob:
         hunt_data: dict,
         env: Environment,
         customer: str,
-        cron_expression: str,
-        hunt_frequency_minutes: float,
-        customer_counter: int,
-        total_customers: int,
+        staggered_cron: str,
+        jitter: int,
         actual_checkpoint_timestamp_field: str,
         hunt_checkpoint_path: str,
         checkpoint_destination: str,
         hunt_directory: str,
         thread_tracking_file_path: str,
     ) -> None:
-        """Schedule a hunt for a specific customer."""
+        """Schedule a hunt for a specific customer with even load spreading."""
         logger.debug(
-            f"Scheduling hunts for customer: {customer} with cron: {cron_expression} and checkpoint field: {actual_checkpoint_timestamp_field}"
+            f"Scheduling hunt for customer: {customer} with cron: {staggered_cron} "
+            f"(jitter: {jitter}s), checkpoint field: {actual_checkpoint_timestamp_field}"
         )
 
         thread_id = threading.get_native_id()
@@ -251,14 +344,6 @@ class CronJob:
             thread_id=thread_id_customer,
             hunt_dir=hunt_directory,
             thread_tracking_file_path=thread_tracking_file_path,
-        )
-
-        minute_offset = int((customer_counter * self.stagger_minutes) % hunt_frequency_minutes)
-        staggered_cron = self.modify_cron_expression(
-            cron_expression, minute_offset, total_customers
-        )
-        logger.debug(
-            f"Original cron expression: {cron_expression}, staggered cron expression: {staggered_cron}"
         )
 
         hunt = Hunt(
@@ -281,11 +366,11 @@ class CronJob:
         hunt.build_sql_queries_for_customers(env)
         job_func = partial(self._run_hunt_for_customer, hunt, customer)
         await self.add_cron_job(
-            job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}"
+            job_func, staggered_cron, f"{hunt.name}-{customer}-{staggered_cron}",
+            jitter=jitter,
         )
         self.hunts.append(hunt)
         logger.debug(f"Total hunts: {len(self.hunts)} - {hunt.description}")
-        logger.debug(f"Hunt Config: {hunt}")
 
     def calculate_frequency_from_cron(self, cron_expression: str) -> float:
         """
@@ -396,7 +481,8 @@ class CronJob:
             raise
 
     async def add_cron_job(
-        self, job_function: Callable, cron_expression: str, job_name: str
+        self, job_function: Callable, cron_expression: str, job_name: str,
+        jitter: int = 0,
     ) -> None:
         """
         Adds a cron job to the scheduler.
@@ -404,9 +490,12 @@ class CronJob:
         :param job_function: The function to execute for the job.
         :param cron_expression: A cron expression that defines the job schedule.
         :param job_name: The name of the job.
+        :param jitter: Max random delay in seconds added to each fire time.
         """
         try:
-            await self.scheduler.add_job_with_cron(job_function, cron_expression, job_name)
+            await self.scheduler.add_job_with_cron(
+                job_function, cron_expression, job_name, jitter=jitter
+            )
             logger.debug(f"get_scheduled_jobs - [{self.get_scheduled_jobs()}]")
             logger.debug(
                 f"describe_all_job_functions - [{self.scheduler.describe_all_job_functions()}]"

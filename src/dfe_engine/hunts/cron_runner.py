@@ -2,7 +2,6 @@ import asyncio
 import time
 import threading
 import os
-import sys
 
 from datetime import datetime, timezone
 from typing import Optional
@@ -52,50 +51,26 @@ class CronRunner:
 
     def run(self):
         """
-        Main function to start the scheduler and process hunts.
+        Start the scheduler and process hunts.
 
-        This method daemonizes the process, sets up logging, and starts an asyncio event loop.
-        The steps are as follows:
-
-        1. First Fork:
-            - The process is forked to create a child process.
-            - If the current process is the parent (`pid > 0`), it exits.
-
-        2. Create a New Session:
-            - The child process becomes the session leader of a new session and the process group leader of a new process group.
-            - This detaches the process from any controlling terminal.
-
-        3. Second Fork:
-            - The process is forked again to ensure it is not a session leader, preventing it from acquiring a controlling terminal.
-            - The parent of this fork exits, leaving the grandchild process running.
-
-        4. Redirect Standard File Descriptors:
-            - Standard output and error are flushed to ensure no buffered data is lost.
-            - Standard input is redirected to `/pre_build_config/null`, effectively ignoring any input.
-            - Standard output and error are redirected to 'hunt_cli_logs.log'.
-            - This setup ensures that the daemon process does not output to the terminal but logs to the specified file.
-
-        5. Start the Asyncio Event Loop:
-            - A new asyncio event loop is created and set as the current event loop.
-            - The `self.run_async()` coroutine is run until complete within the event loop.
-            - The event loop is closed after completion to clean up resources.
+        .. deprecated::
+            Use ``HuntEngine.start()`` instead. The previous implementation used
+            ``os.fork()`` daemonization which was fragile and Linux-only.
+            This method now runs the asyncio loop directly (no fork).
         """
-        logger.info(" forking cron runner onto a thread target")
+        import warnings
 
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(0)
-        os.setsid()
-
-        pid = os.fork()
-        if pid > 0:
-            sys.exit(0)
+        warnings.warn(
+            "CronRunner.run() is deprecated. Use HuntEngine.start() for background scheduling.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         self.daemon_pid = os.getpid()
-        logger.info(f"Daemon process started with PID: [{self.daemon_pid}]")
+        logger.info(f"CronRunner started with PID: [{self.daemon_pid}]")
 
-        asyncio.set_event_loop(asyncio.new_event_loop())
-        loop = asyncio.get_event_loop()
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
         try:
             return loop.run_until_complete(self.run_async())
         except Exception:
