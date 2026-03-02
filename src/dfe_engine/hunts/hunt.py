@@ -30,6 +30,7 @@ class Hunt:
         checkpoint_destination: str = "clickhouse",
         hunt_checkpoint_path: Optional[str] = None,
         thread_id: str = None,
+        explain_queries: bool = False,
     ):
         """
         Initialize a new Hunt instance.
@@ -77,6 +78,7 @@ class Hunt:
         self.hunt_checkpoint_path = hunt_checkpoint_path
         if hunt_checkpoint_path and not os.path.exists(hunt_checkpoint_path):
             os.makedirs(hunt_checkpoint_path, exist_ok=True)
+        self.explain_queries = explain_queries
         self.checkpoint_manager = HuntCheckpointManager()
         self.description = f"Hunt '{self.name}', ID: [{self.unique_id}], Scheduled: [{self.cron}], Number Rules: [{len(self.rules)}]"
 
@@ -368,6 +370,27 @@ class Hunt:
             "{ timestamp_condition }", timestamp_condition
         )
 
+        # Capture EXPLAIN plan if enabled (never blocks query execution)
+        explain_plan = None
+        explain_duration_ms = None
+        if self.explain_queries:
+            try:
+                explain_start = datetime.now(timezone.utc)
+                explain_result = ch_client.execute(f"EXPLAIN PLAN {query}")
+                explain_duration_ms = (
+                    (datetime.now(timezone.utc) - explain_start).total_seconds() * 1000
+                )
+                explain_plan = "\n".join(
+                    str(row[0]) if isinstance(row, (list, tuple)) else str(row)
+                    for row in explain_result
+                )
+                logger.info(
+                    f"EXPLAIN [{rule['rule_name']}] ({customer}): "
+                    f"{explain_plan[:500]} ({explain_duration_ms:.0f}ms)"
+                )
+            except Exception as e:
+                logger.warning(f"EXPLAIN failed for {rule['rule_name']}: {e}")
+
         try:
             logger.info(
                 f"-------- DFE Hunt {self.name} Executing --------- \n"
@@ -405,6 +428,8 @@ class Hunt:
                     "scheduled_start_time_w_buffer"
                 ].strftime("%Y-%m-%d %H:%M:%S"),
                 "execution_time_ms": query_execution_time_ms,
+                "explain_plan": explain_plan,
+                "explain_duration_ms": explain_duration_ms,
                 "file_path": file_path,
             }
 

@@ -23,18 +23,32 @@ class JobScheduler:
         self.active_jobs = []
         self.scheduler_started = False
         self.scheduled_start_time = None
+        self._adaptive_intervals: Dict[str, int] = {}
+        self._rescheduled_jobs: set = set()
         self.scheduler.add_listener(self.job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
+
+    def enable_adaptive_mode(self, job_id: str, interval_seconds: int) -> None:
+        """Register a job for REFRESH AFTER rescheduling.
+
+        After each successful execution, the job's trigger is replaced with
+        an IntervalTrigger starting from the completion time. This gives true
+        backpressure: the next execution only begins ``interval_seconds`` after
+        the previous one finishes, not on a rigid cron tick.
+        """
+        self._adaptive_intervals[job_id] = interval_seconds
 
     def job_listener(self, event):
         """
-        Monitor job execution and log results.
+        Monitor job execution, log results, and handle adaptive rescheduling.
 
-        Captures:
-        1. Job completion status and timing
-        2. Execution results and statistics
-        3. Next scheduled run time
+        For jobs registered via ``enable_adaptive_mode``, replaces the trigger
+        with an IntervalTrigger on each successful completion so the interval
+        always counts from the moment the job finishes (REFRESH AFTER semantics).
         """
         job = self.scheduler.get_job(event.job_id)
+        if job is None:
+            return
+
         self.scheduled_start_time = (
             event.scheduled_run_time if hasattr(event, "scheduled_run_time") else "N/A"
         )
@@ -44,25 +58,52 @@ class JobScheduler:
                 f"The job {job.name} (ID: {job.id}) crashed: {event.exception}",
                 exc_info=True,
             )
-        else:
-            completion_time = datetime.now()
-            result = event.retval if hasattr(event, "retval") else "No result returned"
-            next_run_time = job.next_run_time if job.next_run_time else None
+            return
 
-            details = (
-                f"The job {job.name} (ID: {job.id}) completed successfully. "
-                f"Start time: {self.scheduled_start_time}, Completion time: {completion_time}, Next run time: {next_run_time}. "
+        completion_time = datetime.now()
+        result = event.retval if hasattr(event, "retval") else "No result returned"
+        next_run_time = job.next_run_time if job.next_run_time else None
+
+        details = (
+            f"The job {job.name} (ID: {job.id}) completed successfully. "
+            f"Start time: {self.scheduled_start_time}, Completion time: {completion_time}, Next run time: {next_run_time}. "
+        )
+
+        if isinstance(result, dict):
+            details += (
+                f"Total Execution Time: {result.get('total_execution_time')}, "
+                f"Successful Queries: {result.get('successful_queries')}, "
+                f"Failed Queries: {result.get('failed_queries')}, "
+                f"Hunt Name: {result.get('hunt_name')}. "
             )
 
-            if isinstance(result, dict):
-                details += (
-                    f"Total Execution Time: {result.get('total_execution_time')}, "
-                    f"Successful Queries: {result.get('successful_queries')}, "
-                    f"Failed Queries: {result.get('failed_queries')}, "
-                    f"Hunt Name: {result.get('hunt_name')}. "
-                )
+        logger.debug(details)
 
-            logger.debug(details)
+        # Adaptive rescheduling: reset interval from completion time
+        if event.job_id in self._adaptive_intervals:
+            interval = self._adaptive_intervals[event.job_id]
+            try:
+                self.scheduler.reschedule_job(
+                    event.job_id,
+                    trigger=IntervalTrigger(
+                        seconds=interval, start_date=completion_time,
+                    ),
+                )
+                if event.job_id not in self._rescheduled_jobs:
+                    self._rescheduled_jobs.add(event.job_id)
+                    logger.info(
+                        f"Adaptive scheduling active: {job.name} (ID: {event.job_id}) "
+                        f"interval={interval}s (REFRESH AFTER)"
+                    )
+                else:
+                    logger.debug(
+                        f"Adaptive: {event.job_id} next fire in {interval}s from completion"
+                    )
+            except Exception as e:
+                logger.error(
+                    f"Failed to reschedule job {event.job_id} to interval: {e}",
+                    exc_info=True,
+                )
 
     async def add_job_with_cron(
         self, job_function: Callable, cron_expression: str, job_name: str,
