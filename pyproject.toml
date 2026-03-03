@@ -43,6 +43,8 @@ dependencies = [
     "deepmerge>=2.0",
     # Authentication
     "bcrypt>=4.2.0",
+    # Alerting / notifications
+    "apprise>=1.9.0",
 ]
 
 [project.urls]

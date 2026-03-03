@@ -34,6 +34,8 @@ class Hunt:
         explain_queries: bool = False,
         source_registry: Optional[Any] = None,
         resource_limits: Optional[Dict[str, int]] = None,
+        alert_config: Optional[Any] = None,
+        alert_grouping: Optional[Any] = None,
     ):
         """
         Initialize a new Hunt instance.
@@ -84,6 +86,8 @@ class Hunt:
         self.explain_queries = explain_queries
         self.source_registry = source_registry
         self.resource_limits = resource_limits or {}
+        self.alert_config = alert_config
+        self.alert_grouping = alert_grouping
         self.checkpoint_manager = HuntCheckpointManager()
         self.description = f"Hunt '{self.name}', ID: [{self.unique_id}], Scheduled: [{self.cron}], Number Rules: [{len(self.rules)}]"
 
@@ -272,7 +276,9 @@ class Hunt:
         file_path = self._get_checkpoint_file_path(customer)
 
         try:
-            successful_queries, failed_queries = self._execute_queries(execution_context, file_path)
+            successful_queries, failed_queries, rule_results = self._execute_queries(
+                execution_context, file_path
+            )
         except Exception as e:
             base_error_message = (
                 f"Hunt {self.name} failed during hunt execution. See specific log for {self.name} - "
@@ -282,12 +288,179 @@ class Hunt:
             raise e
 
         total_execution_time = (datetime.now(timezone.utc) - execution_time).total_seconds()
+
+        # Fire alerts if any detections occurred
+        if successful_queries > 0 and self.alert_config:
+            self._dispatch_alerts(customer, rule_results)
+
         return {
             "total_execution_time": total_execution_time,
             "successful_queries": successful_queries,
             "failed_queries": failed_queries,
             "hunt_name": self.name,
         }
+
+    def _dispatch_alerts(self, customer: str, rule_results: List[Dict]) -> None:
+        """Send alerts via configured AlertDispatcher.
+
+        When alert_grouping is configured with group_by fields, runs a
+        post-INSERT aggregation query against the results table and fires
+        one alert per group. Otherwise fires one alert per rule with the
+        actual result row count.
+        """
+        from .alert import AlertDispatcher
+
+        try:
+            dispatcher = AlertDispatcher(self.alert_config)
+            alerts_sent = 0
+            max_alerts = (
+                self.alert_grouping.max_alerts_per_run
+                if self.alert_grouping and self.alert_grouping.max_alerts_per_run > 0
+                else 0
+            )
+
+            for rule_result in rule_results:
+                rule_name = rule_result["rule_name"]
+                result_rows = rule_result.get("result_rows", 0)
+
+                if result_rows == 0:
+                    continue
+
+                if max_alerts and alerts_sent >= max_alerts:
+                    logger.info(
+                        f"Alert cap reached ({max_alerts}) for hunt '{self.name}', "
+                        f"skipping remaining rules"
+                    )
+                    break
+
+                # Grouped alerting: query results table with GROUP BY
+                if (
+                    self.alert_grouping
+                    and self.alert_grouping.has_group_by
+                    and rule_result.get("target_db")
+                    and rule_result.get("target_table")
+                ):
+                    self._dispatch_grouped_alerts(
+                        dispatcher, customer, rule_result, alerts_sent, max_alerts
+                    )
+                else:
+                    # Ungrouped: one alert per rule with actual result count
+                    sent = dispatcher.evaluate_and_send(
+                        hunt_name=self.name,
+                        customer=customer,
+                        rule_name=rule_name,
+                        result_count=result_rows,
+                    )
+                    if sent:
+                        alerts_sent += 1
+
+        except Exception as e:
+            logger.error(f"Alert dispatch failed for hunt '{self.name}': {e}")
+
+    def _dispatch_grouped_alerts(
+        self,
+        dispatcher,
+        customer: str,
+        rule_result: Dict,
+        alerts_sent: int,
+        max_alerts: int,
+    ) -> int:
+        """Run grouping query and fire one alert per group with cooldown."""
+        from .suppression import AlertStateManager, build_grouping_query
+        from .hunt_output import RESULTS_TABLE_COLUMNS
+
+        rule_name = rule_result["rule_name"]
+        target_db = rule_result["target_db"]
+        target_table = rule_result["target_table"]
+        time_start = rule_result["time_start"]
+        time_end = rule_result["time_end"]
+
+        grouping_sql = build_grouping_query(
+            target_db=target_db,
+            target_table=target_table,
+            hunt_name=self.name,
+            rule_name=rule_name,
+            customer=customer,
+            group_by=self.alert_grouping.group_by,
+            time_start=time_start,
+            time_end=time_end,
+            results_table_columns=RESULTS_TABLE_COLUMNS,
+            max_sample_events=self.alert_grouping.max_sample_events,
+        )
+
+        if not grouping_sql:
+            return alerts_sent
+
+        try:
+            with ClickHouseManager.get_instance(
+                self.target_config_data
+            ).get_clickhouse_client() as ch_client:
+                # Cooldown check
+                cooldown = self.alert_grouping.cooldown_td
+                state_mgr = AlertStateManager()
+                state_mgr.ensure_table_exists(ch_client)
+
+                can_fire = state_mgr.check_cooldown(
+                    ch_client, self.name, rule_name, customer, cooldown
+                )
+                if not can_fire:
+                    logger.info(
+                        f"Alert cooldown active for '{self.name}' rule '{rule_name}' "
+                        f"customer '{customer}', skipping"
+                    )
+                    return alerts_sent
+
+                # Run grouping query
+                rows = ch_client.execute(grouping_sql)
+                if not rows:
+                    return alerts_sent
+
+                group_by_fields = self.alert_grouping.group_by
+                for row in rows:
+                    if max_alerts and alerts_sent >= max_alerts:
+                        break
+
+                    # Build group context from row
+                    # Row layout: group_by_field_1, ..., group_by_field_N,
+                    #             match_count, first_seen, last_seen, sample_events
+                    n_groups = len(group_by_fields)
+                    group_values = {
+                        group_by_fields[i]: str(row[i]) for i in range(n_groups)
+                    }
+                    match_count = int(row[n_groups])
+                    first_seen = str(row[n_groups + 1])
+                    last_seen = str(row[n_groups + 2])
+
+                    group_context = {
+                        "group_fields": group_values,
+                        "match_count": match_count,
+                        "first_seen": first_seen,
+                        "last_seen": last_seen,
+                    }
+
+                    sent = dispatcher.evaluate_and_send(
+                        hunt_name=self.name,
+                        customer=customer,
+                        rule_name=rule_name,
+                        result_count=match_count,
+                        group_context=group_context,
+                    )
+                    if sent:
+                        alerts_sent += 1
+
+                # Record fire for cooldown tracking
+                if alerts_sent > 0:
+                    state_mgr.record_fire(
+                        ch_client, self.name, rule_name, customer
+                    )
+
+        except Exception as e:
+            logger.error(
+                f"Grouped alert dispatch failed for '{self.name}' "
+                f"rule '{rule_name}': {e}"
+            )
+
+        return alerts_sent
 
     def _prepare_execution_context(
         self, scheduled_start_time: datetime, execution_time: datetime
@@ -318,9 +491,10 @@ class Hunt:
     def _execute_queries(
         self, execution_context: Dict[str, Any], file_path: Optional[str]
     ) -> tuple:
-        """Execute all queries and return success/failure counts."""
+        """Execute all queries and return success/failure counts + per-rule metadata."""
         successful_queries = 0
         failed_queries = 0
+        rule_results: List[Dict] = []
 
         with ClickHouseManager.get_instance(
             self.target_config_data
@@ -350,6 +524,7 @@ class Hunt:
                         rule_counter += 1
                         successful_queries += 1
                         successful_checkpoints.append(result["checkpoint"])
+                        rule_results.append(result.get("rule_metadata", {}))
                         logger.debug(
                             f"Hunt [{self.name}] executed ({rule_counter}/{total_number_of_queries}) "
                             f"for org [{customer}] executed @{execution_context['execution_time_str']} previous checkpoint {result['last_success_time']} new checkpoint @{execution_context['scheduled_start_time_w_buffer_str']}"
@@ -359,7 +534,7 @@ class Hunt:
 
             self._save_checkpoints(ch_client, successful_checkpoints, file_path)
 
-        return successful_queries, failed_queries
+        return successful_queries, failed_queries, rule_results
 
     def _execute_single_query(
         self,
@@ -469,10 +644,21 @@ class Hunt:
                 **profile,
             }
 
+            # Per-rule metadata for alert grouping
+            rule_metadata = {
+                "rule_name": rule["rule_name"],
+                "result_rows": profile.get("result_rows", 0),
+                "target_db": customer,
+                "target_table": rule.get("target_table_name", self.global_target_table_name),
+                "time_start": last_success_time_str,
+                "time_end": execution_context["scheduled_start_time_w_buffer_str"],
+            }
+
             return {
                 "success": True,
                 "checkpoint": checkpoint,
                 "last_success_time": last_success_time,
+                "rule_metadata": rule_metadata,
             }
 
         except Exception as e:

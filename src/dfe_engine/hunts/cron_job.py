@@ -10,6 +10,8 @@ from jinja2 import Environment
 import threading
 from .job import JobScheduler
 from .hunt import Hunt
+from .alert import AlertDestinationRegistry, build_alert_config
+from .suppression import AlertGroupingConfig
 from .validator import HuntValidator
 import croniter
 from hyperi_pylib.logger import logger
@@ -134,6 +136,8 @@ class CronJob:
         source_registry=None,
         concurrency_semaphore=None,
         resource_limits: dict | None = None,
+        alert_channels: list[str] | None = None,
+        destination_registry: AlertDestinationRegistry | None = None,
     ):
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
@@ -150,6 +154,8 @@ class CronJob:
         self._source_registry = source_registry
         self._concurrency_semaphore = concurrency_semaphore
         self._resource_limits = resource_limits or {}
+        self._alert_channels = alert_channels or []
+        self._destination_registry = destination_registry
         logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -369,6 +375,16 @@ class CronJob:
             thread_tracking_file_path=thread_tracking_file_path,
         )
 
+        alert_config = build_alert_config(
+            hunt_data, self._alert_channels, self._destination_registry
+        )
+
+        # Parse optional alert grouping config
+        grouping_data = hunt_data.get("alert_grouping")
+        alert_grouping = (
+            AlertGroupingConfig(**grouping_data) if grouping_data else None
+        )
+
         hunt = Hunt(
             cron=staggered_cron,
             log_buffer=hunt_data["log_buffer"],
@@ -387,6 +403,8 @@ class CronJob:
             explain_queries=explain_queries,
             source_registry=self._source_registry,
             resource_limits=self._resource_limits,
+            alert_config=alert_config,
+            alert_grouping=alert_grouping,
         )
 
         hunt.build_sql_queries_for_customers(env)

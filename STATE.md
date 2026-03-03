@@ -18,6 +18,7 @@
 - Service configs (receiver, loader, archiver) — `ServiceConfigRegistry`
 - Query definitions — `QueryRegistry`
 - Source definitions — `SourceRegistry`
+- Alert destinations — `AlertDestinationRegistry`
 
 **DirectoryConfigStore features used:**
 
@@ -80,25 +81,33 @@
 
 **Decision:** nginx-ingress community EOL March 2026. Envoy Gateway has native OIDC via SecurityPolicy.
 
+### Pylib Usage Policy
+
+**Decision:** Engine MUST use hyperi-pylib primitives — no bespoke alternatives:
+
+- **Logger:** `from hyperi_pylib.logger import logger` (loguru-based, NOT stdlib `logging`)
+- **HTTP:** `HttpClient` / `AsyncHttpClient` from `hyperi_pylib.http` (retries, timeouts — NOT raw `httpx`)
+- **Config store:** `DirectoryConfigStore` from `hyperi_pylib.config` for all YAML registries
+- **Deep merge:** `deepmerge.always_merger` (separate pip package, pylib's `mergedeep` is file-level only)
+- **YAML:** `ruamel.yaml` via `dfe_engine.yaml_utils` (YAML 1.2 — intentional divergence from pylib's PyYAML 1.1)
+
 ---
 
-## Current Session (2026-03-02)
+## Current Session (2026-03-03)
 
-### Completed — Hunt Source Wiring, Rule Model, Expression Validator, Execution Profiles
+### Completed — Alert Grouping + Cooldown, Apprise Alerts, Pylib Audit
 
-5 workstreams implemented (uncommitted):
+**Alert grouping + cooldown:** Read-time aggregation for hunt alerts. All rows written at full fidelity, grouping via post-INSERT `SELECT ... GROUP BY`. Cooldown per (hunt, rule, customer) via `dfe_audit.alert_state`.
 
-- **Source wiring:** Hunt resolves `source` field from SourceRegistry, `{{ source }}` template var, CronJob passthrough
-- **dfe_package.yaml removal:** `SigmaRuleConverter.from_config()`, `config_base_dir` replaces `dfe_package_file_path`
-- **Rule model:** `Rule` + `RuleCreate` Pydantic models wrapping RuleRewriter, `from_create()`, `validate_rule()`
-- **Expression validator:** `ExpressionValidator` for @source/@generated/@captured/@computed/@config directives, `ExpressionBuilder`, `list_directive_types()`
-- **Execution profiles:** `_capture_execution_profile()` queries `system.query_log`, checkpoint schema extended with 4 profile columns
+**Apprise alert system:** `AlertConfig`, `AlertDispatcher`, `AlertDestinationRegistry` with DirectoryConfigStore backing.
 
-**Test results:** 1435 passed, 0 failures (82 new tests)
+**Pylib audit:** All violations fixed (logger, HTTP client, deep merge).
+
+**Test results:** 1593 passed, 0 failures
 
 ### Previous Sessions
 
-- **2026-03-02:** DDLFileWriter, adaptive scheduling + EXPLAIN capture, Hunt Engine, field mapping (5 phases), clean-slate restructure, DESIGN.md, Argo CD CRDs
+- **2026-03-02:** Hunt source wiring, Rule model, Expression validator, execution profiles, DDLFileWriter, adaptive scheduling + EXPLAIN capture
 - **2026-03-01:** OTEL env config, KEDA scalers, Argo RBAC generator
 - **2026-02-28:** Source model, schema v2, sigma mapper, service routing, v1 removal, Helm compiler + RBAC
 
@@ -106,34 +115,34 @@
 
 ## Module Status
 
-| Module        | Status | Notes                                                            |
-| ------------- | ------ | ---------------------------------------------------------------- |
-| `source/`     | Ready  | TypeRegistry, Source, SourceRegistry, ExpressionValidator — 163 tests |
-| `schema/`     | Ready  | v2 YAML→DDL pipeline, ViewGenerator integration                  |
-| `fieldmap/`   | Ready  | FieldMap model, registry, resolver, ViewGenerator — 96 tests     |
-| `clickhouse/` | Ready  | clickhouse-connect client management                             |
-| `pipeline/`   | Ready  | Vector pipeline generation (core build/render logic)             |
-| `sigma/`      | Ready  | SigmaSourceMapper + converter, FieldMapRegistry integration      |
-| `hunts/`      | Ready  | HuntEngine, Rule model, source wiring, execution profiles — 58 tests |
-| `query/`      | Ready  | YAML SSoT registry, Arrow-native output, built-in queries        |
-| `services/`   | Ready  | YAML SSoT registry, source routing, default configs, validators  |
-| `auth/`       | Ready  | Engine RBAC, open-ended argo: namespace, infra_admin role        |
-| `helm/`       | Ready  | Values compiler, ExternalComponent, Argo CD app/project CRDs, RBAC, OTEL |
-| `deployment/` | Ready  | Pydantic models for K8s/KEDA, Prometheus + generic triggers      |
-| `settings.py` | Ready  | Pydantic config cascade + deepmerge (no PostgresSettings)        |
-| `yaml_utils.py` | Ready | Consolidated YAML operations                                   |
-| `storage/`    | Ready  | Local/HTTP/S3 storage backends                                   |
+| Module | Status | Notes |
+| --- | --- | --- |
+| `source/` | Ready | TypeRegistry, Source, SourceRegistry, ExpressionValidator — 163 tests |
+| `schema/` | Ready | v2 YAML→DDL pipeline, DDLFileWriter, ViewGenerator integration |
+| `fieldmap/` | Ready | FieldMap model, registry, resolver, ViewGenerator — 96 tests |
+| `clickhouse/` | Ready | clickhouse-connect client management |
+| `pipeline/` | Ready | Vector pipeline generation (core build/render logic) |
+| `sigma/` | Ready | SigmaSourceMapper + converter, FieldMapRegistry integration |
+| `hunts/` | Ready | HuntEngine, Rule model, source wiring, execution profiles, Apprise alerts, alert grouping + cooldown — 107 tests |
+| `query/` | Ready | YAML SSoT registry, Arrow-native output, built-in queries |
+| `services/` | Ready | YAML SSoT registry, source routing, default configs, validators |
+| `auth/` | Ready | Engine RBAC, open-ended argo: namespace, infra_admin role |
+| `helm/` | Ready | Values compiler, ExternalComponent, Argo CD app/project CRDs, RBAC, OTEL |
+| `deployment/` | Ready | Pydantic models for K8s/KEDA, Prometheus + generic triggers |
+| `settings.py` | Ready | Pydantic config cascade + deepmerge (no PostgresSettings) |
+| `yaml_utils.py` | Ready | Consolidated YAML operations |
+| `storage/` | Ready | Local/HTTP/S3 storage backends (pylib HttpClient) |
 
 ### Removed Modules
 
-| Module               | Removed In         | Reason                                  |
-| -------------------- | ------------------ | --------------------------------------- |
-| `config/`            | Restructure Ph 1+4 | Dead Config class + DFEConfigLoader shim → settings.py |
-| `targets/`           | Restructure Ph 1   | Legacy Targets class → settings.py      |
-| `data/`              | Restructure Ph 1   | Unused DataGenerator/DataTool           |
-| `schema/v1 files`    | Restructure Ph 2   | 6,427 lines → v2 pipeline (949 lines)  |
-| `deprecated/`        | Earlier Phase 5    | Replaced by settings.py + Source model  |
-| `schemas/`           | Earlier Phase 5    | Replaced by schema/ v2 pipeline         |
+| Module | Removed In | Reason |
+| --- | --- | --- |
+| `config/` | Restructure Ph 1+4 | Dead Config class + DFEConfigLoader shim → settings.py |
+| `targets/` | Restructure Ph 1 | Legacy Targets class → settings.py |
+| `data/` | Restructure Ph 1 | Unused DataGenerator/DataTool |
+| `schema/v1 files` | Restructure Ph 2 | 6,427 lines → v2 pipeline (949 lines) |
+| `deprecated/` | Earlier Phase 5 | Replaced by settings.py + Source model |
+| `schemas/` | Earlier Phase 5 | Replaced by schema/ v2 pipeline |
 
 ---
 
@@ -141,7 +150,7 @@
 
 ### Runtime
 
-- `hyperi-pylib>=2.19.0` — Logging, config, DirectoryConfigStore
+- `hyperi-pylib>=2.19.0` — Logging, config, DirectoryConfigStore, HttpClient
 - `clickhouse-connect>=0.13.0` — ClickHouse client
 - `pyarrow>=23.0.1` — Arrow-native query output
 - `pandas>=3.0.1` — DataFrame operations
@@ -151,6 +160,7 @@
 - `pysigma>=1.1.1` — Sigma rule conversion
 - `httpx>=0.28.1` — Async HTTP client
 - `deepmerge>=2.0` — Deep dict merging for settings and Helm values
+- `apprise>=1.9.2` — Multi-channel notification dispatch
 
 ### Development
 
@@ -160,4 +170,4 @@
 
 ---
 
-**Last Updated:** 2026-03-02
+**Last Updated:** 2026-03-03

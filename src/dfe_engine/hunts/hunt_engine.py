@@ -116,6 +116,17 @@ class HuntEngine:
         if max_concurrent > 0:
             self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
 
+        # Build destination registry — prefer DirectoryConfigStore, seed from inline dict
+        from .alert import AlertDestinationRegistry
+
+        dest_dir = hunts_cfg.alert_destinations_dir or None
+        self._destination_registry = AlertDestinationRegistry(directory=dest_dir)
+        if hunts_cfg.alert_destinations:
+            self._destination_registry.load_from_dict(hunts_cfg.alert_destinations)
+            logger.info(
+                f"HuntEngine: loaded {len(self._destination_registry)} alert destinations"
+            )
+
         logger.info(
             f"HuntEngine scheduling_mode={hunts_cfg.scheduling_mode}, "
             f"min_interval={hunts_cfg.min_interval_seconds}s, "
@@ -208,6 +219,8 @@ class HuntEngine:
                 explain_queries=hunts_cfg.explain_queries,
                 concurrency_semaphore=self._concurrency_semaphore,
                 resource_limits=resource_limits,
+                alert_channels=hunts_cfg.alert_channels,
+                destination_registry=self._destination_registry,
             )
 
             thread_tracking_path = os.path.join(

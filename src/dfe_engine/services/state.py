@@ -10,6 +10,7 @@ import re
 from typing import Any
 
 import httpx
+from hyperi_pylib.http import AsyncHttpClient
 from pydantic import BaseModel
 
 from hyperi_pylib.logger import logger
@@ -90,6 +91,12 @@ class ServiceStateClient:
         self.metrics_url = (metrics_url or base_url).rstrip("/")
         self.instance = instance
         self._timeout = timeout
+        self._health_client = AsyncHttpClient(
+            base_url=self.base_url, timeout=timeout, retries=1,
+        )
+        self._metrics_client = AsyncHttpClient(
+            base_url=self.metrics_url, timeout=timeout, retries=1,
+        )
 
     # -------------------------------------------------------------------------
     # Health
@@ -110,10 +117,9 @@ class ServiceStateClient:
             # Try to get detailed health (loader has /health returning JSON)
             if self.service == "loader":
                 try:
-                    async with httpx.AsyncClient(timeout=self._timeout) as client:
-                        resp = await client.get(f"{self.base_url}/health")
-                        if resp.status_code == 200:
-                            details = resp.json()
+                    resp = await self._health_client.get("/health")
+                    if resp.status_code == 200:
+                        details = resp.json()
                 except Exception:
                     pass
 
@@ -122,14 +128,13 @@ class ServiceStateClient:
     async def is_alive(self) -> bool:
         """Check if the service process is alive (liveness probe)."""
         paths = self._liveness_paths()
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for path in paths:
-                try:
-                    resp = await client.get(f"{self.base_url}{path}")
-                    if resp.status_code == 200:
-                        return True
-                except httpx.HTTPError:
-                    continue
+        for path in paths:
+            try:
+                resp = await self._health_client.get(path)
+                if resp.status_code == 200:
+                    return True
+            except httpx.HTTPError:
+                continue
         return False
 
     async def readiness(self) -> HealthStatus:
@@ -140,13 +145,12 @@ class ServiceStateClient:
     async def _check_readiness(self) -> bool:
         """Check readiness endpoint."""
         paths = self._readiness_paths()
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            for path in paths:
-                try:
-                    resp = await client.get(f"{self.base_url}{path}")
-                    return resp.status_code == 200
-                except httpx.HTTPError:
-                    continue
+        for path in paths:
+            try:
+                resp = await self._health_client.get(path)
+                return resp.status_code == 200
+            except httpx.HTTPError:
+                continue
         return False
 
     # -------------------------------------------------------------------------
@@ -155,10 +159,9 @@ class ServiceStateClient:
 
     async def metrics_raw(self) -> str:
         """Fetch raw Prometheus metrics text."""
-        async with httpx.AsyncClient(timeout=self._timeout) as client:
-            resp = await client.get(f"{self.metrics_url}/metrics")
-            resp.raise_for_status()
-            return resp.text
+        resp = await self._metrics_client.get("/metrics")
+        resp.raise_for_status()
+        return resp.text
 
     async def metrics(self) -> dict[str, float]:
         """Fetch and parse Prometheus metrics into a dict."""
@@ -200,6 +203,11 @@ class ServiceStateClient:
             metrics=metrics_data,
             config_version=config_version,
         )
+
+    async def close(self) -> None:
+        """Close underlying HTTP clients."""
+        await self._health_client.aclose()
+        await self._metrics_client.aclose()
 
     # -------------------------------------------------------------------------
     # Service-specific endpoint paths

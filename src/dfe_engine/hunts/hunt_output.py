@@ -93,6 +93,16 @@ HUNT_DETECTION_COLUMNS: tuple[HuntDetectionColumn, ...] = (
 )
 
 
+# Column names present on the hunt results table — used by alert grouping
+# to distinguish direct column references from _json field extraction.
+RESULTS_TABLE_COLUMNS: frozenset[str] = (
+    _HEADER_COLUMNS_TO_COPY
+    | _HEADER_COLUMNS_GENERATED
+    | frozenset(dc.name for dc in HUNT_DETECTION_COLUMNS)
+    | frozenset({"_json"})
+)
+
+
 class HuntResultSchema:
     """Dynamic hunt results schema composed from common header + detection columns.
 

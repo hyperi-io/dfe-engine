@@ -1,21 +1,35 @@
 # DFE Engine - TODO
 
 **Project Goal:** Production-ready core library for Data Fusion Engine
-**Tests:** 1478 passing
+**Tests:** 1593 passing
 
 ---
 
 ## Engine Scope
 
-### Hunts
+### Hunts — Remaining
 
-- [ ] AI query improvement — structured execution profiles for LLM-based query optimisation
-- [ ] External alerting — configurable notification channels (Slack, email, PagerDuty) triggered by hunt output criteria (any match, specific field values, result count thresholds)
+- [x] ~~Alert grouping + cooldown — read-time aggregation, per-(hunt,rule,customer) cooldown~~ (done 2026-03-03)
+- [ ] Per-group cooldown — extend cooldown key to include group_by field values (v2)
+- [ ] Alert grouping integration tests — verify against real ClickHouse (DevEx cluster)
 
-### Config Repo
+### AI Module Interface (stub — implementation in separate repo)
 
-See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
+Engine defines the interface contract. AI modules slot in from another project repo. Interface will iterate as engine evolves.
 
+- [ ] `AIModuleInterface` ABC with three module types:
+  - Query optimisation: takes query + execution profile → returns proposed query + rationale
+  - Schema optimisation: takes source schema → returns proposed meta schema improvements
+  - Parser: takes raw log samples → returns parsers + proposed meta schema
+- [ ] Module discovery / registry (plugin pattern or entry_points)
+- [ ] Async execution — AI modules run background tasks, return results asynchronously
+
+### Config Repo + Deployment Migration
+
+Needs architectural decision: TF + Helm + Argo under this project or separate. Must migrate from DFE 2.1 (dfe-core) AWS-only approach to DFE 2.2 engine.
+
+- [ ] Decide: mono-repo vs separate repo for infra (TF/Helm/Argo)
+- [ ] Migrate DFE 2.1 deployment approach from `/projects/dfe-core` to DFE 2.2
 - [ ] Create `dfe-config` repo with directory structure from DESIGN.md §2.2
 - [ ] Seed default field maps (Sigma/ECS/CIM) as package resources
 - [ ] Blob SHA ETag computation for conflict detection
@@ -25,7 +39,7 @@ See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
 
 ### Integration Tests
 
-- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
+- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io) — after above items complete
 
 ---
 
