@@ -146,11 +146,12 @@ class TestCheckpointProfileColumns:
         assert "memory_usage" in insert_sql
         assert "result_rows" in insert_sql
 
-        # Verify data tuple has 19 elements (15 original + 4 profile)
+        # Verify data tuple has 20 elements (15 original + 4 profile + 1 fingerprint)
         data = insert_call[0][1]
         assert len(data) == 1
-        assert len(data[0]) == 19
+        assert len(data[0]) == 20
         assert data[0][15] == 50000   # read_rows
         assert data[0][16] == 1024000  # read_bytes
         assert data[0][17] == 2048000  # memory_usage
         assert data[0][18] == 3       # result_rows
+        assert data[0][19] == ""      # query_fingerprint (empty, not set in checkpoint)

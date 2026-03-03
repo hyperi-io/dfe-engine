@@ -158,7 +158,8 @@ class HuntCheckpointManager:
                     read_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
                     read_bytes UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
                     memory_usage UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                    result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD)
+                    result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
+                    query_fingerprint LowCardinality(String) DEFAULT '' CODEC(LZ4)
                 ) ENGINE = {engine}
                 PARTITION BY toYYYYMM(query_checkpoint_time)
                 ORDER BY (customer_name, hunt_name, rule_name, query_checkpoint_time);
@@ -188,6 +189,7 @@ class HuntCheckpointManager:
             ("read_bytes", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
             ("memory_usage", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
             ("result_rows", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
+            ("query_fingerprint", "LowCardinality(String) DEFAULT '' CODEC(LZ4)"),
         ]
         for col_name, col_def in new_columns:
             try:
@@ -579,6 +581,7 @@ class HuntCheckpointManager:
                     int(checkpoint.get("read_bytes") or 0),
                     int(checkpoint.get("memory_usage") or 0),
                     int(checkpoint.get("result_rows") or 0),
+                    str(checkpoint.get("query_fingerprint") or ""),
                 )
                 for checkpoint in checkpoints
             ]
@@ -605,7 +608,8 @@ class HuntCheckpointManager:
                     read_rows,
                     read_bytes,
                     memory_usage,
-                    result_rows
+                    result_rows,
+                    query_fingerprint
                 ) VALUES
                 """,
                 data,
