@@ -23,6 +23,12 @@ Usage:
     source = source_reg.get_source("filebeat")
 """
 
+from dfe_engine.source.expression import (
+    ExpressionBuilder,
+    ExpressionValidator,
+    ExprValidationResult,
+    list_directive_types,
+)
 from dfe_engine.source.models import (
     FetcherAuth,
     SchemaColumn,
@@ -51,6 +57,11 @@ from dfe_engine.source.type_registry import (
 )
 
 __all__ = [
+    # Expression Validator
+    "ExpressionBuilder",
+    "ExpressionValidator",
+    "ExprValidationResult",
+    "list_directive_types",
     # Type Registry
     "InvalidAttributeError",
     "InvalidChOverrideError",

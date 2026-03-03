@@ -154,7 +154,11 @@ class HuntCheckpointManager:
                     query_id LowCardinality(String) CODEC(LZ4),
                     explain_plan String DEFAULT '' CODEC(ZSTD),
                     explain_duration_ms Int32 DEFAULT 0 CODEC(Delta, ZSTD),
-                    scheduling_mode LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4)
+                    scheduling_mode LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4),
+                    read_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
+                    read_bytes UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
+                    memory_usage UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
+                    result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD)
                 ) ENGINE = {engine}
                 PARTITION BY toYYYYMM(query_checkpoint_time)
                 ORDER BY (customer_name, hunt_name, rule_name, query_checkpoint_time);
@@ -172,12 +176,18 @@ class HuntCheckpointManager:
     def migrate_table_if_needed(self, ch_client) -> None:
         """Add new columns to existing checkpoint tables (idempotent).
 
-        Safe to call on tables created before the adaptive scheduling update.
+        Safe to call on tables created before the adaptive scheduling update
+        or before the execution profile update.
         """
         new_columns = [
             ("explain_plan", "String DEFAULT '' CODEC(ZSTD)"),
             ("explain_duration_ms", "Int32 DEFAULT 0 CODEC(Delta, ZSTD)"),
             ("scheduling_mode", "LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4)"),
+            # Execution profile columns (from system.query_log)
+            ("read_rows", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
+            ("read_bytes", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
+            ("memory_usage", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
+            ("result_rows", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
         ]
         for col_name, col_def in new_columns:
             try:
@@ -565,6 +575,10 @@ class HuntCheckpointManager:
                     str(checkpoint.get("explain_plan") or ""),
                     int(checkpoint.get("explain_duration_ms") or 0),
                     str(checkpoint.get("scheduling_mode", "adaptive")),
+                    int(checkpoint.get("read_rows") or 0),
+                    int(checkpoint.get("read_bytes") or 0),
+                    int(checkpoint.get("memory_usage") or 0),
+                    int(checkpoint.get("result_rows") or 0),
                 )
                 for checkpoint in checkpoints
             ]
@@ -587,7 +601,11 @@ class HuntCheckpointManager:
                     query_id,
                     explain_plan,
                     explain_duration_ms,
-                    scheduling_mode
+                    scheduling_mode,
+                    read_rows,
+                    read_bytes,
+                    memory_usage,
+                    result_rows
                 ) VALUES
                 """,
                 data,
