@@ -85,11 +85,12 @@ class QueryClient:
     def http_client(self):
         """Lazy-load HTTP client."""
         if self._http_client is None:
-            import httpx
+            from hyperi_pylib.http import HttpClient
 
-            self._http_client = httpx.Client(
+            self._http_client = HttpClient(
                 base_url=self.base_url,
                 timeout=self.timeout_seconds + 10,  # Buffer for network
+                retries=3,
             )
         return self._http_client
 

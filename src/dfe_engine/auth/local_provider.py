@@ -17,12 +17,10 @@ Usage:
 
 from __future__ import annotations
 
-import logging
+from hyperi_pylib.logger import logger
 
 from dfe_engine.auth.models import AuthContext, AuthenticationError
 from dfe_engine.settings import LocalAuthSettings
-
-logger = logging.getLogger(__name__)
 
 # Bcrypt hash prefixes (covers all common variants)
 _BCRYPT_PREFIXES = ("$2b$", "$2a$", "$2y$")

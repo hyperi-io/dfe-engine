@@ -2,18 +2,11 @@ import uuid
 import pytest
 import time
 import os
-import logging
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-from hyperi_pylib.logger import logger as hs_logger
+from hyperi_pylib.logger import logger
 import shutil
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
-logger.addHandler(handler)
 
 execution_time = datetime.now(timezone.utc)
 execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -33,9 +26,9 @@ def setup_paths(tmp_path):
 
 
 @pytest.fixture
-def setup_hunt_logger(setup_paths) -> logging.Logger:
+def setup_hunt_logger(setup_paths):
     """Return hyperi-pylib logger for hunt tests."""
-    return hs_logger
+    return logger
 
 
 @pytest.fixture

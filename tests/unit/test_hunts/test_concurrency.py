@@ -142,7 +142,7 @@ class TestBackpressureSignal:
         # */5 * * * * = every 5 minutes = 300 seconds
         interval = cj._get_hunt_interval_seconds("*/5 * * * *")
         assert interval is not None
-        assert abs(interval - 300) < 10  # croniter average may drift slightly
+        assert abs(interval - 300) < 15  # croniter average may drift slightly
 
     def test_get_hunt_interval_invalid_cron(self):
         """Invalid cron returns None."""

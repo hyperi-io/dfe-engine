@@ -3,21 +3,14 @@ import pytest
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 from dfe_engine.settings import get_settings
 import time
-from hyperi_pylib.logger import logger as hs_logger
+from hyperi_pylib.logger import logger
 from datetime import datetime, timezone, timedelta
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-import logging
 import yaml
 from pathlib import Path
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-handler = logging.StreamHandler()
-handler.setLevel(logging.DEBUG)
-logger.addHandler(handler)
 
 
 def create_unique_name(base_name: str) -> str:
@@ -51,7 +44,7 @@ def ch_client():
 @pytest.fixture(scope="function")
 def test_logger(tmp_path):
     """Return hyperi-pylib logger for hunt tests."""
-    return hs_logger
+    return logger
 
 
 def test_ensure_table_exists(ch_client, unique_names):

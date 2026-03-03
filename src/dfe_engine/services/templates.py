@@ -6,20 +6,12 @@ Template overrides are sourced from the plugin system.
 
 from __future__ import annotations
 
+import copy
 from typing import Any
 
+from deepmerge import always_merger
+
 from dfe_engine.services.plugins import get_plugin, valid_services
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge override into base (override wins)."""
-    result = base.copy()
-    for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
 
 
 def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
@@ -58,6 +50,8 @@ def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
     # Apply plugin-provided overrides for this profile
     overrides = plugin.config_template_overrides.get(profile, {})
     if overrides:
-        return _deep_merge(base, overrides)
+        merged = copy.deepcopy(base)
+        always_merger.merge(merged, overrides)
+        return merged
 
     return base

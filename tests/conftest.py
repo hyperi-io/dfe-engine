@@ -26,7 +26,6 @@ Docker Integration:
     - If DFE_CLICKHOUSE_HOST or DFE_POSTGRES_HOST point to non-localhost, Docker is skipped
 """
 
-import logging
 import os
 import subprocess
 import time
@@ -34,6 +33,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from hyperi_pylib.logger import logger
 
 # Load .env file if present (before any other imports that might use settings)
 try:
@@ -42,7 +42,7 @@ try:
     env_path = Path(__file__).parent.parent / ".env"
     if env_path.exists():
         load_dotenv(env_path, override=True)
-        logging.info(f"Loaded environment from {env_path}")
+        logger.info(f"Loaded environment from {env_path}")
 except ImportError:
     pass  # python-dotenv not installed, rely on shell-exported vars
 
@@ -53,15 +53,6 @@ try:
     reset_settings()
 except ImportError:
     pass
-
-# Configure logging for tests
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s | %(levelname)8s | %(module)20s:%(lineno)4d | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
-logger = logging.getLogger(__name__)
 
 # Test statistics tracking
 test_stats = {"total": 0, "passed": 0, "failed": 0, "skipped": 0, "test_files": {}}
