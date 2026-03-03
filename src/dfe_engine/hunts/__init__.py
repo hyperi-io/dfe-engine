@@ -7,6 +7,7 @@ from .scheduler import HuntScheduler  # deprecated — use HuntEngine
 from .validator import HuntValidator
 from .cron_runner import CronRunner  # deprecated — use HuntEngine
 from .cron_job import compute_stagger_offsets
+from .fingerprint import fingerprint_query, normalize_query
 from .rule_rewriter import RuleRewriter, ParsedRule
 from .rule_model import Rule, RuleCreate
 
@@ -24,4 +25,6 @@ __all__ = [
     "Rule",
     "RuleCreate",
     "compute_stagger_offsets",
+    "fingerprint_query",
+    "normalize_query",
 ]

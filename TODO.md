@@ -1,7 +1,7 @@
 # DFE Engine - TODO
 
 **Project Goal:** Production-ready core library for Data Fusion Engine
-**Tests:** 1435 passing
+**Tests:** 1478 passing
 
 ---
 
@@ -9,13 +9,8 @@
 
 ### Hunts
 
-- [ ] Concurrency limit — max concurrent hunt queries per cluster (configurable), queue excess
-- [ ] Backpressure signal — expose hunt execution lag metric via OTEL
-- [ ] Resource hog detection — flag hunts exceeding configurable thresholds (rows scanned, memory, duration)
-- [ ] Query fingerprinting — normalise query text for grouping execution stats across runs
 - [ ] AI query improvement — structured execution profiles for LLM-based query optimisation
-- [ ] Alerts table as a Source (timeseries profile)
-- [ ] Update hunt validator for new schema format
+- [ ] External alerting — configurable notification channels (Slack, email, PagerDuty) triggered by hunt output criteria (any match, specific field values, result count thresholds)
 
 ### Config Repo
 
@@ -77,4 +72,4 @@ See [DESIGN.md](docs/DESIGN.md) §2 for config repo structure and write model.
 
 ---
 
-**Last Updated:** 2026-03-02
+**Last Updated:** 2026-03-03

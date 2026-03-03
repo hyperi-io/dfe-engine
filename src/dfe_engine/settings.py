@@ -133,6 +133,22 @@ class HuntsSettings(BaseModel):
         default=False,
         description="Run EXPLAIN PLAN before each hunt query and log the plan",
     )
+    max_concurrent_queries: int = Field(
+        default=0,
+        description="Max concurrent hunt queries across all schedulers (0 = unlimited)",
+    )
+    resource_limit_read_rows: int = Field(
+        default=0, description="Warn when a hunt reads more than this many rows (0 = no limit)"
+    )
+    resource_limit_read_bytes: int = Field(
+        default=0, description="Warn when a hunt reads more bytes than this (0 = no limit)"
+    )
+    resource_limit_memory_bytes: int = Field(
+        default=0, description="Warn when a hunt uses more memory than this (0 = no limit)"
+    )
+    resource_limit_execution_ms: int = Field(
+        default=0, description="Warn when a hunt takes longer than this in ms (0 = no limit)"
+    )
 
 
 class ArtifactorySettings(BaseModel):
@@ -458,6 +474,16 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["min_interval_seconds"] = int(val)
     if val := _get_env("DFE_HUNTS_EXPLAIN_QUERIES"):
         overrides["hunts"]["explain_queries"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_HUNTS_MAX_CONCURRENT_QUERIES"):
+        overrides["hunts"]["max_concurrent_queries"] = int(val)
+    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_ROWS"):
+        overrides["hunts"]["resource_limit_read_rows"] = int(val)
+    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_BYTES"):
+        overrides["hunts"]["resource_limit_read_bytes"] = int(val)
+    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_MEMORY_BYTES"):
+        overrides["hunts"]["resource_limit_memory_bytes"] = int(val)
+    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_EXECUTION_MS"):
+        overrides["hunts"]["resource_limit_execution_ms"] = int(val)
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):

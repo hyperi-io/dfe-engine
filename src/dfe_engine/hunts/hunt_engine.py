@@ -41,6 +41,7 @@ class HuntEngine:
         self._started = threading.Event()
         self._cron_jobs: list = []
         self._lock = threading.Lock()
+        self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
 
     @property
     def is_running(self) -> bool:
@@ -110,10 +111,16 @@ class HuntEngine:
         hunts_cfg = self._settings.hunts
         target_config = get_clickhouse_config(self._settings)
 
+        # Create concurrency semaphore if max_concurrent_queries > 0
+        max_concurrent = hunts_cfg.max_concurrent_queries
+        if max_concurrent > 0:
+            self._concurrency_semaphore = asyncio.Semaphore(max_concurrent)
+
         logger.info(
             f"HuntEngine scheduling_mode={hunts_cfg.scheduling_mode}, "
             f"min_interval={hunts_cfg.min_interval_seconds}s, "
-            f"explain_queries={hunts_cfg.explain_queries}"
+            f"explain_queries={hunts_cfg.explain_queries}, "
+            f"max_concurrent={max_concurrent or 'unlimited'}"
         )
 
         hunt_dirs = self._parse_dirs(hunts_cfg.hunt_dir)
@@ -185,6 +192,12 @@ class HuntEngine:
             rules_env = Environment(
                 loader=FileSystemLoader(rule_dir), autoescape=True
             )
+            resource_limits = {
+                "read_rows": hunts_cfg.resource_limit_read_rows,
+                "read_bytes": hunts_cfg.resource_limit_read_bytes,
+                "memory_bytes": hunts_cfg.resource_limit_memory_bytes,
+                "execution_ms": hunts_cfg.resource_limit_execution_ms,
+            }
             cron_job = CronJob(
                 hunt_log_path=hunts_cfg.log_path,
                 target_config_data=target_config,
@@ -193,6 +206,8 @@ class HuntEngine:
                 scheduling_mode=hunts_cfg.scheduling_mode,
                 min_interval_seconds=hunts_cfg.min_interval_seconds,
                 explain_queries=hunts_cfg.explain_queries,
+                concurrency_semaphore=self._concurrency_semaphore,
+                resource_limits=resource_limits,
             )
 
             thread_tracking_path = os.path.join(

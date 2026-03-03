@@ -1,4 +1,6 @@
 import os
+from typing import Any
+
 from jinja2 import Environment, TemplateSyntaxError
 from ..yaml_utils import yaml_dump_string, yaml_load_string, YAMLError
 from hyperi_pylib.logger import logger
@@ -14,6 +16,7 @@ class HuntValidator:
         env: Environment,
         rule_repo_dir: str,
         checkpoint_timestamp_field: str,
+        source_registry: Any = None,
     ):
         """
         Validates the hunt configuration for correctness.
@@ -22,6 +25,7 @@ class HuntValidator:
         :param env: A Jinja2 Environment instance for SQL template rendering.
         :param rule_repo_dir: The directory where rule templates are stored.
         :param checkpoint_timestamp_field: The timestamp field for checkpointing.
+        :param source_registry: Optional SourceRegistry for validating source references.
         """
         logger.info("--- HUNT VALIDATOR STARTED ---")
         logger.info(f"Hunt Config:\n {hunt_data} ")
@@ -29,8 +33,9 @@ class HuntValidator:
         HuntValidator._validate_yaml_structure(hunt_data)
         HuntValidator._validate_required_fields(hunt_data, checkpoint_timestamp_field)
         customers = HuntValidator._validate_customers(hunt_data)
-        HuntValidator._validate_rules(hunt_data, env, rule_repo_dir)
+        HuntValidator._validate_rules(hunt_data, env, rule_repo_dir, source_registry)
         HuntValidator._validate_customer_filters(hunt_data, customers)
+        HuntValidator._validate_scheduling_fields(hunt_data)
 
         logger.info("--- HUNT VALIDATOR COMPLETED ---")
 
@@ -58,9 +63,17 @@ class HuntValidator:
         if not isinstance(global_target_table_name, str) or not global_target_table_name.strip():
             raise ValueError("Invalid 'global_target_table_name'. It should be a non-empty string.")
 
+        # Source model: hunts can use 'source' (resolved via SourceRegistry) OR
+        # 'global_source_table_name' (direct table reference). At least one required.
         global_source_table_name = hunt_data.get("global_source_table_name")
-        if not isinstance(global_source_table_name, str) or not global_source_table_name.strip():
-            raise ValueError("Invalid 'global_source_table_name'. It should be a non-empty string.")
+        has_source_ref = any(
+            r.get("source") for r in hunt_data.get("rules", [])
+        )
+        if not has_source_ref:
+            if not isinstance(global_source_table_name, str) or not global_source_table_name.strip():
+                raise ValueError(
+                    "Either 'global_source_table_name' or per-rule 'source' field is required."
+                )
 
         if (
             not isinstance(checkpoint_timestamp_field, str)
@@ -79,7 +92,9 @@ class HuntValidator:
         return customers
 
     @staticmethod
-    def _validate_rules(hunt_data: dict, env: Environment, rule_repo_dir: str) -> None:
+    def _validate_rules(
+        hunt_data: dict, env: Environment, rule_repo_dir: str, source_registry: Any = None
+    ) -> None:
         """Validate rules configuration and syntax."""
         rules = hunt_data.get("rules", [])
         for rule_info in rules:
@@ -88,6 +103,17 @@ class HuntValidator:
             if not os.path.isfile(rule_path):
                 raise ValueError(f"Rule file does not exist: {rule_path}")
             HuntValidator.validate_rule_syntax(rule_path, env)
+
+            # Validate source reference if SourceRegistry available
+            source_name = rule_info.get("source")
+            if source_name and source_registry:
+                try:
+                    source_registry.get_source(source_name)
+                except Exception:
+                    logger.warning(
+                        f"Rule '{rule_name}' references source '{source_name}' "
+                        f"which is not in the SourceRegistry."
+                    )
 
             initial_checkpoint_lookback_minutes = rule_info.get(
                 "initial_checkpoint_lookback_minutes"
@@ -125,6 +151,22 @@ class HuntValidator:
                     raise ValueError(
                         f"Invalid rule filter structure for customer '{customer}': {rule_filter}"
                     )
+
+    @staticmethod
+    def _validate_scheduling_fields(hunt_data: dict) -> None:
+        """Validate optional scheduling fields if present."""
+        scheduling_mode = hunt_data.get("scheduling_mode")
+        if scheduling_mode is not None and scheduling_mode not in ("adaptive", "cron"):
+            raise ValueError(
+                f"Invalid 'scheduling_mode': '{scheduling_mode}'. Must be 'adaptive' or 'cron'."
+            )
+
+        min_interval = hunt_data.get("min_interval_seconds")
+        if min_interval is not None:
+            if not isinstance(min_interval, (int, float)) or min_interval < 0:
+                raise ValueError(
+                    f"Invalid 'min_interval_seconds': {min_interval}. Must be >= 0."
+                )
 
     @staticmethod
     def validate_rule_syntax(rule_path: str, env: Environment):

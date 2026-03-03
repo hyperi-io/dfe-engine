@@ -394,6 +394,54 @@ class SourceRegistry:
         self._store.switch_branch(branch, create=create)
 
     # -----------------------------------------------------------------
+    # Built-in Sources
+    # -----------------------------------------------------------------
+
+    def seed_builtin_sources(self, overwrite: bool = False) -> int:
+        """Seed the sources directory with built-in source definitions.
+
+        Copies built-in YAML files from package resources. Non-destructive
+        by default — skips files that already exist.
+
+        Args:
+            overwrite: If True, overwrite existing source definitions.
+
+        Returns:
+            Number of sources seeded.
+        """
+        import importlib.resources as resources
+
+        try:
+            builtins_dir = resources.files("dfe_engine.source") / "builtin_sources"
+        except Exception as e:
+            logger.warning(f"Failed to locate built-in sources: {e}")
+            return 0
+
+        count = 0
+        for resource in builtins_dir.iterdir():
+            if not resource.name.endswith(".yaml"):
+                continue
+
+            source_name = resource.name.removesuffix(".yaml")
+            if not overwrite and self.source_exists(source_name):
+                logger.debug(f"Built-in source '{source_name}' already exists, skipping")
+                continue
+
+            try:
+                content = resource.read_text()
+                dest = self._sources_directory / resource.name
+                dest.write_text(content)
+                count += 1
+                logger.info(f"Seeded built-in source: {source_name}")
+            except Exception as e:
+                logger.warning(f"Failed to seed source '{source_name}': {e}")
+
+        if count > 0:
+            self._store._refresh_all()
+
+        return count
+
+    # -----------------------------------------------------------------
     # Lifecycle
     # -----------------------------------------------------------------
 
