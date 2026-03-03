@@ -17,21 +17,48 @@ class SigmaRuleConverter:
         input_directory: str,
         output_directory: str,
         dfe_root_log_path: str,
+        config: dict | None = None,
     ) -> None:
         """
-        Initializes the SigmaRuleConverter with the input and output directories and DFE configuration file path.
+        Initialize the SigmaRuleConverter.
 
-        :param args_dfe_package_file_path: Path to the DFE package configuration file.
+        :param args_dfe_package_file_path: Path to the config file, or empty string when using ``config``.
         :param input_directory: Directory to scan for Sigma rule files.
         :param output_directory: Directory to write the converted rules.
         :param dfe_root_log_path: Directory for logging.
+        :param config: Pre-loaded config dict. Skips file loading when provided.
         """
         self.input_directory = input_directory
         self.output_directory = output_directory
         self.args_dfe_package_file_path = args_dfe_package_file_path
         self._ensure_output_directory_exists()
-        self.config = self._load_dfe_config()
+        self.config = config if config is not None else self._load_dfe_config()
         self.field_mapping_service = FieldMappingService(self.config)
+
+    @classmethod
+    def from_config(
+        cls,
+        config: dict,
+        input_directory: str,
+        output_directory: str,
+    ) -> "SigmaRuleConverter":
+        """Create a converter from a pre-loaded config dict (no dfe_package.yaml).
+
+        Args:
+            config: Configuration dictionary (same structure as dfe_package.yaml).
+            input_directory: Directory to scan for Sigma rule files.
+            output_directory: Directory to write the converted rules.
+
+        Returns:
+            SigmaRuleConverter instance.
+        """
+        return cls(
+            args_dfe_package_file_path="",
+            input_directory=input_directory,
+            output_directory=output_directory,
+            dfe_root_log_path="",
+            config=config,
+        )
 
     def _ensure_output_directory_exists(self) -> None:
         """Creates the output directory if it does not exist."""

@@ -77,7 +77,8 @@ class FieldMappingService:
 
             full_path = os.path.abspath(include_path)
             if not os.path.exists(full_path):
-                base_dir = os.path.dirname(
+                # Resolve relative paths against config base dir or CWD
+                base_dir = self.config.get("config_base_dir") or os.path.dirname(
                     os.path.abspath(self.config.get("dfe_package_file_path", ""))
                 )
                 full_path = os.path.abspath(os.path.join(base_dir, include_path))

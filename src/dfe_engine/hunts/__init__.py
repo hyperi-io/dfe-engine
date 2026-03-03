@@ -8,6 +8,7 @@ from .validator import HuntValidator
 from .cron_runner import CronRunner  # deprecated — use HuntEngine
 from .cron_job import compute_stagger_offsets
 from .rule_rewriter import RuleRewriter, ParsedRule
+from .rule_model import Rule, RuleCreate
 
 __all__ = [
     "Hunt",
@@ -20,5 +21,7 @@ __all__ = [
     "CronRunner",
     "RuleRewriter",
     "ParsedRule",
+    "Rule",
+    "RuleCreate",
     "compute_stagger_offsets",
 ]

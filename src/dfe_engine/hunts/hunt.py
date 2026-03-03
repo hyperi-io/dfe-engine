@@ -31,6 +31,7 @@ class Hunt:
         hunt_checkpoint_path: Optional[str] = None,
         thread_id: str = None,
         explain_queries: bool = False,
+        source_registry: Optional[Any] = None,
     ):
         """
         Initialize a new Hunt instance.
@@ -79,6 +80,7 @@ class Hunt:
         if hunt_checkpoint_path and not os.path.exists(hunt_checkpoint_path):
             os.makedirs(hunt_checkpoint_path, exist_ok=True)
         self.explain_queries = explain_queries
+        self.source_registry = source_registry
         self.checkpoint_manager = HuntCheckpointManager()
         self.description = f"Hunt '{self.name}', ID: [{self.unique_id}], Scheduled: [{self.cron}], Number Rules: [{len(self.rules)}]"
 
@@ -146,6 +148,24 @@ class Hunt:
             rule_name = rule_info["rule_name"]
             target_table_name = rule_info.get("target_table_name", self.global_target_table_name)
             source_table_name = rule_info.get("source_table_name", self.global_source_table_name)
+
+            # Source model resolution: if rule specifies a 'source' name,
+            # resolve table_name from SourceRegistry (overrides source_table_name)
+            source_name = rule_info.get("source")
+            if source_name and self.source_registry:
+                try:
+                    source = self.source_registry.get_source(source_name)
+                    source_table_name = source.table_name
+                    logger.debug(
+                        f"Rule [{rule_name}]: resolved source '{source_name}' "
+                        f"→ table '{source_table_name}'"
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Rule [{rule_name}]: could not resolve source '{source_name}': {e}. "
+                        f"Falling back to '{source_table_name}'."
+                    )
+
             self.initial_checkpoint_lookback_minutes = rule_info.get(
                 "initial_checkpoint_lookback_minutes", self.convert_cron_to_minutes()
             )
@@ -159,6 +179,7 @@ class Hunt:
                 org_id=org_id,
                 target_table_name=target_table_name,
                 source_table_name=source_table_name,
+                source=source_table_name,
                 timestamp_condition="{timestamp_condition}",
                 customer_filters="{customer_filters}",
             )
@@ -410,6 +431,11 @@ class Hunt:
                 f"Query Results: [{query_result}]"
             )
 
+            # Capture execution profile from system.query_log (best-effort)
+            profile = self._capture_execution_profile(
+                ch_client, generated_query_id, rule["rule_name"]
+            )
+
             checkpoint = {
                 "checkpoint_destination": self.checkpoint_destination,
                 "customer_name": customer,
@@ -431,6 +457,7 @@ class Hunt:
                 "explain_plan": explain_plan,
                 "explain_duration_ms": explain_duration_ms,
                 "file_path": file_path,
+                **profile,
             }
 
             return {
@@ -474,6 +501,44 @@ class Hunt:
             last_success_time_str = last_success_time.strftime("%Y-%m-%d %H:%M:%S")
 
         return last_success_time, last_success_time_str
+
+    @staticmethod
+    def _capture_execution_profile(
+        ch_client, query_id: str, rule_name: str
+    ) -> Dict[str, int]:
+        """Capture execution profile from system.query_log.
+
+        Queries ClickHouse system.query_log for the completed query
+        to extract read_rows, read_bytes, memory_usage, and result_rows.
+        Returns an empty dict on failure (best-effort, never blocks).
+        """
+        try:
+            rows = ch_client.execute(
+                "SELECT read_rows, read_bytes, memory_usage, result_rows "
+                "FROM system.query_log "
+                "WHERE query_id = %(qid)s AND type = 'QueryFinish' "
+                "ORDER BY event_time DESC LIMIT 1",
+                parameters={"qid": query_id},
+            )
+            if rows:
+                row = rows[0]
+                profile = {
+                    "read_rows": int(row[0]),
+                    "read_bytes": int(row[1]),
+                    "memory_usage": int(row[2]),
+                    "result_rows": int(row[3]),
+                }
+                logger.debug(
+                    f"Execution profile [{rule_name}]: "
+                    f"read_rows={profile['read_rows']:,} "
+                    f"read_bytes={profile['read_bytes']:,} "
+                    f"memory={profile['memory_usage']:,} "
+                    f"result_rows={profile['result_rows']:,}"
+                )
+                return profile
+        except Exception as e:
+            logger.debug(f"Execution profile capture skipped for {rule_name}: {e}")
+        return {}
 
     def _save_checkpoints(
         self, ch_client, successful_checkpoints: List[Dict], file_path: Optional[str]

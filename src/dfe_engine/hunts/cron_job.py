@@ -131,6 +131,7 @@ class CronJob:
         scheduling_mode: str = "cron",
         min_interval_seconds: int = 0,
         explain_queries: bool = False,
+        source_registry=None,
     ):
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
@@ -144,6 +145,7 @@ class CronJob:
         self._scheduling_mode = scheduling_mode
         self._min_interval_seconds = min_interval_seconds
         self._explain_queries = explain_queries
+        self._source_registry = source_registry
         logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -379,6 +381,7 @@ class CronJob:
             hunt_checkpoint_path=hunt_checkpoint_path,
             thread_id=thread_id_customer,
             explain_queries=explain_queries,
+            source_registry=self._source_registry,
         )
 
         hunt.build_sql_queries_for_customers(env)
