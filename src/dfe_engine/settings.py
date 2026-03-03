@@ -149,6 +149,30 @@ class HuntsSettings(BaseModel):
     resource_limit_execution_ms: int = Field(
         default=0, description="Warn when a hunt takes longer than this in ms (0 = no limit)"
     )
+    alert_channels: list[str] = Field(
+        default_factory=list,
+        description="Global Apprise notification URLs applied to all hunts (e.g. slack://token/#channel)",
+    )
+    alert_destinations: dict[str, str] = Field(
+        default_factory=dict,
+        description="Named alert destinations: {name: apprise_url}. Inline bootstrap; prefer alert_destinations_dir.",
+    )
+    alert_destinations_dir: str = Field(
+        default="",
+        description="YAML directory for alert destination definitions (DirectoryConfigStore SSoT)",
+    )
+    default_alert_cooldown: str = Field(
+        default="1h",
+        description="Default alert cooldown window for grouped alerts",
+    )
+    default_max_alerts_per_run: int = Field(
+        default=0,
+        description="Default max alerts per execution (0 = unlimited)",
+    )
+    default_max_sample_events: int = Field(
+        default=10,
+        description="Default max _json samples in grouped alert body",
+    )
 
 
 class ArtifactorySettings(BaseModel):
@@ -484,6 +508,21 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["resource_limit_memory_bytes"] = int(val)
     if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_EXECUTION_MS"):
         overrides["hunts"]["resource_limit_execution_ms"] = int(val)
+    if val := _get_env("DFE_HUNTS_ALERT_CHANNELS"):
+        overrides["hunts"]["alert_channels"] = [u.strip() for u in val.split(",") if u.strip()]
+    if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS"):
+        # JSON format: {"slack-dfe-alerts": "slack://T.../B.../x.../"}
+        import json
+        try:
+            overrides["hunts"]["alert_destinations"] = json.loads(val)
+        except json.JSONDecodeError:
+            pass
+    if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
+        overrides["hunts"]["default_alert_cooldown"] = val
+    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):
+        overrides["hunts"]["default_max_alerts_per_run"] = int(val)
+    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
+        overrides["hunts"]["default_max_sample_events"] = int(val)
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):
@@ -590,6 +629,7 @@ def _get_env_overrides() -> dict:
             ("deployment", "config_dir"): "deployment",
             ("hunts", "hunt_dir"): "hunts",
             ("hunts", "rule_repo_dir"): "hunt-rules",
+            ("hunts", "alert_destinations_dir"): "alert-destinations",
             ("query", "yaml_dir"): "queries",
         }
         for (section, key), subdir in _config_dir_subdirs.items():

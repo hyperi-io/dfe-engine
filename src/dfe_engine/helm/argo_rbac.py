@@ -13,12 +13,11 @@ it doesn't understand.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
-from dfe_engine.auth.engine import ARGO_ACTION_PREFIX, DEFAULT_ROLE_PERMISSIONS
+from hyperi_pylib.logger import logger
 
-logger = logging.getLogger(__name__)
+from dfe_engine.auth.engine import ARGO_ACTION_PREFIX, DEFAULT_ROLE_PERMISSIONS
 
 
 def generate_rbac_csv(

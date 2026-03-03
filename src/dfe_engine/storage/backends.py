@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import List, Optional
 
 import httpx
+from hyperi_pylib.http import HttpClient
 from hyperi_pylib.logger import logger
 
 
@@ -164,6 +165,13 @@ class HTTPStorageBackend(StorageBackend):
         self.password = password
         self.timeout = timeout
         self.auth = (username, password) if username and password else None
+        self._client = HttpClient(
+            base_url=self.base_url,
+            timeout=timeout,
+            retries=3,
+            auth=self.auth,
+            follow_redirects=True,
+        )
         logger.info(f"Initialized HTTPStorageBackend with base_url: {self.base_url}")
 
     def _build_url(self, path: str) -> str:
@@ -180,13 +188,7 @@ class HTTPStorageBackend(StorageBackend):
         try:
             dest.parent.mkdir(parents=True, exist_ok=True)
 
-            with httpx.stream(
-                "GET",
-                url,
-                auth=self.auth,
-                follow_redirects=True,
-                timeout=self.timeout,
-            ) as response:
+            with self._client._client.stream("GET", url) as response:
                 response.raise_for_status()
 
                 with open(dest, "wb") as f:
@@ -218,7 +220,7 @@ class HTTPStorageBackend(StorageBackend):
         """Check if a file exists by making a HEAD request."""
         url = self._build_url(path)
         try:
-            response = httpx.head(url, auth=self.auth, follow_redirects=True, timeout=10.0)
+            response = self._client.head(url)
             return response.status_code == 200
         except Exception:
             return False

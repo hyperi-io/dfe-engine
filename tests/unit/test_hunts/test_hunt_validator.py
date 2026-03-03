@@ -1,28 +1,8 @@
 import pytest
 import yaml
 import pathlib
-import logging
 from jinja2 import Environment
 from dfe_engine.hunts.validator import HuntValidator
-
-
-class ListHandler(logging.Handler):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.log_messages = []
-
-    def emit(self, record):
-        log_entry = self.format(record)
-        self.log_messages.append(log_entry)
-
-
-logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
-
-list_handler = ListHandler()
-logger.addHandler(list_handler)
-formatter = logging.Formatter("%(levelname)s %(message)s")
-list_handler.setFormatter(formatter)
 
 
 def load_config(file_path: pathlib.Path) -> dict:
