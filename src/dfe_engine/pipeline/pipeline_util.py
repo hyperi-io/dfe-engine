@@ -174,7 +174,7 @@ def get_pipeline(package_config: dict, pipeline_name: str) -> list:
         return vector_pipelines[pipeline_name]
     else:
         raise PipelineSchemaError(
-            f"Pipeline {pipeline_name} not found in package config. Make sure the pipeline exists and is defined in dfe_package.yaml"
+            f"Pipeline {pipeline_name} not found in package config. Make sure the pipeline exists and is defined in the configuration file"
         )
 
 
