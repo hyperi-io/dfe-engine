@@ -132,6 +132,8 @@ class CronJob:
         min_interval_seconds: int = 0,
         explain_queries: bool = False,
         source_registry=None,
+        concurrency_semaphore=None,
+        resource_limits: dict | None = None,
     ):
         """
         Initializes the CronJob with a JobScheduler and sets up logging.
@@ -146,6 +148,8 @@ class CronJob:
         self._min_interval_seconds = min_interval_seconds
         self._explain_queries = explain_queries
         self._source_registry = source_registry
+        self._concurrency_semaphore = concurrency_semaphore
+        self._resource_limits = resource_limits or {}
         logger.info("cron job dfe logger initialized")
         self.scheduled_start_time = datetime.now(timezone.utc)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
@@ -382,6 +386,7 @@ class CronJob:
             thread_id=thread_id_customer,
             explain_queries=explain_queries,
             source_registry=self._source_registry,
+            resource_limits=self._resource_limits,
         )
 
         hunt.build_sql_queries_for_customers(env)
@@ -495,21 +500,54 @@ class CronJob:
 
         return " ".join(parts)
 
-    async def _run_hunt_for_customer(self, hunt: Hunt, customer: str) -> str:
+    async def _run_hunt_for_customer(self, hunt: Hunt, customer: str) -> dict:
         """
-        Executes a hunt for a specific customer in a separate thread using ThreadPoolExecutor.
+        Executes a hunt for a specific customer in a separate thread.
 
-        :param hunt: The Hunt instance to be executed.
-        :param customer: The customer data for whom the hunt is being executed.
-        :return: The result of the hunt execution.
+        Applies concurrency semaphore if configured. Tracks execution lag
+        (backpressure signal) comparing execution duration to cron interval.
         """
         try:
             scheduled_start_time = datetime.now(timezone.utc)
-            result = await asyncio.to_thread(hunt.execute_hunt, customer, scheduled_start_time)
+
+            if self._concurrency_semaphore is not None:
+                async with self._concurrency_semaphore:
+                    result = await asyncio.to_thread(
+                        hunt.execute_hunt, customer, scheduled_start_time
+                    )
+            else:
+                result = await asyncio.to_thread(
+                    hunt.execute_hunt, customer, scheduled_start_time
+                )
+
+            # Backpressure signal: compare execution duration to cron interval
+            execution_seconds = result.get("total_execution_time", 0)
+            interval_seconds = self._get_hunt_interval_seconds(hunt.cron)
+            if interval_seconds and execution_seconds > interval_seconds:
+                lag_seconds = execution_seconds - interval_seconds
+                logger.warning(
+                    f"BACKPRESSURE: hunt '{hunt.name}' for '{customer}' "
+                    f"took {execution_seconds:.1f}s but interval is {interval_seconds}s "
+                    f"(lag={lag_seconds:.1f}s). Hunt is falling behind."
+                )
+                result["lag_seconds"] = lag_seconds
+                result["is_lagging"] = True
+            else:
+                result["lag_seconds"] = 0
+                result["is_lagging"] = False
+
             return result
         except Exception as e:
             logger.error(f"Error executing hunt for customer {customer}: {e}", exc_info=True)
             raise
+
+    def _get_hunt_interval_seconds(self, cron_expression: str) -> float | None:
+        """Get the cron interval in seconds for backpressure calculation."""
+        try:
+            freq = self.calculate_frequency_from_cron(cron_expression)
+            return freq * 60 if freq and freq > 0 else None
+        except (ValueError, Exception):
+            return None
 
     async def add_cron_job(
         self, job_function: Callable, cron_expression: str, job_name: str,

@@ -103,7 +103,8 @@ class DDLFileWriter:
                 read_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
                 read_bytes UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
                 memory_usage UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD)
+                result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
+                query_fingerprint LowCardinality(String) DEFAULT '' CODEC(LZ4)
             ) ENGINE = MergeTree()
             PARTITION BY toYYYYMM(query_checkpoint_time)
             ORDER BY (customer_name, hunt_name, rule_name, query_checkpoint_time);

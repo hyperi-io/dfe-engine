@@ -5,6 +5,7 @@ from typing import Any, List, Dict, Optional
 from jinja2 import Environment
 from hyperi_pylib.logger import logger
 from .checkpoint import HuntCheckpointManager
+from .fingerprint import fingerprint_query
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 
 
@@ -32,6 +33,7 @@ class Hunt:
         thread_id: str = None,
         explain_queries: bool = False,
         source_registry: Optional[Any] = None,
+        resource_limits: Optional[Dict[str, int]] = None,
     ):
         """
         Initialize a new Hunt instance.
@@ -81,6 +83,7 @@ class Hunt:
             os.makedirs(hunt_checkpoint_path, exist_ok=True)
         self.explain_queries = explain_queries
         self.source_registry = source_registry
+        self.resource_limits = resource_limits or {}
         self.checkpoint_manager = HuntCheckpointManager()
         self.description = f"Hunt '{self.name}', ID: [{self.unique_id}], Scheduled: [{self.cron}], Number Rules: [{len(self.rules)}]"
 
@@ -436,6 +439,11 @@ class Hunt:
                 ch_client, generated_query_id, rule["rule_name"]
             )
 
+            # Resource hog detection — warn if thresholds exceeded
+            self._check_resource_limits(
+                rule["rule_name"], customer, profile, query_execution_time_ms
+            )
+
             checkpoint = {
                 "checkpoint_destination": self.checkpoint_destination,
                 "customer_name": customer,
@@ -456,6 +464,7 @@ class Hunt:
                 "execution_time_ms": query_execution_time_ms,
                 "explain_plan": explain_plan,
                 "explain_duration_ms": explain_duration_ms,
+                "query_fingerprint": fingerprint_query(query),
                 "file_path": file_path,
                 **profile,
             }
@@ -539,6 +548,41 @@ class Hunt:
         except Exception as e:
             logger.debug(f"Execution profile capture skipped for {rule_name}: {e}")
         return {}
+
+    def _check_resource_limits(
+        self,
+        rule_name: str,
+        customer: str,
+        profile: Dict[str, int],
+        execution_time_ms: float,
+    ) -> None:
+        """Check execution profile against configurable thresholds.
+
+        Logs warnings for any threshold exceeded. Never blocks execution.
+        """
+        limits = self.resource_limits
+        if not limits or not profile:
+            return
+
+        checks = [
+            ("read_rows", "read_rows", profile.get("read_rows", 0)),
+            ("read_bytes", "read_bytes", profile.get("read_bytes", 0)),
+            ("memory_bytes", "memory_usage", profile.get("memory_usage", 0)),
+        ]
+        for limit_key, profile_key, actual in checks:
+            threshold = limits.get(limit_key, 0)
+            if threshold and actual > threshold:
+                logger.warning(
+                    f"RESOURCE HOG: rule '{rule_name}' ({customer}) "
+                    f"{profile_key}={actual:,} exceeds limit {threshold:,}"
+                )
+
+        exec_limit = limits.get("execution_ms", 0)
+        if exec_limit and execution_time_ms > exec_limit:
+            logger.warning(
+                f"RESOURCE HOG: rule '{rule_name}' ({customer}) "
+                f"execution_time={execution_time_ms:.0f}ms exceeds limit {exec_limit}ms"
+            )
 
     def _save_checkpoints(
         self, ch_client, successful_checkpoints: List[Dict], file_path: Optional[str]

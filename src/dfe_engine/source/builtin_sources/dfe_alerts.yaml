@@ -1,0 +1,29 @@
+# Built-in Source: DFE Alerts (Hunt Detection Results)
+#
+# Represents the hunt detection results table as a queryable Source.
+# Enables correlation hunts that query previous detection output,
+# field mapping views, and schema DDL generation.
+#
+# Table: dfe_hunts.detection
+# Profile: timeseries (minus _raw, _tags) + detection columns
+
+source: dfe_alerts
+display_name: DFE Alerts
+description: >-
+  Hunt detection results — matched records from scheduled detection rules.
+  Contains matched_uuid linking back to the original source record,
+  plus rule metadata (rule_id, rule_name, hunt_name, severity).
+enabled: true
+
+header:
+  type: time_series
+  version: "1.0.0"
+
+schema:
+  meta_schema: null
+  ttl_days: 365
+  engine: MergeTree
+  additional_fields: hunt-results/detection.yaml
+
+mapping_standards:
+  - sigma
