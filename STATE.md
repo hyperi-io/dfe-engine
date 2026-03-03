@@ -84,67 +84,23 @@
 
 ## Current Session (2026-03-02)
 
-### Completed — Hunt Engine + Even Load Spreading
+### Completed — Hunt Source Wiring, Rule Model, Expression Validator, Execution Profiles
 
-Replaced fragile `HuntScheduler` + `CronRunner` (os.fork()) architecture with `HuntEngine` — single daemon thread running an asyncio event loop.
+5 workstreams implemented (uncommitted):
 
-**HuntEngine** (`hunts/hunt_engine.py`):
-- `threading.Thread(daemon=True)` replaces `os.fork()` — visible to parent, cross-platform
-- `start()`/`stop()`/`is_running` lifecycle with `threading.Event` + `asyncio.Event`
-- Reads all config from `DFESettings.hunts` (no dfe_package.yaml dependency)
-- `asyncio.wait_for()` replaces busy-loop timeout
+- **Source wiring:** Hunt resolves `source` field from SourceRegistry, `{{ source }}` template var, CronJob passthrough
+- **dfe_package.yaml removal:** `SigmaRuleConverter.from_config()`, `config_base_dir` replaces `dfe_package_file_path`
+- **Rule model:** `Rule` + `RuleCreate` Pydantic models wrapping RuleRewriter, `from_create()`, `validate_rule()`
+- **Expression validator:** `ExpressionValidator` for @source/@generated/@captured/@computed/@config directives, `ExpressionBuilder`, `list_directive_types()`
+- **Execution profiles:** `_capture_execution_profile()` queries `system.query_log`, checkpoint schema extended with 4 profile columns
 
-**Even load spreading** (`compute_stagger_offsets()`):
-- Even distribution formula: `offset_i = (F / N) * i` for N jobs over frequency F
-- APScheduler `jitter` parameter for sub-minute randomization (default 15s)
-- Handles per-minute, step-minute, fixed-minute, and long-interval cron expressions
-
-**Settings expanded**: `HuntsSettings` gained `hunt_dir`, `rule_repo_dir`, `num_threads`, `checkpoint_destination`, `checkpoint_timestamp_field`, `jitter_seconds` with env var mappings.
-
-**Deprecations**: `CronRunner.run()` (removed os.fork, added warning), `HuntScheduler` (added warning). Both remain importable.
-
-**Test results:** 1163 passed, 0 failures (27 new tests: 15 stagger + 12 engine lifecycle)
-
-### Completed — Field Mapping Layer (Phases 1-5)
-
-Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom standards.
-
-**Phase 1** (`8761e3e`): Core models + resolver
-- `FieldMap` Pydantic model, `FieldMapRegistry` (DirectoryConfigStore-backed)
-- `resolve_field_map()` — two-tier resolution (default + source-specific)
-- Default seed maps for Sigma, ECS, CIM as package resources
-- 60 tests
-
-**Phase 2+3** (`6ec3491`): View DDL generation
-- `ViewGenerator` — CREATE VIEW DDL from resolved field maps
-- Generic `DDLGenerator.generate_view()` with configurable suffix
-- `SchemaBuildResult.view_ddls` for multi-standard view output
-- 26 tests
-
-**Phase 4** (`6becc28`): Schema compiler integration
-- `Source.mapping_standards` field for declaring view standards
-- `SchemaBuilderV2` accepts optional `field_map_registry`, auto-generates views
-- Legacy `sigma_view_ddl` preserved for backward compatibility
-- 10 tests
-
-**Phase 5** (`3976d08`): Sigma adapter refactoring
-- `SigmaSourceMapper` accepts optional `field_map_registry`
-- Two-tier registry resolution → fallback to `Source.sigma.custom_mappings`
-- 6 tests
-
-**Test results:** 1136 passed, 0 failures
-
-### Completed — Clean-Slate Restructure + DESIGN.md
-
-- 8-phase restructure: deleted legacy code, shims, tech debt (1034 tests)
-- DESIGN.md with 11 mermaid diagrams (GitOps, CRUD, field mapping, deployment)
+**Test results:** 1435 passed, 0 failures (82 new tests)
 
 ### Previous Sessions
 
-- **2026-03-02 (earlier):** Field Mapping Layer (5 phases), clean-slate restructure, DESIGN.md (1136 tests)
-- **2026-03-02 (earlier):** Phase 8c — Argo CD Application/AppProject CRD generator (1075 passed)
-- **2026-03-01:** Phase 8b — OTEL env config, KEDA scalers, Argo RBAC generator (1026 tests)
-- **2026-02-28:** Phases 1-8 — Source model, schema v2, sigma mapper, service routing, v1 removal, Helm compiler + RBAC (971 tests)
+- **2026-03-02:** DDLFileWriter, adaptive scheduling + EXPLAIN capture, Hunt Engine, field mapping (5 phases), clean-slate restructure, DESIGN.md, Argo CD CRDs
+- **2026-03-01:** OTEL env config, KEDA scalers, Argo RBAC generator
+- **2026-02-28:** Source model, schema v2, sigma mapper, service routing, v1 removal, Helm compiler + RBAC
 
 ---
 
@@ -152,13 +108,13 @@ Generic standard-to-DFE column mapping supporting Sigma, ECS, CIM and custom sta
 
 | Module        | Status | Notes                                                            |
 | ------------- | ------ | ---------------------------------------------------------------- |
-| `source/`     | Ready  | TypeRegistry, Source model, SourceRegistry — 112 tests           |
+| `source/`     | Ready  | TypeRegistry, Source, SourceRegistry, ExpressionValidator — 163 tests |
 | `schema/`     | Ready  | v2 YAML→DDL pipeline, ViewGenerator integration                  |
 | `fieldmap/`   | Ready  | FieldMap model, registry, resolver, ViewGenerator — 96 tests     |
 | `clickhouse/` | Ready  | clickhouse-connect client management                             |
 | `pipeline/`   | Ready  | Vector pipeline generation (core build/render logic)             |
 | `sigma/`      | Ready  | SigmaSourceMapper + converter, FieldMapRegistry integration      |
-| `hunts/`      | Ready  | HuntEngine daemon thread, even stagger, APScheduler jitter — 27 tests |
+| `hunts/`      | Ready  | HuntEngine, Rule model, source wiring, execution profiles — 58 tests |
 | `query/`      | Ready  | YAML SSoT registry, Arrow-native output, built-in queries        |
 | `services/`   | Ready  | YAML SSoT registry, source routing, default configs, validators  |
 | `auth/`       | Ready  | Engine RBAC, open-ended argo: namespace, infra_admin role        |
