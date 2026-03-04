@@ -1,0 +1,17 @@
+{{- if and .Values.configVolume.enabled (not .Values.configVolume.existingClaim) -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dfe-engine.fullname" . }}-config
+  labels:
+    {{- include "dfe-engine.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - {{ .Values.configVolume.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.configVolume.size }}
+  {{- if .Values.configVolume.storageClass }}
+  storageClassName: {{ .Values.configVolume.storageClass }}
+  {{- end }}
+{{- end }}

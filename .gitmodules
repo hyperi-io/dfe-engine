@@ -13,4 +13,4 @@
 	url = https://github.com/hyperi-io/dfe-schemas.git
 [submodule "config"]
 	path = config
-	url = /projects/dfe-devex
+	url = https://github.com/hyperi-io/dfe-devex.git
