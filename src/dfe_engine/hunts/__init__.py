@@ -18,11 +18,28 @@ from .alert import (
 )
 from .rule_rewriter import RuleRewriter, ParsedRule
 from .rule_model import Rule, RuleCreate
-from .suppression import (
+from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
+from .rule_creation_service import (
+    RuleCreationService,
+    RuleCreateRequest,
+    RuleCreateResult,
+    CostEstimate,
+    AIAnalysisStub,
+    SqlValidationError,
+)
+from .alert_grouping import (
     AlertGroupingConfig,
     AlertStateManager,
+    build_group_key,
     build_grouping_query,
     parse_duration,
+)
+from .scoring import (
+    ScoringConfig,
+    ScoreFactor,
+    compute_score,
+    evaluate_condition,
+    validate_condition,
 )
 
 __all__ = [
@@ -38,6 +55,14 @@ __all__ = [
     "ParsedRule",
     "Rule",
     "RuleCreate",
+    "HdxSanitizer",
+    "HdxSanitizeResult",
+    "RuleCreationService",
+    "RuleCreateRequest",
+    "RuleCreateResult",
+    "CostEstimate",
+    "AIAnalysisStub",
+    "SqlValidationError",
     "compute_stagger_offsets",
     "fingerprint_query",
     "normalize_query",
@@ -49,6 +74,12 @@ __all__ = [
     "build_alert_config",
     "AlertGroupingConfig",
     "AlertStateManager",
+    "build_group_key",
     "build_grouping_query",
     "parse_duration",
+    "ScoringConfig",
+    "ScoreFactor",
+    "compute_score",
+    "evaluate_condition",
+    "validate_condition",
 ]

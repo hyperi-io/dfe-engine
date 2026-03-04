@@ -81,8 +81,10 @@ class TestRegistryCrud:
         assert len(configs) == 2
         assert all(c["service"] == "receiver" for c in configs)
 
-    def test_invalid_service_raises(self, registry):
-        with pytest.raises(ValueError, match="Unknown service"):
+    def test_unknown_service_not_found(self, registry):
+        # Unknown services are schema-less — no ValueError, just ConfigNotFoundError
+        from dfe_engine.deployment.registry import DeploymentConfigNotFoundError
+        with pytest.raises(DeploymentConfigNotFoundError):
             registry.get_config("unknown")
 
 

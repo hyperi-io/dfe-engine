@@ -11,7 +11,7 @@ import threading
 from .job import JobScheduler
 from .hunt import Hunt
 from .alert import AlertDestinationRegistry, build_alert_config
-from .suppression import AlertGroupingConfig
+from .alert_grouping import AlertGroupingConfig
 from .validator import HuntValidator
 import croniter
 from hyperi_pylib.logger import logger
@@ -385,6 +385,13 @@ class CronJob:
             AlertGroupingConfig(**grouping_data) if grouping_data else None
         )
 
+        # Parse optional scoring config
+        scoring_data = hunt_data.get("scoring")
+        scoring = None
+        if scoring_data:
+            from .scoring import ScoringConfig
+            scoring = ScoringConfig(**scoring_data)
+
         hunt = Hunt(
             cron=staggered_cron,
             log_buffer=hunt_data["log_buffer"],
@@ -405,6 +412,7 @@ class CronJob:
             resource_limits=self._resource_limits,
             alert_config=alert_config,
             alert_grouping=alert_grouping,
+            scoring=scoring,
         )
 
         hunt.build_sql_queries_for_customers(env)

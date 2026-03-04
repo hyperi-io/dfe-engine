@@ -134,7 +134,9 @@ class ServiceConfigRegistry:
     def _parse_table_name(table: str) -> tuple[str, str] | None:
         """Parse a table name back into (service, instance).
 
-        Returns None if the table name doesn't match a known service.
+        Tries known service prefixes first (handles hyphenated names like
+        'transform-wasm'). Falls back to splitting on the last hyphen for
+        services not registered as plugins (schema-less mode).
         """
         for svc in sorted(valid_services(), key=len, reverse=True):
             prefix = f"{svc}-"
@@ -142,6 +144,11 @@ class ServiceConfigRegistry:
                 instance = table[len(prefix):]
                 if instance:
                     return svc, instance
+        # Unknown service: split on last hyphen so any "{service}-{instance}"
+        # file is included in listings (e.g. a new Rust service not yet registered)
+        idx = table.rfind("-")
+        if idx > 0 and idx < len(table) - 1:
+            return table[:idx], table[idx + 1:]
         return None
 
     # -------------------------------------------------------------------------
@@ -154,19 +161,19 @@ class ServiceConfigRegistry:
         """Get a service configuration.
 
         Reads from the DirectoryConfigStore in-memory cache (backed by YAML).
+        For registered services, returns a typed Pydantic model. For unknown
+        services (schema-less mode), returns the raw dict.
 
         Args:
-            service: Service name ('receiver', 'loader', 'archiver')
+            service: Service name (e.g. 'receiver', 'loader', or any new service)
             instance: Deployment instance name (e.g., 'default', 'production')
 
         Returns:
-            Typed configuration model
+            Typed configuration model for registered services, raw dict otherwise.
 
         Raises:
             ConfigNotFoundError: Config not found
         """
-        self._validate_service(service)
-        plugin = get_plugin(service)
         table = self._table_name(service, instance)
 
         config_data = self._store.get(table)
@@ -175,7 +182,12 @@ class ServiceConfigRegistry:
                 f"Config not found for {service}/{instance}"
             )
 
-        return plugin.config_class.model_validate(config_data)
+        try:
+            plugin = get_plugin(service)
+            return plugin.config_class.model_validate(config_data)
+        except KeyError:
+            # Unknown service — return raw dict (schema-less mode)
+            return config_data
 
     def save_config(
         self,
@@ -196,13 +208,16 @@ class ServiceConfigRegistry:
             created_by: Username/identity of who made the change
             description: Description of the change
         """
-        self._validate_service(service)
-
-        # Normalize to dict via Pydantic validation
+        # Normalize to dict. For registered services, validate via typed model.
+        # For unknown services (schema-less mode), store the raw dict as-is.
         if isinstance(config, dict):
-            plugin = get_plugin(service)
-            validated = plugin.config_class.model_validate(config)
-            config_data = validated.model_dump(mode="json")
+            try:
+                plugin = get_plugin(service)
+                validated = plugin.config_class.model_validate(config)
+                config_data = validated.model_dump(mode="json")
+            except KeyError:
+                # Unknown service — store as-is
+                config_data = config
         else:
             config_data = config.model_dump(mode="json")
 
@@ -232,10 +247,9 @@ class ServiceConfigRegistry:
         Removes the YAML file and commits the deletion if git-aware.
 
         Args:
-            service: Service name
+            service: Service name (any, including unregistered services)
             instance: Deployment instance name
         """
-        self._validate_service(service)
         table = self._table_name(service, instance)
         yaml_path = self._config_directory / f"{table}.yaml"
 
@@ -281,9 +295,6 @@ class ServiceConfigRegistry:
         Returns:
             List of config metadata dicts (service, instance, updated_at)
         """
-        if service:
-            self._validate_service(service)
-
         results = []
         for table in self._store.list_tables():
             parsed = self._parse_table_name(table)
@@ -317,6 +328,9 @@ class ServiceConfigRegistry:
     def validate(self, service: str, config_data: dict) -> ValidationResult:
         """Validate a configuration without saving (dry-run).
 
+        For registered services, runs Pydantic + cross-field validation.
+        For unknown services (schema-less mode), returns valid with a warning.
+
         Args:
             service: Service name
             config_data: Configuration dictionary
@@ -324,7 +338,11 @@ class ServiceConfigRegistry:
         Returns:
             ValidationResult with errors and warnings
         """
-        return validate_config(service, config_data)
+        result = validate_config(service, config_data)
+        if not result.valid and result.errors and result.errors[0].startswith("Unknown service:"):
+            # Unknown service — no schema to validate against, treat as valid
+            return ValidationResult(valid=True, warnings=[f"No schema registered for service '{service}'; stored as-is"])
+        return result
 
     # -------------------------------------------------------------------------
     # History (git log)

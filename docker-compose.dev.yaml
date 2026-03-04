@@ -1,0 +1,20 @@
+# Development services for DFE Engine API
+#
+# Prism mock server — frontend devs can develop against the API contract
+# without running the real backend:
+#
+#   docker compose -f docker-compose.dev.yaml up prism
+#
+# Then point dfe-ui at http://localhost:4010 instead of :8000
+#
+# TypeScript type generation (run from host):
+#   npx openapi-typescript openapi-spec/openapi.json -o types.ts
+
+services:
+  prism:
+    image: stoplight/prism:5
+    command: mock /spec/openapi.json --host 0.0.0.0
+    ports:
+      - "4010:4010"
+    volumes:
+      - ./openapi-spec:/spec:ro

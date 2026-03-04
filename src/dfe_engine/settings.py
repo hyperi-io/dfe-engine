@@ -309,6 +309,18 @@ class SourceSettings(BaseModel):
     )
 
 
+class FieldMapSettings(BaseModel):
+    """Field map registry settings.
+
+    Environment variables:
+    - DFE_FIELDMAPS_DIR -> fieldmap.fieldmaps_dir
+    """
+
+    fieldmaps_dir: str = Field(
+        default="", description="YAML directory for FieldMap definitions (SSoT)"
+    )
+
+
 class ServicesSettings(BaseModel):
     """Endpoints for managed DFE services.
 
@@ -402,6 +414,35 @@ class AuthSettings(BaseModel):
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
 
+class APISettings(BaseModel):
+    """API server settings.
+
+    Environment variables:
+    - DFE_API_HOST -> api.host
+    - DFE_API_PORT -> api.port
+    - DFE_API_JWT_SECRET -> api.jwt_secret
+    - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
+    - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    """
+
+    host: str = Field(default="0.0.0.0", description="API server bind address")
+    port: int = Field(default=8000, description="API server port")
+    cors_origins: list[str] = Field(
+        default_factory=lambda: [
+            "http://localhost:5173",
+            "http://localhost:5174",
+            "http://localhost:3000",
+        ],
+        description="CORS allowed origins",
+    )
+    jwt_secret: str = Field(
+        default="dev-secret-key-change-in-production",
+        description="JWT signing secret (HS256). Change in production!",
+    )
+    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+
+
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
@@ -418,10 +459,12 @@ class DFESettings(BaseModel):
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
     schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)
+    fieldmap: FieldMapSettings = Field(default_factory=FieldMapSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    api: APISettings = Field(default_factory=APISettings)
 
 
 def _load_defaults() -> dict:
@@ -447,10 +490,12 @@ def _get_env_overrides() -> dict:
         "query_views": {},
         "schemas": {},
         "source": {},
+        "fieldmap": {},
         "services": {},
         "deployment": {},
         "helm": {},
         "auth": {},
+        "api": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -574,6 +619,10 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_SOURCES_DIR"):
         overrides["source"]["sources_dir"] = val
 
+    # FieldMap settings
+    if val := _get_env("DFE_FIELDMAPS_DIR"):
+        overrides["fieldmap"]["fieldmaps_dir"] = val
+
     # Services settings
     if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
         overrides["services"]["receiver_url"] = val
@@ -618,6 +667,18 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
 
+    # API settings
+    if val := _get_env("DFE_API_HOST"):
+        overrides["api"]["host"] = val
+    if val := _get_env("DFE_API_PORT"):
+        overrides["api"]["port"] = int(val)
+    if val := _get_env("DFE_API_JWT_SECRET"):
+        overrides["api"]["jwt_secret"] = val
+    if val := _get_env("DFE_API_CORS_ORIGINS"):
+        overrides["api"]["cors_origins"] = [o.strip() for o in val.split(",") if o.strip()]
+    if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
+        overrides["api"]["jwt_expire_minutes"] = int(val)
+
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
     config_dir = _get_env("DFE_CONFIG_DIR")
@@ -626,6 +687,7 @@ def _get_env_overrides() -> dict:
         _config_dir_subdirs = {
             ("services", "config_yaml_dir"): "services",
             ("source", "sources_dir"): "sources",
+            ("fieldmap", "fieldmaps_dir"): "fieldmaps",
             ("deployment", "config_dir"): "deployment",
             ("hunts", "hunt_dir"): "hunts",
             ("hunts", "rule_repo_dir"): "hunt-rules",

@@ -13,31 +13,34 @@ Alert destinations are defined once and referenced by name:
         description="DFE alerts → #dfe-alerts",
     ))
 
-    # Hunt YAML references by name
+    # Hunt YAML references by name — CEL trigger syntax
     alerts:
       destinations:
         - slack-dfe-alerts
       triggers:
-        - type: any_match
-        - type: result_count
-          operator: ">="
-          value: 10
+        - when: "result_count > 0"
+        - when: "result_count >= 10"
+        - when: 'severity == "critical" && result_count > 0'
 
-Trigger types:
-- any_match: fire when any result rows are returned
-- result_count: fire when result count meets a threshold (>=, >, ==)
-- field_value: fire when a specific field in results matches a condition
+Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
+- "result_count > 0" — fire when any result rows are returned
+- "result_count >= 10" — fire when result count meets a threshold
+- 'severity == "critical"' — fire when a field in results matches a condition
+- 'severity == "critical" && result_count > 0' — compound conditions
 """
 
 from __future__ import annotations
 
-import operator
 from pathlib import Path
 from typing import Any, Optional
 
 import apprise
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
+from hyperi_pylib.expression import (
+    evaluate_condition,
+    validate as validate_expression,
+)
 from hyperi_pylib.logger import logger
 
 
@@ -188,23 +191,26 @@ class AlertDestinationRegistry:
 
 # ── Trigger Models ───────────────────────────────────────────────
 
-_OPERATORS = {
-    ">=": operator.ge,
-    ">": operator.gt,
-    "<=": operator.le,
-    "<": operator.lt,
-    "==": operator.eq,
-    "!=": operator.ne,
-}
-
 
 class AlertTrigger(BaseModel):
-    """A condition that triggers an alert."""
+    """A CEL condition that triggers an alert.
 
-    type: str = Field(..., description="Trigger type: any_match, result_count, field_value")
-    operator: str = Field(default=">=", description="Comparison operator")
-    value: Any = Field(default=None, description="Threshold or expected value")
-    field: str | None = Field(default=None, description="Field name (for field_value triggers)")
+    Examples::
+
+        AlertTrigger(when="result_count > 0")
+        AlertTrigger(when="result_count >= 10")
+        AlertTrigger(when='severity == "critical" && result_count > 0')
+    """
+
+    when: str = Field(..., description="CEL condition expression")
+
+    @field_validator("when")
+    @classmethod
+    def _validate_when(cls, v: str) -> str:
+        errors = validate_expression(v)
+        if errors:
+            raise ValueError(f"Invalid alert trigger expression: {'; '.join(errors)}")
+        return v
 
 
 class AlertConfig(BaseModel):
@@ -272,6 +278,7 @@ class AlertDispatcher:
         result_count: int,
         results: list[dict[str, Any]] | None = None,
         group_context: dict[str, Any] | None = None,
+        score: int = 50,
     ) -> bool:
         """Evaluate triggers against hunt results and send alerts if matched.
 
@@ -302,6 +309,7 @@ class AlertDispatcher:
             "customer": customer,
             "rule_name": rule_name,
             "result_count": result_count,
+            "score": score,
         }
 
         # Enrich with group context if available
@@ -322,34 +330,26 @@ class AlertDispatcher:
     def _should_fire(
         self, result_count: int, results: list[dict[str, Any]] | None
     ) -> bool:
-        """Check if any trigger condition is met."""
+        """Check if any trigger condition is met.
+
+        Each trigger's ``when`` expression is evaluated via CEL against a
+        context that always includes ``result_count``.  When ``results``
+        are provided, each row is merged into the context so per-row
+        field conditions (e.g. ``severity == "critical"``) work naturally.
+        """
+        base_context = {"result_count": result_count}
+
         for trigger in self._config.triggers:
-            if trigger.type == "any_match":
-                if result_count > 0:
+            if results:
+                # Per-row evaluation: merge each row with aggregate context
+                for row in results:
+                    ctx = {**base_context, **row}
+                    if evaluate_condition(trigger.when, ctx):
+                        return True
+            else:
+                # Aggregate-only evaluation
+                if evaluate_condition(trigger.when, base_context):
                     return True
-
-            elif trigger.type == "result_count":
-                op_func = _OPERATORS.get(trigger.operator)
-                if op_func and trigger.value is not None:
-                    try:
-                        if op_func(result_count, int(trigger.value)):
-                            return True
-                    except (ValueError, TypeError):
-                        logger.warning(
-                            f"Invalid result_count trigger value: {trigger.value}"
-                        )
-
-            elif trigger.type == "field_value":
-                if trigger.field and results:
-                    op_func = _OPERATORS.get(trigger.operator, operator.eq)
-                    for row in results:
-                        actual = row.get(trigger.field)
-                        if actual is not None:
-                            try:
-                                if op_func(str(actual), str(trigger.value)):
-                                    return True
-                            except (ValueError, TypeError):
-                                pass
 
         return False
 
@@ -378,15 +378,17 @@ def build_alert_config(
 ) -> AlertConfig | None:
     """Build AlertConfig from hunt YAML data, resolving named destinations.
 
-    Hunt YAML format:
+    Hunt YAML format::
+
         alerts:
           destinations:          # named refs → resolved via registry
             - slack-dfe-alerts
             - pagerduty-oncall
-          channels:              # raw Apprise URLs (backward compat)
+          channels:              # raw Apprise URLs
             - mailto://...
           triggers:
-            - type: any_match
+            - when: "result_count > 0"
+            - when: 'severity == "critical" && result_count > 0'
 
     Resolution order:
     1. Resolve destination names via registry → Apprise URLs
@@ -431,9 +433,9 @@ def build_alert_config(
     triggers_raw = alerts_section.get("triggers", [])
     triggers = [AlertTrigger.model_validate(t) for t in triggers_raw] if triggers_raw else []
 
-    # Default to any_match if channels are configured but no triggers specified
+    # Default: fire when any results are returned
     if not triggers:
-        triggers = [AlertTrigger(type="any_match")]
+        triggers = [AlertTrigger(when="result_count > 0")]
 
     return AlertConfig(
         channels=channels,
