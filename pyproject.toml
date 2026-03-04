@@ -49,6 +49,7 @@ dependencies = [
     "fastapi>=0.115.0",
     "uvicorn[standard]>=0.34.0",
     "python-jose[cryptography]>=3.3.0",
+    "cryptography>=46.0.5",
     "sse-starlette>=2.0.0",
 ]
 
