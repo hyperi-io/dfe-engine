@@ -121,6 +121,10 @@ class DeploymentConfigRegistry:
                 instance = table[len(prefix):]
                 if instance:
                     return svc, instance
+        # Unknown service: split on last hyphen (schema-less fallback)
+        idx = table.rfind("-")
+        if idx > 0 and idx < len(table) - 1:
+            return table[:idx], table[idx + 1:]
         return None
 
     # -------------------------------------------------------------------------
@@ -130,9 +134,10 @@ class DeploymentConfigRegistry:
     def get_config(
         self, service: str, instance: str = "default"
     ):
-        """Get a deployment configuration."""
-        self._validate_service(service)
-        config_cls = deployment_classes()[service]
+        """Get a deployment configuration.
+
+        Returns a typed model for registered services, raw dict for unknown ones.
+        """
         table = self._table_name(service, instance)
 
         config_data = self._store.get(table)
@@ -141,7 +146,10 @@ class DeploymentConfigRegistry:
                 f"Deployment config not found for {service}/{instance}"
             )
 
-        return config_cls.model_validate(config_data)
+        classes = deployment_classes()
+        if service in classes:
+            return classes[service].model_validate(config_data)
+        return config_data
 
     def save_config(
         self,
@@ -152,12 +160,14 @@ class DeploymentConfigRegistry:
         description: str | None = None,
     ) -> None:
         """Save a deployment configuration to the YAML directory."""
-        self._validate_service(service)
-
         if isinstance(config, dict):
-            config_cls = deployment_classes()[service]
-            validated = config_cls.model_validate(config)
-            config_data = validated.model_dump(mode="json")
+            classes = deployment_classes()
+            if service in classes:
+                validated = classes[service].model_validate(config)
+                config_data = validated.model_dump(mode="json")
+            else:
+                # Unknown service — store raw dict (schema-less mode)
+                config_data = config
         else:
             config_data = config.model_dump(mode="json")
 
@@ -178,7 +188,6 @@ class DeploymentConfigRegistry:
 
     def delete_config(self, service: str, instance: str = "default") -> None:
         """Delete a deployment configuration."""
-        self._validate_service(service)
         table = self._table_name(service, instance)
         yaml_path = self._config_directory / f"{table}.yaml"
 
@@ -213,9 +222,6 @@ class DeploymentConfigRegistry:
 
     def list_configs(self, service: str | None = None) -> list[dict[str, Any]]:
         """List all stored deployment configurations."""
-        if service:
-            self._validate_service(service)
-
         results = []
         for table in self._store.list_tables():
             parsed = self._parse_table_name(table)

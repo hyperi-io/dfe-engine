@@ -1,89 +1,81 @@
-# DFE Engine - TODO
+# TODO - DFE Engine
 
-**Project Goal:** Production-ready core library for Data Fusion Engine
-**Tests:** 1593 passing
-
----
-
-## Engine Scope
-
-### Hunts — Remaining
-
-- [x] ~~Alert grouping + cooldown — read-time aggregation, per-(hunt,rule,customer) cooldown~~ (done 2026-03-03)
-- [ ] Per-group cooldown — extend cooldown key to include group_by field values (v2)
-- [ ] Alert grouping integration tests — verify against real ClickHouse (DevEx cluster)
-
-### AI Module Interface (stub — implementation in separate repo)
-
-Engine defines the interface contract. AI modules slot in from another project repo. Interface will iterate as engine evolves.
-
-- [ ] `AIModuleInterface` ABC with three module types:
-  - Query optimisation: takes query + execution profile → returns proposed query + rationale
-  - Schema optimisation: takes source schema → returns proposed meta schema improvements
-  - Parser: takes raw log samples → returns parsers + proposed meta schema
-- [ ] Module discovery / registry (plugin pattern or entry_points)
-- [ ] Async execution — AI modules run background tasks, return results asynchronously
-
-### Config Repo + Deployment Migration
-
-Needs architectural decision: TF + Helm + Argo under this project or separate. Must migrate from DFE 2.1 (dfe-core) AWS-only approach to DFE 2.2 engine.
-
-- [ ] Decide: mono-repo vs separate repo for infra (TF/Helm/Argo)
-- [ ] Migrate DFE 2.1 deployment approach from `/projects/dfe-core` to DFE 2.2
-- [ ] Create `dfe-config` repo with directory structure from DESIGN.md §2.2
-- [ ] Seed default field maps (Sigma/ECS/CIM) as package resources
-- [ ] Blob SHA ETag computation for conflict detection
-- [ ] Read-before-write pattern in DirectoryConfigStore writes
-- [ ] Dev workflow: DevEx cluster config repo with default values
-- [ ] AWS alternative: S3-backed config store with versioning
-
-### Integration Tests
-
-- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io) — after above items complete
+This is the **single source of truth** for all tasks and progress.
 
 ---
 
-## Control-Plane Scope
+## Active Tasks
 
-- [ ] Absorb dfe-control-plane into dfe-engine (REST API + CLI + logging + hunt management)
-- [ ] Rule CRUD API (create from HyperDX SQL, validate, store as Jinja2 template)
-- [ ] Migrate Jinja2 templates from `INSERT INTO ... SELECT *` to lean `matched_uuid` pattern
-- [ ] Hunt results → source table join-back for full record lookup (UI concern)
-- [ ] Expression validator UI integration — endpoints for validation, field suggestion, expression preview
-- [ ] Field mapping CRUD API + UI data model
+- [ ] Phase 3: Operational API routers `[PENDING]`
+
+---
+
+## Work Breakdown Structure (WBS)
+
+### API Layer — Remaining Phases
+
+**Goal:** Complete REST API surface to replace dfe-control-plane
+
+#### Phase 3: Operational Routers
+
+1. [ ] Hunts router (`v1/hunts.py`) — HuntEngine lifecycle, async execution (202 + polling)
+2. [ ] Queries router (`v1/queries.py`) — ViewExecutor, absorb `query/endpoint.py`
+3. [ ] Task manager (`api/task_manager.py`) — in-memory task store, polling + SSE
+4. [ ] Pipeline router (`v1/pipeline.py`) — Vector pipeline generation
+
+#### Phase 4: Discovery + Analytics
+
+1. [ ] Discovery router (`v1/discovery.py`) — ClickHouse table/schema exploration
+2. [ ] Sigma router (`v1/sigma.py`) — SigmaSourceMapper, converter
+3. [ ] Schemas router (`v1/schemas.py`) — SchemaManager versions, DDL generation
+
+#### Phase 5: UI Migration
+
+1. [ ] Generate full OpenAPI spec, update `@repo/control-plane-types` in dfe-ui
+2. [ ] Update dfe-ui API config to point at engine API
+3. [ ] Create `docs/UI-API-GUIDE.md`
 
 ---
 
 ## Backlog
 
-### Architecture (decided, not yet implemented)
+### High Priority
+
+- [ ] Alert grouping integration tests — verify against real ClickHouse (DevEx cluster)
+- [ ] `dfe-loader` transforms — replace hardcoded condition evaluation with rustlib CEL
+- [ ] Config repo decision: mono-repo vs separate repo for infra (TF/Helm/Argo)
+
+### Medium Priority
+
+- [ ] Migrate DFE 2.1 deployment from `/projects/dfe-core` to DFE 2.2
+- [ ] Create `dfe-config` repo with directory structure from DESIGN.md §2.2
+- [ ] Seed default field maps (Sigma/ECS/CIM) as package resources
+- [ ] Blob SHA ETag computation for conflict detection in DirectoryConfigStore writes
+- [ ] Read-before-write pattern in DirectoryConfigStore writes
+- [ ] Migrate Jinja2 templates from `INSERT INTO ... SELECT *` to lean `matched_uuid` pattern
+
+### Low Priority
 
 - [ ] Deploy HyperDX (ClickStack) as observability UI
 - [ ] Implement HyperDX OIDC middleware (docs/oauth2/HYPERDX-MIDDLEWARE.md)
 - [ ] Deploy Envoy Gateway with native OIDC (replaces nginx-ingress + oauth2-proxy)
 - [ ] OTEL metrics in Rust services (replace Prometheus)
-
-### Future
-
+- [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
 - [ ] Cedar policy backend for auth (optional .cedar files + cedarpy)
-- [ ] Dev/test mode: auth disabled, root mode, seed defaults
-- [ ] Async ClickHouse operations
-- [ ] Schema diff visualization
-
-### Technical Debt
-
 - [ ] Increase test coverage to 90%+
-- [ ] Add type hints to all public APIs
 
 ---
 
-## Notes
+## Notes for AI Assistants
 
-- Use `uv` for all Python package management (NOT pip)
-- Virtual environment: `~/.venv` (Python 3.12)
-- See STATE.md for project status and architecture decisions
-- Design docs: [DESIGN.md](docs/DESIGN.md), [SOURCE.md](docs/SOURCE.md), [SCHEMA.md](docs/SCHEMA.md), [SYNC.md](docs/SYNC.md)
+This file is the **single source of truth** for tasks and progress.
 
----
+**Rules:**
 
-**Last Updated:** 2026-03-03
+- All tasks go here, nowhere else
+- Mark tasks `[IN PROGRESS]` when starting
+- Mark tasks `[x]` when complete
+- Never add tasks to STATE.md or CLAUDE.md
+
+**Project context:** See `STATE.md` for architecture and key decisions.
+**Test run:** `python -m pytest -q` — uses `~/.venv` (Python 3.12, managed by `uv`)
