@@ -18,19 +18,29 @@ from dfe_engine.hunts.alert import (
 
 
 class TestAlertTrigger:
-    def test_any_match_trigger(self):
-        t = AlertTrigger(type="any_match")
-        assert t.type == "any_match"
-        assert t.operator == ">="
+    def test_basic_condition(self):
+        t = AlertTrigger(when="result_count > 0")
+        assert t.when == "result_count > 0"
 
-    def test_result_count_trigger(self):
-        t = AlertTrigger(type="result_count", operator=">=", value=10)
-        assert t.value == 10
+    def test_threshold_condition(self):
+        t = AlertTrigger(when="result_count >= 10")
+        assert t.when == "result_count >= 10"
 
-    def test_field_value_trigger(self):
-        t = AlertTrigger(type="field_value", field="severity", operator="==", value="critical")
-        assert t.field == "severity"
-        assert t.value == "critical"
+    def test_field_condition(self):
+        t = AlertTrigger(when='severity == "critical"')
+        assert t.when == 'severity == "critical"'
+
+    def test_compound_condition(self):
+        t = AlertTrigger(when='severity == "critical" && result_count > 0')
+        assert t.when == 'severity == "critical" && result_count > 0'
+
+    def test_invalid_expression_rejected(self):
+        with pytest.raises(ValueError, match="Invalid alert trigger"):
+            AlertTrigger(when="== broken")
+
+    def test_disallowed_function_rejected(self):
+        with pytest.raises(ValueError, match="Invalid alert trigger"):
+            AlertTrigger(when='[1,2,3].map(x, x * 2)')
 
 
 # ── AlertConfig ───────────────────────────────────────────────────
@@ -169,66 +179,71 @@ class TestShouldFire:
         config = AlertConfig(channels=["slack://t"], triggers=triggers)
         return AlertDispatcher(config)
 
-    def test_any_match_fires_on_results(self):
-        d = self._dispatcher([AlertTrigger(type="any_match")])
+    def test_fires_on_results(self):
+        d = self._dispatcher([AlertTrigger(when="result_count > 0")])
         assert d._should_fire(5, None) is True
 
-    def test_any_match_does_not_fire_on_zero(self):
-        d = self._dispatcher([AlertTrigger(type="any_match")])
+    def test_does_not_fire_on_zero(self):
+        d = self._dispatcher([AlertTrigger(when="result_count > 0")])
         assert d._should_fire(0, None) is False
 
     def test_result_count_ge(self):
-        d = self._dispatcher([AlertTrigger(type="result_count", operator=">=", value=10)])
+        d = self._dispatcher([AlertTrigger(when="result_count >= 10")])
         assert d._should_fire(10, None) is True
         assert d._should_fire(9, None) is False
 
     def test_result_count_gt(self):
-        d = self._dispatcher([AlertTrigger(type="result_count", operator=">", value=5)])
+        d = self._dispatcher([AlertTrigger(when="result_count > 5")])
         assert d._should_fire(6, None) is True
         assert d._should_fire(5, None) is False
 
     def test_result_count_eq(self):
-        d = self._dispatcher([AlertTrigger(type="result_count", operator="==", value=3)])
+        d = self._dispatcher([AlertTrigger(when="result_count == 3")])
         assert d._should_fire(3, None) is True
         assert d._should_fire(4, None) is False
 
     def test_result_count_lt(self):
-        d = self._dispatcher([AlertTrigger(type="result_count", operator="<", value=5)])
+        d = self._dispatcher([AlertTrigger(when="result_count < 5")])
         assert d._should_fire(4, None) is True
         assert d._should_fire(5, None) is False
 
     def test_field_value_match(self):
-        d = self._dispatcher([
-            AlertTrigger(type="field_value", field="severity", operator="==", value="critical")
-        ])
+        d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         results = [{"severity": "low"}, {"severity": "critical"}]
         assert d._should_fire(2, results) is True
 
     def test_field_value_no_match(self):
-        d = self._dispatcher([
-            AlertTrigger(type="field_value", field="severity", operator="==", value="critical")
-        ])
+        d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         results = [{"severity": "low"}, {"severity": "medium"}]
         assert d._should_fire(2, results) is False
 
     def test_field_value_missing_field(self):
-        d = self._dispatcher([
-            AlertTrigger(type="field_value", field="severity", operator="==", value="critical")
-        ])
+        """Missing field in CEL → evaluate_condition returns False."""
+        d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         results = [{"other": "value"}]
         assert d._should_fire(1, results) is False
 
     def test_field_value_no_results(self):
-        d = self._dispatcher([
-            AlertTrigger(type="field_value", field="severity", operator="==", value="critical")
-        ])
+        """Field condition with no results → aggregate-only eval, field missing → False."""
+        d = self._dispatcher([AlertTrigger(when='severity == "critical"')])
         assert d._should_fire(0, None) is False
+
+    def test_compound_field_and_count(self):
+        """Compound condition: field + result_count."""
+        d = self._dispatcher([AlertTrigger(when='severity == "critical" && result_count > 0')])
+        results = [{"severity": "critical"}]
+        assert d._should_fire(1, results) is True
+
+    def test_compound_field_and_count_no_match(self):
+        d = self._dispatcher([AlertTrigger(when='severity == "critical" && result_count > 10')])
+        results = [{"severity": "critical"}]
+        assert d._should_fire(1, results) is False
 
     def test_multiple_triggers_any_fires(self):
         """Multiple triggers: first match wins (OR logic)."""
         d = self._dispatcher([
-            AlertTrigger(type="result_count", operator=">=", value=100),
-            AlertTrigger(type="any_match"),
+            AlertTrigger(when="result_count >= 100"),
+            AlertTrigger(when="result_count > 0"),
         ])
         assert d._should_fire(1, None) is True
 
@@ -237,9 +252,35 @@ class TestShouldFire:
         d = AlertDispatcher(config)
         assert d._should_fire(5, None) is False
 
-    def test_invalid_result_count_value(self):
-        d = self._dispatcher([AlertTrigger(type="result_count", operator=">=", value="abc")])
-        assert d._should_fire(5, None) is False
+    def test_string_contains(self):
+        d = self._dispatcher([AlertTrigger(when='message.contains("error")')])
+        results = [{"message": "an error occurred"}]
+        assert d._should_fire(1, results) is True
+
+    def test_membership_in(self):
+        d = self._dispatcher([AlertTrigger(when='severity in ["critical", "high"]')])
+        results = [{"severity": "high"}]
+        assert d._should_fire(1, results) is True
+
+    def test_membership_in_no_match(self):
+        d = self._dispatcher([AlertTrigger(when='severity in ["critical", "high"]')])
+        results = [{"severity": "low"}]
+        assert d._should_fire(1, results) is False
+
+    def test_logical_or(self):
+        d = self._dispatcher([AlertTrigger(when='severity == "critical" || result_count >= 100')])
+        results = [{"severity": "low"}]
+        assert d._should_fire(100, results) is True
+
+    def test_negation(self):
+        d = self._dispatcher([AlertTrigger(when='!(severity == "low")')])
+        results = [{"severity": "critical"}]
+        assert d._should_fire(1, results) is True
+
+    def test_numeric_field_comparison(self):
+        d = self._dispatcher([AlertTrigger(when="score > 80")])
+        results = [{"score": 95}]
+        assert d._should_fire(1, results) is True
 
 
 # ── AlertDispatcher.evaluate_and_send ─────────────────────────────
@@ -249,7 +290,7 @@ class TestEvaluateAndSend:
     def test_disabled_config_returns_false(self):
         config = AlertConfig(
             channels=["slack://t"],
-            triggers=[AlertTrigger(type="any_match")],
+            triggers=[AlertTrigger(when="result_count > 0")],
             enabled=False,
         )
         d = AlertDispatcher(config)
@@ -258,7 +299,7 @@ class TestEvaluateAndSend:
     def test_no_channels_returns_false(self):
         config = AlertConfig(
             channels=[],
-            triggers=[AlertTrigger(type="any_match")],
+            triggers=[AlertTrigger(when="result_count > 0")],
         )
         d = AlertDispatcher(config)
         assert d.evaluate_and_send("hunt1", "org_a", "rule1", 5) is False
@@ -272,7 +313,7 @@ class TestEvaluateAndSend:
     def test_sends_when_trigger_fires(self, mock_send):
         config = AlertConfig(
             channels=["slack://t"],
-            triggers=[AlertTrigger(type="any_match")],
+            triggers=[AlertTrigger(when="result_count > 0")],
         )
         d = AlertDispatcher(config)
         result = d.evaluate_and_send("hunt1", "org_a", "rule1", 5)
@@ -287,7 +328,7 @@ class TestEvaluateAndSend:
     def test_custom_templates(self, mock_send):
         config = AlertConfig(
             channels=["slack://t"],
-            triggers=[AlertTrigger(type="any_match")],
+            triggers=[AlertTrigger(when="result_count > 0")],
             title_template="ALERT: {hunt_name}",
             body_template="{result_count} hits for {customer}",
         )
@@ -344,12 +385,12 @@ class TestBuildAlertConfig:
         assert build_alert_config({}) is None
 
     def test_global_channels_only(self):
-        """Global channels with no hunt-level alerts → config with any_match default."""
+        """Global channels with no hunt-level alerts → config with default trigger."""
         config = build_alert_config({}, global_channels=["slack://global"])
         assert config is not None
         assert config.channels == ["slack://global"]
         assert len(config.triggers) == 1
-        assert config.triggers[0].type == "any_match"
+        assert config.triggers[0].when == "result_count > 0"
 
     def test_hunt_channels_only(self):
         """Hunt-level channels with no global → config with those channels."""
@@ -365,26 +406,38 @@ class TestBuildAlertConfig:
         assert config is not None
         assert config.channels == ["slack://a", "slack://b", "slack://c"]
 
-    def test_custom_triggers(self):
+    def test_cel_triggers(self):
         data = {
             "alerts": {
                 "channels": ["slack://t"],
                 "triggers": [
-                    {"type": "result_count", "operator": ">=", "value": 10},
+                    {"when": "result_count >= 10"},
                 ],
             }
         }
         config = build_alert_config(data)
         assert len(config.triggers) == 1
-        assert config.triggers[0].type == "result_count"
-        assert config.triggers[0].value == 10
+        assert config.triggers[0].when == "result_count >= 10"
+
+    def test_multiple_cel_triggers(self):
+        data = {
+            "alerts": {
+                "channels": ["slack://t"],
+                "triggers": [
+                    {"when": "result_count > 0"},
+                    {"when": 'severity == "critical"'},
+                ],
+            }
+        }
+        config = build_alert_config(data)
+        assert len(config.triggers) == 2
 
     def test_default_trigger_when_no_triggers_specified(self):
-        """Channels but no triggers → defaults to any_match."""
+        """Channels but no triggers → defaults to result_count > 0."""
         data = {"alerts": {"channels": ["slack://t"]}}
         config = build_alert_config(data)
         assert len(config.triggers) == 1
-        assert config.triggers[0].type == "any_match"
+        assert config.triggers[0].when == "result_count > 0"
 
     def test_disabled_alerts(self):
         data = {"alerts": {"channels": ["slack://t"], "enabled": False}}

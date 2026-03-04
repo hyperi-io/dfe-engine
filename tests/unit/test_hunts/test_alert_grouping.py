@@ -5,9 +5,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from dfe_engine.hunts.suppression import (
+from dfe_engine.hunts.alert_grouping import (
     AlertGroupingConfig,
     AlertStateManager,
+    build_group_key,
     build_grouping_query,
     parse_duration,
 )
@@ -87,6 +88,50 @@ class TestAlertGroupingConfig:
         assert cfg.cooldown_td == timedelta(minutes=30)
         assert cfg.max_alerts_per_run == 50
         assert cfg.max_sample_events == 5
+
+
+# ── build_group_key ────────────────────────────────────────────
+
+
+class TestBuildGroupKey:
+    def test_single_field(self):
+        key = build_group_key(["source_ip"], {"source_ip": "1.2.3.4"})
+        assert key == "source_ip=1.2.3.4"
+
+    def test_multiple_fields(self):
+        key = build_group_key(
+            ["severity", "source_ip"],
+            {"severity": "high", "source_ip": "1.2.3.4"},
+        )
+        assert key == "severity=high|source_ip=1.2.3.4"
+
+    def test_empty_group_by(self):
+        key = build_group_key([], {"source_ip": "1.2.3.4"})
+        assert key == ""
+
+    def test_missing_field_uses_empty(self):
+        key = build_group_key(["source_ip"], {})
+        assert key == "source_ip="
+
+    def test_pipe_in_value_escaped(self):
+        key = build_group_key(["cmd"], {"cmd": "a|b"})
+        assert key == "cmd=a\\|b"
+
+    def test_equals_in_value_escaped(self):
+        key = build_group_key(["cmd"], {"cmd": "x=y"})
+        assert key == "cmd=x\\=y"
+
+    def test_backslash_in_value_escaped(self):
+        key = build_group_key(["path"], {"path": r"C:\Windows"})
+        assert key == r"path=C:\\Windows"
+
+    def test_ordering_follows_group_by_list(self):
+        """Key order is determined by group_by list, not dict key order."""
+        key = build_group_key(
+            ["b_field", "a_field"],
+            {"a_field": "aaa", "b_field": "bbb"},
+        )
+        assert key == "b_field=bbb|a_field=aaa"
 
 
 # ── build_grouping_query ────────────────────────────────────────
@@ -329,6 +374,64 @@ class TestAlertStateManager:
         call_args = ch_client.execute.call_args
         assert "INSERT INTO dfe_audit.alert_state" in call_args[0][0]
 
+    def test_ddl_contains_group_key(self):
+        mgr = AlertStateManager()
+        ddl = mgr.get_ddl()
+        assert "group_key" in ddl
+        assert "customer_name, group_key)" in ddl  # ORDER BY includes group_key
+
+    def test_check_cooldown_with_group_key(self):
+        """Different groups have independent cooldown state."""
+        mgr = AlertStateManager()
+        mgr._table_ensured = True
+        ch_client = MagicMock()
+
+        # Group A fired recently — should block
+        recent = datetime.now(timezone.utc) - timedelta(minutes=10)
+        ch_client.execute.return_value = [(recent,)]
+
+        can_fire_a = mgr.check_cooldown(
+            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1),
+            group_key="source_ip=1.2.3.4",
+        )
+        assert can_fire_a is False
+        # Verify group_key was passed in the query parameters
+        call_params = ch_client.execute.call_args[1].get("parameters", ch_client.execute.call_args[0][1] if len(ch_client.execute.call_args[0]) > 1 else {})
+        assert call_params["group_key"] == "source_ip=1.2.3.4"
+
+    def test_check_cooldown_default_group_key(self):
+        """Default group_key='' preserves backward compat for ungrouped alerts."""
+        mgr = AlertStateManager()
+        mgr._table_ensured = True
+        ch_client = MagicMock()
+        ch_client.execute.return_value = []
+
+        can_fire = mgr.check_cooldown(
+            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
+        )
+        assert can_fire is True
+        call_kwargs = ch_client.execute.call_args
+        params = call_kwargs[1].get("parameters", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {})
+        assert params["group_key"] == ""
+
+    def test_record_fire_with_group_key(self):
+        """record_fire includes group_key in INSERT values."""
+        mgr = AlertStateManager()
+        mgr._table_ensured = True
+        ch_client = MagicMock()
+        fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
+
+        mgr.record_fire(
+            ch_client, "hunt1", "rule1", "acme",
+            group_key="severity=high|source_ip=10.0.0.1",
+            fired_at=fired_at,
+        )
+        ch_client.execute.assert_called_once()
+        call_args = ch_client.execute.call_args
+        # The group_key should be in the INSERT parameters
+        insert_params = call_args[1].get("parameters", call_args[0][1] if len(call_args[0]) > 1 else [])
+        assert "severity=high|source_ip=10.0.0.1" in insert_params[0]
+
 
 # ── Dispatch Integration ────────────────────────────────────────
 
@@ -342,7 +445,7 @@ class TestDispatchIntegration:
 
         config = AlertConfig(
             channels=["slack://test"],
-            triggers=[{"type": "any_match"}],
+            triggers=[{"when": "result_count > 0"}],
         )
         dispatcher = AlertDispatcher(config)
 
@@ -361,7 +464,7 @@ class TestDispatchIntegration:
 
         config = AlertConfig(
             channels=["slack://test"],
-            triggers=[{"type": "any_match"}],
+            triggers=[{"when": "result_count > 0"}],
             body_template=(
                 "Hunt **{hunt_name}**: **{match_count}** matches "
                 "({group_fields}) from {first_seen} to {last_seen}"
@@ -395,7 +498,7 @@ class TestDispatchIntegration:
 
         config = AlertConfig(
             channels=["slack://test"],
-            triggers=[{"type": "any_match"}],
+            triggers=[{"when": "result_count > 0"}],
             body_template="Hunt {hunt_name}: {match_count} matches ({group_fields})",
         )
         dispatcher = AlertDispatcher(config)
