@@ -6,23 +6,23 @@
 
 # Build type (REQUIRED for Python projects)
 # Values: app (CLI/GUI binary) or package (library wheel)
+# dfe-engine is both: wheel published to Artifactory AND container image deployed to Kubernetes.
 build:
   type: package
 
 # Publishing (set by attach.sh --no-publish)
 publish:
   enabled: true
-
-# Uncomment for Nuitka compiled builds
-# build:
-#   type: app
-#   strategies:
-#     - nuitka
-#
-# python:
-#   nuitka:
-#     platforms:
-#       - linux-x64
+  container:
+    enabled: true
+    registry: jfrog
+    dockerfile: Dockerfile
+    platforms:
+      - linux/amd64
+      - linux/arm64
+  helm:
+    enabled: true
+    registry: jfrog
 
 # Uncomment to customise quality checks
 # quality:

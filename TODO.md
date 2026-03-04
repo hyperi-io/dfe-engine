@@ -7,6 +7,7 @@ This is the **single source of truth** for all tasks and progress.
 ## Active Tasks
 
 - [ ] Phase 3: Operational API routers `[PENDING]`
+- [ ] CI/CD: verify container + helm publish pipeline triggers correctly on next release
 
 ---
 

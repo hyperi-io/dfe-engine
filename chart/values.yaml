@@ -1,0 +1,135 @@
+# dfe-engine Helm chart values
+#
+# All configuration maps to DFESettings environment variables.
+# See src/dfe_engine/settings.py for the full env var reference.
+
+# -- Number of replicas (ignored when autoscaling.enabled is true)
+replicaCount: 1
+
+image:
+  repository: harbor.hyperi.io/dfe/dfe-engine
+  # -- Defaults to Chart appVersion
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+podLabels: {}
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: "2"
+    memory: 2Gi
+
+# -- API server service
+service:
+  type: ClusterIP
+  port: 8000
+
+# -- Ingress (disabled by default — use Envoy Gateway or existing ingress controller)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: dfe-engine.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# -- ClickHouse connection
+config:
+  clickhouse:
+    host: clickhouse
+    port: 9000
+    username: default
+    database: dfe
+    secure: true
+    verify: false
+  api:
+    host: "0.0.0.0"
+    port: 8000
+    # -- Comma-separated list of allowed CORS origins
+    cors_origins: ""
+    jwt_expire_minutes: 60
+  auth:
+    enabled: true
+    local:
+      enabled: true
+      org_id: "default"
+  # -- Root config directory — maps to DFE_CONFIG_DIR.
+  # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
+  # Set to the mount path of your config PVC or git-synced volume.
+  config_dir: ""
+
+# -- ClickHouse credentials
+clickhouse:
+  # -- Name of an existing secret containing the ClickHouse password.
+  # If set, the 'password' field below is ignored.
+  existingSecret: ""
+  secretKeys:
+    password: clickhouse-password
+  password: ""
+
+# -- JWT signing secret
+jwt:
+  # -- Name of an existing secret containing the JWT secret.
+  existingSecret: ""
+  secretKeys:
+    secret: jwt-secret
+  # -- Change this in production. Min 32 chars recommended.
+  secret: "dev-secret-key-change-in-production"
+
+# -- Local auth account passwords (admin / operator / viewer)
+auth:
+  admin:
+    existingSecret: ""
+    secretKeys:
+      password: admin-password
+    password: "changeme"
+  operator:
+    existingSecret: ""
+    secretKeys:
+      password: operator-password
+    password: "changeme"
+  viewer:
+    existingSecret: ""
+    secretKeys:
+      password: viewer-password
+    password: "changeme"
+
+# -- Config directory volume (for YAML SSoT config files)
+# Mount a PVC, NFS share, or git-sync volume at config.config_dir.
+configVolume:
+  enabled: false
+  # -- Mount path inside the container (must match config.config_dir)
+  mountPath: /etc/dfe/config
+  # -- Use an existing PVC
+  existingClaim: ""
+  # -- Create a new PVC
+  size: 1Gi
+  storageClass: ""
+  accessMode: ReadWriteOnce
+
+# -- Standard HPA
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
