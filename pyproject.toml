@@ -9,7 +9,7 @@ readme = "README.md"
 
 dependencies = [
     # hyperi-pylib for logging and common utilities
-    "hyperi-pylib>=2.19.0",
+    "hyperi-pylib>=2.23.1",
     # Data processing
     "pyarrow>=23.0.1",
     "pandas>=3.0.1",
@@ -20,7 +20,7 @@ dependencies = [
     "ruamel-yaml>=0.19.1",
     "pydantic>=2.12.5",
     # AWS
-    "boto3>=1.42.57",
+    "boto3>=1.42.60",
     # Scheduling
     "apscheduler>=3.11.2",
     "aiocron>=2.1",
@@ -33,7 +33,7 @@ dependencies = [
     "Jinja2>=3.1.6",
     # Sigma rules
     "pysigma>=1.1.1",
-    "valhallaapi>=0.6.0",
+    "valhallaapi>=0.6.2",
     # Utilities
     "python-dateutil>=2.9.0",
     "tabulate>=0.9.0",
@@ -42,15 +42,19 @@ dependencies = [
     "psutil>=7.2.2",
     "deepmerge>=2.0",
     # Authentication
-    "bcrypt>=4.2.0",
+    "bcrypt>=5.0.0",
     # Alerting / notifications
-    "apprise>=1.9.0",
+    "apprise>=1.9.7",
     # API server
-    "fastapi>=0.115.0",
-    "uvicorn[standard]>=0.34.0",
-    "python-jose[cryptography]>=3.3.0",
-    "cryptography>=46.0.5",
-    "sse-starlette>=2.0.0",
+    "fastapi>=0.135.1",
+    "uvicorn[standard]>=0.41.0",
+    "python-jose[cryptography]>=3.5.0",
+    "cryptography>=46.0.5",  # CVE fix: subgroup attack on SECT curves (>=46.0.5)
+    "sse-starlette>=3.3.2",
+    # Transitive override: diskcache pulled in by pySigma.
+    # CVE-2025-69872 (unsafe pickle) acknowledged — no upstream patch available.
+    # Acceptable: cache files are not writable by untrusted parties in our deployment.
+    "diskcache>=5.6.3",
 ]
 
 [project.urls]
@@ -79,7 +83,7 @@ dev = [
     "Faker>=40.5.1",
     "types-requests>=2.32.4",
     "psycopg[binary]>=3.3.3",
-    "python-dotenv>=1.2.1",
+    "python-dotenv>=1.2.2",
 ]
 
 [tool.pytest.ini_options]
