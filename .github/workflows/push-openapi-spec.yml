@@ -1,0 +1,81 @@
+# Project:      dfe-engine
+# File:         .github/workflows/push-openapi-spec.yml
+# Purpose:      Create PR to sync OpenAPI spec to dfe-ui types package and run type generation in dfe-ui
+#
+# Creates a PR with openapi.json to: https://github.com/hyperi-io/dfe-ui
+# Target path: packages/dfe-engine-types/openapi-spec/openapi.json
+#
+# Does NOT rely on pre-commit: regenerates spec from FastAPI app before syncing.
+#
+# Required secret: DFE_UI_TOKEN - PAT with repo PR read/write access
+# Optional var: DFE_UI_REPO - repo as owner/name (default: hyperi-io/dfe-ui)
+# Note: Git clone URLs require owner/name; numeric repo IDs are not supported.
+
+name: Sync OpenAPI spec
+
+on:
+  push:
+    branches: ["main", "master"]
+    paths:
+      - "openapi-spec/openapi.json"
+      - "src/dfe_engine/api/**"
+  pull_request:
+    paths:
+      - "openapi-spec/openapi.json"
+      - "src/dfe_engine/api/**"
+  workflow_dispatch:
+
+jobs:
+  push-to-dfe-ui:
+    name: Create PR with OpenAPI spec in dfe-ui
+    permissions:
+      pull-requests: write
+      contents: read
+    runs-on: ${{ vars.GH_RUNNER_DEFAULT || 'ubuntu-latest' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: astral-sh/setup-uv@v4
+      - run: uv sync
+
+      - name: Regenerate OpenAPI spec
+        run: uv run python openapi-spec/generate.py
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.18.0
+
+      - name: Create PR with OpenAPI spec in dfe-ui
+        env:
+          DFE_UI_TOKEN: ${{ secrets.DFE_UI_TOKEN }}
+          DFE_UI_REPO: ${{ vars.DFE_UI_REPO || 'hyperi-io/dfe-ui' }}
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git clone --depth 1 "https://x-access-token:${DFE_UI_TOKEN}@github.com/${DFE_UI_REPO}.git" dfe-ui
+          cd dfe-ui
+          mkdir -p packages/dfe-engine-types/openapi-spec
+          cp ../openapi-spec/openapi.json packages/dfe-engine-types/openapi-spec/openapi.json
+          cd packages/dfe-engine-types && npm ci && npm run generate && cd ../..
+          git add packages/dfe-engine-types/
+          
+          if git diff --staged --quiet; then
+            echo "OpenAPI spec unchanged, no PR needed"
+            exit 0
+          fi
+          
+          BRANCH_NAME="sync-openapi-spec-$(echo ${{ github.sha }} | cut -c1-7)"
+          git checkout -b "$BRANCH_NAME"
+          git commit -m "chore(dfe-engine-types): sync OpenAPI spec from dfe-engine
+
+          Auto-generated from ${{ github.repository }}@${{ github.sha }}"
+          git push origin "$BRANCH_NAME"
+          GH_TOKEN="${DFE_UI_TOKEN}" gh pr create \
+            --repo "${DFE_UI_REPO}" \
+            --head "$BRANCH_NAME" \
+            --title "chore(dfe-engine-types): sync OpenAPI spec from dfe-engine" \
+            --body "Auto-generated from ${{ github.repository }}@${{ github.sha }}
+
+          This PR syncs the OpenAPI specification from the dfe-engine repository."
