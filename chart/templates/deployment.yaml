@@ -1,0 +1,147 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dfe-engine.fullname" . }}
+  labels:
+    {{- include "dfe-engine.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dfe-engine.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "dfe-engine.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dfe-engine.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: {{ .Chart.Name }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.config.api.port }}
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /api/v1/system/health
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          env:
+            # ClickHouse connection
+            - name: DFE_CLICKHOUSE_HOST
+              value: {{ .Values.config.clickhouse.host | quote }}
+            - name: DFE_CLICKHOUSE_PORT
+              value: {{ .Values.config.clickhouse.port | quote }}
+            - name: DFE_CLICKHOUSE_USERNAME
+              value: {{ .Values.config.clickhouse.username | quote }}
+            - name: DFE_CLICKHOUSE_DATABASE
+              value: {{ .Values.config.clickhouse.database | quote }}
+            - name: DFE_CLICKHOUSE_SECURE
+              value: {{ .Values.config.clickhouse.secure | quote }}
+            - name: DFE_CLICKHOUSE_VERIFY
+              value: {{ .Values.config.clickhouse.verify | quote }}
+            - name: DFE_CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.clickhouseSecretName" . }}
+                  key: {{ .Values.clickhouse.secretKeys.password }}
+            # API server
+            - name: DFE_API_HOST
+              value: {{ .Values.config.api.host | quote }}
+            - name: DFE_API_PORT
+              value: {{ .Values.config.api.port | quote }}
+            - name: DFE_API_JWT_EXPIRE_MINUTES
+              value: {{ .Values.config.api.jwt_expire_minutes | quote }}
+            {{- if .Values.config.api.cors_origins }}
+            - name: DFE_API_CORS_ORIGINS
+              value: {{ .Values.config.api.cors_origins | quote }}
+            {{- end }}
+            - name: DFE_API_JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.jwtSecretName" . }}
+                  key: {{ .Values.jwt.secretKeys.secret }}
+            # Auth
+            - name: DFE_AUTH_ENABLED
+              value: {{ .Values.config.auth.enabled | quote }}
+            - name: DFE_AUTH_LOCAL_ENABLED
+              value: {{ .Values.config.auth.local.enabled | quote }}
+            - name: DFE_AUTH_LOCAL_ORG_ID
+              value: {{ .Values.config.auth.local.org_id | quote }}
+            - name: DFE_AUTH_LOCAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.authSecretName" . }}
+                  key: {{ .Values.auth.admin.secretKeys.password }}
+            - name: DFE_AUTH_LOCAL_OPERATOR_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.authSecretName" . }}
+                  key: {{ .Values.auth.operator.secretKeys.password }}
+            - name: DFE_AUTH_LOCAL_VIEWER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dfe-engine.authSecretName" . }}
+                  key: {{ .Values.auth.viewer.secretKeys.password }}
+            {{- if .Values.config.config_dir }}
+            - name: DFE_CONFIG_DIR
+              value: {{ .Values.config.config_dir | quote }}
+            {{- else if .Values.configVolume.enabled }}
+            - name: DFE_CONFIG_DIR
+              value: {{ .Values.configVolume.mountPath | quote }}
+            {{- end }}
+          {{- if .Values.configVolume.enabled }}
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.configVolume.mountPath }}
+          {{- end }}
+      {{- if .Values.configVolume.enabled }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ if .Values.configVolume.existingClaim }}{{ .Values.configVolume.existingClaim }}{{ else }}{{ include "dfe-engine.fullname" . }}-config{{ end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
