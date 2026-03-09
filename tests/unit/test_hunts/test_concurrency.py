@@ -1,9 +1,8 @@
 """Tests for hunt concurrency limiting, resource hog detection, and backpressure."""
 
 import asyncio
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 
 from dfe_engine.hunts.cron_job import CronJob
 from dfe_engine.hunts.hunt import Hunt

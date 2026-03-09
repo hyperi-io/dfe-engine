@@ -1,6 +1,5 @@
 """Tests for error handling — error format, exception handlers."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 from dfe_engine.api.errors import ErrorCode, ErrorResponse, FieldError

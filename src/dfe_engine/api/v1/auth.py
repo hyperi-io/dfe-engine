@@ -8,18 +8,16 @@ GET  /api/v1/auth/permissions → Resolved permissions for current user's roles
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     create_access_token,
-    get_current_user,
 )
 from dfe_engine.auth import (
     DEFAULT_ROLE_PERMISSIONS,
-    AuthenticationError,
     LocalAuthProvider,
 )
 
