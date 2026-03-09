@@ -1,0 +1,12 @@
+# DFE Engine — HyperI CI Configuration
+#
+# Only set values that differ from defaults.
+
+publish:
+  target: internal
+
+quality:
+  python:
+    pip_audit: warn
+    vulture: warn
+    bandit_exclude_tests: true
