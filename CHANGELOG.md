@@ -1,3 +1,10 @@
+## [1.6.3](https://github.com/hyperi-io/dfe-engine/compare/v1.6.2...v1.6.3) (2026-03-09)
+
+
+### Bug Fixes
+
+* move bandit B104 skip to config, pip_audit back to blocking ([b11fdf2](https://github.com/hyperi-io/dfe-engine/commit/b11fdf2dcd76648fafdba88569b05bd8a9d63408))
+
 ## [1.6.2](https://github.com/hyperi-io/dfe-engine/compare/v1.6.1...v1.6.2) (2026-03-09)
 
 
