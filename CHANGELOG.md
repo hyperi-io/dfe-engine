@@ -1,3 +1,41 @@
+# [1.6.0](https://github.com/hyperi-io/dfe-engine/compare/v1.5.0...v1.6.0) (2026-03-09)
+
+
+### Bug Fixes
+
+* add nosec B104 for 0.0.0.0 bind address ([9f4e174](https://github.com/hyperi-io/dfe-engine/commit/9f4e17465d616c464f66ec4f61f8f810824482eb))
+* add transform-vrl ServicePlugin [skip ci] ([8c2b185](https://github.com/hyperi-io/dfe-engine/commit/8c2b1859c58ce9f34fef8f5a45704a5894b656b2))
+* align transform-vrl config model with Rust schema [skip ci] ([d48daba](https://github.com/hyperi-io/dfe-engine/commit/d48daba9f891d13aa6e064390066fafcc790e35d))
+* apply ruff format to all source and test files ([d24cf98](https://github.com/hyperi-io/dfe-engine/commit/d24cf9884649c2c7f767e0af96be2cc7d17b4728))
+* containerise dfe-engine API server with Dockerfile and Helm chart ([b91fa89](https://github.com/hyperi-io/dfe-engine/commit/b91fa8940087be78edb7fb4f10f14ffe95553e82))
+* exclude tool/submodule dirs from sdist build ([283f0ae](https://github.com/hyperi-io/dfe-engine/commit/283f0ae37a12e5ec63562efcc3deec4f0903473d))
+* migrate CI to hyperi-ci reusable workflows ([583c1cc](https://github.com/hyperi-io/dfe-engine/commit/583c1ccdd7cafb4a1dbe7c32959b6efe28cc9ecf))
+* pin cryptography>=46.0.5 to address CVE (subgroup attack on SECT curves) [skip ci] ([6893bc3](https://github.com/hyperi-io/dfe-engine/commit/6893bc392ef1842de5fde6b2b6880af0e070ec1a))
+* resolve ruff lint errors and update deps to latest ([7df88a1](https://github.com/hyperi-io/dfe-engine/commit/7df88a19dd6684a897e9ee0788db71640f62149a))
+* set semgrep to warn mode for false positives ([faaf01e](https://github.com/hyperi-io/dfe-engine/commit/faaf01e8a58a450fe557075f70a2ad23d19bb029))
+* skip schema tests when submodule not checked out ([8cd7ee6](https://github.com/hyperi-io/dfe-engine/commit/8cd7ee6a296f16f4da09235aff16818bc5b4352c))
+
+
+### Features
+
+* adaptive hunt scheduling (REFRESH AFTER) + EXPLAIN plan capture ([cbde751](https://github.com/hyperi-io/dfe-engine/commit/cbde7515ff8a3e40f198fffe05fc36eb98cc33c0))
+* add dfe-schemas submodule, wire SchemaLoader resolution chain ([ebe9cb3](https://github.com/hyperi-io/dfe-engine/commit/ebe9cb3621bbb0e65222d9e425eda92abdaf106f))
+* add field mapping layer — FieldMap model, registry, resolver (Phase 1) ([8761e3e](https://github.com/hyperi-io/dfe-engine/commit/8761e3e7da58baee927ae6a1e438ba365c5f4a01))
+* add HuntResultSchema + RuleRewriter for dynamic hunt output ([2debc7d](https://github.com/hyperi-io/dfe-engine/commit/2debc7d559a3a1a1292ad32aa06c4f1158b5ac36))
+* add SchemaManager for schema version write operations ([b8012a2](https://github.com/hyperi-io/dfe-engine/commit/b8012a2f919fdb005c9ad4e7a9cb0d0e9603a1c6))
+* add ViewGenerator and generic view DDL (field mapping Phase 2+3) ([6ec3491](https://github.com/hyperi-io/dfe-engine/commit/6ec349151605f3da7fbec02abd2a00aa716f78f4))
+* Apprise alert system, alert grouping + cooldown, pylib audit ([c24cf31](https://github.com/hyperi-io/dfe-engine/commit/c24cf31f5c46f8e51f190eb750eaa3809da879c5))
+* DDLFileWriter — auto-generate reference DDL SQL to schemas/ddl/ ([f6f68a2](https://github.com/hyperi-io/dfe-engine/commit/f6f68a26eed6fd216ff80ae4a65efc7478874b87))
+* dfe-devex config submodule + DFE_CONFIG_DIR auto-resolution ([e4fc41c](https://github.com/hyperi-io/dfe-engine/commit/e4fc41c00576d0401a8ac0d64dea3439f92381f9))
+* FastAPI layer (Phases 1-2.5), hunts improvements, CEL, AI module, schema-less registries [skip ci] ([a98171f](https://github.com/hyperi-io/dfe-engine/commit/a98171f4cb48d27b9089c1d4cc4e4840c81d3db2)), closes [hi#perf](https://github.com/hi/issues/perf)
+* hunt source wiring, rule model, expression validator, execution profiles ([932f5db](https://github.com/hyperi-io/dfe-engine/commit/932f5db138818337804ec52aa5fdc594aaea9c2e))
+* implement HuntEngine daemon thread + even load spreading ([250ac27](https://github.com/hyperi-io/dfe-engine/commit/250ac27f112db03854bc171c94f5d13d179055ce))
+* integrate field mapping into schema compiler (Phase 4) ([6becc28](https://github.com/hyperi-io/dfe-engine/commit/6becc28c289eb153752b4bf543db7d59fbd2d833))
+* local auth provider — three fixed accounts for simple deploy + break-glass ([d25efdb](https://github.com/hyperi-io/dfe-engine/commit/d25efdb501bb8e99b19652ab4670915e49bf9aca))
+* query fingerprinting, concurrency limits, resource hog detection, backpressure, validator update, alerts-as-source ([5efd2b4](https://github.com/hyperi-io/dfe-engine/commit/5efd2b4f8deba998dae6c250008b300f42a0bfe3))
+* refactor SigmaSourceMapper to use FieldMapRegistry (Phase 5) ([3976d08](https://github.com/hyperi-io/dfe-engine/commit/3976d082c67de438cf41068f645ae29388e7c546))
+* schema versioning — version tree format + expr/comment separation ([d4c83f6](https://github.com/hyperi-io/dfe-engine/commit/d4c83f6c8d54c6c1f1f07cce7a9d63fb58c58620))
+
 # [1.5.0](https://github.com/hyperi-io/dfe-engine/compare/v1.4.0...v1.5.0) (2026-03-01)
 
 
