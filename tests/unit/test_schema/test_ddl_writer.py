@@ -3,6 +3,7 @@
 import pytest
 
 from dfe_engine.schema.ddl_writer import DDLFileWriter
+from tests.unit.test_schema.conftest import requires_schemas
 
 
 @pytest.fixture
@@ -117,6 +118,7 @@ class TestCheckpointTable:
 # ── Hunt Results Table ───────────────────────────────────────────
 
 
+@requires_schemas
 class TestHuntResultsTable:
     """Test hunt results table DDL generation."""
 
@@ -152,6 +154,7 @@ class TestHuntResultsTable:
 # ── generate_all ─────────────────────────────────────────────────
 
 
+@requires_schemas
 class TestGenerateAll:
     """Test batch generation."""
 
@@ -177,6 +180,7 @@ class TestGenerateAll:
 # ── write_all ────────────────────────────────────────────────────
 
 
+@requires_schemas
 class TestWriteAll:
     """Test file writing."""
 
