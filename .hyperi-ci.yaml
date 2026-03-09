@@ -7,6 +7,7 @@ publish:
 
 quality:
   python:
+    semgrep: warn
     pip_audit: warn
     vulture: warn
     bandit_exclude_tests: true
