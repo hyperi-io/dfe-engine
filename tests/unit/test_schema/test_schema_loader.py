@@ -2,6 +2,8 @@
 
 import pytest
 
+from tests.unit.test_schema.conftest import requires_schemas
+
 from dfe_engine.schema.schema_loader import (
     SchemaLoader,
     SchemaLoadError,
@@ -353,6 +355,7 @@ class TestGetOrderByColumns:
 # ── Submodule resolution ──────────────────────────────────────────
 
 
+@requires_schemas
 class TestSubmoduleResolution:
     """Test profile resolution chain: env var → submodule → bundled."""
 
