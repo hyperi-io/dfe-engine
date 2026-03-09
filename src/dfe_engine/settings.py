@@ -404,7 +404,7 @@ class APISettings(BaseModel):
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     """
 
-    host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
+    host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104  # nosec B104
     port: int = Field(default=8000, description="API server port")
     cors_origins: list[str] = Field(
         default_factory=lambda: [
