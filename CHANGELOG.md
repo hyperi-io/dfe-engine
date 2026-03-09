@@ -1,3 +1,10 @@
+## [1.6.5](https://github.com/hyperi-io/dfe-engine/compare/v1.6.4...v1.6.5) (2026-03-09)
+
+
+### Bug Fixes
+
+* set ty to warn in hyperi-ci config ([d179f9e](https://github.com/hyperi-io/dfe-engine/commit/d179f9e3c06b658709ac0223c7cba0bdec4de5ba))
+
 ## [1.6.4](https://github.com/hyperi-io/dfe-engine/compare/v1.6.3...v1.6.4) (2026-03-09)
 
 
