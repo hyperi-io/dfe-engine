@@ -332,7 +332,6 @@ class TestSubmoduleResolution:
 
     def test_resolve_profiles_dir_finds_submodule(self):
         """When submodule exists, resolution should return submodule path."""
-        from pathlib import Path
 
         resolved = _resolve_profiles_dir()
         # Should end with common-header (either submodule or bundled)
@@ -342,7 +341,6 @@ class TestSubmoduleResolution:
 
     def test_resolve_schemas_root(self):
         """Should find the schemas/ submodule root."""
-        from pathlib import Path
 
         root = _resolve_schemas_root()
         # In the test environment, schemas/ submodule is checked out

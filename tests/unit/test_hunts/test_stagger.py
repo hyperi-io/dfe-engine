@@ -1,6 +1,5 @@
 """Tests for compute_stagger_offsets() — even load spreading algorithm."""
 
-import pytest
 
 from dfe_engine.hunts.cron_job import compute_stagger_offsets
 

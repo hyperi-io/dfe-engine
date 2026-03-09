@@ -5,7 +5,7 @@ Uses real HyperDX SQL samples from renderChartConfig.ts test snapshots.
 
 import pytest
 
-from dfe_engine.hunts.hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
+from dfe_engine.hunts.hdx_sanitizer import HdxSanitizer
 
 
 @pytest.fixture

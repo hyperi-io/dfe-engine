@@ -2,7 +2,6 @@
 
 import importlib.resources as resources
 
-import pytest
 
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
@@ -24,6 +23,7 @@ class TestBuiltinAlertsSource:
         content = alerts_file.read_text()
 
         from dfe_engine.yaml_utils import yaml_load_string
+
         data = yaml_load_string(content)
         source = Source.model_validate(data)
 
@@ -34,7 +34,6 @@ class TestBuiltinAlertsSource:
 
     def test_has_sigma_mapping_standard(self):
         """dfe_alerts declares sigma mapping standard."""
-        builtins = resources.files("dfe_engine.source") / "builtin_sources"
         data = _load_builtin("dfe_alerts")
         source = Source.model_validate(data)
         assert "sigma" in source.mapping_standards

@@ -5,7 +5,6 @@ import pytest
 from pydantic import BaseModel
 
 from dfe_engine.ai import (
-    AIModuleInterface,
     AIModuleRegistry,
     AIModuleResult,
     AIModuleStatus,

@@ -1,7 +1,5 @@
 """Tests for EXPLAIN plan capture in hunt query execution."""
 
-import pytest
-
 from dfe_engine.hunts.hunt import Hunt
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 
@@ -56,7 +54,7 @@ class TestCheckpointSchemaExtension:
         """Verify the batch checkpoint data builder handles explain fields."""
         from datetime import datetime
 
-        mgr = HuntCheckpointManager()
+        HuntCheckpointManager()
 
         checkpoint = {
             "customer_name": "test_org",
@@ -85,7 +83,9 @@ class TestCheckpointSchemaExtension:
             datetime.strptime(checkpoint.get("query_schedule_time"), "%Y-%m-%d %H:%M:%S"),
             datetime.strptime(checkpoint.get("execution_time"), "%Y-%m-%d %H:%M:%S"),
             datetime.strptime(checkpoint.get("end_time"), "%Y-%m-%d %H:%M:%S"),
-            datetime.strptime(checkpoint.get("previous_successful_checkpoint"), "%Y-%m-%d %H:%M:%S"),
+            datetime.strptime(
+                checkpoint.get("previous_successful_checkpoint"), "%Y-%m-%d %H:%M:%S"
+            ),
             datetime.strptime(checkpoint.get("query_checkpoint_time"), "%Y-%m-%d %H:%M:%S"),
             int(checkpoint.get("execution_time_ms", 0)),
             str(checkpoint.get("hunt_name", "na")),
@@ -102,7 +102,6 @@ class TestCheckpointSchemaExtension:
 
     def test_batch_checkpoint_handles_missing_explain(self):
         """Checkpoint without explain fields should use safe defaults."""
-        from datetime import datetime
 
         checkpoint = {
             "customer_name": "org",

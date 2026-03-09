@@ -3,7 +3,7 @@
 Uses CEL (Common Expression Language) via hyperi_pylib.expression.
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
