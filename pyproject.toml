@@ -106,6 +106,7 @@ markers = [
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
+    "requires_schemas: Tests that need the dfe-schemas submodule checked out",
 ]
 
 [tool.coverage.report]
