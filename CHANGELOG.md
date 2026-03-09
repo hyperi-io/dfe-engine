@@ -1,3 +1,10 @@
+## [1.6.6](https://github.com/hyperi-io/dfe-engine/compare/v1.6.5...v1.6.6) (2026-03-09)
+
+
+### Bug Fixes
+
+* clarify publish target comment in hyperi-ci config ([75a7eb7](https://github.com/hyperi-io/dfe-engine/commit/75a7eb7154496256d22fdf8c1c0c93f02bd789ad))
+
 ## [1.6.5](https://github.com/hyperi-io/dfe-engine/compare/v1.6.4...v1.6.5) (2026-03-09)
 
 
