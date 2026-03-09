@@ -1,3 +1,11 @@
+## [1.6.1](https://github.com/hyperi-io/dfe-engine/compare/v1.6.0...v1.6.1) (2026-03-09)
+
+
+### Bug Fixes
+
+* remove old ci submodule (replaced by hyperi-ci) ([e054275](https://github.com/hyperi-io/dfe-engine/commit/e054275737cb32ddd248865c179e7e56a2504e72))
+* simplify sdist excludes, hyperi-ci handles common dirs now ([3787fb3](https://github.com/hyperi-io/dfe-engine/commit/3787fb395e4eb4f80964a769ba6dc5100ac2965e))
+
 # [1.6.0](https://github.com/hyperi-io/dfe-engine/compare/v1.5.0...v1.6.0) (2026-03-09)
 
 
