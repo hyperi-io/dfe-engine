@@ -13,6 +13,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import (
     KafkaTlsConfig,
+    LoggingConfig,
+    MetricsConfig,
     SaslConfig,
 )
 
@@ -31,6 +33,8 @@ class VrlSourceConfig(BaseModel):
     tls: KafkaTlsConfig | None = None
     auto_offset_reset: str = "latest"
     session_timeout_ms: int = Field(default=30_000, gt=0)
+    commit_interval_ms: int = Field(default=5_000, gt=0)
+    librdkafka_options: dict[str, str] = Field(default_factory=dict)
 
 
 class VrlSinkConfig(BaseModel):
@@ -48,6 +52,7 @@ class VrlSinkConfig(BaseModel):
     sasl: SaslConfig | None = None
     tls: KafkaTlsConfig | None = None
     message_timeout_ms: int = Field(default=300_000, gt=0)
+    librdkafka_options: dict[str, str] = Field(default_factory=dict)
 
 
 class VrlPipelineConfig(BaseModel):
@@ -99,4 +104,6 @@ class TransformVrlConfig(BaseServiceConfig):
     sink: VrlSinkConfig = Field(default_factory=VrlSinkConfig)
     transforms: VrlTransformConfig = Field(default_factory=VrlTransformConfig)
     health: VrlHealthConfig = Field(default_factory=VrlHealthConfig)
+    metrics: MetricsConfig = Field(default_factory=MetricsConfig)
+    logging: LoggingConfig = Field(default_factory=LoggingConfig)
     scaling: VrlScalingConfig = Field(default_factory=VrlScalingConfig)
