@@ -1,6 +1,5 @@
 """Tests for auth router — login, me, permissions, 401/403."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 

@@ -24,11 +24,19 @@ def _reset_plugins():
 
 
 class TestPluginDiscovery:
-    """Test that entry_point-based discovery finds all 6 built-in plugins."""
+    """Test that entry_point-based discovery finds all 7 built-in plugins."""
 
     def test_discovers_all_builtin_services(self):
         services = valid_services()
-        expected = {"receiver", "loader", "archiver", "transform-vector", "transform-wasm", "fetcher"}
+        expected = {
+            "receiver",
+            "loader",
+            "archiver",
+            "transform-vector",
+            "transform-vrl",
+            "transform-wasm",
+            "fetcher",
+        }
         assert services == expected
 
     def test_get_plugin_returns_correct_type(self):
@@ -43,18 +51,18 @@ class TestPluginDiscovery:
     def test_all_plugins_returns_dict(self):
         plugins = all_plugins()
         assert isinstance(plugins, dict)
-        assert len(plugins) == 6
+        assert len(plugins) == 7
 
     def test_config_classes_mapping(self):
         classes = config_classes()
-        assert len(classes) == 6
+        assert len(classes) == 7
         for name, cls in classes.items():
             assert name in valid_services()
             assert hasattr(cls, "model_validate")
 
     def test_deployment_classes_mapping(self):
         classes = deployment_classes()
-        assert len(classes) == 6
+        assert len(classes) == 7
         for name, cls in classes.items():
             assert name in valid_services()
             assert hasattr(cls, "model_validate")
@@ -91,10 +99,17 @@ class TestPluginRegistration:
 class TestDescriptors:
     """Test that each plugin has a properly configured descriptor."""
 
-    @pytest.mark.parametrize("service", [
-        "receiver", "loader", "archiver",
-        "transform-vector", "transform-wasm", "fetcher",
-    ])
+    @pytest.mark.parametrize(
+        "service",
+        [
+            "receiver",
+            "loader",
+            "archiver",
+            "transform-vector",
+            "transform-wasm",
+            "fetcher",
+        ],
+    )
     def test_descriptor_fields(self, service):
         plugin = get_plugin(service)
         d = plugin.descriptor

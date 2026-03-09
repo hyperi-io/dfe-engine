@@ -108,9 +108,7 @@ class HuntsSettings(BaseModel):
         default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
     )
     hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
-    rule_repo_dir: str = Field(
-        default="", description="Directory containing Jinja2 rule templates"
-    )
+    rule_repo_dir: str = Field(default="", description="Directory containing Jinja2 rule templates")
     num_threads: int = Field(default=1, description="Number of concurrent hunt threads")
     checkpoint_destination: str = Field(
         default="clickhouse", description="Checkpoint storage: 'clickhouse' or 'file'"
@@ -184,7 +182,6 @@ class ArtifactorySettings(BaseModel):
     templates_version: str = Field(default="latest")
 
 
-
 class KafkaSettings(BaseModel):
     """Kafka connection settings."""
 
@@ -216,9 +213,7 @@ class QuerySettings(BaseModel):
     - DFE_QUERY_YAML_DIR -> query.yaml_dir
     """
 
-    yaml_dir: str = Field(
-        default="", description="YAML directory for query definitions (SSoT)"
-    )
+    yaml_dir: str = Field(default="", description="YAML directory for query definitions (SSoT)")
 
 
 class QueryViewSettings(BaseModel):
@@ -237,27 +232,17 @@ class QueryViewSettings(BaseModel):
     restricted_user: str = Field(
         default="dfe_query_user", description="Username for restricted query user"
     )
-    restricted_password: str = Field(
-        default="", description="Password for restricted query user"
-    )
+    restricted_password: str = Field(default="", description="Password for restricted query user")
     auto_bootstrap: bool = Field(
         default=True,
         description="Automatically bootstrap RBAC and builtin views on startup",
     )
-    view_prefix: str = Field(
-        default="dfe_v_", description="Prefix for parameterized view names"
-    )
-    catalog_cache_ttl: int = Field(
-        default=60, description="View catalog cache TTL in seconds"
-    )
+    view_prefix: str = Field(default="dfe_v_", description="Prefix for parameterized view names")
+    catalog_cache_ttl: int = Field(default=60, description="View catalog cache TTL in seconds")
     default_limit: int = Field(default=1000, description="Default row limit")
     max_limit: int = Field(default=100_000, description="Maximum allowed row limit")
-    default_timeout: int = Field(
-        default=30, description="Default query timeout in seconds"
-    )
-    max_timeout: int = Field(
-        default=300, description="Maximum allowed timeout in seconds"
-    )
+    default_timeout: int = Field(default=30, description="Default query timeout in seconds")
+    max_timeout: int = Field(default=300, description="Maximum allowed timeout in seconds")
     max_execution_time: int = Field(
         default=30,
         description="ClickHouse settings profile max_execution_time (seconds)",
@@ -279,9 +264,7 @@ class DeploymentSettings(BaseModel):
     - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
     """
 
-    config_dir: str = Field(
-        default="", description="YAML directory for deployment configurations"
-    )
+    config_dir: str = Field(default="", description="YAML directory for deployment configurations")
 
 
 class SchemasSettings(BaseModel):
@@ -304,9 +287,7 @@ class SourceSettings(BaseModel):
     - DFE_SOURCES_DIR -> source.sources_dir
     """
 
-    sources_dir: str = Field(
-        default="", description="YAML directory for Source definitions (SSoT)"
-    )
+    sources_dir: str = Field(default="", description="YAML directory for Source definitions (SSoT)")
 
 
 class FieldMapSettings(BaseModel):
@@ -357,12 +338,8 @@ class HelmSettings(BaseModel):
     - DFE_HELM_ENVIRONMENT_FILE -> helm.environment_file
     """
 
-    output_dir: str = Field(
-        default="", description="Output directory for compiled Helm values"
-    )
-    environment_file: str = Field(
-        default="", description="Path to environment config YAML"
-    )
+    output_dir: str = Field(default="", description="Output directory for compiled Helm values")
+    environment_file: str = Field(default="", description="Path to environment config YAML")
 
 
 class LocalAuthSettings(BaseModel):
@@ -380,7 +357,9 @@ class LocalAuthSettings(BaseModel):
     """
 
     enabled: bool = Field(default=True, description="Enable local authentication")
-    admin_password: str = Field(default="changeme", description="Admin account password or bcrypt hash")
+    admin_password: str = Field(
+        default="changeme", description="Admin account password or bcrypt hash"
+    )
     operator_password: str = Field(
         default="changeme", description="Operator account password or bcrypt hash"
     )
@@ -425,7 +404,7 @@ class APISettings(BaseModel):
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     """
 
-    host: str = Field(default="0.0.0.0", description="API server bind address")
+    host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
     port: int = Field(default=8000, description="API server port")
     cors_origins: list[str] = Field(
         default_factory=lambda: [
@@ -558,6 +537,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS"):
         # JSON format: {"slack-dfe-alerts": "slack://T.../B.../x.../"}
         import json
+
         try:
             overrides["hunts"]["alert_destinations"] = json.loads(val)
         except json.JSONDecodeError:

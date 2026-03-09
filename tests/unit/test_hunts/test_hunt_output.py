@@ -4,7 +4,6 @@ import pytest
 
 from dfe_engine.hunts.hunt_output import (
     HuntResultSchema,
-    HUNT_DETECTION_COLUMNS,
 )
 
 
@@ -149,8 +148,11 @@ class TestSelectExpression:
         """Timeseries profile should include _json in SELECT."""
         schema = HuntResultSchema()
         expr = schema.select_expression(
-            rule_id="r", rule_name="r", source_table="s",
-            hunt_name="h", severity="low",
+            rule_id="r",
+            rule_name="r",
+            source_table="s",
+            hunt_name="h",
+            severity="low",
         )
         assert "_json" in expr
 
@@ -204,7 +206,7 @@ class TestBuildInsertSelect:
             severity="low",
         )
         # Extract insert column count from the parenthesized list
-        insert_line = [l for l in sql.split("\n") if l.strip().startswith("(")][0]
+        insert_line = [line for line in sql.split("\n") if line.strip().startswith("(")][0]
         insert_count = insert_line.count(",") + 1
         # Extract select expression count (lines between SELECT and FROM)
         select_lines = []
@@ -238,8 +240,10 @@ class TestBuildInsertSelect:
         )
         assert "WHERE {timestamp_condition}" in sql
         # Should not have trailing AND
-        assert "AND" not in sql.split("WHERE")[1].strip() or \
-               sql.split("WHERE")[1].strip() == "{timestamp_condition}"
+        assert (
+            "AND" not in sql.split("WHERE")[1].strip()
+            or sql.split("WHERE")[1].strip() == "{timestamp_condition}"
+        )
 
     def test_custom_timestamp_placeholder(self):
         """Should support custom timestamp placeholder."""

@@ -6,7 +6,6 @@ from dfe_engine.source.expression import (
     DIRECTIVES,
     ExpressionBuilder,
     ExpressionValidator,
-    ExprValidationResult,
     list_directive_types,
 )
 

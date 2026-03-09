@@ -7,7 +7,6 @@ and returns ``AuthContext`` — the engine's canonical identity model.
 
 from __future__ import annotations
 
-import os
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -38,9 +37,7 @@ def bootstrap_registries(settings: DFESettings) -> None:
     if settings.source.sources_dir:
         from dfe_engine.source.registry import SourceRegistry
 
-        _registries["source"] = SourceRegistry(
-            sources_directory=settings.source.sources_dir
-        )
+        _registries["source"] = SourceRegistry(sources_directory=settings.source.sources_dir)
 
     if settings.services.config_yaml_dir:
         from dfe_engine.services.registry import ServiceConfigRegistry
@@ -74,7 +71,7 @@ def bootstrap_registries(settings: DFESettings) -> None:
 
 def shutdown_registries() -> None:
     """Cleanup registries on shutdown. Called from lifespan."""
-    for name, reg in list(_registries.items()):
+    for _name, reg in list(_registries.items()):
         if hasattr(reg, "close"):
             reg.close()
     _registries.clear()
@@ -86,7 +83,10 @@ def get_source_registry():
     if reg is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "not_configured", "message": "SourceRegistry not initialized — set DFE_SOURCES_DIR"},
+            detail={
+                "code": "not_configured",
+                "message": "SourceRegistry not initialized — set DFE_SOURCES_DIR",
+            },
         )
     return reg
 
@@ -97,7 +97,10 @@ def get_service_config_registry():
     if reg is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "not_configured", "message": "ServiceConfigRegistry not initialized — set DFE_SERVICES_CONFIG_YAML_DIR"},
+            detail={
+                "code": "not_configured",
+                "message": "ServiceConfigRegistry not initialized — set DFE_SERVICES_CONFIG_YAML_DIR",
+            },
         )
     return reg
 
@@ -108,7 +111,10 @@ def get_field_map_registry():
     if reg is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "not_configured", "message": "FieldMapRegistry not initialized — set DFE_FIELDMAPS_DIR"},
+            detail={
+                "code": "not_configured",
+                "message": "FieldMapRegistry not initialized — set DFE_FIELDMAPS_DIR",
+            },
         )
     return reg
 
@@ -119,7 +125,10 @@ def get_alert_destinations_store():
     if store is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "not_configured", "message": "Alert destinations not initialized — set DFE_HUNTS_ALERT_DESTINATIONS_DIR or alert_destinations_dir"},
+            detail={
+                "code": "not_configured",
+                "message": "Alert destinations not initialized — set DFE_HUNTS_ALERT_DESTINATIONS_DIR or alert_destinations_dir",
+            },
         )
     return store
 
@@ -130,7 +139,10 @@ def get_deployment_config_registry():
     if reg is None:
         raise HTTPException(
             status_code=503,
-            detail={"code": "not_configured", "message": "DeploymentConfigRegistry not initialized — set DFE_DEPLOYMENT_CONFIG_DIR"},
+            detail={
+                "code": "not_configured",
+                "message": "DeploymentConfigRegistry not initialized — set DFE_DEPLOYMENT_CONFIG_DIR",
+            },
         )
     return reg
 

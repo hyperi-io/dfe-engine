@@ -137,7 +137,7 @@ class TestDefaultPassword:
 class TestPasswordResolution:
     def test_plaintext_hashed_at_init(self, provider):
         """Plaintext passwords should be hashed to bcrypt at init."""
-        for username, stored_hash in provider._hashes.items():
+        for _username, stored_hash in provider._hashes.items():
             assert stored_hash.startswith(b"$2b$")
 
     def test_bcrypt_hash_used_directly(self, prehashed_settings):

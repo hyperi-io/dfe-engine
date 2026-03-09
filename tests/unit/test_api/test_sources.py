@@ -1,6 +1,5 @@
 """Tests for sources router — CRUD, pagination, search, sort, bulk."""
 
-import pytest
 from fastapi.testclient import TestClient
 
 

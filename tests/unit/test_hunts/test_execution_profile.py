@@ -1,6 +1,5 @@
 """Tests for hunt execution profile capture from system.query_log."""
 
-import pytest
 from unittest.mock import MagicMock
 
 from dfe_engine.hunts.hunt import Hunt

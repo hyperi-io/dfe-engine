@@ -1,7 +1,7 @@
 """Tests for hunt alert grouping + cooldown."""
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -140,11 +140,22 @@ class TestBuildGroupKey:
 class TestBuildGroupingQuery:
     """Tests for the post-INSERT aggregation query builder."""
 
-    RESULTS_COLS = frozenset({
-        "_timestamp", "_timestamp_load", "_org_id", "_uuid", "_source",
-        "matched_uuid", "rule_id", "rule_name", "source_table",
-        "hunt_name", "severity", "_json",
-    })
+    RESULTS_COLS = frozenset(
+        {
+            "_timestamp",
+            "_timestamp_load",
+            "_org_id",
+            "_uuid",
+            "_source",
+            "matched_uuid",
+            "rule_id",
+            "rule_name",
+            "source_table",
+            "hunt_name",
+            "severity",
+            "_json",
+        }
+    )
 
     def test_empty_group_by_returns_none(self):
         result = build_grouping_query(
@@ -309,9 +320,7 @@ class TestAlertStateManager:
         ch_client = MagicMock()
         ch_client.execute.return_value = []  # No rows = never fired
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
         assert can_fire is True
 
     def test_check_cooldown_within_window(self):
@@ -322,9 +331,7 @@ class TestAlertStateManager:
         recent = datetime.now(timezone.utc) - timedelta(minutes=10)
         ch_client.execute.return_value = [(recent,)]
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
         assert can_fire is False
 
     def test_check_cooldown_after_window(self):
@@ -335,9 +342,7 @@ class TestAlertStateManager:
         old = datetime.now(timezone.utc) - timedelta(hours=2)
         ch_client.execute.return_value = [(old,)]
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
         assert can_fire is True
 
     def test_check_cooldown_zero_always_fires(self):
@@ -345,9 +350,7 @@ class TestAlertStateManager:
         mgr._table_ensured = True
         ch_client = MagicMock()
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(0)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(0))
         assert can_fire is True
         # Should not even query ClickHouse
         ch_client.execute.assert_not_called()
@@ -358,9 +361,7 @@ class TestAlertStateManager:
         ch_client = MagicMock()
         ch_client.execute.side_effect = Exception("connection lost")
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
         assert can_fire is True  # Fail-open
 
     def test_record_fire(self):
@@ -391,12 +392,19 @@ class TestAlertStateManager:
         ch_client.execute.return_value = [(recent,)]
 
         can_fire_a = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1),
+            ch_client,
+            "hunt1",
+            "rule1",
+            "acme",
+            timedelta(hours=1),
             group_key="source_ip=1.2.3.4",
         )
         assert can_fire_a is False
         # Verify group_key was passed in the query parameters
-        call_params = ch_client.execute.call_args[1].get("parameters", ch_client.execute.call_args[0][1] if len(ch_client.execute.call_args[0]) > 1 else {})
+        call_params = ch_client.execute.call_args[1].get(
+            "parameters",
+            ch_client.execute.call_args[0][1] if len(ch_client.execute.call_args[0]) > 1 else {},
+        )
         assert call_params["group_key"] == "source_ip=1.2.3.4"
 
     def test_check_cooldown_default_group_key(self):
@@ -406,12 +414,12 @@ class TestAlertStateManager:
         ch_client = MagicMock()
         ch_client.execute.return_value = []
 
-        can_fire = mgr.check_cooldown(
-            ch_client, "hunt1", "rule1", "acme", timedelta(hours=1)
-        )
+        can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
         assert can_fire is True
         call_kwargs = ch_client.execute.call_args
-        params = call_kwargs[1].get("parameters", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {})
+        params = call_kwargs[1].get(
+            "parameters", call_kwargs[0][1] if len(call_kwargs[0]) > 1 else {}
+        )
         assert params["group_key"] == ""
 
     def test_record_fire_with_group_key(self):
@@ -422,14 +430,19 @@ class TestAlertStateManager:
         fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
 
         mgr.record_fire(
-            ch_client, "hunt1", "rule1", "acme",
+            ch_client,
+            "hunt1",
+            "rule1",
+            "acme",
             group_key="severity=high|source_ip=10.0.0.1",
             fired_at=fired_at,
         )
         ch_client.execute.assert_called_once()
         call_args = ch_client.execute.call_args
         # The group_key should be in the INSERT parameters
-        insert_params = call_args[1].get("parameters", call_args[0][1] if len(call_args[0]) > 1 else [])
+        insert_params = call_args[1].get(
+            "parameters", call_args[0][1] if len(call_args[0]) > 1 else []
+        )
         assert "severity=high|source_ip=10.0.0.1" in insert_params[0]
 
 
@@ -538,6 +551,3 @@ class TestDispatchIntegration:
         hunt_data = {"name": "test_hunt", "cron": "*/5 * * * *"}
         grouping_data = hunt_data.get("alert_grouping")
         assert grouping_data is None
-
-
-from unittest.mock import patch

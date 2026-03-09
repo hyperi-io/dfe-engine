@@ -3,7 +3,6 @@
 import pytest
 
 from dfe_engine.hunts.rule_model import Rule, RuleCreate
-from dfe_engine.hunts.rule_rewriter import RuleRewriter
 
 
 # ── RuleCreate ──────────────────────────────────────────────────

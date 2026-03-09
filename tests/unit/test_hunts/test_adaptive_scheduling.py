@@ -1,13 +1,11 @@
 """Tests for adaptive REFRESH AFTER hunt scheduling."""
 
-import time
 from datetime import datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
-import pytest
 
 from dfe_engine.hunts.job import JobScheduler
-from dfe_engine.hunts.cron_job import CronJob, compute_stagger_offsets
+from dfe_engine.hunts.cron_job import CronJob
 from dfe_engine.hunts.hunt_engine import HuntEngine
 from dfe_engine.settings import DFESettings, HuntsSettings
 

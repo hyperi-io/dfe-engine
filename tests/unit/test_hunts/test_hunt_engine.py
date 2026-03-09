@@ -1,13 +1,12 @@
 """Tests for HuntEngine — background thread lifecycle."""
 
-import os
 import time
 
 import pytest
 import yaml
 
 from dfe_engine.hunts.hunt_engine import HuntEngine
-from dfe_engine.settings import DFESettings, HuntsSettings, reset_settings
+from dfe_engine.settings import DFESettings, HuntsSettings
 
 
 @pytest.fixture

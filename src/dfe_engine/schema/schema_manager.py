@@ -97,7 +97,7 @@ def _validate_columns(columns: list[dict[str, Any]]) -> None:
     errors = SchemaLoader.validate_columns(parsed, registry)
     if errors:
         raise SchemaVersionError(
-            f"Column validation failed:\n  " + "\n  ".join(errors)
+            "Column validation failed:\n  " + "\n  ".join(errors)
         )
 
 

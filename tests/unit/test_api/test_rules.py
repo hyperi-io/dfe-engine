@@ -1,7 +1,5 @@
 """Tests for the rules router — RuleCreationService create + validate."""
 
-import pytest
-from fastapi.testclient import TestClient
 
 
 class TestRulesValidate:
