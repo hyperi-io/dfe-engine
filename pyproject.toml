@@ -67,6 +67,15 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/dfe_engine"]
 
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "/.claude",
+    "/ci",
+    "/config",
+    "/hyperi-ai",
+    "/schemas",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
