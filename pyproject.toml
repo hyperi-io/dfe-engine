@@ -69,10 +69,8 @@ packages = ["src/dfe_engine"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
-    "/tooling",
-    "/ci",
+    # /tooling, /tooling, /ci excluded automatically by hyperi-ci build handler
     "/config",
-    "/tooling",
     "/schemas",
 ]
 
