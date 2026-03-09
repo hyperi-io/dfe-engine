@@ -163,4 +163,8 @@ fetcher = "dfe_engine.services.plugins_builtin.fetcher:plugin"
 # All queries use internal data from configuration/templates, not user input.
 # Skip B701 (jinja2_autoescape_false) - We generate YAML/SQL configs, not HTML.
 # XSS is not applicable; autoescape would break template output.
-skips = ["B608", "B701"]
+skips = [
+    "B104",  # B104=hardcoded_bind_all_interfaces — 0.0.0.0 is intentional for containerised service
+    "B608",  # B608=hardcoded_sql — queries use internal config/template data, not user input
+    "B701",  # B701=jinja2_autoescape_false — we generate YAML/SQL configs, not HTML
+]

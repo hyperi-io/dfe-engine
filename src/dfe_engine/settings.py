@@ -316,6 +316,7 @@ class ServicesSettings(BaseModel):
     - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
     - DFE_SERVICES_FETCHER_URL -> services.fetcher_url
     - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
+    - DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
     """
 
     receiver_url: str = Field(default="http://localhost:8080")
@@ -324,6 +325,7 @@ class ServicesSettings(BaseModel):
     archiver_metrics_url: str = Field(default="http://localhost:9090")
     transform_vector_url: str = Field(default="http://localhost:8080")
     transform_wasm_url: str = Field(default="http://localhost:8080")
+    transform_wasm_compiler_url: str = Field(default="http://localhost:8090")
     fetcher_url: str = Field(default="http://localhost:8080")
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
@@ -404,7 +406,7 @@ class APISettings(BaseModel):
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
     """
 
-    host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104  # nosec B104
+    host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
     port: int = Field(default=8000, description="API server port")
     cors_origins: list[str] = Field(
         default_factory=lambda: [
