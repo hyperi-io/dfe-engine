@@ -87,9 +87,7 @@ class SchemaColumn(BaseModel):
 
         # Validate primitive
         if self.type not in registry.primitives and not self.ch_override:
-            errors.append(
-                f"Column '{self.name}': unknown primitive '{self.type}'"
-            )
+            errors.append(f"Column '{self.name}': unknown primitive '{self.type}'")
             return errors  # Can't validate further
 
         # Validate use_case↔primitive
@@ -182,24 +180,16 @@ class SourceTransform(BaseModel):
     """Transform stage configuration (vector or wasm)."""
 
     engine: str = Field(..., description="Transform engine (vector or wasm)")
-    config_file: str | None = Field(
-        default=None, description="Path to engine-specific config"
-    )
-    env: dict[str, str] = Field(
-        default_factory=dict, description="Per-transform ENV overrides"
-    )
-    files: list[str] = Field(
-        default_factory=list, description="Enrichment files (CSV, MMDB)"
-    )
+    config_file: str | None = Field(default=None, description="Path to engine-specific config")
+    env: dict[str, str] = Field(default_factory=dict, description="Per-transform ENV overrides")
+    files: list[str] = Field(default_factory=list, description="Enrichment files (CSV, MMDB)")
 
     @field_validator("engine")
     @classmethod
     def _validate_engine(cls, v: str) -> str:
         valid = {"vector", "wasm"}
         if v not in valid:
-            raise ValueError(
-                f"Invalid transform engine '{v}'. Valid: {', '.join(sorted(valid))}"
-            )
+            raise ValueError(f"Invalid transform engine '{v}'. Valid: {', '.join(sorted(valid))}")
         return v
 
 
@@ -219,17 +209,13 @@ class SourceFetcher(BaseModel):
     source_type: str = Field(..., description="Fetcher type (crowdstrike, m365, etc.)")
     base_url: str | None = Field(default=None, description="API base URL")
     auth: FetcherAuth | None = Field(default=None, description="Authentication config")
-    poll_interval_secs: int = Field(
-        default=300, description="Polling interval in seconds"
-    )
+    poll_interval_secs: int = Field(default=300, description="Polling interval in seconds")
 
 
 class SourceSigma(BaseModel):
     """Sigma field mapping configuration for this source."""
 
-    taxonomy: str | None = Field(
-        default=None, description="Built-in mapping set (e.g. 'windows')"
-    )
+    taxonomy: str | None = Field(default=None, description="Built-in mapping set (e.g. 'windows')")
     custom_mappings: dict[str, str] = Field(
         default_factory=dict,
         description="Per-source field overrides (SigmaField: column_name)",
@@ -251,9 +237,7 @@ class Source(BaseModel):
     """
 
     source: str = Field(..., description="The _source label — immutable identifier")
-    display_name: str | None = Field(
-        default=None, description="Human-readable display name"
-    )
+    display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
 
@@ -273,12 +257,8 @@ class Source(BaseModel):
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
-    fetcher: SourceFetcher | None = Field(
-        default=None, description="SaaS API fetcher (optional)"
-    )
-    sigma: SourceSigma | None = Field(
-        default=None, description="Sigma field mappings (optional)"
-    )
+    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
     mapping_standards: list[str] = Field(
         default_factory=list,
         description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
@@ -293,9 +273,7 @@ class Source(BaseModel):
     def _validate_source_name(cls, v: str) -> str:
         """Enforce _source naming rules."""
         if len(v) > _SOURCE_MAX_LENGTH:
-            raise ValueError(
-                f"Source name '{v}' exceeds max length of {_SOURCE_MAX_LENGTH}"
-            )
+            raise ValueError(f"Source name '{v}' exceeds max length of {_SOURCE_MAX_LENGTH}")
         if not _SOURCE_PATTERN.match(v):
             raise ValueError(
                 f"Source name '{v}' must match [a-z][a-z0-9_]* "

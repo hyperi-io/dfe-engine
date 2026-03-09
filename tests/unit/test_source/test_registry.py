@@ -55,11 +55,13 @@ class TestCRUD:
         assert loaded.match.value == "filebeat"
 
     def test_save_from_dict(self, registry: SourceRegistry):
-        registry.save_source({
-            "source": "syslog",
-            "match": {"field": "tags.type", "value": "syslog"},
-            "schema": {"ttl_days": 30},
-        })
+        registry.save_source(
+            {
+                "source": "syslog",
+                "match": {"field": "tags.type", "value": "syslog"},
+                "schema": {"ttl_days": 30},
+            }
+        )
         loaded = registry.get_source("syslog")
         assert loaded.source == "syslog"
         assert loaded.schema_config.ttl_days == 30
@@ -119,9 +121,7 @@ class TestList:
 
     def test_list_enabled_only(self, registry: SourceRegistry):
         registry.save_source(_make_source("filebeat", match_value="filebeat"))
-        registry.save_source(
-            _make_source("disabled_src", match_value="disabled", enabled=False)
-        )
+        registry.save_source(_make_source("disabled_src", match_value="disabled", enabled=False))
 
         all_sources = registry.list_sources()
         assert len(all_sources) == 2
@@ -172,9 +172,7 @@ class TestValidation:
 
     def test_match_conflict_disabled_ok(self, registry: SourceRegistry):
         """Disabled sources don't participate in match conflict checks."""
-        registry.save_source(
-            _make_source("filebeat", match_value="fb", enabled=False)
-        )
+        registry.save_source(_make_source("filebeat", match_value="fb", enabled=False))
         # Same match value but first source is disabled — should be OK
         registry.save_source(_make_source("another", match_value="fb"))
 
@@ -199,9 +197,7 @@ class TestMatchTable:
 
     def test_compile_excludes_disabled(self, registry: SourceRegistry):
         registry.save_source(_make_source("filebeat", match_value="filebeat"))
-        registry.save_source(
-            _make_source("disabled", match_value="disabled", enabled=False)
-        )
+        registry.save_source(_make_source("disabled", match_value="disabled", enabled=False))
 
         table = registry.compile_match_table()
         assert len(table) == 1
@@ -221,42 +217,44 @@ class TestMatchTable:
 
 class TestRoundTrip:
     def test_save_load_full_source(self, registry: SourceRegistry):
-        source = Source.model_validate({
-            "source": "crowdstrike_edr",
-            "display_name": "CrowdStrike EDR",
-            "description": "CrowdStrike Falcon EDR telemetry",
-            "enabled": True,
-            "header": {"type": "time_series", "version": "1.0.0"},
-            "match": {"field": "tags.vendor", "value": "crowdstrike"},
-            "schema": {
-                "meta_schema": "security_edr_crowdstrike",
-                "meta_schema_version": "1.0.0",
-                "ttl_days": 365,
-                "engine": "ReplicatedMergeTree",
-            },
-            "transform": {
-                "engine": "vector",
-                "config_file": "/etc/vector/crowdstrike.yaml",
-                "env": {"CS_API_KEY": "secret"},
-                "files": ["/data/enrichment/geo.mmdb"],
-            },
-            "fetcher": {
-                "source_type": "crowdstrike",
-                "base_url": "https://api.crowdstrike.com",
-                "auth": {
-                    "type": "oauth2",
-                    "token_url": "https://api.crowdstrike.com/oauth2/token",
+        source = Source.model_validate(
+            {
+                "source": "crowdstrike_edr",
+                "display_name": "CrowdStrike EDR",
+                "description": "CrowdStrike Falcon EDR telemetry",
+                "enabled": True,
+                "header": {"type": "time_series", "version": "1.0.0"},
+                "match": {"field": "tags.vendor", "value": "crowdstrike"},
+                "schema": {
+                    "meta_schema": "security_edr_crowdstrike",
+                    "meta_schema_version": "1.0.0",
+                    "ttl_days": 365,
+                    "engine": "ReplicatedMergeTree",
                 },
-                "poll_interval_secs": 60,
-            },
-            "sigma": {
-                "taxonomy": "windows",
-                "custom_mappings": {
-                    "CommandLine": "command_line",
-                    "ParentCommandLine": "parent_cmd",
+                "transform": {
+                    "engine": "vector",
+                    "config_file": "/etc/vector/crowdstrike.yaml",
+                    "env": {"CS_API_KEY": "secret"},
+                    "files": ["/data/enrichment/geo.mmdb"],
                 },
-            },
-        })
+                "fetcher": {
+                    "source_type": "crowdstrike",
+                    "base_url": "https://api.crowdstrike.com",
+                    "auth": {
+                        "type": "oauth2",
+                        "token_url": "https://api.crowdstrike.com/oauth2/token",
+                    },
+                    "poll_interval_secs": 60,
+                },
+                "sigma": {
+                    "taxonomy": "windows",
+                    "custom_mappings": {
+                        "CommandLine": "command_line",
+                        "ParentCommandLine": "parent_cmd",
+                    },
+                },
+            }
+        )
 
         registry.save_source(source)
         loaded = registry.get_source("crowdstrike_edr")

@@ -54,9 +54,7 @@ class TestExceptionHandlers:
         )
         assert resp.status_code == 401
 
-    def test_403_viewer_write(
-        self, client: TestClient, viewer_headers: dict, sample_source: dict
-    ):
+    def test_403_viewer_write(self, client: TestClient, viewer_headers: dict, sample_source: dict):
         resp = client.post("/api/v1/sources", json=sample_source, headers=viewer_headers)
         assert resp.status_code == 403
         data = resp.json()

@@ -35,10 +35,16 @@ class TestBaseServiceConfig:
         from dfe_engine.services.models.fetcher import FetcherConfig
 
         for cls in [
-            ReceiverConfig, LoaderConfig, ArchiverConfig,
-            TransformVectorConfig, TransformWasmConfig, FetcherConfig,
+            ReceiverConfig,
+            LoaderConfig,
+            ArchiverConfig,
+            TransformVectorConfig,
+            TransformWasmConfig,
+            FetcherConfig,
         ]:
-            assert issubclass(cls, BaseServiceConfig), f"{cls.__name__} must inherit BaseServiceConfig"
+            assert issubclass(cls, BaseServiceConfig), (
+                f"{cls.__name__} must inherit BaseServiceConfig"
+            )
 
 
 class TestServiceDescriptor:
@@ -108,8 +114,11 @@ class TestBaseDeploymentConfig:
         from dfe_engine.deployment.models.fetcher import FetcherDeploymentConfig
 
         for cls in [
-            ReceiverDeploymentConfig, LoaderDeploymentConfig, ArchiverDeploymentConfig,
-            TransformVectorDeploymentConfig, TransformWasmDeploymentConfig,
+            ReceiverDeploymentConfig,
+            LoaderDeploymentConfig,
+            ArchiverDeploymentConfig,
+            TransformVectorDeploymentConfig,
+            TransformWasmDeploymentConfig,
             FetcherDeploymentConfig,
         ]:
             assert issubclass(cls, BaseDeploymentConfig), (

@@ -39,13 +39,13 @@ class TestResourceSizes:
             req_cpu = _parse_k8s_quantity(spec.requests.cpu)
             lim_cpu = _parse_k8s_quantity(spec.limits.cpu)
             assert req_cpu == pytest.approx(lim_cpu / 2), (
-                f"Size {size_name}: CPU request {req_cpu} != limit/2 {lim_cpu/2}"
+                f"Size {size_name}: CPU request {req_cpu} != limit/2 {lim_cpu / 2}"
             )
 
             req_mem = _parse_k8s_quantity(spec.requests.memory)
             lim_mem = _parse_k8s_quantity(spec.limits.memory)
             assert req_mem == pytest.approx(lim_mem / 2), (
-                f"Size {size_name}: memory request {req_mem} != limit/2 {lim_mem/2}"
+                f"Size {size_name}: memory request {req_mem} != limit/2 {lim_mem / 2}"
             )
 
     def test_each_size_doubles_previous(self):
@@ -111,9 +111,7 @@ class TestGetServiceOverrides:
         for size in sizes:
             overrides = get_service_overrides("archiver", size)
             par = overrides["buffer"]["writer_parallelism"]
-            assert par > prev_par, (
-                f"Archiver {size}: parallelism {par} not > previous {prev_par}"
-            )
+            assert par > prev_par, f"Archiver {size}: parallelism {par} not > previous {prev_par}"
             prev_par = par
 
     def test_receiver_overrides_have_buffer(self):

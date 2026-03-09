@@ -202,10 +202,7 @@ class TestViewNameConversion:
 
     def test_name_to_label_deep_name(self):
         """Underscore-separated names after namespace stay as underscores."""
-        assert (
-            view_name_to_label("dfe_v_hunts_active_threats")
-            == "hunts/active_threats"
-        )
+        assert view_name_to_label("dfe_v_hunts_active_threats") == "hunts/active_threats"
 
     def test_name_to_label_invalid_prefix(self):
         """Should raise ValueError if prefix doesn't match."""

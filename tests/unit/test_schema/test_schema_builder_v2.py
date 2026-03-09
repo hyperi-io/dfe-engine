@@ -53,7 +53,12 @@ def schemas_dir(tmp_path):
     yaml_dump(
         {
             "columns": [
-                {"name": "severity", "type": "string", "attribute": ["lowcardinality"], "use_case": "dimension"},
+                {
+                    "name": "severity",
+                    "type": "string",
+                    "attribute": ["lowcardinality"],
+                    "use_case": "dimension",
+                },
             ]
         },
         tmp_path / "additional.yaml",
@@ -333,9 +338,7 @@ class TestViewDDLIntegration:
         result = builder.build(source)
         assert result.view_ddls == {}
 
-    def test_no_views_without_mapping_standards(
-        self, registry, schemas_dir, fm_registry
-    ):
+    def test_no_views_without_mapping_standards(self, registry, schemas_dir, fm_registry):
         """With registry but no mapping_standards on source, no views."""
         builder = SchemaBuilderV2(
             registry=registry,
@@ -346,9 +349,7 @@ class TestViewDDLIntegration:
         result = builder.build(source)
         assert result.view_ddls == {}
 
-    def test_generates_views_for_declared_standards(
-        self, registry, schemas_dir, fm_registry
-    ):
+    def test_generates_views_for_declared_standards(self, registry, schemas_dir, fm_registry):
         """With registry + mapping_standards, views are generated."""
         fm_registry.save_map(
             FieldMap(
@@ -379,13 +380,9 @@ class TestViewDDLIntegration:
         assert "test_source_ecs" in result.view_ddls["ecs"]
         assert "`user_name` AS `User`" in result.view_ddls["sigma"]
 
-    def test_skips_standard_with_no_maps(
-        self, registry, schemas_dir, fm_registry
-    ):
+    def test_skips_standard_with_no_maps(self, registry, schemas_dir, fm_registry):
         """If a declared standard has no maps, it's excluded from view_ddls."""
-        fm_registry.save_map(
-            FieldMap(standard="sigma", mappings={"X": "x"})
-        )
+        fm_registry.save_map(FieldMap(standard="sigma", mappings={"X": "x"}))
         builder = SchemaBuilderV2(
             registry=registry,
             schemas_base_dir=schemas_dir,
@@ -400,13 +397,9 @@ class TestViewDDLIntegration:
         assert "sigma" in result.view_ddls
         assert "ecs" not in result.view_ddls
 
-    def test_legacy_sigma_view_coexists_with_view_ddls(
-        self, registry, schemas_dir, fm_registry
-    ):
+    def test_legacy_sigma_view_coexists_with_view_ddls(self, registry, schemas_dir, fm_registry):
         """Legacy sigma_view_ddl and new view_ddls are both populated."""
-        fm_registry.save_map(
-            FieldMap(standard="sigma", mappings={"EventID": "event_id"})
-        )
+        fm_registry.save_map(FieldMap(standard="sigma", mappings={"EventID": "event_id"}))
         builder = SchemaBuilderV2(
             registry=registry,
             schemas_base_dir=schemas_dir,
@@ -426,9 +419,7 @@ class TestViewDDLIntegration:
         assert "sigma" in result.view_ddls
         assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
 
-    def test_source_specific_overrides_in_views(
-        self, registry, schemas_dir, fm_registry
-    ):
+    def test_source_specific_overrides_in_views(self, registry, schemas_dir, fm_registry):
         """Source-specific field map overrides default in view DDL."""
         fm_registry.save_map(
             FieldMap(

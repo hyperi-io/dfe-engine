@@ -87,8 +87,7 @@ class TestCreateRuleRaw:
             RuleCreateRequest(
                 name="Test",
                 user_sql=(
-                    "SELECT * FROM db.tbl "
-                    "WHERE _timestamp > '2026-01-01' AND severity = 'high'"
+                    "SELECT * FROM db.tbl WHERE _timestamp > '2026-01-01' AND severity = 'high'"
                 ),
             ),
             rule_id="r1",
@@ -240,9 +239,7 @@ class TestSqlValidation:
     """Test SQL syntax validation."""
 
     def test_valid_select(self, service):
-        errors = service.validate_sql(
-            "SELECT count() FROM default.logs WHERE x = 1"
-        )
+        errors = service.validate_sql("SELECT count() FROM default.logs WHERE x = 1")
         assert errors == []
 
     def test_reject_non_select(self, service):
@@ -258,15 +255,11 @@ class TestSqlValidation:
         assert any("DROP" in e.message for e in errors)
 
     def test_unbalanced_parens(self, service):
-        errors = service.validate_sql(
-            "SELECT count() FROM logs WHERE ((x = 1)"
-        )
+        errors = service.validate_sql("SELECT count() FROM logs WHERE ((x = 1)")
         assert any("parenthesis" in e.message.lower() for e in errors)
 
     def test_unmatched_closing_paren(self, service):
-        errors = service.validate_sql(
-            "SELECT count() FROM logs WHERE x = 1))"
-        )
+        errors = service.validate_sql("SELECT count() FROM logs WHERE x = 1))")
         assert any("parenthesis" in e.message.lower() for e in errors)
 
     def test_sql_errors_in_result(self, service):
@@ -410,8 +403,7 @@ class TestSanitizeSummary:
                 name="Settings",
                 source_type="hyperdx",
                 user_sql=(
-                    "SELECT 1 FROM default.logs WHERE x = 1 "
-                    "SETTINGS optimize_read_in_order = 0"
+                    "SELECT 1 FROM default.logs WHERE x = 1 SETTINGS optimize_read_in_order = 0"
                 ),
             ),
             rule_id="sum3",

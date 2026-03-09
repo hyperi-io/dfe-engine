@@ -118,9 +118,11 @@ class ImperativeOperations:
         try:
             from confluent_kafka.admin import AdminClient, NewTopic
 
-            admin = AdminClient({
-                "bootstrap.servers": ",".join(self._env.kafka.bootstrap_servers),
-            })
+            admin = AdminClient(
+                {
+                    "bootstrap.servers": ",".join(self._env.kafka.bootstrap_servers),
+                }
+            )
 
             new_topics = [
                 NewTopic(
@@ -143,9 +145,7 @@ class ImperativeOperations:
 
         except ImportError:
             for topic in topics:
-                result.topics_failed.append(
-                    (topic["name"], "confluent-kafka not installed")
-                )
+                result.topics_failed.append((topic["name"], "confluent-kafka not installed"))
 
         return result
 

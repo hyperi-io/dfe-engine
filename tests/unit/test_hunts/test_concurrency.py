@@ -103,12 +103,14 @@ class TestResourceHogDetection:
 
     def test_under_limit_no_warning(self):
         """No warning when values are under limits."""
-        hunt = self._make_hunt(resource_limits={
-            "read_rows": 10000,
-            "read_bytes": 10_000_000,
-            "memory_bytes": 100_000_000,
-            "execution_ms": 30000,
-        })
+        hunt = self._make_hunt(
+            resource_limits={
+                "read_rows": 10000,
+                "read_bytes": 10_000_000,
+                "memory_bytes": 100_000_000,
+                "execution_ms": 30000,
+            }
+        )
         profile = {"read_rows": 500, "read_bytes": 5000, "memory_usage": 1000}
         with patch("dfe_engine.hunts.hunt.logger") as mock_logger:
             hunt._check_resource_limits("rule1", "org1", profile, 100)
@@ -116,11 +118,13 @@ class TestResourceHogDetection:
 
     def test_multiple_limits_exceeded(self):
         """Multiple warnings when multiple limits exceeded."""
-        hunt = self._make_hunt(resource_limits={
-            "read_rows": 100,
-            "read_bytes": 100,
-            "execution_ms": 100,
-        })
+        hunt = self._make_hunt(
+            resource_limits={
+                "read_rows": 100,
+                "read_bytes": 100,
+                "execution_ms": 100,
+            }
+        )
         profile = {"read_rows": 5000, "read_bytes": 5000, "memory_usage": 0}
         with patch("dfe_engine.hunts.hunt.logger") as mock_logger:
             hunt._check_resource_limits("rule1", "org1", profile, 5000)
@@ -159,6 +163,7 @@ class TestSettingsIntegration:
 
     def test_hunts_settings_defaults(self):
         from dfe_engine.settings import HuntsSettings
+
         s = HuntsSettings()
         assert s.max_concurrent_queries == 0
         assert s.resource_limit_read_rows == 0
@@ -168,6 +173,7 @@ class TestSettingsIntegration:
 
     def test_hunts_settings_custom_values(self):
         from dfe_engine.settings import HuntsSettings
+
         s = HuntsSettings(
             max_concurrent_queries=4,
             resource_limit_read_rows=1_000_000,

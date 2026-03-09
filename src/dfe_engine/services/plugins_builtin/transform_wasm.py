@@ -26,19 +26,13 @@ descriptor = ServiceDescriptor(
 )
 
 
-def _validate_transform_wasm(
-    config: Any, errors: list[str], warnings: list[str]
-) -> None:
+def _validate_transform_wasm(config: Any, errors: list[str], warnings: list[str]) -> None:
     """Cross-field validation for dfe-transform-wasm config."""
     if not config.kafka.consumer.brokers and not config.ipc.enabled:
-        errors.append(
-            "kafka.consumer.brokers is required when IPC is not enabled"
-        )
+        errors.append("kafka.consumer.brokers is required when IPC is not enabled")
 
     if not config.kafka.producer.brokers and not config.ipc.enabled:
-        errors.append(
-            "kafka.producer.brokers is required when IPC is not enabled"
-        )
+        errors.append("kafka.producer.brokers is required when IPC is not enabled")
 
     # Check source names are unique
     source_names = [s.name for s in config.sources]

@@ -317,9 +317,7 @@ class SigmaRuleConverter:
 
             rules = SigmaCollection.load_ruleset([file_path])
             converted_rules = backend.convert(rules, output_format="full_alert")
-            cleaned_rules = " ".join(
-                converted_rules.replace("\n", " ").replace("\r", " ").split()
-            )
+            cleaned_rules = " ".join(converted_rules.replace("\n", " ").replace("\r", " ").split())
             formatted_rules = self.format_rules(cleaned_rules)
 
             filename = os.path.splitext(os.path.basename(file_path))[0]

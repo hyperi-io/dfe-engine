@@ -36,10 +36,7 @@ def validate_deployment_config(service: str, config_data: dict) -> ValidationRes
     if service not in services:
         return ValidationResult(
             valid=False,
-            errors=[
-                f"Unknown service: {service}. "
-                f"Valid: {', '.join(sorted(services))}"
-            ],
+            errors=[f"Unknown service: {service}. Valid: {', '.join(sorted(services))}"],
         )
 
     deploy_cls = deployment_classes().get(service)
@@ -69,9 +66,7 @@ def validate_deployment_config(service: str, config_data: dict) -> ValidationRes
 def _validate_sizing(config, errors: list[str], warnings: list[str]) -> None:
     """Validate sizing consistency."""
     if config.size.value == "custom" and config.resources is None:
-        errors.append(
-            "size is 'custom' but no explicit resources provided"
-        )
+        errors.append("size is 'custom' but no explicit resources provided")
 
     if config.size.value != "custom" and config.resources is not None:
         warnings.append(
@@ -130,23 +125,17 @@ def _validate_resources(config, errors: list[str], warnings: list[str]) -> None:
         req_cpu = _parse_k8s_quantity(res.requests.cpu)
         lim_cpu = _parse_k8s_quantity(res.limits.cpu)
         if req_cpu > lim_cpu:
-            errors.append(
-                f"CPU requests ({res.requests.cpu}) > limits ({res.limits.cpu})"
-            )
+            errors.append(f"CPU requests ({res.requests.cpu}) > limits ({res.limits.cpu})")
     except ValueError:
         warnings.append(
-            f"Could not parse CPU quantities: requests={res.requests.cpu}, "
-            f"limits={res.limits.cpu}"
+            f"Could not parse CPU quantities: requests={res.requests.cpu}, limits={res.limits.cpu}"
         )
 
     try:
         req_mem = _parse_k8s_quantity(res.requests.memory)
         lim_mem = _parse_k8s_quantity(res.limits.memory)
         if req_mem > lim_mem:
-            errors.append(
-                f"Memory requests ({res.requests.memory}) > "
-                f"limits ({res.limits.memory})"
-            )
+            errors.append(f"Memory requests ({res.requests.memory}) > limits ({res.limits.memory})")
     except ValueError:
         warnings.append(
             f"Could not parse memory quantities: requests={res.requests.memory}, "

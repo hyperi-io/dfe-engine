@@ -125,9 +125,7 @@ def is_shipped_schema(path: str | Path) -> bool:
     return False
 
 
-def _extract_version_columns(
-    data: dict[str, Any], version: str, path: Path
-) -> list[dict]:
+def _extract_version_columns(data: dict[str, Any], version: str, path: Path) -> list[dict]:
     """Extract the column list for a specific version from a version tree.
 
     The version tree lives under ``versions.<ver>.columns``.
@@ -137,14 +135,11 @@ def _extract_version_columns(
     if version not in versions:
         available = ", ".join(sorted(versions.keys())) or "(none)"
         raise SchemaLoadError(
-            f"Version '{version}' not found in {path}. "
-            f"Available versions: {available}"
+            f"Version '{version}' not found in {path}. Available versions: {available}"
         )
     ver_entry = versions[version]
     if not isinstance(ver_entry, dict) or "columns" not in ver_entry:
-        raise SchemaLoadError(
-            f"Version '{version}' in {path} must contain a 'columns' key"
-        )
+        raise SchemaLoadError(f"Version '{version}' in {path} must contain a 'columns' key")
     return ver_entry["columns"]
 
 
@@ -230,9 +225,7 @@ class SchemaLoader:
             # Flat layout (unversioned or no version requested)
             raw_columns = data["columns"]
         else:
-            raise SchemaLoadError(
-                f"Schema YAML must contain 'columns' or 'versions' key: {path}"
-            )
+            raise SchemaLoadError(f"Schema YAML must contain 'columns' or 'versions' key: {path}")
 
         columns = []
         for i, col_data in enumerate(raw_columns):
@@ -244,9 +237,7 @@ class SchemaLoader:
                 columns.append(SchemaColumn.model_validate(col_data))
             except Exception as e:
                 name = col_data.get("name", f"index {i}")
-                raise SchemaLoadError(
-                    f"Invalid column '{name}' in {path}: {e}"
-                ) from e
+                raise SchemaLoadError(f"Invalid column '{name}' in {path}: {e}") from e
 
         return columns
 
@@ -278,9 +269,7 @@ class SchemaLoader:
             versions_meta: dict[str, Any] = {}
             for ver, entry in data["versions"].items():
                 if isinstance(entry, dict):
-                    versions_meta[ver] = {
-                        k: v for k, v in entry.items() if k != "columns"
-                    }
+                    versions_meta[ver] = {k: v for k, v in entry.items() if k != "columns"}
                 else:
                     versions_meta[ver] = entry
             result["versions"] = versions_meta
@@ -324,9 +313,7 @@ class SchemaLoader:
             profile_path = resolved_dir / f"{profile_name}.yaml"
 
         if not profile_path.exists():
-            raise SchemaLoadError(
-                f"Profile '{profile_name}' not found at {profile_path}"
-            )
+            raise SchemaLoadError(f"Profile '{profile_name}' not found at {profile_path}")
 
         return SchemaLoader.load_columns(profile_path, version=version)
 
@@ -407,8 +394,7 @@ class SchemaLoader:
 
         if duplicates:
             logger.warning(
-                f"Source schema columns duplicate profile header, "
-                f"profile values used: {duplicates}"
+                f"Source schema columns duplicate profile header, profile values used: {duplicates}"
             )
 
         unique_source = [col for col in source_columns if col.name not in profile_names]

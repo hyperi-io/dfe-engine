@@ -96,11 +96,7 @@ def apply_search(
     if not query:
         return items
     q = query.lower()
-    return [
-        item
-        for item in items
-        if any(q in str(item.get(f, "")).lower() for f in fields)
-    ]
+    return [item for item in items if any(q in str(item.get(f, "")).lower() for f in fields)]
 
 
 def apply_sort(

@@ -15,9 +15,7 @@ class TestSelectStarDetection:
 
     def test_detects_select_star(self, rewriter):
         """Should flag SELECT * in the SQL."""
-        result = rewriter.parse_user_sql(
-            "SELECT * FROM acme.windows_audit WHERE severity = 'high'"
-        )
+        result = rewriter.parse_user_sql("SELECT * FROM acme.windows_audit WHERE severity = 'high'")
         assert result.had_select_star is True
         assert any("SELECT *" in w for w in result.warnings)
 
@@ -30,9 +28,7 @@ class TestSelectStarDetection:
 
     def test_select_star_case_insensitive(self, rewriter):
         """Should detect case variations."""
-        result = rewriter.parse_user_sql(
-            "select * from acme.windows_audit WHERE x = 1"
-        )
+        result = rewriter.parse_user_sql("select * from acme.windows_audit WHERE x = 1")
         assert result.had_select_star is True
 
 
@@ -41,17 +37,13 @@ class TestSourceTableExtraction:
 
     def test_extracts_qualified_table(self, rewriter):
         """Should extract db.table from qualified name."""
-        result = rewriter.parse_user_sql(
-            "SELECT * FROM acme.windows_audit WHERE x = 1"
-        )
+        result = rewriter.parse_user_sql("SELECT * FROM acme.windows_audit WHERE x = 1")
         assert result.source_db == "acme"
         assert result.source_table == "windows_audit"
 
     def test_extracts_unqualified_table(self, rewriter):
         """Should extract table name without db prefix."""
-        result = rewriter.parse_user_sql(
-            "SELECT * FROM windows_audit WHERE x = 1"
-        )
+        result = rewriter.parse_user_sql("SELECT * FROM windows_audit WHERE x = 1")
         assert result.source_db is None
         assert result.source_table == "windows_audit"
 
@@ -68,8 +60,7 @@ class TestTimeBoundStripping:
     def test_strips_timestamp_gte(self, rewriter):
         """Should strip timestamp >= 'datetime' conditions."""
         result = rewriter.parse_user_sql(
-            "SELECT * FROM t WHERE timestamp >= '2026-01-01 00:00:00' "
-            "AND severity = 'high'"
+            "SELECT * FROM t WHERE timestamp >= '2026-01-01 00:00:00' AND severity = 'high'"
         )
         assert "timestamp >=" not in result.where_clause
         assert "severity = 'high'" in result.where_clause
@@ -78,8 +69,7 @@ class TestTimeBoundStripping:
     def test_strips_timestamp_lt(self, rewriter):
         """Should strip timestamp < 'datetime' conditions."""
         result = rewriter.parse_user_sql(
-            "SELECT * FROM t WHERE severity = 'high' "
-            "AND _timestamp_load < '2026-01-01 12:00:00'"
+            "SELECT * FROM t WHERE severity = 'high' AND _timestamp_load < '2026-01-01 12:00:00'"
         )
         assert "_timestamp_load <" not in result.where_clause
         assert "severity = 'high'" in result.where_clause
@@ -108,8 +98,7 @@ class TestTimeBoundStripping:
     def test_strips_between(self, rewriter):
         """Should strip BETWEEN time bounds."""
         result = rewriter.parse_user_sql(
-            "SELECT * FROM t WHERE timestamp BETWEEN '2026-01-01' AND '2026-01-02' "
-            "AND rule_id = 5"
+            "SELECT * FROM t WHERE timestamp BETWEEN '2026-01-01' AND '2026-01-02' AND rule_id = 5"
         )
         assert "BETWEEN" not in result.where_clause
         assert "rule_id = 5" in result.where_clause
@@ -128,17 +117,14 @@ class TestTimeBoundStripping:
 
     def test_no_where_clause(self, rewriter):
         """Should handle SQL without WHERE clause."""
-        result = rewriter.parse_user_sql(
-            "SELECT * FROM acme.windows_audit"
-        )
+        result = rewriter.parse_user_sql("SELECT * FROM acme.windows_audit")
         assert result.where_clause == ""
         assert any("WHERE" in w.upper() for w in result.warnings)
 
     def test_only_time_bounds(self, rewriter):
         """WHERE with only time bounds should result in empty clause."""
         result = rewriter.parse_user_sql(
-            "SELECT * FROM t WHERE timestamp >= '2026-01-01' "
-            "AND timestamp < '2026-01-02'"
+            "SELECT * FROM t WHERE timestamp >= '2026-01-01' AND timestamp < '2026-01-02'"
         )
         assert result.where_clause == ""
 
@@ -185,9 +171,7 @@ class TestCustomTimestampColumns:
 
     def test_additional_timestamp_columns(self):
         """Should strip custom timestamp columns when configured."""
-        rewriter = RuleRewriter(
-            timestamp_columns=frozenset({"event_time", "created_at"})
-        )
+        rewriter = RuleRewriter(timestamp_columns=frozenset({"event_time", "created_at"}))
         result = rewriter.parse_user_sql(
             "SELECT * FROM t WHERE event_time >= '2026-01-01' AND x = 1"
         )

@@ -48,8 +48,7 @@ class TestRuleCreate:
         rc = RuleCreate(
             name="Test",
             user_sql=(
-                "SELECT * FROM db.tbl WHERE _timestamp > '2026-01-01' "
-                "AND process_name = 'cmd.exe'"
+                "SELECT * FROM db.tbl WHERE _timestamp > '2026-01-01' AND process_name = 'cmd.exe'"
             ),
         )
         parsed = rc.parse()

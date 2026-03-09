@@ -92,7 +92,8 @@ class TestSchemaColumn:
 
     def test_validate_multiple_errors(self, registry: TypeRegistry):
         col = SchemaColumn(
-            name="x", type="json",
+            name="x",
+            type="json",
             attribute=["lowcardinality"],
             use_case="dimension",
         )
@@ -238,27 +239,29 @@ class TestSource:
         assert s.schema_config.engine == "MergeTree"
 
     def test_full(self):
-        s = Source.model_validate({
-            "source": "filebeat",
-            "display_name": "Elastic Filebeat",
-            "description": "Filebeat log collector",
-            "enabled": True,
-            "header": {"type": "time_series", "version": "1.0.0"},
-            "match": {"field": "tags.collector.type", "value": "filebeat"},
-            "schema": {
-                "meta_schema": "logs_beats_filebeat",
-                "ttl_days": 90,
-                "engine": "MergeTree",
-            },
-            "transform": {
-                "engine": "vector",
-                "config_file": "/etc/vector/filebeat.yaml",
-            },
-            "sigma": {
-                "taxonomy": "linux",
-                "custom_mappings": {"User": "user_name"},
-            },
-        })
+        s = Source.model_validate(
+            {
+                "source": "filebeat",
+                "display_name": "Elastic Filebeat",
+                "description": "Filebeat log collector",
+                "enabled": True,
+                "header": {"type": "time_series", "version": "1.0.0"},
+                "match": {"field": "tags.collector.type", "value": "filebeat"},
+                "schema": {
+                    "meta_schema": "logs_beats_filebeat",
+                    "ttl_days": 90,
+                    "engine": "MergeTree",
+                },
+                "transform": {
+                    "engine": "vector",
+                    "config_file": "/etc/vector/filebeat.yaml",
+                },
+                "sigma": {
+                    "taxonomy": "linux",
+                    "custom_mappings": {"User": "user_name"},
+                },
+            }
+        )
         assert s.source == "filebeat"
         assert s.display_name == "Elastic Filebeat"
         assert s.schema_config.meta_schema == "logs_beats_filebeat"

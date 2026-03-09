@@ -65,9 +65,7 @@ class TestGenerateView:
         result = gen.generate_view("sigma", "windows_audit", "windows_audit")
         assert result is None
 
-    def test_generates_view_from_default_map(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_generates_view_from_default_map(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="sigma",
@@ -82,9 +80,7 @@ class TestGenerateView:
         assert "`user_name` AS `User`" in ddl
         assert "FROM {db}.windows_audit" in ddl
 
-    def test_generates_view_from_source_map(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_generates_view_from_source_map(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="ecs",
@@ -97,9 +93,7 @@ class TestGenerateView:
         assert "syslog_ecs" in ddl
         assert "`src_ip` AS `source.ip`" in ddl
 
-    def test_source_overrides_default(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_source_overrides_default(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="sigma",
@@ -120,24 +114,16 @@ class TestGenerateView:
         # Default preserved
         assert "`user_name` AS `User`" in ddl
 
-    def test_custom_config(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"X": "x"})
-        )
+    def test_custom_config(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         cfg = DDLConfig(db="analytics")
         ddl = gen.generate_view("sigma", "test_src", "test_table", cfg)
         assert ddl is not None
         assert "analytics.test_table_sigma" in ddl
         assert "FROM analytics.test_table" in ddl
 
-    def test_view_includes_star(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"A": "a"})
-        )
+    def test_view_includes_star(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
         ddl = gen.generate_view("sigma", "src", "tbl")
         assert ddl is not None
         assert "*" in ddl
@@ -156,12 +142,8 @@ class TestGenerateViewsForSource:
     def test_generates_for_all_discovered_standards(
         self, gen: ViewGenerator, registry: FieldMapRegistry
     ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"EventID": "event_id"})
-        )
-        registry.save_map(
-            _make_field_map(standard="ecs", mappings={"source.ip": "source_ip"})
-        )
+        registry.save_map(_make_field_map(standard="sigma", mappings={"EventID": "event_id"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"source.ip": "source_ip"}))
         views = gen.generate_views_for_source("windows_audit", "windows_audit")
         assert "sigma" in views
         assert "ecs" in views
@@ -182,9 +164,7 @@ class TestGenerateViewsForSource:
         views = gen.generate_views_for_source("syslog", "syslog")
         assert "cim" in views
 
-    def test_excludes_other_source_maps(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_excludes_other_source_maps(self, gen: ViewGenerator, registry: FieldMapRegistry):
         # Map for a different source — should not appear
         registry.save_map(
             _make_field_map(
@@ -196,33 +176,19 @@ class TestGenerateViewsForSource:
         views = gen.generate_views_for_source("syslog", "syslog")
         assert "cim" not in views
 
-    def test_explicit_standards_list(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"A": "a"})
-        )
-        registry.save_map(
-            _make_field_map(standard="ecs", mappings={"B": "b"})
-        )
-        views = gen.generate_views_for_source(
-            "src", "tbl", standards=["sigma"]
-        )
+    def test_explicit_standards_list(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"B": "b"}))
+        views = gen.generate_views_for_source("src", "tbl", standards=["sigma"])
         assert "sigma" in views
         assert "ecs" not in views
 
     def test_standards_list_with_no_maps(self, gen: ViewGenerator):
-        views = gen.generate_views_for_source(
-            "src", "tbl", standards=["sigma", "ecs"]
-        )
+        views = gen.generate_views_for_source("src", "tbl", standards=["sigma", "ecs"])
         assert views == {}
 
-    def test_custom_config_passed_through(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"X": "x"})
-        )
+    def test_custom_config_passed_through(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         cfg = DDLConfig(db="mydb")
         views = gen.generate_views_for_source("src", "tbl", config=cfg)
         assert "mydb.tbl_sigma" in views["sigma"]
@@ -257,24 +223,16 @@ class TestDiscoverStandards:
     def test_discovers_defaults_and_source_maps(
         self, gen: ViewGenerator, registry: FieldMapRegistry
     ):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="ecs", source="syslog", mappings={"B": "b"}))
         registry.save_map(
-            _make_field_map(standard="sigma", mappings={"A": "a"})
-        )
-        registry.save_map(
-            _make_field_map(standard="ecs", source="syslog", mappings={"B": "b"})
-        )
-        registry.save_map(
-            _make_field_map(
-                standard="cim", source="crowdstrike", mappings={"C": "c"}
-            )
+            _make_field_map(standard="cim", source="crowdstrike", mappings={"C": "c"})
         )
         result = gen._discover_standards("syslog")
         # sigma (default), ecs (source-specific for syslog) — NOT cim (different source)
         assert result == ["ecs", "sigma"]
 
-    def test_sorted_output(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_sorted_output(self, gen: ViewGenerator, registry: FieldMapRegistry):
         for std in ["cim", "sigma", "ecs"]:
             registry.save_map(_make_field_map(standard=std, mappings={"X": "x"}))
         result = gen._discover_standards("any")
@@ -291,9 +249,7 @@ class TestResolveMap:
         result = gen._resolve_map("sigma", "windows_audit")
         assert result == {}
 
-    def test_default_only(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_default_only(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="sigma",
@@ -303,9 +259,7 @@ class TestResolveMap:
         result = gen._resolve_map("sigma", "windows_audit")
         assert result == {"EventID": "event_id", "User": "user_name"}
 
-    def test_source_overrides_default(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_source_overrides_default(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="sigma",
@@ -322,9 +276,7 @@ class TestResolveMap:
         result = gen._resolve_map("sigma", "crowdstrike")
         assert result == {"EventID": "cs_event_id", "User": "user_name"}
 
-    def test_source_map_only(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
+    def test_source_map_only(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
             _make_field_map(
                 standard="ecs",
@@ -335,11 +287,7 @@ class TestResolveMap:
         result = gen._resolve_map("ecs", "syslog")
         assert result == {"source.ip": "src_ip"}
 
-    def test_none_source_name(
-        self, gen: ViewGenerator, registry: FieldMapRegistry
-    ):
-        registry.save_map(
-            _make_field_map(standard="sigma", mappings={"X": "x"})
-        )
+    def test_none_source_name(self, gen: ViewGenerator, registry: FieldMapRegistry):
+        registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         result = gen._resolve_map("sigma", None)
         assert result == {"X": "x"}

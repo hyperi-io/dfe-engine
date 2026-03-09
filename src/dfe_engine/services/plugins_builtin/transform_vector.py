@@ -26,19 +26,13 @@ descriptor = ServiceDescriptor(
 )
 
 
-def _validate_transform_vector(
-    config: Any, errors: list[str], warnings: list[str]
-) -> None:
+def _validate_transform_vector(config: Any, errors: list[str], warnings: list[str]) -> None:
     """Cross-field validation for dfe-transform-vector config."""
     if not config.kafka.consumer.brokers and not config.ipc.enabled:
-        errors.append(
-            "kafka.consumer.brokers is required when IPC is not enabled"
-        )
+        errors.append("kafka.consumer.brokers is required when IPC is not enabled")
 
     if not config.kafka.producer.brokers and not config.ipc.enabled:
-        errors.append(
-            "kafka.producer.brokers is required when IPC is not enabled"
-        )
+        errors.append("kafka.producer.brokers is required when IPC is not enabled")
 
     # Check source names are unique
     source_names = [s.name for s in config.sources]
@@ -49,9 +43,7 @@ def _validate_transform_vector(
     name_set = set(source_names)
     for src in config.sources:
         if src.parent and src.parent not in name_set:
-            errors.append(
-                f"Source '{src.name}' references unknown parent '{src.parent}'"
-            )
+            errors.append(f"Source '{src.name}' references unknown parent '{src.parent}'")
 
 
 _sizing_overrides: dict[str, dict[str, Any]] = {

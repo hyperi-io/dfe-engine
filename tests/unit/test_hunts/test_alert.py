@@ -40,7 +40,7 @@ class TestAlertTrigger:
 
     def test_disallowed_function_rejected(self):
         with pytest.raises(ValueError, match="Invalid alert trigger"):
-            AlertTrigger(when='[1,2,3].map(x, x * 2)')
+            AlertTrigger(when="[1,2,3].map(x, x * 2)")
 
 
 # ── AlertConfig ───────────────────────────────────────────────────
@@ -153,10 +153,12 @@ class TestAlertDestinationRegistry:
 
     def test_load_from_dict(self):
         r = AlertDestinationRegistry()
-        r.load_from_dict({
-            "slack-dfe": "slack://t/b/c/",
-            "email-ops": "mailto://user:pass@smtp.example.com",
-        })
+        r.load_from_dict(
+            {
+                "slack-dfe": "slack://t/b/c/",
+                "email-ops": "mailto://user:pass@smtp.example.com",
+            }
+        )
         assert len(r) == 2
         assert r.resolve("slack-dfe") == "slack://t/b/c/"
         assert r.resolve("email-ops") == "mailto://user:pass@smtp.example.com"
@@ -241,10 +243,12 @@ class TestShouldFire:
 
     def test_multiple_triggers_any_fires(self):
         """Multiple triggers: first match wins (OR logic)."""
-        d = self._dispatcher([
-            AlertTrigger(when="result_count >= 100"),
-            AlertTrigger(when="result_count > 0"),
-        ])
+        d = self._dispatcher(
+            [
+                AlertTrigger(when="result_count >= 100"),
+                AlertTrigger(when="result_count > 0"),
+            ]
+        )
         assert d._should_fire(1, None) is True
 
     def test_no_triggers_does_not_fire(self):
@@ -527,7 +531,9 @@ class TestBuildAlertConfigWithRegistry:
     def test_empty_destinations_list(self, registry):
         """Empty destinations list → falls through to channels/global."""
         data = {"alerts": {"destinations": []}}
-        config = build_alert_config(data, global_channels=["slack://g"], destination_registry=registry)
+        config = build_alert_config(
+            data, global_channels=["slack://g"], destination_registry=registry
+        )
         assert config.channels == ["slack://g"]
 
 

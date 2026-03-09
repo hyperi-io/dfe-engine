@@ -72,9 +72,7 @@ class TestValidatorSource:
         assert result.fallback == "now()"
 
     def test_first_syntax(self):
-        result = ExpressionValidator.validate(
-            "@source: first(tags/_tags/meta/metadata.tags)"
-        )
+        result = ExpressionValidator.validate("@source: first(tags/_tags/meta/metadata.tags)")
         assert result.valid
         assert result.candidate_fields == ["tags", "_tags", "meta", "metadata.tags"]
         assert result.field == "tags"
@@ -99,9 +97,7 @@ class TestValidatorSource:
         assert not result.valid
 
     def test_field_with_complex_fallback(self):
-        result = ExpressionValidator.validate(
-            "@source: first(timestamp_received/received_at)"
-        )
+        result = ExpressionValidator.validate("@source: first(timestamp_received/received_at)")
         assert result.valid
         assert result.candidate_fields == ["timestamp_received", "received_at"]
 
@@ -209,9 +205,7 @@ class TestValidateColumnExpr:
         assert errors == []
 
     def test_invalid_expr(self):
-        errors = ExpressionValidator.validate_column_expr(
-            "_bad", "not a directive"
-        )
+        errors = ExpressionValidator.validate_column_expr("_bad", "not a directive")
         assert len(errors) == 1
         assert "_bad" in errors[0]
 
@@ -252,8 +246,7 @@ class TestBuilder:
 
     def test_source_with_fallback(self):
         assert (
-            ExpressionBuilder.source("timestamp", fallback="now()")
-            == "@source: timestamp | now()"
+            ExpressionBuilder.source("timestamp", fallback="now()") == "@source: timestamp | now()"
         )
 
     def test_source_first(self):
@@ -281,10 +274,7 @@ class TestBuilder:
         )
 
     def test_config(self):
-        assert (
-            ExpressionBuilder.config("routing.org_id_field")
-            == "@config: routing.org_id_field"
-        )
+        assert ExpressionBuilder.config("routing.org_id_field") == "@config: routing.org_id_field"
 
 
 class TestBuilderRoundTrip:

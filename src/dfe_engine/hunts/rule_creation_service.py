@@ -63,16 +63,12 @@ class RuleCreateRequest(BaseModel):
         description="SQL origin: 'raw' for clean SQL, 'hyperdx' for HyperDX-generated",
     )
     user_sql: str | None = Field(default=None, description="User-supplied SQL SELECT")
-    cel_filter: str | None = Field(
-        default=None, description="CEL expression for query pushdown"
-    )
+    cel_filter: str | None = Field(default=None, description="CEL expression for query pushdown")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(
         default=None, description="Source name for SourceRegistry resolution"
     )
-    estimate_cost: bool = Field(
-        default=False, description="Run EXPLAIN to estimate query cost"
-    )
+    estimate_cost: bool = Field(default=False, description="Run EXPLAIN to estimate query cost")
     cost_window_minutes: int = Field(
         default=10, description="Time window (minutes) for cost estimation"
     )
@@ -80,9 +76,7 @@ class RuleCreateRequest(BaseModel):
     @model_validator(mode="after")
     def _require_sql_or_cel(self) -> RuleCreateRequest:
         if not self.user_sql and not self.cel_filter:
-            raise ValueError(
-                "At least one of 'user_sql' or 'cel_filter' must be provided."
-            )
+            raise ValueError("At least one of 'user_sql' or 'cel_filter' must be provided.")
         return self
 
 
@@ -317,7 +311,9 @@ class RuleCreationService:
             client = ch.get_client()
 
             # Build a minimal SELECT to estimate cost
-            db_table = f"{rule.source_db}.{rule.source_table}" if rule.source_db else rule.source_table
+            db_table = (
+                f"{rule.source_db}.{rule.source_table}" if rule.source_db else rule.source_table
+            )
             where = rule.where_clause.strip()
             if where:
                 explain_sql = f"EXPLAIN ESTIMATE SELECT count() FROM {db_table} WHERE {where}"
@@ -327,8 +323,8 @@ class RuleCreationService:
             explain_start = datetime.now(timezone.utc)
             explain_result = client.execute(explain_sql)
             explain_duration_ms = (
-                (datetime.now(timezone.utc) - explain_start).total_seconds() * 1000
-            )
+                datetime.now(timezone.utc) - explain_start
+            ).total_seconds() * 1000
 
             explain_plan = "\n".join(
                 str(row[0]) if isinstance(row, (list, tuple)) else str(row)
