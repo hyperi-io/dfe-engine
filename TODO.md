@@ -42,6 +42,7 @@ This is the **single source of truth** for all tasks and progress.
 
 ### High Priority
 
+- [ ] **No-mock remediation** — migrate test suite from `unittest.mock` to real dependencies (testcontainers for ClickHouse, sandbox endpoints for apprise). See `STATE.md` for affected files. Do not add new mocks.
 - [ ] Alert grouping integration tests — verify against real ClickHouse (DevEx cluster)
 - [ ] `dfe-loader` transforms — replace hardcoded condition evaluation with rustlib CEL
 - [ ] Config repo decision: mono-repo vs separate repo for infra (TF/Helm/Argo)

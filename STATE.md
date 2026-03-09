@@ -1,10 +1,21 @@
-## CI UNAVAILABLE — Commit with [skip ci]
+## CI: Migrated to hyperi-ci
 
-The CI system is being completely rewritten. Until migration instructions are provided:
+CI now uses `hyperi-io/hyperi-ci` reusable workflows (PyPI: `hyperi-ci`).
+No more `ci/` submodule. The `[skip ci]` requirement is lifted.
 
-- **All commits MUST include `[skip ci]` in the commit message**
-- Do not trigger CI runs or rely on CI for validation
-- Run `./ci/local-build.sh` for local validation if it exists
+### Known Technical Debt: Mock Usage
+
+Test suite uses `unittest.mock` (MagicMock, patch) in several test files.
+This violates the no-mocks policy. Tests that mock ClickHouse clients and
+Apprise notifications should be migrated to real dependencies (testcontainers
+for ClickHouse, sandbox endpoints for notifications).
+
+**Affected files:**
+- `tests/unit/test_hunts/test_alert_grouping.py` — MagicMock for ClickHouse, patch for apprise
+- `tests/unit/test_hunts/test_explain_hunts.py` — MagicMock for ClickHouse
+- Other test files using `pytest-mock` fixtures
+
+**Policy:** Do not add new mocks. Migrate existing mocks to real deps when touching those files.
 
 ---
 
@@ -158,7 +169,7 @@ The CI system is being completely rewritten. Until migration instructions are pr
 
 ## External Dependencies
 
-- **hyperi-pylib[expression]>=2.19.0** — Logger, config, DirectoryConfigStore, HttpClient, CEL expressions
+- **hyperi-pylib[expression]>=2.24.2** — Logger, config, DirectoryConfigStore, HttpClient, CEL expressions (public PyPI)
 - **clickhouse-connect>=0.13.0** — ClickHouse client
 - **fastapi>=0.115.0** — REST API framework
 - **uvicorn[standard]>=0.34.0** — ASGI server

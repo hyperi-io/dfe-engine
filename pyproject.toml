@@ -9,7 +9,7 @@ readme = "README.md"
 
 dependencies = [
     # hyperi-pylib for logging and common utilities
-    "hyperi-pylib>=2.23.1",
+    "hyperi-pylib[expression]>=2.24.2",
     # Data processing
     "pyarrow>=23.0.1",
     "pandas>=3.0.1",
@@ -58,7 +58,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/hypersec-io/dfe-engine"
+Repository = "https://github.com/hyperi-io/dfe-engine"
 
 [build-system]
 requires = ["hatchling"]
@@ -129,20 +129,14 @@ ignore = [
     "S607",  # S607=subprocess partial exec (CI scripts)
     "B017",  # B017=pytest.raises without match (legacy tests)
     "B904",  # B904=raise from (TEMP: too many to fix now)
+    "B008",  # B008=Depends in defaults (idiomatic FastAPI pattern)
 ]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S"]  # Allow all security checks in tests
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
+"ci/*" = ["S", "F841"]  # CI submodule (legacy, being removed)
 
-[[tool.uv.index]]
-name = "hyperi-repo"
-url = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local/simple"
-publish-url = "https://hypersec.jfrog.io/artifactory/api/pypi/hyperi-pypi-local"
-explicit = true
-
-[tool.uv.sources]
-hyperi-pylib = { index = "hyperi-repo" }
 
 [project.scripts]
 dfe-api = "dfe_engine.api:run_dev_server"
