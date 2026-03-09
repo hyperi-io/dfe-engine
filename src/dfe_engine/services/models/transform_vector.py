@@ -65,12 +65,8 @@ class TransformKafkaConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    consumer: TransformKafkaConsumerConfig = Field(
-        default_factory=TransformKafkaConsumerConfig
-    )
-    producer: TransformKafkaProducerConfig = Field(
-        default_factory=TransformKafkaProducerConfig
-    )
+    consumer: TransformKafkaConsumerConfig = Field(default_factory=TransformKafkaConsumerConfig)
+    producer: TransformKafkaProducerConfig = Field(default_factory=TransformKafkaProducerConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -89,9 +85,7 @@ class VectorSourceConfig(BaseSourceConfig):
     is NOT a reused pattern across other multi-source services.
     """
 
-    config_file: str = Field(
-        ..., description="Path to vector.dev YAML config file"
-    )
+    config_file: str = Field(..., description="Path to vector.dev YAML config file")
     parent: str = Field(
         default="",
         description="Parent source name (empty = root source in the config tree)",

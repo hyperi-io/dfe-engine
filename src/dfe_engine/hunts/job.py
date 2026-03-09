@@ -86,7 +86,8 @@ class JobScheduler:
                 self.scheduler.reschedule_job(
                     event.job_id,
                     trigger=IntervalTrigger(
-                        seconds=interval, start_date=completion_time,
+                        seconds=interval,
+                        start_date=completion_time,
                     ),
                 )
                 if event.job_id not in self._rescheduled_jobs:
@@ -106,7 +107,10 @@ class JobScheduler:
                 )
 
     async def add_job_with_cron(
-        self, job_function: Callable, cron_expression: str, job_name: str,
+        self,
+        job_function: Callable,
+        cron_expression: str,
+        job_name: str,
         jitter: int = 0,
     ) -> Any:
         """
@@ -137,7 +141,9 @@ class JobScheduler:
                 kwargs["jitter"] = jitter
             job = self.scheduler.add_job(job_function, trigger, **kwargs)
             self.active_jobs.append(job)
-            logger.debug(f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}, jitter: {jitter}s")
+            logger.debug(
+                f"Added cron job [{job_name}] with:\nSchedule: {cron_expression}, jitter: {jitter}s"
+            )
             return job
         except Exception as e:
             logger.error(f"Error adding job with cron job : {e}")

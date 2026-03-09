@@ -318,18 +318,14 @@ class AlertDispatcher:
             context["first_seen"] = group_context.get("first_seen", "")
             context["last_seen"] = group_context.get("last_seen", "")
             group_fields = group_context.get("group_fields", {})
-            context["group_fields"] = ", ".join(
-                f"{k}={v}" for k, v in group_fields.items()
-            )
+            context["group_fields"] = ", ".join(f"{k}={v}" for k, v in group_fields.items())
 
         title = self._config.title_template.format_map(_SafeFormatDict(context))
         body = self._config.body_template.format_map(_SafeFormatDict(context))
 
         return self._send(title, body)
 
-    def _should_fire(
-        self, result_count: int, results: list[dict[str, Any]] | None
-    ) -> bool:
+    def _should_fire(self, result_count: int, results: list[dict[str, Any]] | None) -> bool:
         """Check if any trigger condition is met.
 
         Each trigger's ``when`` expression is evaluated via CEL against a
@@ -408,9 +404,7 @@ def build_alert_config(
     if destination_names and destination_registry:
         channels.extend(destination_registry.resolve_many(destination_names))
     elif destination_names and not destination_registry:
-        logger.warning(
-            f"Hunt references destinations {destination_names} but no registry provided"
-        )
+        logger.warning(f"Hunt references destinations {destination_names} but no registry provided")
 
     # Raw channel URLs (backward compat)
     raw_channels = alerts_section.get("channels", [])
@@ -440,7 +434,11 @@ def build_alert_config(
     return AlertConfig(
         channels=channels,
         triggers=triggers,
-        title_template=alerts_section.get("title_template", AlertConfig.model_fields["title_template"].default),
-        body_template=alerts_section.get("body_template", AlertConfig.model_fields["body_template"].default),
+        title_template=alerts_section.get(
+            "title_template", AlertConfig.model_fields["title_template"].default
+        ),
+        body_template=alerts_section.get(
+            "body_template", AlertConfig.model_fields["body_template"].default
+        ),
         enabled=alerts_section.get("enabled", True),
     )

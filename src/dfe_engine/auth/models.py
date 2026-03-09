@@ -33,9 +33,7 @@ class AuthContext(BaseModel):
     user_id: str = Field(..., description="User ID")
     roles: list[str] = Field(default_factory=list)
     permissions: list[str] = Field(default_factory=list)
-    groups: list[str] = Field(
-        default_factory=list, description="OIDC groups (Entra ID, Okta)"
-    )
+    groups: list[str] = Field(default_factory=list, description="OIDC groups (Entra ID, Okta)")
     request_id: str | None = None
     client_ip: str | None = None
     user_agent: str | None = None

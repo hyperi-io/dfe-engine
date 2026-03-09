@@ -58,9 +58,7 @@ class TestGenerateApplication:
         assert source["repoURL"] == "https://harbor.hyperi.io/chartrepo/dfe"
         assert source["chart"] == "dfe-receiver"
         assert source["targetRevision"] == "1.2.0"
-        assert source["helm"]["valueFiles"] == [
-            "values/receiver-production-values.yaml"
-        ]
+        assert source["helm"]["valueFiles"] == ["values/receiver-production-values.yaml"]
 
     def test_destination(self):
         app = self._make(namespace="custom-ns")

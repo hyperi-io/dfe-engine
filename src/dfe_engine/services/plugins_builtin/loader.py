@@ -62,9 +62,7 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
                 errors.append("SASL AWS_MSK_IAM requires aws_region")
 
     if config.routing.route_all_by_org and config.routing.routed_orgs:
-        warnings.append(
-            "route_all_by_org is true, routed_orgs list will be ignored"
-        )
+        warnings.append("route_all_by_org is true, routed_orgs list will be ignored")
 
 
 _sizing_overrides: dict[str, dict[str, Any]] = {

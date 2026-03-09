@@ -90,9 +90,7 @@ class SchemaBuilderV2:
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
-        self._ddl_gen = DDLGenerator(
-            self._registry, use_legacy_indexes=use_legacy_indexes
-        )
+        self._ddl_gen = DDLGenerator(self._registry, use_legacy_indexes=use_legacy_indexes)
         self._field_map_registry = field_map_registry
 
     # ── Main entry points ───────────────────────────────────────────
@@ -126,9 +124,7 @@ class SchemaBuilderV2:
 
         # 5. Generate CREATE TABLE DDL
         ddl_config = self._build_ddl_config(source)
-        create_ddl = self._ddl_gen.generate_create_table(
-            source.table_name, columns, ddl_config
-        )
+        create_ddl = self._ddl_gen.generate_create_table(source.table_name, columns, ddl_config)
 
         # 6. Generate Sigma view DDL (legacy path)
         sigma_ddl = None
@@ -170,9 +166,7 @@ class SchemaBuilderV2:
     ) -> str:
         """Generate ALTER TABLE ADD COLUMN for a Source."""
         cfg = self._build_ddl_config(source)
-        return self._ddl_gen.generate_alter_add_column(
-            source.table_name, column, cfg, after=after
-        )
+        return self._ddl_gen.generate_alter_add_column(source.table_name, column, cfg, after=after)
 
     def generate_alter_modify(
         self,
@@ -181,15 +175,11 @@ class SchemaBuilderV2:
     ) -> str:
         """Generate ALTER TABLE MODIFY COLUMN for a Source."""
         cfg = self._build_ddl_config(source)
-        return self._ddl_gen.generate_alter_modify_column(
-            source.table_name, column, cfg
-        )
+        return self._ddl_gen.generate_alter_modify_column(source.table_name, column, cfg)
 
     # ── Internal: view generation ──────────────────────────────────
 
-    def _generate_view_ddls(
-        self, source: Source, config: DDLConfig
-    ) -> dict[str, str]:
+    def _generate_view_ddls(self, source: Source, config: DDLConfig) -> dict[str, str]:
         """Generate standard view DDLs from the FieldMapRegistry.
 
         Only runs when a field_map_registry was provided and the source
@@ -221,8 +211,7 @@ class SchemaBuilderV2:
             return SchemaLoader.load_profile(profile_name, version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile '{profile_name}' for source "
-                f"'{source.source}': {e}"
+                f"Failed to load profile '{profile_name}' for source '{source.source}': {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
@@ -242,8 +231,7 @@ class SchemaBuilderV2:
                 )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
-                    f"Failed to load meta_schema for source "
-                    f"'{source.source}': {e}"
+                    f"Failed to load meta_schema for source '{source.source}': {e}"
                 ) from e
 
         # Apply derived_schema (overrides)

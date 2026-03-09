@@ -335,9 +335,7 @@ class FieldMappingService:
 
         return missing_mappings
 
-    def get_combined_schema_mappings(
-        self, schema_config: dict, rule_name: str
-    ) -> Dict[str, str]:
+    def get_combined_schema_mappings(self, schema_config: dict, rule_name: str) -> Dict[str, str]:
         """
         Gets field mappings from schema files.
 

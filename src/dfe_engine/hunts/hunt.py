@@ -357,7 +357,10 @@ class Hunt:
                         ).get_clickhouse_client() as ch_client:
                             state_mgr.ensure_table_exists(ch_client)
                             can_fire = state_mgr.check_cooldown(
-                                ch_client, self.name, rule_name, customer,
+                                ch_client,
+                                self.name,
+                                rule_name,
+                                customer,
                                 self.alert_grouping.cooldown_td,
                             )
                             if not can_fire:
@@ -370,6 +373,7 @@ class Hunt:
                     score = 50
                     if self.scoring:
                         from .scoring import compute_score
+
                         score = compute_score(
                             self.scoring,
                             {"rule_name": rule_name, "result_count": result_rows},
@@ -384,7 +388,10 @@ class Hunt:
                     if sent:
                         alerts_sent += 1
                         # Record fire for cooldown tracking
-                        if self.alert_grouping and self.alert_grouping.cooldown_td.total_seconds() > 0:
+                        if (
+                            self.alert_grouping
+                            and self.alert_grouping.cooldown_td.total_seconds() > 0
+                        ):
                             from .alert_grouping import AlertStateManager
 
                             state_mgr = AlertStateManager()
@@ -392,7 +399,10 @@ class Hunt:
                                 self.target_config_data
                             ).get_clickhouse_client() as ch_client:
                                 state_mgr.record_fire(
-                                    ch_client, self.name, rule_name, customer,
+                                    ch_client,
+                                    self.name,
+                                    rule_name,
+                                    customer,
                                 )
 
         except Exception as e:
@@ -458,15 +468,17 @@ class Hunt:
                     # Row layout: group_by_field_1, ..., group_by_field_N,
                     #             match_count, first_seen, last_seen, sample_events
                     n_groups = len(group_by_fields)
-                    group_values = {
-                        group_by_fields[i]: str(row[i]) for i in range(n_groups)
-                    }
+                    group_values = {group_by_fields[i]: str(row[i]) for i in range(n_groups)}
 
                     # Per-group cooldown check
                     gk = build_group_key(group_by_fields, group_values)
                     can_fire = state_mgr.check_cooldown(
-                        ch_client, self.name, rule_name, customer,
-                        cooldown, group_key=gk,
+                        ch_client,
+                        self.name,
+                        rule_name,
+                        customer,
+                        cooldown,
+                        group_key=gk,
                     )
                     if not can_fire:
                         logger.debug(
@@ -489,6 +501,7 @@ class Hunt:
                     score = 50
                     if self.scoring:
                         from .scoring import compute_score
+
                         score_data = {**group_values, "match_count": match_count}
                         score = compute_score(self.scoring, score_data)
                     group_context["score"] = score
@@ -504,15 +517,15 @@ class Hunt:
                     if sent:
                         alerts_sent += 1
                         state_mgr.record_fire(
-                            ch_client, self.name, rule_name, customer,
+                            ch_client,
+                            self.name,
+                            rule_name,
+                            customer,
                             group_key=gk,
                         )
 
         except Exception as e:
-            logger.error(
-                f"Grouped alert dispatch failed for '{self.name}' "
-                f"rule '{rule_name}': {e}"
-            )
+            logger.error(f"Grouped alert dispatch failed for '{self.name}' rule '{rule_name}': {e}")
 
         return alerts_sent
 
@@ -631,8 +644,8 @@ class Hunt:
                 explain_start = datetime.now(timezone.utc)
                 explain_result = ch_client.execute(f"EXPLAIN PLAN {query}")
                 explain_duration_ms = (
-                    (datetime.now(timezone.utc) - explain_start).total_seconds() * 1000
-                )
+                    datetime.now(timezone.utc) - explain_start
+                ).total_seconds() * 1000
                 explain_plan = "\n".join(
                     str(row[0]) if isinstance(row, (list, tuple)) else str(row)
                     for row in explain_result
@@ -752,9 +765,7 @@ class Hunt:
         return last_success_time, last_success_time_str
 
     @staticmethod
-    def _capture_execution_profile(
-        ch_client, query_id: str, rule_name: str
-    ) -> Dict[str, int]:
+    def _capture_execution_profile(ch_client, query_id: str, rule_name: str) -> Dict[str, int]:
         """Capture execution profile from system.query_log.
 
         Queries ClickHouse system.query_log for the completed query

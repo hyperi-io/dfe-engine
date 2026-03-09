@@ -59,12 +59,8 @@ class WasmKafkaConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    consumer: WasmKafkaConsumerConfig = Field(
-        default_factory=WasmKafkaConsumerConfig
-    )
-    producer: WasmKafkaProducerConfig = Field(
-        default_factory=WasmKafkaProducerConfig
-    )
+    consumer: WasmKafkaConsumerConfig = Field(default_factory=WasmKafkaConsumerConfig)
+    producer: WasmKafkaProducerConfig = Field(default_factory=WasmKafkaProducerConfig)
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +79,7 @@ class WasmSourceConfig(BaseSourceConfig):
     Per-source ENV + files are inherited from BaseSourceConfig.
     """
 
-    wasm_module: str = Field(
-        ..., description="Path to the compiled WASM module file (.wasm)"
-    )
+    wasm_module: str = Field(..., description="Path to the compiled WASM module file (.wasm)")
     input_topic: str = Field(default="", description="Kafka topic to consume from")
     output_topic: str = Field(default="", description="Kafka topic to produce to")
 

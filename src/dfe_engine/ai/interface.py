@@ -70,12 +70,8 @@ class AIModuleResult(BaseModel):
     task_id: str = Field(..., description="Unique task identifier")
     module_name: str = Field(..., description="Module that produced this result")
     module_type: AIModuleType = Field(..., description="Module type")
-    status: AIModuleStatus = Field(
-        default=AIModuleStatus.PENDING, description="Task status"
-    )
-    output: dict[str, Any] = Field(
-        default_factory=dict, description="Module-specific output"
-    )
+    status: AIModuleStatus = Field(default=AIModuleStatus.PENDING, description="Task status")
+    output: dict[str, Any] = Field(default_factory=dict, description="Module-specific output")
     error: str | None = Field(default=None, description="Error message if failed")
     duration_ms: float | None = Field(
         default=None, description="Execution duration in milliseconds"
@@ -149,20 +145,14 @@ class QueryOptimiser(AIModuleInterface):
             default_factory=dict,
             description="EXPLAIN output, row counts, timing data",
         )
-        source_table: str | None = Field(
-            default=None, description="Source table name"
-        )
-        context: dict[str, Any] = Field(
-            default_factory=dict, description="Additional context"
-        )
+        source_table: str | None = Field(default=None, description="Source table name")
+        context: dict[str, Any] = Field(default_factory=dict, description="Additional context")
 
     class Output(BaseModel):
         """Output from query optimisation."""
 
         proposed_query: str = Field(..., description="Optimised SQL query")
-        rationale: str = Field(
-            default="", description="Explanation of changes"
-        )
+        rationale: str = Field(default="", description="Explanation of changes")
         estimated_improvement: str | None = Field(
             default=None,
             description="Estimated improvement (e.g. '3x fewer rows scanned')",
@@ -180,16 +170,12 @@ class SchemaOptimiser(AIModuleInterface):
         """Input for schema optimisation."""
 
         source_name: str = Field(..., description="Source name")
-        source_schema: dict[str, Any] = Field(
-            ..., description="Current schema definition"
-        )
+        source_schema: dict[str, Any] = Field(..., description="Current schema definition")
         query_patterns: list[str] = Field(
             default_factory=list,
             description="Common query patterns against this source",
         )
-        context: dict[str, Any] = Field(
-            default_factory=dict, description="Additional context"
-        )
+        context: dict[str, Any] = Field(default_factory=dict, description="Additional context")
 
     class Output(BaseModel):
         """Output from schema optimisation."""
@@ -201,9 +187,7 @@ class SchemaOptimiser(AIModuleInterface):
         proposed_indices: list[str] = Field(
             default_factory=list, description="Proposed index changes"
         )
-        rationale: str = Field(
-            default="", description="Explanation of proposals"
-        )
+        rationale: str = Field(default="", description="Explanation of proposals")
 
     @property
     def module_type(self) -> AIModuleType:
@@ -216,9 +200,7 @@ class LogParser(AIModuleInterface):
     class Input(BaseModel):
         """Input for log parsing."""
 
-        samples: list[str] = Field(
-            ..., description="Raw log samples (strings)"
-        )
+        samples: list[str] = Field(..., description="Raw log samples (strings)")
         source_hint: str | None = Field(
             default=None,
             description="Hint about log source (e.g. 'nginx', 'aws_cloudtrail')",
@@ -272,13 +254,9 @@ class AIModuleRegistry:
             ValueError: If a module with the same name is already registered.
         """
         if module.name in self._modules:
-            raise ValueError(
-                f"AI module '{module.name}' is already registered."
-            )
+            raise ValueError(f"AI module '{module.name}' is already registered.")
         self._modules[module.name] = module
-        logger.info(
-            f"Registered AI module '{module.name}' (type={module.module_type.value})"
-        )
+        logger.info(f"Registered AI module '{module.name}' (type={module.module_type.value})")
 
     def unregister(self, name: str) -> None:
         """Remove a registered module."""
@@ -292,14 +270,11 @@ class AIModuleRegistry:
         """
         if name not in self._modules:
             raise KeyError(
-                f"AI module '{name}' not found. "
-                f"Registered: {list(self._modules.keys())}"
+                f"AI module '{name}' not found. Registered: {list(self._modules.keys())}"
             )
         return self._modules[name]
 
-    def list_modules(
-        self, module_type: AIModuleType | None = None
-    ) -> list[AIModuleInterface]:
+    def list_modules(self, module_type: AIModuleType | None = None) -> list[AIModuleInterface]:
         """List registered modules, optionally filtered by type."""
         modules = list(self._modules.values())
         if module_type is not None:

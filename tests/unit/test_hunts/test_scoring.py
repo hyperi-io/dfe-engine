@@ -143,7 +143,9 @@ class TestEvaluateCondition:
         assert evaluate_condition('status in ["blocked", "banned"]', {"status": "active"}) is False
 
     def test_not_in_operator(self):
-        assert evaluate_condition('!(status in ["blocked", "banned"])', {"status": "active"}) is True
+        assert (
+            evaluate_condition('!(status in ["blocked", "banned"])', {"status": "active"}) is True
+        )
 
     def test_double_quoted_string(self):
         assert evaluate_condition('severity == "critical"', {"severity": "critical"}) is True
@@ -165,16 +167,22 @@ class TestEvaluateCondition:
         assert evaluate_condition("port in [80, 443, 8080]", {"port": 443}) is True
 
     def test_compound_condition(self):
-        assert evaluate_condition(
-            'severity == "critical" && amount > 10000',
-            {"severity": "critical", "amount": 15000},
-        ) is True
+        assert (
+            evaluate_condition(
+                'severity == "critical" && amount > 10000',
+                {"severity": "critical", "amount": 15000},
+            )
+            is True
+        )
 
     def test_logical_or(self):
-        assert evaluate_condition(
-            'severity == "critical" || amount > 50000',
-            {"severity": "low", "amount": 100000},
-        ) is True
+        assert (
+            evaluate_condition(
+                'severity == "critical" || amount > 50000',
+                {"severity": "low", "amount": 100000},
+            )
+            is True
+        )
 
     def test_logical_not(self):
         assert evaluate_condition("!is_test", {"is_test": False}) is True
@@ -206,7 +214,7 @@ class TestValidateCondition:
         assert validate_condition('!(status in ["x", "y"])') == []
 
     def test_valid_compound(self):
-        assert validate_condition('a == 1 && b > 2') == []
+        assert validate_condition("a == 1 && b > 2") == []
 
     def test_valid_string_function(self):
         assert validate_condition('msg.contains("test")') == []

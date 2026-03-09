@@ -25,9 +25,7 @@ descriptor = ServiceDescriptor(
 )
 
 
-def _validate_fetcher(
-    config: Any, errors: list[str], warnings: list[str]
-) -> None:
+def _validate_fetcher(config: Any, errors: list[str], warnings: list[str]) -> None:
     """Cross-field validation for dfe-fetcher config."""
     if not config.kafka.brokers:
         errors.append("kafka.brokers is required for the fetcher")
@@ -42,9 +40,7 @@ def _validate_fetcher(
             errors.append(f"Source '{src.name}' is missing source_type")
 
         if src.auth.type == "oauth2" and not src.auth.token_url:
-            warnings.append(
-                f"Source '{src.name}': OAuth2 auth without token_url configured"
-            )
+            warnings.append(f"Source '{src.name}': OAuth2 auth without token_url configured")
 
 
 _sizing_overrides: dict[str, dict[str, Any]] = {

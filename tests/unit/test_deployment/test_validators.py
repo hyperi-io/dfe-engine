@@ -58,13 +58,16 @@ class TestValidateDeploymentConfig:
         assert any("custom" in e and "resources" in e for e in result.errors)
 
     def test_custom_size_with_resources(self):
-        result = validate_deployment_config("receiver", {
-            "size": "custom",
-            "resources": {
-                "requests": {"cpu": "3", "memory": "6Gi"},
-                "limits": {"cpu": "6", "memory": "12Gi"},
+        result = validate_deployment_config(
+            "receiver",
+            {
+                "size": "custom",
+                "resources": {
+                    "requests": {"cpu": "3", "memory": "6Gi"},
+                    "limits": {"cpu": "6", "memory": "12Gi"},
+                },
             },
-        })
+        )
         assert result.valid is True
 
     def test_keda_and_hpa_both_enabled(self):
@@ -103,25 +106,31 @@ class TestValidateDeploymentConfig:
         assert any("no triggers" in e for e in result.errors)
 
     def test_resource_requests_gt_limits_error(self):
-        result = validate_deployment_config("receiver", {
-            "size": "custom",
-            "resources": {
-                "requests": {"cpu": "4", "memory": "8Gi"},
-                "limits": {"cpu": "2", "memory": "4Gi"},
+        result = validate_deployment_config(
+            "receiver",
+            {
+                "size": "custom",
+                "resources": {
+                    "requests": {"cpu": "4", "memory": "8Gi"},
+                    "limits": {"cpu": "2", "memory": "4Gi"},
+                },
             },
-        })
+        )
         assert result.valid is False
         assert any("CPU requests" in e for e in result.errors)
         assert any("Memory requests" in e for e in result.errors)
 
     def test_size_and_resources_warning(self):
-        result = validate_deployment_config("receiver", {
-            "size": "small",
-            "resources": {
-                "requests": {"cpu": "500m", "memory": "1Gi"},
-                "limits": {"cpu": "1", "memory": "2Gi"},
+        result = validate_deployment_config(
+            "receiver",
+            {
+                "size": "small",
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "1Gi"},
+                    "limits": {"cpu": "1", "memory": "2Gi"},
+                },
             },
-        })
+        )
         assert result.valid is True
         assert any("explicit resources" in w for w in result.warnings)
 

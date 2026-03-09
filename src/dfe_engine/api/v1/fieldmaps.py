@@ -88,10 +88,13 @@ async def create_field_map(
     try:
         fm = registry.save_map(body, created_by=user.user_id)
     except FieldMapValidationError as e:
-        raise HTTPException(status_code=422, detail={
-            "code": "validation_error",
-            "message": str(e),
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation_error",
+                "message": str(e),
+            },
+        )
     return fm.model_dump(mode="json")
 
 
@@ -106,10 +109,13 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
     try:
         fm = registry.get_map(standard)
     except FieldMapNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Field map for standard '{standard}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Field map for standard '{standard}' not found",
+            },
+        )
     return fm.model_dump(mode="json")
 
 
@@ -126,10 +132,13 @@ async def get_source_field_map(
     try:
         fm = registry.get_map(standard, source=source)
     except FieldMapNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Field map for '{standard}/{source}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Field map for '{standard}/{source}' not found",
+            },
+        )
     return fm.model_dump(mode="json")
 
 
@@ -143,10 +152,13 @@ async def delete_source_field_map(
 ):
     """Delete a source-specific field map override."""
     if not registry.map_exists(standard, source=source):
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Field map for '{standard}/{source}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Field map for '{standard}/{source}' not found",
+            },
+        )
     registry.delete_map(standard, source=source)
 
 

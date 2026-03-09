@@ -94,10 +94,13 @@ async def create_destination(
 ):
     """Create an alert destination."""
     if store.get(body.name, _DATA_KEY) is not None:
-        raise HTTPException(status_code=409, detail={
-            "code": "conflict",
-            "message": f"Alert destination '{body.name}' already exists",
-        })
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": f"Alert destination '{body.name}' already exists",
+            },
+        )
     _write_destination(store, body)
     return body
 
@@ -111,10 +114,13 @@ async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
     """Get an alert destination by name."""
     data = store.get(name, _DATA_KEY)
     if data is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Alert destination '{name}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Alert destination '{name}' not found",
+            },
+        )
     return AlertDestination(name=name, **data)
 
 
@@ -143,10 +149,13 @@ async def update_destination(
 async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore):
     """Delete an alert destination."""
     if store.get(name, _DATA_KEY) is None:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Alert destination '{name}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Alert destination '{name}' not found",
+            },
+        )
     store.delete(name, _DATA_KEY)
 
 
@@ -155,11 +164,15 @@ async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore
 
 def _write_destination(store, dest: AlertDestination) -> None:
     """Write destination as a single "data" key within its YAML table."""
-    store.set(dest.name, _DATA_KEY, {
-        "url": dest.url,
-        "description": dest.description,
-        "enabled": dest.enabled,
-    })
+    store.set(
+        dest.name,
+        _DATA_KEY,
+        {
+            "url": dest.url,
+            "description": dest.description,
+            "enabled": dest.enabled,
+        },
+    )
 
 
 def _url_scheme(url: str) -> str:

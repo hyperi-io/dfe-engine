@@ -81,8 +81,11 @@ class TestAddVersion:
             {"name": "severity", "type": "string", "attribute": ["lowcardinality"]},
         ]
         SchemaManager.add_version(
-            versioned_schema, "1.1.0", new_cols,
-            type="addition", summary="Added severity",
+            versioned_schema,
+            "1.1.0",
+            new_cols,
+            type="addition",
+            summary="Added severity",
         )
         # Verify version was added
         meta = SchemaLoader.load_version_metadata(versioned_schema)
@@ -96,18 +99,22 @@ class TestAddVersion:
 
     def test_set_current_true(self, versioned_schema):
         SchemaManager.add_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             [{"name": "ts", "type": "datetime"}],
-            type="model", set_current=True,
+            type="model",
+            set_current=True,
         )
         data = yaml_load(versioned_schema)
         assert data["current"] == "2.0.0"
 
     def test_set_current_false(self, versioned_schema):
         SchemaManager.add_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             [{"name": "ts", "type": "datetime"}],
-            type="model", set_current=False,
+            type="model",
+            set_current=False,
         )
         data = yaml_load(versioned_schema)
         assert data["current"] == "1.0.0"  # Unchanged
@@ -115,21 +122,24 @@ class TestAddVersion:
     def test_refuse_duplicate_version(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="already exists"):
             SchemaManager.add_version(
-                versioned_schema, "1.0.0",
+                versioned_schema,
+                "1.0.0",
                 [{"name": "ts", "type": "datetime"}],
             )
 
     def test_validates_columns(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="validation failed"):
             SchemaManager.add_version(
-                versioned_schema, "1.1.0",
+                versioned_schema,
+                "1.1.0",
                 [{"name": "bad_col", "type": "nonexistent_type"}],
             )
 
     def test_skip_validation(self, versioned_schema):
         # Should not raise even with invalid type
         SchemaManager.add_version(
-            versioned_schema, "1.1.0",
+            versioned_schema,
+            "1.1.0",
             [{"name": "col", "type": "nonexistent_type"}],
             validate=False,
         )
@@ -138,7 +148,8 @@ class TestAddVersion:
 
     def test_preserves_existing_versions(self, versioned_schema):
         SchemaManager.add_version(
-            versioned_schema, "1.1.0",
+            versioned_schema,
+            "1.1.0",
             [{"name": "ts", "type": "datetime"}],
         )
         # Original version still intact
@@ -157,7 +168,8 @@ class TestAddVersion:
 
     def test_auto_generates_date(self, versioned_schema):
         SchemaManager.add_version(
-            versioned_schema, "1.1.0",
+            versioned_schema,
+            "1.1.0",
             [{"name": "ts", "type": "datetime"}],
         )
         data = yaml_load(versioned_schema)
@@ -167,7 +179,8 @@ class TestAddVersion:
     def test_file_not_found(self, tmp_path):
         with pytest.raises(SchemaLoadError, match="not found"):
             SchemaManager.add_version(
-                tmp_path / "missing.yaml", "1.0.0",
+                tmp_path / "missing.yaml",
+                "1.0.0",
                 [{"name": "ts", "type": "datetime"}],
             )
 
@@ -178,9 +191,11 @@ class TestAddVersion:
 class TestCloneVersion:
     def test_clone_from_explicit_version(self, versioned_schema):
         result = SchemaManager.clone_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             source_version="1.0.0",
-            type="model", summary="Cloned from 1.0.0",
+            type="model",
+            summary="Cloned from 1.0.0",
         )
         assert len(result) == 3
         assert result[0].name == "event_time"
@@ -191,8 +206,10 @@ class TestCloneVersion:
 
     def test_clone_from_current(self, multi_version_schema):
         result = SchemaManager.clone_version(
-            multi_version_schema, "2.0.0",
-            type="model", summary="Major revision",
+            multi_version_schema,
+            "2.0.0",
+            type="model",
+            summary="Major revision",
         )
         # current is 1.1.0 which has 3 columns
         assert len(result) == 3
@@ -202,20 +219,23 @@ class TestCloneVersion:
     def test_refuse_duplicate_new_version(self, multi_version_schema):
         with pytest.raises(SchemaVersionError, match="already exists"):
             SchemaManager.clone_version(
-                multi_version_schema, "1.0.0",
+                multi_version_schema,
+                "1.0.0",
                 source_version="1.1.0",
             )
 
     def test_source_version_not_found(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="not found"):
             SchemaManager.clone_version(
-                versioned_schema, "2.0.0",
+                versioned_schema,
+                "2.0.0",
                 source_version="9.9.9",
             )
 
     def test_modification_add(self, versioned_schema):
         result = SchemaManager.clone_version(
-            versioned_schema, "1.1.0",
+            versioned_schema,
+            "1.1.0",
             source_version="1.0.0",
             column_modifications=[
                 {"action": "add", "column": {"name": "severity", "type": "string"}},
@@ -226,7 +246,8 @@ class TestCloneVersion:
 
     def test_modification_remove(self, versioned_schema):
         result = SchemaManager.clone_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             source_version="1.0.0",
             type="model",
             column_modifications=[
@@ -239,7 +260,8 @@ class TestCloneVersion:
 
     def test_modification_update(self, versioned_schema):
         result = SchemaManager.clone_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             source_version="1.0.0",
             type="model",
             column_modifications=[
@@ -252,7 +274,8 @@ class TestCloneVersion:
     def test_modification_remove_nonexistent_raises(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="not found for removal"):
             SchemaManager.clone_version(
-                versioned_schema, "2.0.0",
+                versioned_schema,
+                "2.0.0",
                 source_version="1.0.0",
                 column_modifications=[
                     {"action": "remove", "name": "nonexistent"},
@@ -261,7 +284,8 @@ class TestCloneVersion:
 
     def test_returns_schema_columns(self, versioned_schema):
         result = SchemaManager.clone_version(
-            versioned_schema, "2.0.0",
+            versioned_schema,
+            "2.0.0",
             source_version="1.0.0",
         )
         assert all(isinstance(c, SchemaColumn) for c in result)
@@ -305,7 +329,8 @@ class TestCreateMetaSchema:
     def test_creates_parent_dirs(self, tmp_path):
         path = tmp_path / "deep" / "nested" / "schema.yaml"
         SchemaManager.create_meta_schema(
-            path, [{"name": "ts", "type": "datetime"}],
+            path,
+            [{"name": "ts", "type": "datetime"}],
         )
         assert path.exists()
 
@@ -352,7 +377,9 @@ class TestCloneMetaSchema:
     def test_clone_explicit_version(self, multi_version_schema, tmp_path):
         dest = tmp_path / "cloned.yaml"
         SchemaManager.clone_meta_schema(
-            multi_version_schema, dest, source_version="1.0.0",
+            multi_version_schema,
+            dest,
+            source_version="1.0.0",
         )
         cols = SchemaLoader.load_columns(dest)
         assert len(cols) == 2  # 1.0.0 only has 2 columns
@@ -397,20 +424,24 @@ class TestIntegration:
 
         # Add a second version with extra column
         SchemaManager.add_version(
-            path, "1.1.0",
+            path,
+            "1.1.0",
             [
                 {"name": "ts", "type": "datetime", "order": 0},
                 {"name": "user", "type": "string"},
                 {"name": "action", "type": "string", "attribute": ["lowcardinality"]},
             ],
-            type="addition", summary="Added action",
+            type="addition",
+            summary="Added action",
         )
 
         # Clone v1.1.0 to v2.0.0, removing user column
         result = SchemaManager.clone_version(
-            path, "2.0.0",
+            path,
+            "2.0.0",
             source_version="1.1.0",
-            type="model", summary="Removed user",
+            type="model",
+            summary="Removed user",
             column_modifications=[{"action": "remove", "name": "user"}],
         )
         assert len(result) == 2
@@ -434,7 +465,8 @@ class TestIntegration:
 
         # Add a version to the clone
         SchemaManager.clone_version(
-            clone, "1.1.0",
+            clone,
+            "1.1.0",
             source_version="1.0.0",
             column_modifications=[
                 {"action": "add", "column": {"name": "extra", "type": "integer"}},

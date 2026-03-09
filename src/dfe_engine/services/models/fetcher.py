@@ -70,9 +70,7 @@ class FetcherSourceConfig(BaseSourceConfig):
     )
     base_url: str = Field(default="", description="API base URL")
     auth: FetcherAuthConfig = Field(default_factory=FetcherAuthConfig)
-    poll_interval_secs: int = Field(
-        default=300, ge=10, description="Seconds between API polls"
-    )
+    poll_interval_secs: int = Field(default=300, ge=10, description="Seconds between API polls")
     batch_size: int = Field(default=1000, ge=1, description="Max records per API call")
 
 

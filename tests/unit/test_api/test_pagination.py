@@ -1,6 +1,5 @@
 """Tests for pagination models and helpers."""
 
-
 from dfe_engine.api.pagination import PaginatedResponse, apply_search, apply_sort
 
 

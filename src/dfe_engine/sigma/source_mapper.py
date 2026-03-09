@@ -89,9 +89,7 @@ class SigmaSourceMapper:
             return {}
         return dict(source.sigma.custom_mappings)
 
-    def get_schema_metadata(
-        self, source_name: str
-    ) -> dict[str, dict[str, str | list[str] | None]]:
+    def get_schema_metadata(self, source_name: str) -> dict[str, dict[str, str | list[str] | None]]:
         """Get schema column metadata for a source.
 
         Returns a dict keyed by column name with type info:
@@ -109,9 +107,7 @@ class SigmaSourceMapper:
         try:
             result = builder.build(source)
         except Exception as e:
-            logger.warning(
-                f"Failed to build schema for source '{source_name}': {e}"
-            )
+            logger.warning(f"Failed to build schema for source '{source_name}': {e}")
             return {}
 
         metadata: dict[str, dict[str, str | list[str] | None]] = {}
@@ -141,9 +137,7 @@ class SigmaSourceMapper:
             return None
 
         config = DDLConfig(db=db)
-        return self._ddl_gen.generate_sigma_view(
-            source.table_name, mappings, config
-        )
+        return self._ddl_gen.generate_sigma_view(source.table_name, mappings, config)
 
     def generate_all_sigma_views(
         self,
@@ -156,15 +150,11 @@ class SigmaSourceMapper:
             Dict mapping source_name → Sigma view DDL string.
         """
         views: dict[str, str] = {}
-        for source in self._source_registry.get_all_sources(
-            enabled_only=enabled_only
-        ):
+        for source in self._source_registry.get_all_sources(enabled_only=enabled_only):
             mappings = self._get_mappings_for_source(source)
             if mappings:
                 config = DDLConfig(db=db)
-                ddl = self._ddl_gen.generate_sigma_view(
-                    source.table_name, mappings, config
-                )
+                ddl = self._ddl_gen.generate_sigma_view(source.table_name, mappings, config)
                 views[source.source] = ddl
 
         return views

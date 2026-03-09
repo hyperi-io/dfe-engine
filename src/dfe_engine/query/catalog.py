@@ -289,9 +289,7 @@ class ViewCatalog:
 
         if label not in self._cache:
             available = sorted(self._cache.keys())
-            raise KeyError(
-                f"View '{label}' not found. Available views: {available}"
-            )
+            raise KeyError(f"View '{label}' not found. Available views: {available}")
 
         return self._cache[label]
 

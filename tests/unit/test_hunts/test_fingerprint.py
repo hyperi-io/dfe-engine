@@ -1,6 +1,5 @@
 """Tests for query fingerprinting."""
 
-
 from dfe_engine.hunts.fingerprint import fingerprint_query, normalize_query
 
 

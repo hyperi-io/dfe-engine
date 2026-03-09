@@ -314,8 +314,7 @@ class TestSqlOnlyRules:
         rc = RuleCreate(
             name="Test",
             user_sql=(
-                "SELECT 1 FROM db.tbl "
-                "WHERE _timestamp > '2026-01-01' AND process_name = 'cmd.exe'"
+                "SELECT 1 FROM db.tbl WHERE _timestamp > '2026-01-01' AND process_name = 'cmd.exe'"
             ),
         )
         rule = Rule.from_create(rc, rule_id="ts_01")
@@ -375,9 +374,7 @@ class TestCombinedSqlCel:
             name="Complex Combo",
             user_sql="SELECT * FROM db.tbl WHERE event_type = 'login'",
             cel_filter=(
-                'src_ip.startsWith("10.") && '
-                'user_agent.contains("bot") && '
-                "failed_attempts > 5"
+                'src_ip.startsWith("10.") && user_agent.contains("bot") && failed_attempts > 5'
             ),
         )
         rule = Rule.from_create(rc, rule_id="complex_01")
@@ -392,8 +389,7 @@ class TestCombinedSqlCel:
         rc = RuleCreate(
             name="Time Strip",
             user_sql=(
-                "SELECT 1 FROM db.tbl "
-                "WHERE _timestamp >= '2026-01-01' AND event_type = 'error'"
+                "SELECT 1 FROM db.tbl WHERE _timestamp >= '2026-01-01' AND event_type = 'error'"
             ),
             cel_filter="count > 100",
         )
@@ -414,7 +410,7 @@ class TestCelTranspilationEdgeCases:
         rule = Rule.from_create(
             RuleCreate(
                 name="Quote Test",
-                cel_filter="message == \"it's a test\"",
+                cel_filter='message == "it\'s a test"',
                 source="logs",
             ),
             rule_id="quote_01",
@@ -446,10 +442,7 @@ class TestCelTranspilationEdgeCases:
         rule = Rule.from_create(
             RuleCreate(
                 name="Mixed",
-                cel_filter=(
-                    'count > 100 && ratio >= 0.5 && '
-                    'name == "test" && is_active == true'
-                ),
+                cel_filter=('count > 100 && ratio >= 0.5 && name == "test" && is_active == true'),
                 source="data",
             ),
             rule_id="mix_01",
@@ -504,9 +497,7 @@ class TestCelTranspilationEdgeCases:
             RuleCreate(
                 name="Multi Method",
                 cel_filter=(
-                    'path.startsWith("/api") && '
-                    'path.contains("admin") && '
-                    '!path.endsWith(".css")'
+                    'path.startsWith("/api") && path.contains("admin") && !path.endsWith(".css")'
                 ),
                 source="web_logs",
             ),
@@ -821,9 +812,7 @@ class TestRealWorldPatterns:
                 name="Brute Force Login",
                 severity="critical",
                 cel_filter=(
-                    'event_type == "authentication" && '
-                    'outcome == "failure" && '
-                    "failed_count > 10"
+                    'event_type == "authentication" && outcome == "failure" && failed_count > 10'
                 ),
                 source="auth_logs",
             ),
@@ -880,7 +869,7 @@ class TestRealWorldPatterns:
                 user_sql="SELECT * FROM prod.web_access_logs WHERE status_code >= 400",
                 cel_filter=(
                     'request_uri.contains("UNION") || '
-                    "request_uri.contains(\"'--\") || "
+                    'request_uri.contains("\'--") || '
                     'request_uri.contains("OR 1=1")'
                 ),
             ),

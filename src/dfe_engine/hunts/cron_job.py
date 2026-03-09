@@ -381,15 +381,14 @@ class CronJob:
 
         # Parse optional alert grouping config
         grouping_data = hunt_data.get("alert_grouping")
-        alert_grouping = (
-            AlertGroupingConfig(**grouping_data) if grouping_data else None
-        )
+        alert_grouping = AlertGroupingConfig(**grouping_data) if grouping_data else None
 
         # Parse optional scoring config
         scoring_data = hunt_data.get("scoring")
         scoring = None
         if scoring_data:
             from .scoring import ScoringConfig
+
             scoring = ScoringConfig(**scoring_data)
 
         hunt = Hunt(
@@ -542,9 +541,7 @@ class CronJob:
                         hunt.execute_hunt, customer, scheduled_start_time
                     )
             else:
-                result = await asyncio.to_thread(
-                    hunt.execute_hunt, customer, scheduled_start_time
-                )
+                result = await asyncio.to_thread(hunt.execute_hunt, customer, scheduled_start_time)
 
             # Backpressure signal: compare execution duration to cron interval
             execution_seconds = result.get("total_execution_time", 0)
@@ -576,7 +573,10 @@ class CronJob:
             return None
 
     async def add_cron_job(
-        self, job_function: Callable, cron_expression: str, job_name: str,
+        self,
+        job_function: Callable,
+        cron_expression: str,
+        job_name: str,
         jitter: int = 0,
     ):
         """

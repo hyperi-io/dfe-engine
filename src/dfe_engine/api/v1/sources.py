@@ -116,16 +116,22 @@ async def create_source(
     """Create a new source from a source definition dict."""
     name = body.get("source")
     if not name:
-        raise HTTPException(status_code=422, detail={
-            "code": "validation_error",
-            "message": "'source' field is required",
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation_error",
+                "message": "'source' field is required",
+            },
+        )
 
     if registry.source_exists(name):
-        raise HTTPException(status_code=409, detail={
-            "code": "conflict",
-            "message": f"Source '{name}' already exists",
-        })
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": f"Source '{name}' already exists",
+            },
+        )
 
     source = registry.save_source(body, created_by=user.user_id)
     return SourceResponse(source=source.source, message="created")
@@ -142,10 +148,13 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Source '{name}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        )
     return source.model_dump(mode="json")
 
 
@@ -162,10 +171,13 @@ async def update_source(
 ):
     """Update an existing source definition."""
     if not registry.source_exists(name):
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Source '{name}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        )
 
     body["source"] = name  # Ensure name matches path
     source = registry.save_source(body, created_by=user.user_id)
@@ -180,10 +192,13 @@ async def update_source(
 async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
     """Delete a source by name."""
     if not registry.source_exists(name):
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Source '{name}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        )
     registry.delete_source(name)
 
 
@@ -199,10 +214,13 @@ async def bulk_action(
 ):
     """Perform a bulk action (enable, disable, delete) on multiple sources."""
     if body.action not in ("enable", "disable", "delete"):
-        raise HTTPException(status_code=422, detail={
-            "code": "validation_error",
-            "message": f"Unknown action '{body.action}'. Must be: enable, disable, delete",
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "validation_error",
+                "message": f"Unknown action '{body.action}'. Must be: enable, disable, delete",
+            },
+        )
 
     succeeded: list[str] = []
     failed: list[dict[str, str]] = []
@@ -243,7 +261,9 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummary:
         display_name=raw.get("display_name"),
         description=raw.get("description"),
         enabled=raw.get("enabled", True),
-        header_type=raw.get("header", {}).get("type") if isinstance(raw.get("header"), dict) else None,
+        header_type=raw.get("header", {}).get("type")
+        if isinstance(raw.get("header"), dict)
+        else None,
         has_transform=raw.get("transform") is not None,
         has_fetcher=raw.get("fetcher") is not None,
         mapping_standards=raw.get("mapping_standards", []),
