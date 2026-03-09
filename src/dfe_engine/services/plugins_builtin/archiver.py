@@ -62,9 +62,7 @@ def _validate_archiver(config: Any, errors: list[str], warnings: list[str]) -> N
             )
 
     if config.routing.mode == "expression" and not config.routing.expression_fields:
-        errors.append(
-            "routing.mode is 'expression' but no expression_fields configured"
-        )
+        errors.append("routing.mode is 'expression' but no expression_fields configured")
 
 
 _sizing_overrides: dict[str, dict[str, Any]] = {

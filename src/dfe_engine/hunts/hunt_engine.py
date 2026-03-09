@@ -123,9 +123,7 @@ class HuntEngine:
         self._destination_registry = AlertDestinationRegistry(directory=dest_dir)
         if hunts_cfg.alert_destinations:
             self._destination_registry.load_from_dict(hunts_cfg.alert_destinations)
-            logger.info(
-                f"HuntEngine: loaded {len(self._destination_registry)} alert destinations"
-            )
+            logger.info(f"HuntEngine: loaded {len(self._destination_registry)} alert destinations")
 
         logger.info(
             f"HuntEngine scheduling_mode={hunts_cfg.scheduling_mode}, "
@@ -156,9 +154,7 @@ class HuntEngine:
                 logger.error(f"Rule directory not found: {rule_dir}")
                 continue
 
-            cron_job = await self._setup_cron_job(
-                hunt_dir, rule_dir, hunts_cfg, target_config
-            )
+            cron_job = await self._setup_cron_job(hunt_dir, rule_dir, hunts_cfg, target_config)
             if cron_job:
                 self._cron_jobs.append(cron_job)
 
@@ -176,9 +172,7 @@ class HuntEngine:
                     timeout=hunts_cfg.cron_task_timeout,
                 )
             except asyncio.TimeoutError:
-                logger.info(
-                    f"HuntEngine: timeout reached ({hunts_cfg.cron_task_timeout}s)."
-                )
+                logger.info(f"HuntEngine: timeout reached ({hunts_cfg.cron_task_timeout}s).")
         else:
             await self._stop_event.wait()
 
@@ -191,18 +185,14 @@ class HuntEngine:
 
         self._cron_jobs.clear()
 
-    async def _setup_cron_job(
-        self, hunt_dir: str, rule_dir: str, hunts_cfg, target_config: dict
-    ):
+    async def _setup_cron_job(self, hunt_dir: str, rule_dir: str, hunts_cfg, target_config: dict):
         """Set up a CronJob for a single hunt_dir/rule_dir pair."""
         from jinja2 import Environment, FileSystemLoader
 
         from .cron_job import CronJob
 
         try:
-            rules_env = Environment(
-                loader=FileSystemLoader(rule_dir), autoescape=True
-            )
+            rules_env = Environment(loader=FileSystemLoader(rule_dir), autoescape=True)
             resource_limits = {
                 "read_rows": hunts_cfg.resource_limit_read_rows,
                 "read_bytes": hunts_cfg.resource_limit_read_bytes,
@@ -223,9 +213,7 @@ class HuntEngine:
                 destination_registry=self._destination_registry,
             )
 
-            thread_tracking_path = os.path.join(
-                hunts_cfg.log_path, "thread_tracking.log"
-            )
+            thread_tracking_path = os.path.join(hunts_cfg.log_path, "thread_tracking.log")
             os.makedirs(hunts_cfg.log_path, exist_ok=True)
 
             await cron_job.add_hunts_from_directory(
@@ -239,14 +227,11 @@ class HuntEngine:
             await cron_job.start_scheduler()
 
             logger.info(
-                f"HuntEngine: started scheduler for {hunt_dir} "
-                f"with {len(cron_job.hunts)} hunts."
+                f"HuntEngine: started scheduler for {hunt_dir} with {len(cron_job.hunts)} hunts."
             )
             return cron_job
         except Exception:
-            logger.exception(
-                f"HuntEngine: failed to set up scheduler for {hunt_dir}."
-            )
+            logger.exception(f"HuntEngine: failed to set up scheduler for {hunt_dir}.")
             return None
 
     @staticmethod

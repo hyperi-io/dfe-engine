@@ -29,9 +29,19 @@ class TestTypeRegistryLoading:
 
     def test_all_primitives_present(self, registry: TypeRegistry):
         expected = {
-            "string", "text", "integer", "float", "boolean",
-            "datetime", "timestamp", "date", "ip", "uuid",
-            "json", "geo_point", "enum",
+            "string",
+            "text",
+            "integer",
+            "float",
+            "boolean",
+            "datetime",
+            "timestamp",
+            "date",
+            "ip",
+            "uuid",
+            "json",
+            "geo_point",
+            "enum",
         }
         assert set(registry.primitives) == expected
 
@@ -72,9 +82,7 @@ class TestResolveNormal:
 
     def test_datetime_default(self, registry: TypeRegistry):
         r = registry.resolve("datetime")
-        assert r == ResolvedType(
-            ch_type="Nullable(DateTime64(3,'UTC'))", codec="Delta, ZSTD(1)"
-        )
+        assert r == ResolvedType(ch_type="Nullable(DateTime64(3,'UTC'))", codec="Delta, ZSTD(1)")
 
     def test_timestamp_not_nullable(self, registry: TypeRegistry):
         r = registry.resolve("timestamp")
@@ -147,9 +155,7 @@ class TestResolveChOverride:
         assert r.codec is None
 
     def test_override_with_lowcardinality(self, registry: TypeRegistry):
-        r = registry.resolve(
-            "integer", attributes=["lowcardinality"], ch_override="UInt16"
-        )
+        r = registry.resolve("integer", attributes=["lowcardinality"], ch_override="UInt16")
         assert r.ch_type == "LowCardinality(UInt16)"
         assert r.codec is None
 
@@ -193,7 +199,9 @@ class TestValidateUseCase:
     def test_dimension_valid(self, registry: TypeRegistry, primitive: str):
         registry.validate_use_case(primitive, "dimension")
 
-    @pytest.mark.parametrize("primitive", ["float", "text", "datetime", "date", "json", "geo_point"])
+    @pytest.mark.parametrize(
+        "primitive", ["float", "text", "datetime", "date", "json", "geo_point"]
+    )
     def test_dimension_invalid(self, registry: TypeRegistry, primitive: str):
         with pytest.raises(InvalidUseCaseError):
             registry.validate_use_case(primitive, "dimension")
@@ -207,7 +215,9 @@ class TestValidateUseCase:
         with pytest.raises(InvalidUseCaseError):
             registry.validate_use_case(primitive, "fulltext")
 
-    @pytest.mark.parametrize("primitive", ["integer", "float", "datetime", "timestamp", "date", "ip"])
+    @pytest.mark.parametrize(
+        "primitive", ["integer", "float", "datetime", "timestamp", "date", "ip"]
+    )
     def test_range_valid(self, registry: TypeRegistry, primitive: str):
         registry.validate_use_case(primitive, "range")
 
@@ -267,36 +277,61 @@ class TestValidateAttribute:
 
 
 class TestValidateChOverride:
-    @pytest.mark.parametrize("override", [
-        "Int8", "Int16", "Int32", "Int64", "Int128", "Int256",
-        "UInt8", "UInt16", "UInt32", "UInt64",
-        "Float32", "Float64",
-        "String", "Bool", "Date", "Date32", "DateTime",
-        "IPv4", "IPv6", "UUID", "JSON",
-        "Point", "Ring", "Polygon", "MultiPolygon",
-        "Dynamic",
-    ])
+    @pytest.mark.parametrize(
+        "override",
+        [
+            "Int8",
+            "Int16",
+            "Int32",
+            "Int64",
+            "Int128",
+            "Int256",
+            "UInt8",
+            "UInt16",
+            "UInt32",
+            "UInt64",
+            "Float32",
+            "Float64",
+            "String",
+            "Bool",
+            "Date",
+            "Date32",
+            "DateTime",
+            "IPv4",
+            "IPv6",
+            "UUID",
+            "JSON",
+            "Point",
+            "Ring",
+            "Polygon",
+            "MultiPolygon",
+            "Dynamic",
+        ],
+    )
     def test_exact_types(self, registry: TypeRegistry, override: str):
         registry.validate_ch_override(override)
 
-    @pytest.mark.parametrize("override", [
-        "FixedString(16)",
-        "DateTime64(3)",
-        "DateTime64(6,'UTC')",
-        "Decimal(10,2)",
-        "Decimal32(4)",
-        "Decimal64(8)",
-        "Decimal128(18)",
-        "Enum8('a'=1,'b'=2)",
-        "Enum16('x'=1)",
-        "Array(String)",
-        "Map(String,Int64)",
-        "Tuple(String,Int64,Float64)",
-        "Nested(key String, value String)",
-        "AggregateFunction(groupBitmap, UInt32)",
-        "SimpleAggregateFunction(sum, Int64)",
-        "Variant(String, Int64)",
-    ])
+    @pytest.mark.parametrize(
+        "override",
+        [
+            "FixedString(16)",
+            "DateTime64(3)",
+            "DateTime64(6,'UTC')",
+            "Decimal(10,2)",
+            "Decimal32(4)",
+            "Decimal64(8)",
+            "Decimal128(18)",
+            "Enum8('a'=1,'b'=2)",
+            "Enum16('x'=1)",
+            "Array(String)",
+            "Map(String,Int64)",
+            "Tuple(String,Int64,Float64)",
+            "Nested(key String, value String)",
+            "AggregateFunction(groupBitmap, UInt32)",
+            "SimpleAggregateFunction(sum, Int64)",
+            "Variant(String, Int64)",
+        ],
+    )
     def test_parameterised_types(self, registry: TypeRegistry, override: str):
         registry.validate_ch_override(override)
 

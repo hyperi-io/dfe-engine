@@ -36,9 +36,7 @@ class ViewGenerator:
         self._fm_registry = field_map_registry
         self._ddl_gen = DDLGenerator(type_registry or TypeRegistry.default())
 
-    def _resolve_map(
-        self, standard: str, source_name: str | None
-    ) -> dict[str, str]:
+    def _resolve_map(self, standard: str, source_name: str | None) -> dict[str, str]:
         """Load and resolve a field map for a standard + source.
 
         Returns the merged mappings dict (default + source-specific).
@@ -82,9 +80,7 @@ class ViewGenerator:
         if not mappings:
             return None
 
-        return self._ddl_gen.generate_view(
-            table_name, mappings, standard, config
-        )
+        return self._ddl_gen.generate_view(table_name, mappings, standard, config)
 
     def generate_views_for_source(
         self,

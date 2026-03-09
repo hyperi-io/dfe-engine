@@ -346,8 +346,7 @@ class QueryClient:
             store=response.headers.get("X-Store"),
             truncated=response.headers.get("X-Truncated", "false").lower() == "true",
             cached=response.headers.get("X-Cached", "false").lower() == "true",
-            explain_duration_ms=int(response.headers.get("X-Explain-Duration-Ms", 0))
-            or None,
+            explain_duration_ms=int(response.headers.get("X-Explain-Duration-Ms", 0)) or None,
             request_id=response.headers.get("X-Request-Id"),
         )
 

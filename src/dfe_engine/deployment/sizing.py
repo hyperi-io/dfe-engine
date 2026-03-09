@@ -134,9 +134,7 @@ def _ensure_compat_dicts() -> None:
             DEFAULT_SIZES[name] = TShirtSize.small
 
 
-def apply_sizing(
-    service: str, size: TShirtSize | str
-) -> tuple[dict[str, Any], dict[str, Any]]:
+def apply_sizing(service: str, size: TShirtSize | str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply t-shirt sizing to get both deployment and service config overrides.
 
     Args:

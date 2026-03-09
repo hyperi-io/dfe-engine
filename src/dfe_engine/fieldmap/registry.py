@@ -91,8 +91,7 @@ class FieldMapRegistry:
         if cls._instance is None:
             if field_maps_directory is None:
                 raise FieldMapError(
-                    "field_maps_directory is required on first call "
-                    "to get_instance()"
+                    "field_maps_directory is required on first call to get_instance()"
                 )
             cls._instance = FieldMapRegistry(
                 field_maps_directory=field_maps_directory,
@@ -181,9 +180,7 @@ class FieldMapRegistry:
             try:
                 field_map = FieldMap.model_validate(field_map)
             except Exception as e:
-                raise FieldMapValidationError(
-                    f"Invalid field map definition: {e}"
-                ) from e
+                raise FieldMapValidationError(f"Invalid field map definition: {e}") from e
 
         config_data = field_map.to_yaml_dict()
         table = self._table_name(field_map.standard, field_map.source)
@@ -281,20 +278,20 @@ class FieldMapRegistry:
             yaml_path = self._directory / parsed_std / f"{name}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
             except OSError:
                 updated_at = None
 
-            results.append({
-                "standard": fm.standard,
-                "source": fm.source,
-                "is_default": fm.is_default,
-                "version": fm.version,
-                "mapping_count": len(fm.mappings),
-                "updated_at": updated_at,
-            })
+            results.append(
+                {
+                    "standard": fm.standard,
+                    "source": fm.source,
+                    "is_default": fm.is_default,
+                    "version": fm.version,
+                    "mapping_count": len(fm.mappings),
+                    "updated_at": updated_at,
+                }
+            )
 
         return results
 
@@ -367,19 +364,13 @@ class FieldMapRegistry:
 
                 target = target_subdir / item.name
                 if target.exists() and not overwrite:
-                    logger.debug(
-                        f"Skipping existing field map: "
-                        f"{standard_dir.name}/{item.name}"
-                    )
+                    logger.debug(f"Skipping existing field map: {standard_dir.name}/{item.name}")
                     continue
 
                 content = item.read_text(encoding="utf-8")
                 target.write_text(content, encoding="utf-8")
                 count += 1
-                logger.info(
-                    f"Seeded default field map: "
-                    f"{standard_dir.name}/{item.name}"
-                )
+                logger.info(f"Seeded default field map: {standard_dir.name}/{item.name}")
 
         if count > 0:
             self._store._refresh_all()
@@ -390,9 +381,7 @@ class FieldMapRegistry:
     # Change Callbacks & Git (passthrough)
     # -----------------------------------------------------------------
 
-    def on_change(
-        self, standard: str, source: str | None, callback: Any
-    ) -> None:
+    def on_change(self, standard: str, source: str | None, callback: Any) -> None:
         """Register a callback for when a field map changes."""
         table = self._table_name(standard, source)
         self._store.on_change(table, callback)

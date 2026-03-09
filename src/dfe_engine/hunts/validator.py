@@ -66,11 +66,12 @@ class HuntValidator:
         # Source model: hunts can use 'source' (resolved via SourceRegistry) OR
         # 'global_source_table_name' (direct table reference). At least one required.
         global_source_table_name = hunt_data.get("global_source_table_name")
-        has_source_ref = any(
-            r.get("source") for r in hunt_data.get("rules", [])
-        )
+        has_source_ref = any(r.get("source") for r in hunt_data.get("rules", []))
         if not has_source_ref:
-            if not isinstance(global_source_table_name, str) or not global_source_table_name.strip():
+            if (
+                not isinstance(global_source_table_name, str)
+                or not global_source_table_name.strip()
+            ):
                 raise ValueError(
                     "Either 'global_source_table_name' or per-rule 'source' field is required."
                 )
@@ -164,9 +165,7 @@ class HuntValidator:
         min_interval = hunt_data.get("min_interval_seconds")
         if min_interval is not None:
             if not isinstance(min_interval, (int, float)) or min_interval < 0:
-                raise ValueError(
-                    f"Invalid 'min_interval_seconds': {min_interval}. Must be >= 0."
-                )
+                raise ValueError(f"Invalid 'min_interval_seconds': {min_interval}. Must be >= 0.")
 
     @staticmethod
     def validate_rule_syntax(rule_path: str, env: Environment):

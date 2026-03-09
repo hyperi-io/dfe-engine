@@ -100,11 +100,22 @@ def alert_state_db(ch_client, test_db):
     yield mgr
 
 
-RESULTS_COLS = frozenset({
-    "_timestamp", "_timestamp_load", "_org_id", "_uuid", "_source",
-    "matched_uuid", "rule_id", "rule_name", "source_table",
-    "hunt_name", "severity", "_json",
-})
+RESULTS_COLS = frozenset(
+    {
+        "_timestamp",
+        "_timestamp_load",
+        "_org_id",
+        "_uuid",
+        "_source",
+        "matched_uuid",
+        "rule_id",
+        "rule_name",
+        "source_table",
+        "hunt_name",
+        "severity",
+        "_json",
+    }
+)
 
 
 # ── Grouping Query Tests ───────────────────────────────────────
@@ -253,23 +264,35 @@ class TestAlertStateCooldown:
         mgr.record_fire(ch_client, hunt, "rule_1", "acme", group_key=group_a)
 
         # Group A blocked, group B still allowed
-        assert mgr.check_cooldown(
-            ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_a
-        ) is False
-        assert mgr.check_cooldown(
-            ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_b
-        ) is True
+        assert (
+            mgr.check_cooldown(
+                ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_a
+            )
+            is False
+        )
+        assert (
+            mgr.check_cooldown(
+                ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_b
+            )
+            is True
+        )
 
         # Fire group B
         mgr.record_fire(ch_client, hunt, "rule_1", "acme", group_key=group_b)
 
         # Both now blocked
-        assert mgr.check_cooldown(
-            ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_a
-        ) is False
-        assert mgr.check_cooldown(
-            ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_b
-        ) is False
+        assert (
+            mgr.check_cooldown(
+                ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_a
+            )
+            is False
+        )
+        assert (
+            mgr.check_cooldown(
+                ch_client, hunt, "rule_1", "acme", timedelta(hours=1), group_key=group_b
+            )
+            is False
+        )
 
     def test_ensure_table_idempotent(self, ch_client, test_db):
         """Two ensure_table calls don't error."""

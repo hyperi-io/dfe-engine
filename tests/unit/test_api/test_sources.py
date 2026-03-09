@@ -15,9 +15,7 @@ class TestListSources:
         assert data["page"] == 1
         assert data["total_pages"] == 1
 
-    def test_list_after_create(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_list_after_create(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get("/api/v1/sources", headers=admin_headers)
         assert resp.status_code == 200
@@ -36,9 +34,7 @@ class TestListSources:
             )
 
         # Page 1, 2 per page
-        resp = client.get(
-            "/api/v1/sources?page=1&per_page=2", headers=admin_headers
-        )
+        resp = client.get("/api/v1/sources?page=1&per_page=2", headers=admin_headers)
         data = resp.json()
         assert len(data["items"]) == 2
         assert data["total"] == 5
@@ -47,9 +43,7 @@ class TestListSources:
         assert data["prev_page"] is None
 
         # Page 3 (last)
-        resp = client.get(
-            "/api/v1/sources?page=3&per_page=2", headers=admin_headers
-        )
+        resp = client.get("/api/v1/sources?page=3&per_page=2", headers=admin_headers)
         data = resp.json()
         assert len(data["items"]) == 1
         assert data["next_page"] is None
@@ -80,9 +74,7 @@ class TestListSources:
                 headers=admin_headers,
             )
 
-        resp = client.get(
-            "/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers
-        )
+        resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
         data = resp.json()
         names = [item["source"] for item in data["items"]]
         assert names == sorted(names)
@@ -99,18 +91,14 @@ class TestListSources:
 class TestCreateSource:
     """POST /api/v1/sources"""
 
-    def test_create_success(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_create_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         resp = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         assert resp.status_code == 201
         data = resp.json()
         assert data["source"] == "test_source"
         assert data["message"] == "created"
 
-    def test_create_duplicate(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_create_duplicate(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         assert resp.status_code == 409
@@ -133,9 +121,7 @@ class TestCreateSource:
 class TestGetSource:
     """GET /api/v1/sources/{name}"""
 
-    def test_get_existing(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_get_existing(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
         assert resp.status_code == 200
@@ -151,9 +137,7 @@ class TestGetSource:
 class TestUpdateSource:
     """PUT /api/v1/sources/{name}"""
 
-    def test_update_success(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_update_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.put(
             "/api/v1/sources/test_source",
@@ -179,9 +163,7 @@ class TestUpdateSource:
 class TestDeleteSource:
     """DELETE /api/v1/sources/{name}"""
 
-    def test_delete_success(
-        self, client: TestClient, admin_headers: dict, sample_source: dict
-    ):
+    def test_delete_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.delete("/api/v1/sources/test_source", headers=admin_headers)
         assert resp.status_code == 204

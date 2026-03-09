@@ -32,9 +32,11 @@ def _make_hunt(tmp_path, source_registry=None, **kwargs):
 def _make_env(template_sql="SELECT 1 FROM {{ source_table_name }}"):
     """Create a Jinja2 env with a test template."""
     return Environment(
-        loader=DictLoader({
-            "detect_priv_esc.jinja2": template_sql,
-        })
+        loader=DictLoader(
+            {
+                "detect_priv_esc.jinja2": template_sql,
+            }
+        )
     )
 
 
@@ -127,9 +129,11 @@ class TestSourceRegistryWiring:
             rules=[{"rule_name": "detect_priv_esc", "source": "aws_cloudtrail"}],
         )
         env = Environment(
-            loader=DictLoader({
-                "detect_priv_esc.jinja2": "SELECT 1 FROM {{ org_id }}.{{ source }}",
-            })
+            loader=DictLoader(
+                {
+                    "detect_priv_esc.jinja2": "SELECT 1 FROM {{ org_id }}.{{ source }}",
+                }
+            )
         )
 
         queries = hunt.convert_yaml_to_sql(env, "org1", {})
@@ -143,9 +147,7 @@ class TestSourceRegistryWiring:
         source_b.table_name = "table_b"
 
         registry = MagicMock()
-        registry.get_source.side_effect = lambda name: {
-            "src_a": source_a, "src_b": source_b
-        }[name]
+        registry.get_source.side_effect = lambda name: {"src_a": source_a, "src_b": source_b}[name]
 
         hunt = _make_hunt(
             tmp_path,

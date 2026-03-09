@@ -71,8 +71,7 @@ class TypeRegistry:
 
         # Pre-compile parameterised override patterns
         self._override_patterns: list[re.Pattern] = [
-            re.compile(f"^{pattern}$")
-            for pattern in self._ch_overrides.get("parameterised", [])
+            re.compile(f"^{pattern}$") for pattern in self._ch_overrides.get("parameterised", [])
         ]
         self._override_exact: set[str] = set(self._ch_overrides.get("exact", []))
 
@@ -123,8 +122,7 @@ class TypeRegistry:
         # Validate primitive exists
         if primitive not in self._primitives:
             raise UnknownPrimitiveError(
-                f"Unknown primitive '{primitive}'. "
-                f"Valid: {', '.join(sorted(self._primitives))}"
+                f"Unknown primitive '{primitive}'. Valid: {', '.join(sorted(self._primitives))}"
             )
 
         # Validate use_case constraint
@@ -192,14 +190,12 @@ class TypeRegistry:
         """
         if primitive not in self._primitives:
             raise UnknownPrimitiveError(
-                f"Unknown primitive '{primitive}'. "
-                f"Valid: {', '.join(sorted(self._primitives))}"
+                f"Unknown primitive '{primitive}'. Valid: {', '.join(sorted(self._primitives))}"
             )
 
         if use_case not in self._use_cases:
             raise InvalidUseCaseError(
-                f"Unknown use case '{use_case}'. "
-                f"Valid: {', '.join(sorted(self._use_cases))}"
+                f"Unknown use case '{use_case}'. Valid: {', '.join(sorted(self._use_cases))}"
             )
 
         valid = self._use_cases[use_case]["valid_primitives"]
@@ -218,14 +214,12 @@ class TypeRegistry:
         """
         if primitive not in self._primitives:
             raise UnknownPrimitiveError(
-                f"Unknown primitive '{primitive}'. "
-                f"Valid: {', '.join(sorted(self._primitives))}"
+                f"Unknown primitive '{primitive}'. Valid: {', '.join(sorted(self._primitives))}"
             )
 
         if attribute not in self._attributes:
             raise InvalidAttributeError(
-                f"Unknown attribute '{attribute}'. "
-                f"Valid: {', '.join(sorted(self._attributes))}"
+                f"Unknown attribute '{attribute}'. Valid: {', '.join(sorted(self._attributes))}"
             )
 
         valid = self._attributes[attribute]["valid_primitives"]

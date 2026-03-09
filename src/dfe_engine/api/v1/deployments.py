@@ -117,10 +117,13 @@ async def get_deployment(
     try:
         config = registry.get_config(service, instance)
     except DeploymentConfigNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Deployment config '{service}/{instance}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Deployment config '{service}/{instance}' not found",
+            },
+        )
     if isinstance(config, dict):
         return config
     return config.model_dump(mode="json")
@@ -164,10 +167,13 @@ async def delete_deployment(
     try:
         registry.get_config(service, instance)
     except DeploymentConfigNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Deployment config '{service}/{instance}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Deployment config '{service}/{instance}' not found",
+            },
+        )
     registry.delete_config(service, instance)
 
 
@@ -237,10 +243,13 @@ async def apply_size(
     /api/v1/services/{service}/{instance}.
     """
     if size not in _VALID_SIZES:
-        raise HTTPException(status_code=422, detail={
-            "code": "invalid_size",
-            "message": f"Invalid size '{size}'. Valid: {', '.join(sorted(_VALID_SIZES))}",
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "invalid_size",
+                "message": f"Invalid size '{size}'. Valid: {', '.join(sorted(_VALID_SIZES))}",
+            },
+        )
 
     try:
         service_overrides = registry.apply_size(
@@ -250,10 +259,13 @@ async def apply_size(
             created_by=user.user_id,
         )
     except (ValueError, KeyError) as e:
-        raise HTTPException(status_code=422, detail={
-            "code": "sizing_error",
-            "message": str(e),
-        })
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "sizing_error",
+                "message": str(e),
+            },
+        )
 
     return SizeResponse(
         service=service,

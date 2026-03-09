@@ -251,9 +251,7 @@ class CoercionConfig(BaseModel):
         ]
     )
     default_timezone: str = "UTC"
-    timezone_fields: list[str] = Field(
-        default_factory=lambda: ["tags_collector_timezone"]
-    )
+    timezone_fields: list[str] = Field(default_factory=lambda: ["tags_collector_timezone"])
     array_to_json: bool = True
     strict: bool = False
 
@@ -320,9 +318,7 @@ class LoaderConfig(BaseServiceConfig):
     buffer: LoaderBufferConfig = Field(default_factory=LoaderBufferConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     timestamp_dq: TimestampDqConfig = Field(default_factory=TimestampDqConfig)
-    field_sanitization: FieldSanitizationConfig = Field(
-        default_factory=FieldSanitizationConfig
-    )
+    field_sanitization: FieldSanitizationConfig = Field(default_factory=FieldSanitizationConfig)
     metadata: MetadataConfig = Field(default_factory=MetadataConfig)
     coercion: CoercionConfig = Field(default_factory=CoercionConfig)
     schema_cache: SchemaConfig = Field(

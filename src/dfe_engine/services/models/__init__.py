@@ -85,8 +85,12 @@ SERVICE_FETCHER = "fetcher"
 
 # Backward-compatible static sets (prefer plugins.valid_services() for dynamic lookup)
 VALID_SERVICES = {
-    SERVICE_RECEIVER, SERVICE_LOADER, SERVICE_ARCHIVER,
-    SERVICE_TRANSFORM_VECTOR, SERVICE_TRANSFORM_WASM, SERVICE_FETCHER,
+    SERVICE_RECEIVER,
+    SERVICE_LOADER,
+    SERVICE_ARCHIVER,
+    SERVICE_TRANSFORM_VECTOR,
+    SERVICE_TRANSFORM_WASM,
+    SERVICE_FETCHER,
 }
 
 # Backward-compatible config class mapping (prefer plugins.config_classes())

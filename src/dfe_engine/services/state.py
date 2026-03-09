@@ -37,9 +37,7 @@ class ServiceStatus(BaseModel):
 
 
 # Prometheus text format line pattern: metric_name{labels} value
-_PROM_LINE_RE = re.compile(
-    r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{[^}]*\})?\s+([\d.eE+-]+(?:nan|inf)?)"
-)
+_PROM_LINE_RE = re.compile(r"^([a-zA-Z_:][a-zA-Z0-9_:]*)(?:\{[^}]*\})?\s+([\d.eE+-]+(?:nan|inf)?)")
 
 
 def _parse_prometheus_text(text: str) -> dict[str, float]:
@@ -92,10 +90,14 @@ class ServiceStateClient:
         self.instance = instance
         self._timeout = timeout
         self._health_client = AsyncHttpClient(
-            base_url=self.base_url, timeout=timeout, retries=1,
+            base_url=self.base_url,
+            timeout=timeout,
+            retries=1,
         )
         self._metrics_client = AsyncHttpClient(
-            base_url=self.metrics_url, timeout=timeout, retries=1,
+            base_url=self.metrics_url,
+            timeout=timeout,
+            retries=1,
         )
 
     # -------------------------------------------------------------------------

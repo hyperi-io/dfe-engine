@@ -122,9 +122,7 @@ class ViewExecutor:
                 settings=settings,
             )
         except Exception as e:
-            raise ViewExecutionError(
-                f"Failed to execute view '{label}': {e}"
-            ) from e
+            raise ViewExecutionError(f"Failed to execute view '{label}': {e}") from e
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 
@@ -165,9 +163,7 @@ class ViewExecutor:
         """
         return self._catalog.get_view(label)
 
-    def _check_authorization(
-        self, view_def: ViewDefinition, auth: AuthContext
-    ) -> None:
+    def _check_authorization(self, view_def: ViewDefinition, auth: AuthContext) -> None:
         """Check if user is authorized to execute this view."""
         from dfe_engine.auth import authorize
         from dfe_engine.settings import get_settings
@@ -180,16 +176,13 @@ class ViewExecutor:
             enabled=settings.auth.enabled,
         )
         if not result.allowed:
-            raise AuthorizationError(
-                f"View '{view_def.label}': access denied ({result.reason})"
-            )
+            raise AuthorizationError(f"View '{view_def.label}': access denied ({result.reason})")
 
         # View-level role gate (separate from global RBAC)
         if view_def.required_roles:
             if not any(role in auth.roles for role in view_def.required_roles):
                 raise AuthorizationError(
-                    f"View '{view_def.label}' requires one of roles: "
-                    f"{view_def.required_roles}"
+                    f"View '{view_def.label}' requires one of roles: {view_def.required_roles}"
                 )
 
         # Non-tenant-isolated views require admin role
@@ -295,10 +288,7 @@ class ViewExecutor:
 
         if offset > 0:
             # Offset pagination
-            return (
-                f"SELECT * FROM {view_call} "
-                f"LIMIT {limit} OFFSET {offset}"
-            )
+            return f"SELECT * FROM {view_call} LIMIT {limit} OFFSET {offset}"
 
         # No pagination wrapping, but add outer limit if view doesn't have one
         return f"SELECT * FROM {view_call} LIMIT {limit}"

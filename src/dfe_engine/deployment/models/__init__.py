@@ -34,8 +34,12 @@ DEPLOY_FETCHER = "fetcher"
 
 # Backward-compatible static sets (prefer plugins.valid_services() for dynamic lookup)
 VALID_DEPLOY_SERVICES = {
-    DEPLOY_RECEIVER, DEPLOY_LOADER, DEPLOY_ARCHIVER,
-    DEPLOY_TRANSFORM_VECTOR, DEPLOY_TRANSFORM_WASM, DEPLOY_FETCHER,
+    DEPLOY_RECEIVER,
+    DEPLOY_LOADER,
+    DEPLOY_ARCHIVER,
+    DEPLOY_TRANSFORM_VECTOR,
+    DEPLOY_TRANSFORM_WASM,
+    DEPLOY_FETCHER,
 }
 
 # Backward-compatible config class mapping (prefer plugins.deployment_classes())

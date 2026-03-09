@@ -32,13 +32,16 @@ from dataclasses import dataclass, field
 
 
 # Common timestamp column patterns in DFE tables.
-_TIMESTAMP_COLUMNS = frozenset({
-    "timestamp",
-    "_timestamp",
-    "_timestamp_load",
-    "timestamp_load",
-    "@timestamp",
-})
+_TIMESTAMP_COLUMNS = frozenset(
+    {
+        "timestamp",
+        "_timestamp",
+        "_timestamp_load",
+        "timestamp_load",
+        "@timestamp",
+    }
+)
+
 
 def _build_time_bound_patterns(columns: frozenset[str]) -> list[re.Pattern]:
     """Build regex patterns for time-bound conditions from column names."""
@@ -158,17 +161,13 @@ class RuleRewriter:
         where_match = _WHERE_RE.search(sql)
         if where_match:
             raw_where = where_match.group(1).strip()
-            result.where_clause = self._strip_time_bounds(
-                raw_where, result.stripped_time_bounds
-            )
+            result.where_clause = self._strip_time_bounds(raw_where, result.stripped_time_bounds)
         else:
             result.warnings.append("No WHERE clause found in SQL.")
 
         return result
 
-    def _strip_time_bounds(
-        self, where_clause: str, stripped: list[str]
-    ) -> str:
+    def _strip_time_bounds(self, where_clause: str, stripped: list[str]) -> str:
         """Remove time-bound conditions from a WHERE clause.
 
         Args:
@@ -198,12 +197,8 @@ class RuleRewriter:
         # Remove trailing AND/OR
         clause = re.sub(r"\s+(?:AND|OR)\s*$", "", clause, flags=re.IGNORECASE)
         # Remove doubled AND/OR (from middle removal)
-        clause = re.sub(
-            r"\s+AND\s+AND\s+", " AND ", clause, flags=re.IGNORECASE
-        )
-        clause = re.sub(
-            r"\s+OR\s+OR\s+", " OR ", clause, flags=re.IGNORECASE
-        )
+        clause = re.sub(r"\s+AND\s+AND\s+", " AND ", clause, flags=re.IGNORECASE)
+        clause = re.sub(r"\s+OR\s+OR\s+", " OR ", clause, flags=re.IGNORECASE)
         # Remove AND/OR next to parentheses: ( AND ... or ... AND )
         clause = re.sub(r"\(\s*(?:AND|OR)\s+", "(", clause, flags=re.IGNORECASE)
         clause = re.sub(r"\s+(?:AND|OR)\s*\)", ")", clause, flags=re.IGNORECASE)

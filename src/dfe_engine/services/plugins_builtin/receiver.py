@@ -35,12 +35,9 @@ def _validate_receiver(config: Any, errors: list[str], warnings: list[str]) -> N
         errors.append("kafka.brokers is required when destinations.default is 'kafka'")
 
     if config.server.auth.mode == "bearer" and (
-        not config.server.auth.bearer.tokens
-        and not config.server.auth.bearer.secret_source
+        not config.server.auth.bearer.tokens and not config.server.auth.bearer.secret_source
     ):
-        warnings.append(
-            "auth.mode is 'bearer' but no tokens or secret_source configured"
-        )
+        warnings.append("auth.mode is 'bearer' but no tokens or secret_source configured")
 
     if config.server.auth.mode == "mtls" and not config.server.tls.enabled:
         errors.append("auth.mode is 'mtls' but TLS is not enabled")
@@ -53,8 +50,7 @@ def _validate_receiver(config: Any, errors: list[str], warnings: list[str]) -> N
         has_secret = config.server.tls.cert_secret and config.server.tls.key_secret
         if not has_file and not has_secret:
             errors.append(
-                "TLS enabled but neither cert_file/key_file "
-                "nor cert_secret/key_secret configured"
+                "TLS enabled but neither cert_file/key_file nor cert_secret/key_secret configured"
             )
 
     if config.grpc.enabled and config.grpc.bind_address == config.server.bind_address:

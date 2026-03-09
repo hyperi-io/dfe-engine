@@ -46,11 +46,14 @@ class DDLFileWriter:
             profile_version=self._profile_version(profile),
         )
         ddl = self._ddl_gen.generate_create_table("default", columns, config)
-        return self._replace_header(ddl, self._metadata_header(
-            name="dfe.default",
-            profile=profile,
-            description="Default ingestion table (profile columns only)",
-        ))
+        return self._replace_header(
+            ddl,
+            self._metadata_header(
+                name="dfe.default",
+                profile=profile,
+                description="Default ingestion table (profile columns only)",
+            ),
+        )
 
     def generate_profile_table(self, profile_name: str) -> str:
         """Generate DDL for a profile-only reference table."""
@@ -62,11 +65,14 @@ class DDLFileWriter:
         )
         table_name = f"_{profile_name}_profile"
         ddl = self._ddl_gen.generate_create_table(table_name, columns, config)
-        return self._replace_header(ddl, self._metadata_header(
-            name=f"Profile reference: {profile_name}",
-            profile=profile_name,
-            description=f"Reference DDL for the {profile_name} common header profile",
-        ))
+        return self._replace_header(
+            ddl,
+            self._metadata_header(
+                name=f"Profile reference: {profile_name}",
+                profile=profile_name,
+                description=f"Reference DDL for the {profile_name} common header profile",
+            ),
+        )
 
     @staticmethod
     def generate_checkpoint_table() -> str:
@@ -131,11 +137,14 @@ class DDLFileWriter:
             ttl_days=365,
         )
         ddl = self._ddl_gen.generate_create_table("detection", all_columns, config)
-        return self._replace_header(ddl, self._metadata_header(
-            name="dfe_hunts.detection",
-            profile=profile,
-            description="Hunt detection results (profile + detection columns)",
-        ))
+        return self._replace_header(
+            ddl,
+            self._metadata_header(
+                name="dfe_hunts.detection",
+                profile=profile,
+                description="Hunt detection results (profile + detection columns)",
+            ),
+        )
 
     # ── Batch generators ─────────────────────────────────────────────
 
@@ -172,7 +181,10 @@ class DDLFileWriter:
 
     @staticmethod
     def _metadata_header(
-        *, name: str, profile: str, description: str,
+        *,
+        name: str,
+        profile: str,
+        description: str,
     ) -> str:
         """Build the static metadata header block for a DDL file."""
         return (

@@ -260,19 +260,19 @@ class SourceRegistry:
             yaml_path = self._sources_directory / f"{table}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
             except OSError:
                 updated_at = None
 
-            results.append({
-                "source": source.source,
-                "display_name": source.display_name,
-                "enabled": source.enabled,
-                "header_type": source.header.type,
-                "updated_at": updated_at,
-            })
+            results.append(
+                {
+                    "source": source.source,
+                    "display_name": source.display_name,
+                    "enabled": source.enabled,
+                    "header_type": source.header.type,
+                    "updated_at": updated_at,
+                }
+            )
 
         return results
 
@@ -317,11 +317,13 @@ class SourceRegistry:
         rules = []
         for source in self.get_all_sources(enabled_only=True):
             if source.match:
-                rules.append({
-                    "field": source.match.field,
-                    "value": source.match.value,
-                    "source": source.source,
-                })
+                rules.append(
+                    {
+                        "field": source.match.field,
+                        "value": source.match.value,
+                        "source": source.source,
+                    }
+                )
         return rules
 
     # -----------------------------------------------------------------

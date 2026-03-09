@@ -153,10 +153,7 @@ class ExpressionValidator:
         if not m:
             return ExprValidationResult(
                 valid=False,
-                errors=[
-                    f"Expression must start with @directive: — "
-                    f"got: {expr[:60]!r}"
-                ],
+                errors=[f"Expression must start with @directive: — got: {expr[:60]!r}"],
             )
 
         directive = m.group("directive").lower()
@@ -168,8 +165,7 @@ class ExpressionValidator:
                 directive=directive,
                 body=body,
                 errors=[
-                    f"Unknown directive '@{directive}'. "
-                    f"Valid: {', '.join(sorted(DIRECTIVES))}"
+                    f"Unknown directive '@{directive}'. Valid: {', '.join(sorted(DIRECTIVES))}"
                 ],
             )
 

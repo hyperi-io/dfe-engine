@@ -118,22 +118,20 @@ class DeploymentConfigRegistry:
         for svc in sorted(valid_services(), key=len, reverse=True):
             prefix = f"{svc}-"
             if table.startswith(prefix):
-                instance = table[len(prefix):]
+                instance = table[len(prefix) :]
                 if instance:
                     return svc, instance
         # Unknown service: split on last hyphen (schema-less fallback)
         idx = table.rfind("-")
         if idx > 0 and idx < len(table) - 1:
-            return table[:idx], table[idx + 1:]
+            return table[:idx], table[idx + 1 :]
         return None
 
     # -------------------------------------------------------------------------
     # CRUD Operations
     # -------------------------------------------------------------------------
 
-    def get_config(
-        self, service: str, instance: str = "default"
-    ):
+    def get_config(self, service: str, instance: str = "default"):
         """Get a deployment configuration.
 
         Returns a typed model for registered services, raw dict for unknown ones.
@@ -234,17 +232,17 @@ class DeploymentConfigRegistry:
             yaml_path = self._config_directory / f"{table}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
             except OSError:
                 updated_at = None
 
-            results.append({
-                "service": svc,
-                "instance": inst,
-                "updated_at": updated_at,
-            })
+            results.append(
+                {
+                    "service": svc,
+                    "instance": inst,
+                    "updated_at": updated_at,
+                }
+            )
 
         return results
 
@@ -296,12 +294,8 @@ class DeploymentConfigRegistry:
                     parent = repo[commit.parents[0]]
                     parent_tree = repo[parent.tree]
                     try:
-                        parent_entry = parent_tree.lookup_path(
-                            repo.__getitem__, rel_path
-                        )
-                        current_entry = tree.lookup_path(
-                            repo.__getitem__, rel_path
-                        )
+                        parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
+                        current_entry = tree.lookup_path(repo.__getitem__, rel_path)
                         if parent_entry[1] == current_entry[1]:
                             continue
                     except KeyError:
@@ -310,14 +304,16 @@ class DeploymentConfigRegistry:
                 author_str = commit.author.decode("utf-8", errors="replace")
                 author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
 
-                history.append({
-                    "commit": commit.id.decode("ascii"),
-                    "message": commit.message.decode("utf-8", errors="replace").strip(),
-                    "author": author_name,
-                    "date": datetime.fromtimestamp(
-                        commit.author_time, tz=timezone.utc
-                    ).isoformat(),
-                })
+                history.append(
+                    {
+                        "commit": commit.id.decode("ascii"),
+                        "message": commit.message.decode("utf-8", errors="replace").strip(),
+                        "author": author_name,
+                        "date": datetime.fromtimestamp(
+                            commit.author_time, tz=timezone.utc
+                        ).isoformat(),
+                    }
+                )
 
             return history
 
@@ -384,9 +380,7 @@ class DeploymentConfigRegistry:
     # Helm Values Export
     # -------------------------------------------------------------------------
 
-    def export_helm_values(
-        self, service: str, instance: str, path: Path
-    ) -> Path:
+    def export_helm_values(self, service: str, instance: str, path: Path) -> Path:
         """Export a deployment config as Helm values file.
 
         Strips the ``size`` field (Helm doesn't need it — resources are

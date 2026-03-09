@@ -222,8 +222,7 @@ class Rule(BaseModel):
 
         if not self.source_table and not self.source:
             errors.append(
-                "Rule has no source table or source name — "
-                "cannot determine what to scan."
+                "Rule has no source table or source name — cannot determine what to scan."
             )
 
         if self.cel_filter:
@@ -231,9 +230,7 @@ class Rule(BaseModel):
 
             cel_errors = validate_cel(self.cel_filter)
             if cel_errors:
-                errors.append(
-                    f"CEL filter validation failed: {'; '.join(cel_errors)}"
-                )
+                errors.append(f"CEL filter validation failed: {'; '.join(cel_errors)}")
 
         if self.had_select_star:
             # Warning, not error — the system rewrites to lean output

@@ -1,7 +1,6 @@
 """Tests for the rules router — RuleCreationService create + validate."""
 
 
-
 class TestRulesValidate:
     """POST /api/v1/rules/validate — validate SQL without creating."""
 

@@ -128,9 +128,7 @@ class TestJobSchedulerAdaptive:
         mock_job.id = "test-job-0"
         mock_job.next_run_time = datetime.now()
         scheduler.scheduler.get_job = MagicMock(return_value=mock_job)
-        scheduler.scheduler.reschedule_job = MagicMock(
-            side_effect=RuntimeError("scheduler error")
-        )
+        scheduler.scheduler.reschedule_job = MagicMock(side_effect=RuntimeError("scheduler error"))
 
         event = MagicMock()
         event.job_id = "test-job-0"

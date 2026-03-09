@@ -95,10 +95,13 @@ async def get_service_config(
     try:
         config = registry.get_config(service, instance)
     except ConfigNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Service config '{service}/{instance}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Service config '{service}/{instance}' not found",
+            },
+        )
     # get_config returns typed model for known services, raw dict for unknown
     if isinstance(config, dict):
         return config
@@ -144,10 +147,13 @@ async def delete_service_config(
     try:
         registry.get_config(service, instance)
     except ConfigNotFoundError:
-        raise HTTPException(status_code=404, detail={
-            "code": "not_found",
-            "message": f"Service config '{service}/{instance}' not found",
-        })
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Service config '{service}/{instance}' not found",
+            },
+        )
     registry.delete_config(service, instance)
 
 
@@ -165,7 +171,9 @@ async def validate_service_config(
 ):
     """Dry-run validate a service config without saving."""
     result = registry.validate(service, body)
-    return ValidationResult(valid=result.valid, errors=result.errors if hasattr(result, "errors") else [])
+    return ValidationResult(
+        valid=result.valid, errors=result.errors if hasattr(result, "errors") else []
+    )
 
 
 @router.get(

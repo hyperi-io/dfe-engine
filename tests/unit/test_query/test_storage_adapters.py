@@ -333,9 +333,7 @@ class TestFilesystemAdapter:
 
     def test_healthcheck_false_for_invalid_path(self):
         """Healthcheck should return False for invalid path."""
-        adapter = FilesystemAdapter(
-            "default", config={"base_path": "/nonexistent/path/12345"}
-        )
+        adapter = FilesystemAdapter("default", config={"base_path": "/nonexistent/path/12345"})
         adapter._base_path = Path("/nonexistent/path/12345")
 
         assert adapter.healthcheck() is False

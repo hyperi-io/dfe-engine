@@ -21,9 +21,7 @@ class KafkaEnvironment(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    bootstrap_servers: list[str] = Field(
-        ..., description="Concrete broker addresses"
-    )
+    bootstrap_servers: list[str] = Field(..., description="Concrete broker addresses")
     authentication_ref: str = Field(
         default="", description="KEDA TriggerAuthentication resource name"
     )
@@ -117,9 +115,7 @@ class ArgoEnvironment(BaseModel):
 
     enabled: bool = Field(default=False, description="Generate Argo CD manifests")
     project: str = Field(default="dfe", description="Argo CD project name")
-    chart_repo_url: str = Field(
-        default="", description="Helm chart repository URL"
-    )
+    chart_repo_url: str = Field(default="", description="Helm chart repository URL")
     chart_version: str = Field(
         default="", description="Default Helm chart version for all services"
     )

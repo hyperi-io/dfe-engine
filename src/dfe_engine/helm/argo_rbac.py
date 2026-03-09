@@ -134,8 +134,6 @@ def _role_to_policies(
             continue
 
         resource, argo_action = parts
-        lines.append(
-            f"p, {argo_role}, {resource}, {argo_action}, {project}/*, allow"
-        )
+        lines.append(f"p, {argo_role}, {resource}, {argo_action}, {project}/*, allow")
 
     return lines

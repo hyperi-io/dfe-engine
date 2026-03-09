@@ -248,5 +248,7 @@ class TestFetcherConfig:
     def test_poll_interval_minimum(self):
         with pytest.raises(Exception):
             FetcherSourceConfig(
-                name="bad", source_type="test", poll_interval_secs=5,
+                name="bad",
+                source_type="test",
+                poll_interval_secs=5,
             )

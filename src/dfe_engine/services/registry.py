@@ -141,23 +141,21 @@ class ServiceConfigRegistry:
         for svc in sorted(valid_services(), key=len, reverse=True):
             prefix = f"{svc}-"
             if table.startswith(prefix):
-                instance = table[len(prefix):]
+                instance = table[len(prefix) :]
                 if instance:
                     return svc, instance
         # Unknown service: split on last hyphen so any "{service}-{instance}"
         # file is included in listings (e.g. a new Rust service not yet registered)
         idx = table.rfind("-")
         if idx > 0 and idx < len(table) - 1:
-            return table[:idx], table[idx + 1:]
+            return table[:idx], table[idx + 1 :]
         return None
 
     # -------------------------------------------------------------------------
     # CRUD Operations
     # -------------------------------------------------------------------------
 
-    def get_config(
-        self, service: str, instance: str = "default"
-    ):
+    def get_config(self, service: str, instance: str = "default"):
         """Get a service configuration.
 
         Reads from the DirectoryConfigStore in-memory cache (backed by YAML).
@@ -178,9 +176,7 @@ class ServiceConfigRegistry:
 
         config_data = self._store.get(table)
         if config_data is None:
-            raise ConfigNotFoundError(
-                f"Config not found for {service}/{instance}"
-            )
+            raise ConfigNotFoundError(f"Config not found for {service}/{instance}")
 
         try:
             plugin = get_plugin(service)
@@ -307,17 +303,17 @@ class ServiceConfigRegistry:
             yaml_path = self._config_directory / f"{table}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(
-                    stat.st_mtime, tz=timezone.utc
-                ).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
             except OSError:
                 updated_at = None
 
-            results.append({
-                "service": svc,
-                "instance": inst,
-                "updated_at": updated_at,
-            })
+            results.append(
+                {
+                    "service": svc,
+                    "instance": inst,
+                    "updated_at": updated_at,
+                }
+            )
 
         return results
 
@@ -341,7 +337,9 @@ class ServiceConfigRegistry:
         result = validate_config(service, config_data)
         if not result.valid and result.errors and result.errors[0].startswith("Unknown service:"):
             # Unknown service — no schema to validate against, treat as valid
-            return ValidationResult(valid=True, warnings=[f"No schema registered for service '{service}'; stored as-is"])
+            return ValidationResult(
+                valid=True, warnings=[f"No schema registered for service '{service}'; stored as-is"]
+            )
         return result
 
     # -------------------------------------------------------------------------
@@ -399,12 +397,8 @@ class ServiceConfigRegistry:
                     parent = repo[commit.parents[0]]
                     parent_tree = repo[parent.tree]
                     try:
-                        parent_entry = parent_tree.lookup_path(
-                            repo.__getitem__, rel_path
-                        )
-                        current_entry = tree.lookup_path(
-                            repo.__getitem__, rel_path
-                        )
+                        parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
+                        current_entry = tree.lookup_path(repo.__getitem__, rel_path)
                         if parent_entry[1] == current_entry[1]:
                             continue  # File unchanged in this commit
                     except KeyError:
@@ -414,14 +408,16 @@ class ServiceConfigRegistry:
                 # Parse "Name <email>" format — extract just the name
                 author_name = author_str.split("<")[0].strip() if "<" in author_str else author_str
 
-                history.append({
-                    "commit": commit.id.decode("ascii"),
-                    "message": commit.message.decode("utf-8", errors="replace").strip(),
-                    "author": author_name,
-                    "date": datetime.fromtimestamp(
-                        commit.author_time, tz=timezone.utc
-                    ).isoformat(),
-                })
+                history.append(
+                    {
+                        "commit": commit.id.decode("ascii"),
+                        "message": commit.message.decode("utf-8", errors="replace").strip(),
+                        "author": author_name,
+                        "date": datetime.fromtimestamp(
+                            commit.author_time, tz=timezone.utc
+                        ).isoformat(),
+                    }
+                )
 
             return history
 

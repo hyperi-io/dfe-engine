@@ -35,7 +35,13 @@ def _basic_columns() -> list[SchemaColumn]:
     return [
         _col(name="_timestamp_load", type="timestamp", default="now64(3)", order=0),
         _col(name="_timestamp", type="datetime", use_case="range", order=1),
-        _col(name="_org_id", type="string", attribute=["lowcardinality"], use_case="dimension", order=2),
+        _col(
+            name="_org_id",
+            type="string",
+            attribute=["lowcardinality"],
+            use_case="dimension",
+            order=2,
+        ),
         _col(name="user_name", type="string", use_case="dimension"),
         _col(name="message", type="text", use_case="fulltext"),
     ]
@@ -81,7 +87,9 @@ class TestGenerateCreateTable:
         assert "INDEX idx__timestamp `_timestamp` TYPE minmax GRANULARITY 4" in ddl
         assert "INDEX idx__org_id `_org_id` TYPE set(0) GRANULARITY 4" in ddl
         assert "INDEX idx_user_name `user_name` TYPE set(0) GRANULARITY 4" in ddl
-        assert "INDEX idx_message `message` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
+        assert (
+            "INDEX idx_message `message` TYPE text(tokenizer=splitByNonAlpha) GRANULARITY 1" in ddl
+        )
 
     def test_legacy_indexes(self, gen_legacy: DDLGenerator):
         ddl = gen_legacy.generate_create_table("t", _basic_columns())
@@ -220,13 +228,17 @@ class TestExpressions:
         assert "DEFAULT now64(3)" in ddl
 
     def test_materialized_expression(self, gen: DDLGenerator):
-        cols = [_col(name="day", type="date", attribute=["materialized"], default="toDate(_timestamp)")]
+        cols = [
+            _col(name="day", type="date", attribute=["materialized"], default="toDate(_timestamp)")
+        ]
         ddl = gen.generate_create_table("t", cols)
         assert "MATERIALIZED toDate(_timestamp)" in ddl
         assert "DEFAULT" not in ddl.split("`day`")[1].split("\n")[0]
 
     def test_alias_expression(self, gen: DDLGenerator):
-        cols = [_col(name="hour", type="integer", attribute=["alias"], default="toHour(_timestamp)")]
+        cols = [
+            _col(name="hour", type="integer", attribute=["alias"], default="toHour(_timestamp)")
+        ]
         ddl = gen.generate_create_table("t", cols)
         assert "ALIAS toHour(_timestamp)" in ddl
 

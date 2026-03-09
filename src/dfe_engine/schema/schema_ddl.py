@@ -39,9 +39,7 @@ class DDLConfig:
     db: str = "{db}"
     engine: str = "MergeTree"
     ttl_days: int | None = 90
-    ttl_columns: list[str] = field(
-        default_factory=lambda: ["_timestamp", "_timestamp_load"]
-    )
+    ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp", "_timestamp_load"])
     partition_column: str = "_timestamp_load"
     index_granularity: int = 2048
     ttl_only_drop_parts: bool = True
@@ -73,9 +71,7 @@ _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
 }
 
 
-def _build_column_comment(
-    expr: str | None, comment: str | None
-) -> str | None:
+def _build_column_comment(expr: str | None, comment: str | None) -> str | None:
     """Combine DFE directive and human comment into a single ClickHouse COMMENT.
 
     When both are present, the expr comes first (loader parses it),
@@ -107,9 +103,7 @@ class DDLGenerator:
                                (for ClickHouse < v25.10).
         """
         self._registry = registry
-        self._index_templates = (
-            _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
-        )
+        self._index_templates = _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
 
     # ── CREATE TABLE ────────────────────────────────────────────────
 
@@ -207,10 +201,7 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
-        sql = (
-            f"ALTER TABLE {cfg.db}.{table_name} "
-            f"ADD COLUMN IF NOT EXISTS {col_def}"
-        )
+        sql = f"ALTER TABLE {cfg.db}.{table_name} ADD COLUMN IF NOT EXISTS {col_def}"
         if after:
             sql += f" AFTER `{after}`"
         return sql + ";\n"
@@ -233,10 +224,7 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
-        return (
-            f"ALTER TABLE {cfg.db}.{table_name} "
-            f"MODIFY COLUMN {col_def};\n"
-        )
+        return f"ALTER TABLE {cfg.db}.{table_name} MODIFY COLUMN {col_def};\n"
 
     # ── Standard Views ─────────────────────────────────────────────
 
@@ -440,10 +428,7 @@ class DDLGenerator:
 
         parts = []
         for col in cfg.ttl_columns:
-            parts.append(
-                f"{col} + INTERVAL {cfg.ttl_days} DAY DELETE "
-                f"WHERE {col} >= 0"
-            )
+            parts.append(f"{col} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {col} >= 0")
 
         return "TTL " + ",\n    ".join(parts)
 

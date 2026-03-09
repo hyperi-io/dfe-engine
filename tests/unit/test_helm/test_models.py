@@ -84,9 +84,7 @@ class TestCompilationResult:
     def test_with_values(self):
         r = CompilationResult(
             helm_values={
-                "receiver-production": HelmServiceValues(
-                    image="harbor.hyperi.io/dfe/dfe-receiver"
-                ),
+                "receiver-production": HelmServiceValues(image="harbor.hyperi.io/dfe/dfe-receiver"),
             },
             ddl_statements=["CREATE TABLE ..."],
             kafka_topics=[{"name": "events_land", "partitions": 3}],

@@ -76,19 +76,32 @@ class TestAdminRole:
 class TestOperatorRole:
     @pytest.mark.parametrize(
         "action",
-        ["config:read", "config:write", "source:read", "source:write",
-         "query:execute", "helm:compile",
-         "argo:applications:get", "argo:applications:sync", "argo:logs:get"],
+        [
+            "config:read",
+            "config:write",
+            "source:read",
+            "source:write",
+            "query:execute",
+            "helm:compile",
+            "argo:applications:get",
+            "argo:applications:sync",
+            "argo:logs:get",
+        ],
     )
     def test_operator_allowed_actions(self, action):
         result = authorize(_auth(["operator"]), action, enabled=True)
         assert result.allowed
         assert result.reason == "role:operator"
 
-    @pytest.mark.parametrize("action", [
-        "helm:execute_ddl", "helm:create_topics",
-        "argo:applications:delete", "argo:clusters:create",
-    ])
+    @pytest.mark.parametrize(
+        "action",
+        [
+            "helm:execute_ddl",
+            "helm:create_topics",
+            "argo:applications:delete",
+            "argo:clusters:create",
+        ],
+    )
     def test_operator_denied_actions(self, action):
         result = authorize(_auth(["operator"]), action, enabled=True)
         assert not result.allowed
@@ -103,8 +116,13 @@ class TestOperatorRole:
 class TestViewerRole:
     @pytest.mark.parametrize(
         "action",
-        ["config:read", "source:read", "query:execute",
-         "argo:applications:get", "argo:projects:get"],
+        [
+            "config:read",
+            "source:read",
+            "query:execute",
+            "argo:applications:get",
+            "argo:projects:get",
+        ],
     )
     def test_viewer_allowed_actions(self, action):
         result = authorize(_auth(["viewer"]), action, enabled=True)
@@ -113,9 +131,15 @@ class TestViewerRole:
 
     @pytest.mark.parametrize(
         "action",
-        ["config:write", "source:write", "helm:compile",
-         "helm:execute_ddl", "helm:create_topics",
-         "argo:applications:sync", "argo:applications:delete"],
+        [
+            "config:write",
+            "source:write",
+            "helm:compile",
+            "helm:execute_ddl",
+            "helm:create_topics",
+            "argo:applications:sync",
+            "argo:applications:delete",
+        ],
     )
     def test_viewer_denied_actions(self, action):
         result = authorize(_auth(["viewer"]), action, enabled=True)
@@ -225,11 +249,17 @@ class TestInfraAdminRole:
     @pytest.mark.parametrize(
         "action",
         [
-            "config:read", "config:write",
-            "helm:compile", "helm:execute_ddl", "helm:create_topics",
-            "argo:applications:get", "argo:applications:sync",
-            "argo:applications:create", "argo:applications:delete",
-            "argo:applications:action", "argo:exec:create",
+            "config:read",
+            "config:write",
+            "helm:compile",
+            "helm:execute_ddl",
+            "helm:create_topics",
+            "argo:applications:get",
+            "argo:applications:sync",
+            "argo:applications:create",
+            "argo:applications:delete",
+            "argo:applications:action",
+            "argo:exec:create",
         ],
     )
     def test_infra_admin_allowed_actions(self, action):

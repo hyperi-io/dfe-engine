@@ -104,7 +104,7 @@ class ClickHouseErrorHandler:
             "type": "table_not_found",
             "message": "Table does not exist in the database. Ensure schemas are deployed first: run build-schemas then apply-schemas before attempting updates or queries. Check: 1) Table name spelling and case sensitivity, 2) Correct database selection, or 3) Schema deployment completed successfully.",
             "category": "not_found",
-        }
+        },
     }
 
     @classmethod

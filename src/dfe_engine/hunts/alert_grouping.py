@@ -169,12 +169,14 @@ def build_grouping_query(
         group_by_aliases.append(alias)
 
     # Aggregation columns
-    select_parts.extend([
-        "count(*) AS match_count",
-        "min(_timestamp) AS first_seen",
-        "max(_timestamp) AS last_seen",
-        f"groupArray({max_sample_events})(_json) AS sample_events",
-    ])
+    select_parts.extend(
+        [
+            "count(*) AS match_count",
+            "min(_timestamp) AS first_seen",
+            "max(_timestamp) AS last_seen",
+            f"groupArray({max_sample_events})(_json) AS sample_events",
+        ]
+    )
 
     select_clause = ",\n    ".join(select_parts)
     group_by_clause = ", ".join(group_by_aliases)

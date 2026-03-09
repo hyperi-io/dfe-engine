@@ -52,9 +52,7 @@ class KedaTriggerKafka(BaseModel):
     consumer_group: str = ""
     topic: str = ""
     lag_threshold: int = Field(default=1000, gt=0)
-    authentication_ref: str = Field(
-        default="", description="TriggerAuthentication resource name"
-    )
+    authentication_ref: str = Field(default="", description="TriggerAuthentication resource name")
 
 
 class KedaTriggerCpu(BaseModel):
@@ -114,9 +112,7 @@ class KedaTriggerGeneric(BaseModel):
     metadata: dict[str, str] = Field(
         default_factory=dict, description="Scaler metadata key-value pairs"
     )
-    authentication_ref: str = Field(
-        default="", description="TriggerAuthentication resource name"
-    )
+    authentication_ref: str = Field(default="", description="TriggerAuthentication resource name")
 
 
 class KedaConfig(BaseModel):
@@ -136,9 +132,7 @@ class KedaConfig(BaseModel):
         default_factory=list,
         description="Additional KEDA triggers (any scaler type)",
     )
-    fallback_replicas: int = Field(
-        default=2, ge=1, description="Replicas when all triggers fail"
-    )
+    fallback_replicas: int = Field(default=2, ge=1, description="Replicas when all triggers fail")
 
 
 class HpaConfig(BaseModel):

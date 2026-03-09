@@ -125,9 +125,7 @@ class HelmValuesCompiler:
                 namespace=self._env.namespace,
                 argo_project=argo.project,
                 chart_repo_url=argo.chart_repo_url,
-                chart_version=(
-                    argo.chart_version or self._env.image_tag_override or "latest"
-                ),
+                chart_version=(argo.chart_version or self._env.image_tag_override or "latest"),
                 values_path_prefix=argo.values_path_prefix,
                 destination_server=argo.destination_server,
                 sync_policy=argo.sync_policy.to_argo_dict(),
@@ -260,9 +258,7 @@ class HelmValuesCompiler:
             results[key] = merged
         return results
 
-    def _compile_external_argo_apps(
-        self, component: "ExternalComponent"
-    ) -> list[dict[str, Any]]:
+    def _compile_external_argo_apps(self, component: "ExternalComponent") -> list[dict[str, Any]]:
         """Generate Argo CD Application CRDs for an external component."""
         from dfe_engine.helm.argo_app import generate_application
 
@@ -329,11 +325,13 @@ class HelmValuesCompiler:
             topic = source.topic_land
             if topic and topic not in seen:
                 seen.add(topic)
-                topics.append({
-                    "name": topic,
-                    "partitions": 3,
-                    "replication_factor": 1,
-                })
+                topics.append(
+                    {
+                        "name": topic,
+                        "partitions": 3,
+                        "replication_factor": 1,
+                    }
+                )
 
         return topics
 
@@ -432,22 +430,26 @@ class HelmValuesCompiler:
                 metadata["topic"] = kt.topic
 
             auth_ref = kt.authentication_ref or self._env.kafka.authentication_ref
-            triggers.append(HelmKedaTrigger(
-                type="kafka",
-                metadata=metadata,
-                authentication_ref=auth_ref,
-            ))
+            triggers.append(
+                HelmKedaTrigger(
+                    type="kafka",
+                    metadata=metadata,
+                    authentication_ref=auth_ref,
+                )
+            )
 
         # CPU trigger
         if keda_config.cpu_trigger:
             ct = keda_config.cpu_trigger
-            triggers.append(HelmKedaTrigger(
-                type="cpu",
-                metadata={
-                    "type": ct.metric_type,
-                    "value": str(ct.value),
-                },
-            ))
+            triggers.append(
+                HelmKedaTrigger(
+                    type="cpu",
+                    metadata={
+                        "type": ct.metric_type,
+                        "value": str(ct.value),
+                    },
+                )
+            )
 
         # Prometheus/OTEL metrics trigger
         if keda_config.prometheus_trigger:
@@ -467,18 +469,22 @@ class HelmValuesCompiler:
                 metadata["activationThreshold"] = str(pt.activation_threshold)
             if pt.metric_name:
                 metadata["metricName"] = pt.metric_name
-            triggers.append(HelmKedaTrigger(
-                type="prometheus",
-                metadata=metadata,
-            ))
+            triggers.append(
+                HelmKedaTrigger(
+                    type="prometheus",
+                    metadata=metadata,
+                )
+            )
 
         # Generic extra triggers (any KEDA scaler type)
         for gt in getattr(keda_config, "extra_triggers", []):
-            triggers.append(HelmKedaTrigger(
-                type=gt.type,
-                metadata=dict(gt.metadata),
-                authentication_ref=gt.authentication_ref,
-            ))
+            triggers.append(
+                HelmKedaTrigger(
+                    type=gt.type,
+                    metadata=dict(gt.metadata),
+                    authentication_ref=gt.authentication_ref,
+                )
+            )
 
         return HelmKedaConfig(
             enabled=True,
@@ -528,9 +534,7 @@ class HelmValuesCompiler:
         """Inject source routing and ClickHouse hosts into loader config."""
         from dfe_engine.services.source_routing import compile_loader_routing
 
-        routing = compile_loader_routing(
-            self._source, db=self._env.clickhouse.database
-        )
+        routing = compile_loader_routing(self._source, db=self._env.clickhouse.database)
         config["routing"] = routing.model_dump(mode="json")
 
         # Inject ClickHouse hosts from environment

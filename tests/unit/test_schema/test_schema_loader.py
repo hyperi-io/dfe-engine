@@ -42,10 +42,12 @@ def tmp_versioned_schema(tmp_path):
 
 class TestLoadColumns:
     def test_load_basic(self, tmp_schema):
-        path = tmp_schema([
-            {"name": "user_name", "type": "string", "use_case": "dimension"},
-            {"name": "message", "type": "text", "use_case": "fulltext"},
-        ])
+        path = tmp_schema(
+            [
+                {"name": "user_name", "type": "string", "use_case": "dimension"},
+                {"name": "message", "type": "text", "use_case": "fulltext"},
+            ]
+        )
         columns = SchemaLoader.load_columns(path)
         assert len(columns) == 2
         assert all(isinstance(c, SchemaColumn) for c in columns)
@@ -55,21 +57,27 @@ class TestLoadColumns:
         assert columns[1].name == "message"
 
     def test_load_with_attributes(self, tmp_schema):
-        path = tmp_schema([
-            {"name": "x", "type": "string", "attribute": ["lowcardinality", "not_null"]},
-        ])
+        path = tmp_schema(
+            [
+                {"name": "x", "type": "string", "attribute": ["lowcardinality", "not_null"]},
+            ]
+        )
         columns = SchemaLoader.load_columns(path)
         assert columns[0].attribute == ["lowcardinality", "not_null"]
 
     def test_load_with_all_fields(self, tmp_schema):
-        path = tmp_schema([{
-            "name": "ts",
-            "type": "timestamp",
-            "default": "now64(3)",
-            "order": 0,
-            "expr": "@generated: now64(3)",
-            "comment": "Insertion timestamp",
-        }])
+        path = tmp_schema(
+            [
+                {
+                    "name": "ts",
+                    "type": "timestamp",
+                    "default": "now64(3)",
+                    "order": 0,
+                    "expr": "@generated: now64(3)",
+                    "comment": "Insertion timestamp",
+                }
+            ]
+        )
         col = SchemaLoader.load_columns(path)[0]
         assert col.default == "now64(3)"
         assert col.order == 0
@@ -77,9 +85,11 @@ class TestLoadColumns:
         assert col.comment == "Insertion timestamp"
 
     def test_load_with_ch_override(self, tmp_schema):
-        path = tmp_schema([
-            {"name": "status", "type": "integer", "ch_override": "UInt16"},
-        ])
+        path = tmp_schema(
+            [
+                {"name": "status", "type": "integer", "ch_override": "UInt16"},
+            ]
+        )
         col = SchemaLoader.load_columns(path)[0]
         assert col.ch_override == "UInt16"
 
@@ -94,16 +104,20 @@ class TestLoadColumns:
             SchemaLoader.load_columns(path)
 
     def test_invalid_column_data(self, tmp_schema):
-        path = tmp_schema([
-            "not a dict",
-        ])
+        path = tmp_schema(
+            [
+                "not a dict",
+            ]
+        )
         with pytest.raises(SchemaLoadError, match="must be a dict"):
             SchemaLoader.load_columns(path)
 
     def test_invalid_column_schema(self, tmp_schema):
-        path = tmp_schema([
-            {"name": "x"},  # missing required 'type' field
-        ])
+        path = tmp_schema(
+            [
+                {"name": "x"},  # missing required 'type' field
+            ]
+        )
         with pytest.raises(SchemaLoadError, match="Invalid column"):
             SchemaLoader.load_columns(path)
 
@@ -175,9 +189,12 @@ class TestApplyDerived:
             SchemaColumn(name="x", type="string"),
             SchemaColumn(name="y", type="integer"),
         ]
-        derived_path = tmp_schema([
-            {"name": "x", "type": "string", "attribute": ["lowcardinality"]},
-        ], filename="derived.yaml")
+        derived_path = tmp_schema(
+            [
+                {"name": "x", "type": "string", "attribute": ["lowcardinality"]},
+            ],
+            filename="derived.yaml",
+        )
 
         result = SchemaLoader.apply_derived_schema(base, derived_path)
         assert len(result) == 2
@@ -190,9 +207,12 @@ class TestApplyDerived:
             SchemaColumn(name="b", type="string"),
             SchemaColumn(name="c", type="string"),
         ]
-        derived_path = tmp_schema([
-            {"name": "c", "type": "string", "use_case": "dimension"},
-        ], filename="derived.yaml")
+        derived_path = tmp_schema(
+            [
+                {"name": "c", "type": "string", "use_case": "dimension"},
+            ],
+            filename="derived.yaml",
+        )
 
         result = SchemaLoader.apply_derived_schema(base, derived_path)
         assert [c.name for c in result] == ["a", "b", "c"]
@@ -209,10 +229,13 @@ class TestApplyDerived:
 class TestApplyAdditional:
     def test_append_new_columns(self, tmp_schema):
         base = [SchemaColumn(name="x", type="string")]
-        additional_path = tmp_schema([
-            {"name": "y", "type": "integer"},
-            {"name": "z", "type": "boolean"},
-        ], filename="additional.yaml")
+        additional_path = tmp_schema(
+            [
+                {"name": "y", "type": "integer"},
+                {"name": "z", "type": "boolean"},
+            ],
+            filename="additional.yaml",
+        )
 
         result = SchemaLoader.apply_additional_fields(base, additional_path)
         assert len(result) == 3
@@ -220,9 +243,12 @@ class TestApplyAdditional:
 
     def test_override_existing_on_conflict(self, tmp_schema):
         base = [SchemaColumn(name="x", type="string")]
-        additional_path = tmp_schema([
-            {"name": "x", "type": "text", "use_case": "fulltext"},
-        ], filename="additional.yaml")
+        additional_path = tmp_schema(
+            [
+                {"name": "x", "type": "text", "use_case": "fulltext"},
+            ],
+            filename="additional.yaml",
+        )
 
         result = SchemaLoader.apply_additional_fields(base, additional_path)
         assert len(result) == 1
@@ -389,7 +415,9 @@ class TestSubmoduleResolution:
         """Submodule and bundled profiles should have the same columns."""
         from pathlib import Path
 
-        bundled_dir = Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles"
+        bundled_dir = (
+            Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles"
+        )
         submodule_dir = Path(__file__).resolve().parents[3] / "schemas" / "common-header"
 
         if not submodule_dir.is_dir():
@@ -413,14 +441,23 @@ class TestIsShippedSchema:
         """Bundled profile files should be identified as shipped."""
         from pathlib import Path
 
-        bundled = Path(__file__).resolve().parents[3] / "src" / "dfe_engine" / "schema" / "profiles" / "timeseries.yaml"
+        bundled = (
+            Path(__file__).resolve().parents[3]
+            / "src"
+            / "dfe_engine"
+            / "schema"
+            / "profiles"
+            / "timeseries.yaml"
+        )
         assert is_shipped_schema(bundled) is True
 
     def test_submodule_file_is_shipped(self):
         """Submodule files should be identified as shipped."""
         from pathlib import Path
 
-        submodule = Path(__file__).resolve().parents[3] / "schemas" / "common-header" / "timeseries.yaml"
+        submodule = (
+            Path(__file__).resolve().parents[3] / "schemas" / "common-header" / "timeseries.yaml"
+        )
         if not submodule.exists():
             pytest.skip("Submodule not checked out")
         assert is_shipped_schema(submodule) is True
@@ -440,47 +477,51 @@ class TestVersionTree:
 
     def test_load_current_default(self, tmp_versioned_schema):
         """When no version specified, uses file's current marker."""
-        path = tmp_versioned_schema({
-            "current": "1.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "summary": "Initial",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b", "type": "integer"},
-                    ],
+        path = tmp_versioned_schema(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "Initial",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b", "type": "integer"},
+                        ],
+                    },
                 },
-            },
-        })
+            }
+        )
         columns = SchemaLoader.load_columns(path)
         assert [c.name for c in columns] == ["a", "b"]
 
     def test_explicit_version_overrides_current(self, tmp_versioned_schema):
         """Explicit version arg selects a different version snapshot."""
-        path = tmp_versioned_schema({
-            "current": "2.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "summary": "Initial",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                    ],
+        path = tmp_versioned_schema(
+            {
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "Initial",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                        ],
+                    },
+                    "2.0.0": {
+                        "date": "2026-03-02",
+                        "type": "addition",
+                        "summary": "Added b",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b", "type": "integer"},
+                        ],
+                    },
                 },
-                "2.0.0": {
-                    "date": "2026-03-02",
-                    "type": "addition",
-                    "summary": "Added b",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b", "type": "integer"},
-                    ],
-                },
-            },
-        })
+            }
+        )
         # Default (current=2.0.0): a, b
         cols = SchemaLoader.load_columns(path)
         assert [c.name for c in cols] == ["a", "b"]
@@ -491,28 +532,30 @@ class TestVersionTree:
 
     def test_dropped_column_between_versions(self, tmp_versioned_schema):
         """A column present in v1 can be absent in v2."""
-        path = tmp_versioned_schema({
-            "current": "2.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "summary": "Initial with legacy",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "legacy", "type": "text"},
-                    ],
+        path = tmp_versioned_schema(
+            {
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "Initial with legacy",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "legacy", "type": "text"},
+                        ],
+                    },
+                    "2.0.0": {
+                        "date": "2026-03-02",
+                        "type": "model",
+                        "summary": "Removed legacy",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                        ],
+                    },
                 },
-                "2.0.0": {
-                    "date": "2026-03-02",
-                    "type": "model",
-                    "summary": "Removed legacy",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                    ],
-                },
-            },
-        })
+            }
+        )
         v1 = SchemaLoader.load_columns(path, version="1.0.0")
         assert [c.name for c in v1] == ["a", "legacy"]
 
@@ -521,25 +564,27 @@ class TestVersionTree:
 
     def test_changed_column_type_between_versions(self, tmp_versioned_schema):
         """A column's type can change between versions."""
-        path = tmp_versioned_schema({
-            "current": "2.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "columns": [
-                        {"name": "_raw", "type": "text", "use_case": "text_search"},
-                    ],
+        path = tmp_versioned_schema(
+            {
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "columns": [
+                            {"name": "_raw", "type": "text", "use_case": "text_search"},
+                        ],
+                    },
+                    "2.0.0": {
+                        "date": "2026-03-02",
+                        "type": "model",
+                        "columns": [
+                            {"name": "_raw", "type": "string"},
+                        ],
+                    },
                 },
-                "2.0.0": {
-                    "date": "2026-03-02",
-                    "type": "model",
-                    "columns": [
-                        {"name": "_raw", "type": "string"},
-                    ],
-                },
-            },
-        })
+            }
+        )
         v1 = SchemaLoader.load_columns(path, version="1.0.0")
         assert v1[0].type == "text"
         assert v1[0].use_case == "text_search"
@@ -550,38 +595,40 @@ class TestVersionTree:
 
     def test_multi_version_history(self, tmp_versioned_schema):
         """Full lifecycle across 3 versions."""
-        path = tmp_versioned_schema({
-            "current": "3.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b", "type": "integer"},
-                    ],
+        path = tmp_versioned_schema(
+            {
+                "current": "3.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b", "type": "integer"},
+                        ],
+                    },
+                    "2.0.0": {
+                        "date": "2026-02-15",
+                        "type": "addition",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b", "type": "integer"},
+                            {"name": "c", "type": "boolean"},
+                        ],
+                    },
+                    "3.0.0": {
+                        "date": "2026-03-15",
+                        "type": "model",
+                        "summary": "Replaced b with b_new, added c",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b_new", "type": "float"},
+                            {"name": "c", "type": "boolean"},
+                        ],
+                    },
                 },
-                "2.0.0": {
-                    "date": "2026-02-15",
-                    "type": "addition",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b", "type": "integer"},
-                        {"name": "c", "type": "boolean"},
-                    ],
-                },
-                "3.0.0": {
-                    "date": "2026-03-15",
-                    "type": "model",
-                    "summary": "Replaced b with b_new, added c",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b_new", "type": "float"},
-                        {"name": "c", "type": "boolean"},
-                    ],
-                },
-            },
-        })
+            }
+        )
         v1 = SchemaLoader.load_columns(path, version="1.0.0")
         assert [c.name for c in v1] == ["a", "b"]
 
@@ -593,38 +640,44 @@ class TestVersionTree:
 
     def test_version_not_found_raises(self, tmp_versioned_schema):
         """Requesting a nonexistent version raises SchemaLoadError."""
-        path = tmp_versioned_schema({
-            "current": "1.0.0",
-            "versions": {
-                "1.0.0": {
-                    "columns": [{"name": "a", "type": "string"}],
+        path = tmp_versioned_schema(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
                 },
-            },
-        })
+            }
+        )
         with pytest.raises(SchemaLoadError, match="Version '9.9.9' not found"):
             SchemaLoader.load_columns(path, version="9.9.9")
 
     def test_version_missing_columns_key_raises(self, tmp_versioned_schema):
         """Version entry without columns raises SchemaLoadError."""
-        path = tmp_versioned_schema({
-            "current": "1.0.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    # no columns key!
+        path = tmp_versioned_schema(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        # no columns key!
+                    },
                 },
-            },
-        })
+            }
+        )
         with pytest.raises(SchemaLoadError, match="must contain a 'columns' key"):
             SchemaLoader.load_columns(path)
 
     def test_unversioned_flat_file_still_works(self, tmp_schema):
         """Files without version tree return all columns (backward compat)."""
-        path = tmp_schema([
-            {"name": "x", "type": "string"},
-            {"name": "y", "type": "integer"},
-        ])
+        path = tmp_schema(
+            [
+                {"name": "x", "type": "string"},
+                {"name": "y", "type": "integer"},
+            ]
+        )
         columns = SchemaLoader.load_columns(path)
         assert len(columns) == 2
 
@@ -660,22 +713,16 @@ class TestVersionTree:
     def test_shipped_profiles_have_version_tree(self):
         """All shipped profiles should have current marker and version tree."""
         for profile in ("timeseries", "minimal", "passthrough"):
-            meta = SchemaLoader.load_version_metadata(
-                _resolve_profiles_dir() / f"{profile}.yaml"
-            )
+            meta = SchemaLoader.load_version_metadata(_resolve_profiles_dir() / f"{profile}.yaml")
             assert "current" in meta, f"Profile '{profile}' missing 'current' marker"
             assert "versions" in meta, f"Profile '{profile}' missing 'versions' dict"
 
     def test_each_version_has_date(self):
         """Each version entry should have a date."""
         for profile in ("timeseries", "minimal", "passthrough"):
-            meta = SchemaLoader.load_version_metadata(
-                _resolve_profiles_dir() / f"{profile}.yaml"
-            )
+            meta = SchemaLoader.load_version_metadata(_resolve_profiles_dir() / f"{profile}.yaml")
             for ver, entry in meta["versions"].items():
-                assert "date" in entry, (
-                    f"Version '{ver}' in profile '{profile}' missing 'date'"
-                )
+                assert "date" in entry, f"Version '{ver}' in profile '{profile}' missing 'date'"
 
 
 # ── load_version_metadata ──────────────────────────────────────────
@@ -683,26 +730,28 @@ class TestVersionTree:
 
 class TestLoadVersionMetadata:
     def test_versioned_file(self, tmp_versioned_schema):
-        path = tmp_versioned_schema({
-            "current": "1.2.0",
-            "versions": {
-                "1.0.0": {
-                    "date": "2026-01-15",
-                    "type": "model",
-                    "summary": "Initial",
-                    "columns": [{"name": "a", "type": "string"}],
+        path = tmp_versioned_schema(
+            {
+                "current": "1.2.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-15",
+                        "type": "model",
+                        "summary": "Initial",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                    "1.2.0": {
+                        "date": "2026-03-02",
+                        "type": "addition",
+                        "summary": "Added field",
+                        "columns": [
+                            {"name": "a", "type": "string"},
+                            {"name": "b", "type": "string"},
+                        ],
+                    },
                 },
-                "1.2.0": {
-                    "date": "2026-03-02",
-                    "type": "addition",
-                    "summary": "Added field",
-                    "columns": [
-                        {"name": "a", "type": "string"},
-                        {"name": "b", "type": "string"},
-                    ],
-                },
-            },
-        })
+            }
+        )
         meta = SchemaLoader.load_version_metadata(path)
         assert meta["current"] == "1.2.0"
         assert "1.0.0" in meta["versions"]

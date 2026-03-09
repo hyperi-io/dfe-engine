@@ -18,16 +18,18 @@ from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
 from hyperi_pylib.logger import logger
 
 # Arrow schema for directory listings
-LISTING_SCHEMA = pa.schema([
-    pa.field("name", pa.string()),
-    pa.field("path", pa.string()),
-    pa.field("type", pa.string()),  # "file" or "directory"
-    pa.field("size", pa.int64()),
-    pa.field("modified", pa.timestamp("us", tz="UTC")),
-    pa.field("etag", pa.string()),
-    pa.field("storage_class", pa.string()),
-    pa.field("content_type", pa.string()),
-])
+LISTING_SCHEMA = pa.schema(
+    [
+        pa.field("name", pa.string()),
+        pa.field("path", pa.string()),
+        pa.field("type", pa.string()),  # "file" or "directory"
+        pa.field("size", pa.int64()),
+        pa.field("modified", pa.timestamp("us", tz="UTC")),
+        pa.field("etag", pa.string()),
+        pa.field("storage_class", pa.string()),
+        pa.field("content_type", pa.string()),
+    ]
+)
 
 
 class StorageListingError(Exception):
@@ -291,9 +293,7 @@ class FilesystemAdapter(DatasourceAdapter):
         try:
             target_path.relative_to(self.base_path)
         except ValueError:
-            raise StorageListingError(
-                f"Path traversal detected: {subpath}"
-            )
+            raise StorageListingError(f"Path traversal detected: {subpath}")
 
         return target_path
 

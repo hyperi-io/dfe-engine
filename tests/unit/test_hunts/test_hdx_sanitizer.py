@@ -183,21 +183,13 @@ class TestTimeBucketGroupByOrderBy:
     """Strip __hdx_time_bucket from GROUP BY / ORDER BY."""
 
     def test_strips_from_group_by(self, sanitizer):
-        sql = (
-            "SELECT count() FROM default.logs "
-            "WHERE x = 1 "
-            "GROUP BY `__hdx_time_bucket`"
-        )
+        sql = "SELECT count() FROM default.logs WHERE x = 1 GROUP BY `__hdx_time_bucket`"
         result = sanitizer.sanitize(sql)
         assert "__hdx_time_bucket" not in result.clean_sql
         assert "GROUP BY" not in result.clean_sql  # empty, so removed
 
     def test_strips_from_order_by(self, sanitizer):
-        sql = (
-            "SELECT count() FROM default.logs "
-            "WHERE x = 1 "
-            "ORDER BY `__hdx_time_bucket`"
-        )
+        sql = "SELECT count() FROM default.logs WHERE x = 1 ORDER BY `__hdx_time_bucket`"
         result = sanitizer.sanitize(sql)
         assert "__hdx_time_bucket" not in result.clean_sql
         assert "ORDER BY" not in result.clean_sql
@@ -244,10 +236,7 @@ class TestSettingsClause:
     """Strip SETTINGS clause."""
 
     def test_strips_settings(self, sanitizer):
-        sql = (
-            "SELECT count() FROM default.logs WHERE x = 1 "
-            "SETTINGS optimize_read_in_order = 0"
-        )
+        sql = "SELECT count() FROM default.logs WHERE x = 1 SETTINGS optimize_read_in_order = 0"
         result = sanitizer.sanitize(sql)
         assert "SETTINGS" not in result.clean_sql
         assert result.stripped_settings is not None
@@ -413,10 +402,7 @@ class TestEdgeCases:
 
     def test_sql_without_hyperdx_patterns(self, sanitizer):
         """Standard SQL passes through unchanged."""
-        sql = (
-            "SELECT count(), severity FROM default.logs "
-            "WHERE severity = 'high' GROUP BY severity"
-        )
+        sql = "SELECT count(), severity FROM default.logs WHERE severity = 'high' GROUP BY severity"
         result = sanitizer.sanitize(sql)
         assert result.clean_sql == sql
         assert result.stripped_time_bounds == []

@@ -148,15 +148,9 @@ class TestList:
         assert registry.list_maps() == []
 
     def test_list_multiple(self, registry):
-        registry.save_map(_make_field_map(
-            standard="sigma", mappings={"A": "a"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="sigma", source="win", mappings={"B": "b"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="ecs", mappings={"C": "c"}
-        ))
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="sigma", source="win", mappings={"B": "b"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"C": "c"}))
 
         results = registry.list_maps()
         assert len(results) == 3
@@ -165,24 +159,22 @@ class TestList:
         assert standards == {"sigma", "ecs"}
 
     def test_list_filtered_by_standard(self, registry):
-        registry.save_map(_make_field_map(
-            standard="sigma", mappings={"A": "a"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="ecs", mappings={"B": "b"}
-        ))
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"B": "b"}))
 
         sigma_results = registry.list_maps(standard="sigma")
         assert len(sigma_results) == 1
         assert sigma_results[0]["standard"] == "sigma"
 
     def test_list_includes_metadata(self, registry):
-        registry.save_map(_make_field_map(
-            standard="ecs",
-            source="windows_audit",
-            mappings={"source.ip": "source_ip", "user.name": "user_name"},
-            version="8.11",
-        ))
+        registry.save_map(
+            _make_field_map(
+                standard="ecs",
+                source="windows_audit",
+                mappings={"source.ip": "source_ip", "user.name": "user_name"},
+                version="8.11",
+            )
+        )
 
         results = registry.list_maps()
         assert len(results) == 1
@@ -202,27 +194,17 @@ class TestList:
 
 class TestGetMapsForStandard:
     def test_returns_correct_standard(self, registry):
-        registry.save_map(_make_field_map(
-            standard="sigma", mappings={"A": "a"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="sigma", source="win", mappings={"B": "b"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="ecs", mappings={"C": "c"}
-        ))
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="sigma", source="win", mappings={"B": "b"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"C": "c"}))
 
         sigma_maps = registry.get_maps_for_standard("sigma")
         assert len(sigma_maps) == 2
         assert all(m.standard == "sigma" for m in sigma_maps)
 
     def test_excludes_other_standards(self, registry):
-        registry.save_map(_make_field_map(
-            standard="sigma", mappings={"A": "a"}
-        ))
-        registry.save_map(_make_field_map(
-            standard="ecs", mappings={"B": "b"}
-        ))
+        registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
+        registry.save_map(_make_field_map(standard="ecs", mappings={"B": "b"}))
 
         ecs_maps = registry.get_maps_for_standard("ecs")
         assert len(ecs_maps) == 1
@@ -246,9 +228,7 @@ class TestMapExists:
         assert registry.map_exists("sigma") is False
 
     def test_exists_source_specific(self, registry):
-        registry.save_map(_make_field_map(
-            source="windows_audit", mappings={"A": "a"}
-        ))
+        registry.save_map(_make_field_map(source="windows_audit", mappings={"A": "a"}))
         assert registry.map_exists("sigma", "windows_audit") is True
         assert registry.map_exists("sigma", "linux_syslog") is False
 
@@ -364,14 +344,20 @@ class TestSingleton:
 class TestMultiStandard:
     def test_same_source_different_standards(self, registry):
         """Same source name under different standards should not conflict."""
-        registry.save_map(_make_field_map(
-            standard="sigma", source="windows_audit",
-            mappings={"User": "user_name"},
-        ))
-        registry.save_map(_make_field_map(
-            standard="ecs", source="windows_audit",
-            mappings={"user.name": "user_name"},
-        ))
+        registry.save_map(
+            _make_field_map(
+                standard="sigma",
+                source="windows_audit",
+                mappings={"User": "user_name"},
+            )
+        )
+        registry.save_map(
+            _make_field_map(
+                standard="ecs",
+                source="windows_audit",
+                mappings={"user.name": "user_name"},
+            )
+        )
 
         sigma = registry.get_map("sigma", "windows_audit")
         ecs = registry.get_map("ecs", "windows_audit")
@@ -379,13 +365,19 @@ class TestMultiStandard:
         assert ecs.mappings == {"user.name": "user_name"}
 
     def test_default_and_source_coexist(self, registry):
-        registry.save_map(_make_field_map(
-            standard="sigma", mappings={"User": "user_name"},
-        ))
-        registry.save_map(_make_field_map(
-            standard="sigma", source="windows_audit",
-            mappings={"User": "account_name"},
-        ))
+        registry.save_map(
+            _make_field_map(
+                standard="sigma",
+                mappings={"User": "user_name"},
+            )
+        )
+        registry.save_map(
+            _make_field_map(
+                standard="sigma",
+                source="windows_audit",
+                mappings={"User": "account_name"},
+            )
+        )
 
         default = registry.get_map("sigma")
         specific = registry.get_map("sigma", "windows_audit")

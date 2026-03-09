@@ -36,18 +36,22 @@ from ..schema.schema_loader import SchemaLoader
 # These are the columns we SELECT from the source table.
 # Other profile columns (like _raw, _tags) are NOT copied —
 # the full record is available via _json.
-_HEADER_COLUMNS_TO_COPY = frozenset({
-    "_timestamp",
-    "_timestamp_load",
-    "_org_id",
-})
+_HEADER_COLUMNS_TO_COPY = frozenset(
+    {
+        "_timestamp",
+        "_timestamp_load",
+        "_org_id",
+    }
+)
 
 # Columns that exist on the hunt results table but are generated
 # by ClickHouse defaults (not from the source SELECT).
-_HEADER_COLUMNS_GENERATED = frozenset({
-    "_uuid",          # generateUUIDv7() — new UUID for the hunt result row
-    "_source",        # set by the hunt engine to identify the hunt
-})
+_HEADER_COLUMNS_GENERATED = frozenset(
+    {
+        "_uuid",  # generateUUIDv7() — new UUID for the hunt result row
+        "_source",  # set by the hunt engine to identify the hunt
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -122,12 +126,9 @@ class HuntResultSchema:
     ):
         self._profile_name = profile_name
         self._include_json_copy = include_json_copy
-        self._profile_columns = SchemaLoader.load_profile(
-            profile_name, profiles_dir=profiles_dir
-        )
+        self._profile_columns = SchemaLoader.load_profile(profile_name, profiles_dir=profiles_dir)
         self._header_copy_columns = [
-            col for col in self._profile_columns
-            if col.name in _HEADER_COLUMNS_TO_COPY
+            col for col in self._profile_columns if col.name in _HEADER_COLUMNS_TO_COPY
         ]
         self._has_json = any(col.name == "_json" for col in self._profile_columns)
 
@@ -283,22 +284,26 @@ class HuntResultSchema:
             # Skip _raw and _tags — not needed in hunt results
             if col.name in ("_raw", "_tags"):
                 continue
-            columns.append({
-                "name": col.name,
-                "type": col.type,
-                "attribute": col.attribute,
-                "default": col.default,
-                "expr": col.expr,
-                "comment": col.comment,
-            })
+            columns.append(
+                {
+                    "name": col.name,
+                    "type": col.type,
+                    "attribute": col.attribute,
+                    "default": col.default,
+                    "expr": col.expr,
+                    "comment": col.comment,
+                }
+            )
 
         # Hunt detection columns
         for dc in HUNT_DETECTION_COLUMNS:
-            columns.append({
-                "name": dc.name,
-                "ch_type": dc.ch_type,
-                "codec": dc.codec,
-                "comment": dc.comment,
-            })
+            columns.append(
+                {
+                    "name": dc.name,
+                    "ch_type": dc.ch_type,
+                    "codec": dc.codec,
+                    "comment": dc.comment,
+                }
+            )
 
         return columns

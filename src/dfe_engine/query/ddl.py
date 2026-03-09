@@ -123,16 +123,12 @@ class DDLManager:
 
     def _grant_view(self, name: str) -> None:
         """Grant SELECT on a view to the restricted role."""
-        self._client.command(
-            f"GRANT SELECT ON {self._database}.{name} TO dfe_query_reader"
-        )
+        self._client.command(f"GRANT SELECT ON {self._database}.{name} TO dfe_query_reader")
 
     def _revoke_view(self, name: str) -> None:
         """Revoke SELECT on a view from the restricted role."""
         try:
-            self._client.command(
-                f"REVOKE SELECT ON {self._database}.{name} FROM dfe_query_reader"
-            )
+            self._client.command(f"REVOKE SELECT ON {self._database}.{name} FROM dfe_query_reader")
         except Exception:
             logger.warning(f"Failed to revoke view (may not exist): {name}")
 

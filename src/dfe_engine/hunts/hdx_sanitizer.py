@@ -180,17 +180,13 @@ class HdxSanitizer:
         text = self._HDX_BUCKET_REF_RE.sub("", text)
         return text
 
-    def _strip_compound_time_bounds(
-        self, text: str, result: HdxSanitizeResult
-    ) -> str:
+    def _strip_compound_time_bounds(self, text: str, result: HdxSanitizeResult) -> str:
         for m in self._COMPOUND_TIME_BOUND_RE.finditer(text):
             result.stripped_time_bounds.append(m.group(0).strip())
         text = self._COMPOUND_TIME_BOUND_RE.sub("", text)
         return text
 
-    def _strip_epoch_time_bounds(
-        self, text: str, result: HdxSanitizeResult
-    ) -> str:
+    def _strip_epoch_time_bounds(self, text: str, result: HdxSanitizeResult) -> str:
         for m in self._EPOCH_TIME_BOUND_RE.finditer(text):
             result.stripped_time_bounds.append(m.group(0).strip())
         text = self._EPOCH_TIME_BOUND_RE.sub("", text)

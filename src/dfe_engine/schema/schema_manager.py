@@ -96,9 +96,7 @@ def _validate_columns(columns: list[dict[str, Any]]) -> None:
     parsed = [SchemaColumn.model_validate(c) for c in columns]
     errors = SchemaLoader.validate_columns(parsed, registry)
     if errors:
-        raise SchemaVersionError(
-            "Column validation failed:\n  " + "\n  ".join(errors)
-        )
+        raise SchemaVersionError("Column validation failed:\n  " + "\n  ".join(errors))
 
 
 def _today() -> str:
@@ -152,8 +150,7 @@ def _apply_modifications(
 
         else:
             raise SchemaVersionError(
-                f"Unknown modification action: '{action}'. "
-                f"Valid: add, remove, update"
+                f"Unknown modification action: '{action}'. Valid: add, remove, update"
             )
     return cols
 
@@ -203,9 +200,7 @@ class SchemaManager:
 
         versions = data.setdefault("versions", {})
         if new_version in versions:
-            raise SchemaVersionError(
-                f"Version '{new_version}' already exists in {p}"
-            )
+            raise SchemaVersionError(f"Version '{new_version}' already exists in {p}")
 
         col_dicts = _normalise_columns(columns)
         if validate:
@@ -264,21 +259,16 @@ class SchemaManager:
 
         versions = data.get("versions", {})
         if new_version in versions:
-            raise SchemaVersionError(
-                f"Version '{new_version}' already exists in {p}"
-            )
+            raise SchemaVersionError(f"Version '{new_version}' already exists in {p}")
 
         # Resolve source version
         src_ver = source_version or data.get("current")
         if not src_ver:
-            raise SchemaVersionError(
-                f"No source_version specified and no 'current' marker in {p}"
-            )
+            raise SchemaVersionError(f"No source_version specified and no 'current' marker in {p}")
         if src_ver not in versions:
             available = ", ".join(sorted(versions.keys())) or "(none)"
             raise SchemaVersionError(
-                f"Source version '{src_ver}' not found in {p}. "
-                f"Available: {available}"
+                f"Source version '{src_ver}' not found in {p}. Available: {available}"
             )
 
         # Deep-copy source columns
