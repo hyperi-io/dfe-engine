@@ -1,6 +1,7 @@
 # DFE Engine — HyperI CI Configuration
 #
 # Only set values that differ from defaults.
+# Publish target: internal (JFrog hyperi-pypi-local)
 
 publish:
   target: internal
