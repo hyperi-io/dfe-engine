@@ -1,3 +1,10 @@
+## [1.6.2](https://github.com/hyperi-io/dfe-engine/compare/v1.6.1...v1.6.2) (2026-03-09)
+
+
+### Bug Fixes
+
+* register requires_schemas pytest marker in pyproject.toml ([a2939cf](https://github.com/hyperi-io/dfe-engine/commit/a2939cf58add988cac2004977d81c7ab523771e7))
+
 ## [1.6.1](https://github.com/hyperi-io/dfe-engine/compare/v1.6.0...v1.6.1) (2026-03-09)
 
 
