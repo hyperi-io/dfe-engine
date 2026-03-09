@@ -152,6 +152,7 @@ receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"
 loader = "dfe_engine.services.plugins_builtin.loader:plugin"
 archiver = "dfe_engine.services.plugins_builtin.archiver:plugin"
 transform-vector = "dfe_engine.services.plugins_builtin.transform_vector:plugin"
+transform-vrl = "dfe_engine.services.plugins_builtin.transform_vrl:plugin"
 transform-wasm = "dfe_engine.services.plugins_builtin.transform_wasm:plugin"
 fetcher = "dfe_engine.services.plugins_builtin.fetcher:plugin"
 
