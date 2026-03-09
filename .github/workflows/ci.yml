@@ -22,3 +22,4 @@ jobs:
       publish-target: internal
     secrets:
       JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
+      JFROG_USERNAME: ${{ secrets.JFROG_USERNAME }}
