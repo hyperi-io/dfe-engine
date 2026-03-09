@@ -1,3 +1,10 @@
+## [1.6.4](https://github.com/hyperi-io/dfe-engine/compare/v1.6.3...v1.6.4) (2026-03-09)
+
+
+### Bug Fixes
+
+* pass JFROG_USERNAME secret to CI workflow ([089a2a9](https://github.com/hyperi-io/dfe-engine/commit/089a2a966d4578d3b208fa2df94be93615bb136d))
+
 ## [1.6.3](https://github.com/hyperi-io/dfe-engine/compare/v1.6.2...v1.6.3) (2026-03-09)
 
 
