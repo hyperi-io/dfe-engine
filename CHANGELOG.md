@@ -1,3 +1,10 @@
+## [1.6.7](https://github.com/hyperi-io/dfe-engine/compare/v1.6.6...v1.6.7) (2026-03-10)
+
+
+### Bug Fixes
+
+* add http extra to hyperi-pylib dep for AsyncHttpClient/HttpClient ([b930d39](https://github.com/hyperi-io/dfe-engine/commit/b930d39e8b045ca4e29c549e78b2de33020ada18))
+
 ## [1.6.6](https://github.com/hyperi-io/dfe-engine/compare/v1.6.5...v1.6.6) (2026-03-09)
 
 
