@@ -10,6 +10,7 @@ from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.services import router as services_router
 from dfe_engine.api.v1.sources import router as sources_router
 from dfe_engine.api.v1.system import router as system_router
+from dfe_engine.api.v1.transforms import router as transforms_router
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router)
@@ -20,5 +21,6 @@ v1_router.include_router(fieldmaps_router)
 v1_router.include_router(rules_router)
 v1_router.include_router(alerts_router)
 v1_router.include_router(system_router)
+v1_router.include_router(transforms_router)
 
 __all__ = ["v1_router"]

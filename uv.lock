@@ -598,7 +598,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.6.5"
+version = "1.6.6"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },
@@ -667,7 +667,7 @@ requires-dist = [
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "fastapi", specifier = ">=0.135.1" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "hyperi-pylib", extras = ["expression", "http"], specifier = ">=2.24.2" },
+    { name = "hyperi-pylib", extras = ["expression", "http"], specifier = ">=2.24.3" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "pandas", specifier = ">=3.0.1" },
@@ -890,21 +890,21 @@ wheels = [
 
 [[package]]
 name = "hyperi-pylib"
-version = "2.24.2"
+version = "2.24.3"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "dulwich" },
     { name = "dynaconf" },
     { name = "loguru" },
     { name = "mergedeep" },
-    { name = "psutil" },
+    { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/a6/76/98a0df342e11b766435d39d1370ec16394eae62078da8add0653409ffcd4/hyperi_pylib-2.24.2.tar.gz", hash = "sha256:1c762cac8de146c5c9d17f25103698040c7bb67ef948724aac2594fd7233b100", size = 176038, upload-time = "2026-03-09T03:26:57.687Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/4c/47/e8cf52c88e29b8a59621158fa2708afc2a5e99a89fc5e7a86f02d874772b/hyperi_pylib-2.24.3.tar.gz", hash = "sha256:551e314c5e6712821c3a17688d5a294453c87254a0ab08b44c336eb605e20d80", size = 177522, upload-time = "2026-03-10T00:36:38.605Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/62/0925506df04a0115087925aac740a7e1ab47b8a6fe33807dd70174efdf15/hyperi_pylib-2.24.2-py3-none-any.whl", hash = "sha256:ef9128191f4af34692b73f2eefe8299e800a4d840830fbef47e39430270f16f3", size = 213064, upload-time = "2026-03-09T03:26:56.25Z" },
+    { url = "https://files.pythonhosted.org/packages/e5/b8/b822524c1bf4ea0fe60ceab7a6ff7d97a26351d1387f3a72bd112347c99f/hyperi_pylib-2.24.3-py3-none-any.whl", hash = "sha256:513c5cf25ffd05448e2c4f26abe475df6bc15b822e940d8d93f377421d06714c", size = 216208, upload-time = "2026-03-10T00:36:37.088Z" },
 ]
 
 [package.optional-dependencies]
