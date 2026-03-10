@@ -1,3 +1,10 @@
+## [1.6.8](https://github.com/hyperi-io/dfe-engine/compare/v1.6.7...v1.6.8) (2026-03-10)
+
+
+### Bug Fixes
+
+* add WASM transform endpoints and update hyperi-pylib to 2.24.3 ([23e408d](https://github.com/hyperi-io/dfe-engine/commit/23e408de72631ebacaf05492443d3038bde3b23f))
+
 ## [1.6.7](https://github.com/hyperi-io/dfe-engine/compare/v1.6.6...v1.6.7) (2026-03-10)
 
 
