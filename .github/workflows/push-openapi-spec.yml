@@ -17,9 +17,6 @@ on:
     paths:
       - "openapi-spec/openapi.json"
   workflow_dispatch:
-  pull_request:
-    paths:
-      - "openapi-spec/openapi.json"
 
 jobs:
   push-to-dfe-ui:
