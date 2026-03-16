@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.5.0"
+    "version": "1.6.9.dev1"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -337,7 +337,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/Source"
+                }
               }
             }
           },
@@ -2336,6 +2338,100 @@
           }
         ]
       }
+    },
+    "/api/v1/transforms/compile": {
+      "post": {
+        "tags": [
+          "Transforms"
+        ],
+        "summary": "Compile Transform",
+        "description": "Compile user source code to a WASM binary.\n\nProxies to the dfe-transform-compiler service. The response includes\na base64-encoded WASM binary that can be passed directly to /test.",
+        "operationId": "compile_transform_api_v1_transforms_compile_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompileRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompileResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/transforms/test": {
+      "post": {
+        "tags": [
+          "Transforms"
+        ],
+        "summary": "Test Transform",
+        "description": "Run a compiled WASM transform against sample records.\n\nProxies to the dfe-transform-wasm service's /test endpoint.\nThe wasm_base64 field should come directly from /compile.",
+        "operationId": "test_transform_api_v1_transforms_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
     }
   },
   "components": {
@@ -2454,6 +2550,51 @@
         ],
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
+      },
+      "CompileRequest": {
+        "properties": {
+          "language": {
+            "type": "string",
+            "enum": [
+              "rust",
+              "go",
+              "assemblyscript"
+            ],
+            "title": "Language"
+          },
+          "files": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Files",
+            "description": "Source files. Key = filename, value = source content."
+          }
+        },
+        "type": "object",
+        "required": [
+          "language",
+          "files"
+        ],
+        "title": "CompileRequest"
+      },
+      "CompileResponse": {
+        "properties": {
+          "wasm_base64": {
+            "type": "string",
+            "title": "Wasm Base64"
+          },
+          "wasm_bytes": {
+            "type": "integer",
+            "title": "Wasm Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wasm_base64",
+          "wasm_bytes"
+        ],
+        "title": "CompileResponse"
       },
       "ConfigHistoryEntry": {
         "properties": {
@@ -2623,6 +2764,94 @@
           "instance"
         ],
         "title": "DeploymentSummary"
+      },
+      "EmittedRecord": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "value"
+        ],
+        "title": "EmittedRecord"
+      },
+      "FetcherAuth": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Auth type (oauth2, api_key, basic)"
+          },
+          "token_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token Url",
+            "description": "OAuth2 token URL"
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id",
+            "description": "OAuth2 client ID"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret",
+            "description": "OAuth2 client secret"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key",
+            "description": "API key"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "FetcherAuth",
+        "description": "Fetcher authentication configuration."
       },
       "FieldMapSummary": {
         "properties": {
@@ -3284,6 +3513,36 @@
         ],
         "title": "RuleResponse"
       },
+      "SampleRecord": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "default": ""
+          },
+          "value": {
+            "type": "string",
+            "title": "Value"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp",
+            "default": 0
+          },
+          "headers": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Headers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SampleRecord"
+      },
       "ServiceConfigSummary": {
         "properties": {
           "service": {
@@ -3404,6 +3663,195 @@
         ],
         "title": "SizeResponse"
       },
+      "Source": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label \u2014 immutable identifier"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active",
+            "default": true
+          },
+          "header": {
+            "$ref": "#/components/schemas/SourceHeader",
+            "description": "Common schema header configuration"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "Schema configuration"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage (optional)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SaaS API fetcher (optional)"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSigma"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sigma field mappings (optional)"
+          },
+          "mapping_standards": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mapping Standards",
+            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "Source",
+        "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
+      },
+      "SourceFetcher": {
+        "properties": {
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "Fetcher type (crowdstrike, m365, etc.)"
+          },
+          "base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Url",
+            "description": "API base URL"
+          },
+          "auth": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FetcherAuth"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Authentication config"
+          },
+          "poll_interval_secs": {
+            "type": "integer",
+            "title": "Poll Interval Secs",
+            "description": "Polling interval in seconds",
+            "default": 300
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_type"
+        ],
+        "title": "SourceFetcher",
+        "description": "Fetcher configuration for SaaS API pull sources."
+      },
+      "SourceHeader": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Profile name (time_series, minimal, passthrough)",
+            "default": "time_series"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "description": "Common header version (semver)",
+            "default": "1.0.0"
+          }
+        },
+        "type": "object",
+        "title": "SourceHeader",
+        "description": "Common schema header configuration."
+      },
+      "SourceMatch": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "JSON field to inspect"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "Expected value (exact match)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "value"
+        ],
+        "title": "SourceMatch",
+        "description": "Receiver match rule \u2014 how the receiver identifies this source."
+      },
       "SourceResponse": {
         "properties": {
           "source": {
@@ -3422,6 +3870,106 @@
         ],
         "title": "SourceResponse",
         "description": "Full source after create/update."
+      },
+      "SourceSchema": {
+        "properties": {
+          "meta_schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta Schema",
+            "description": "Base field definitions (YAML file reference)"
+          },
+          "meta_schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta Schema Version",
+            "description": "Meta schema version (semver)"
+          },
+          "derived_schema": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Derived Schema",
+            "description": "Source-specific field overrides (optional YAML reference)"
+          },
+          "additional_fields": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Additional Fields",
+            "description": "Extra fields/indexes (optional YAML reference)"
+          },
+          "ttl_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttl Days",
+            "description": "Data retention in days"
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "description": "Table engine (MergeTree, ReplicatedMergeTree, SharedMergeTree)",
+            "default": "MergeTree"
+          }
+        },
+        "type": "object",
+        "title": "SourceSchema",
+        "description": "Schema configuration for the source's ClickHouse table."
+      },
+      "SourceSigma": {
+        "properties": {
+          "taxonomy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxonomy",
+            "description": "Built-in mapping set (e.g. 'windows')"
+          },
+          "custom_mappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Custom Mappings",
+            "description": "Per-source field overrides (SigmaField: column_name)"
+          }
+        },
+        "type": "object",
+        "title": "SourceSigma",
+        "description": "Sigma field mapping configuration for this source."
       },
       "SourceSummary": {
         "properties": {
@@ -3493,6 +4041,49 @@
         "title": "SourceSummary",
         "description": "Lightweight source listing (for paginated list)."
       },
+      "SourceTransform": {
+        "properties": {
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "description": "Transform engine (vector or wasm)"
+          },
+          "config_file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config File",
+            "description": "Path to engine-specific config"
+          },
+          "env": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Env",
+            "description": "Per-transform ENV overrides"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files",
+            "description": "Enrichment files (CSV, MMDB)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "engine"
+        ],
+        "title": "SourceTransform",
+        "description": "Transform stage configuration (vector or wasm)."
+      },
       "SqlValidationError": {
         "properties": {
           "message": {
@@ -3561,6 +4152,73 @@
           "valid"
         ],
         "title": "SqlValidationResponse"
+      },
+      "TestRequest": {
+        "properties": {
+          "wasm_base64": {
+            "type": "string",
+            "title": "Wasm Base64",
+            "description": "Base64-encoded WASM binary from /compile"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/SampleRecord"
+            },
+            "type": "array",
+            "title": "Records",
+            "description": "Sample input records"
+          },
+          "source_format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "msgpack"
+            ],
+            "title": "Source Format",
+            "default": "json"
+          },
+          "sink_format": {
+            "type": "string",
+            "enum": [
+              "json",
+              "msgpack"
+            ],
+            "title": "Sink Format",
+            "default": "json"
+          }
+        },
+        "type": "object",
+        "required": [
+          "wasm_base64",
+          "records"
+        ],
+        "title": "TestRequest"
+      },
+      "TestResponse": {
+        "properties": {
+          "emitted": {
+            "items": {
+              "$ref": "#/components/schemas/EmittedRecord"
+            },
+            "type": "array",
+            "title": "Emitted"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          },
+          "wasm_memory_bytes": {
+            "type": "integer",
+            "title": "Wasm Memory Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "emitted",
+          "duration_ms",
+          "wasm_memory_bytes"
+        ],
+        "title": "TestResponse"
       },
       "TokenResponse": {
         "properties": {

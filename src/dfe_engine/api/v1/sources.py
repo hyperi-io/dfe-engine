@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.source.models import Source
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
 
@@ -139,6 +140,7 @@ async def create_source(
 
 @router.get(
     "/{name}",
+    response_model=Source,
     dependencies=[Depends(require_action("source:read"))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
@@ -155,7 +157,7 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
                 "message": f"Source '{name}' not found",
             },
         )
-    return source.model_dump(mode="json")
+    return source
 
 
 @router.put(
