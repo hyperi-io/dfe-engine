@@ -48,7 +48,7 @@ jobs:
           cd dfe-ui
           mkdir -p packages/dfe-engine-types/openapi-spec
           cp ../openapi-spec/openapi.json packages/dfe-engine-types/openapi-spec/openapi.json
-          cd packages/dfe-engine-types && npm ci && npm run generate && cd ../..
+          cd packages/dfe-engine-types && yarn install --immutable && yarn generate && cd ../..
           git add packages/dfe-engine-types/
           
           if git diff --staged --quiet; then
