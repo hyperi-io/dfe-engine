@@ -1,3 +1,10 @@
+## [1.6.9-dev.1](https://github.com/hyperi-io/dfe-engine/compare/v1.6.8...v1.6.9-dev.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* add build.type app to CI config ([630fbcc](https://github.com/hyperi-io/dfe-engine/commit/630fbcc20b5689533d8e92f6abde59f127f45947))
+
 ## [1.6.8](https://github.com/hyperi-io/dfe-engine/compare/v1.6.7...v1.6.8) (2026-03-10)
 
 
