@@ -37,18 +37,23 @@ jobs:
         with:
           node-version: 22.18.0
 
+      - name: Enable Yarn via Corepack
+        run: corepack enable && corepack prepare yarn@stable --activate
+
       - name: Create PR with OpenAPI spec in dfe-ui
         env:
           DFE_UI_TOKEN: ${{ secrets.DFE_UI_TOKEN }}
           DFE_UI_REPO: ${{ vars.DFE_UI_REPO || 'hyperi-io/dfe-ui' }}
         run: |
+          set -e
           git config --global user.name "github-actions[bot]"
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git clone --depth 1 "https://x-access-token:${DFE_UI_TOKEN}@github.com/${DFE_UI_REPO}.git" dfe-ui
           cd dfe-ui
           mkdir -p packages/dfe-engine-types/specs
           cp ../openapi-spec/openapi.json packages/dfe-engine-types/specs/openapi.json
-          cd packages/dfe-engine-types && yarn install --immutable && yarn generate && cd ../..
+          cd packages/dfe-engine-types && yarn install --immutable && yarn generate
+          cd "$GITHUB_WORKSPACE/dfe-ui"
           git add packages/dfe-engine-types/
           
           if git diff --staged --quiet; then
