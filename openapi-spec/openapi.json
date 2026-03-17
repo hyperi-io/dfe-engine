@@ -1679,9 +1679,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/FieldMap"
               }
             }
           }
@@ -1691,7 +1689,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FieldMap"
+                }
               }
             }
           },
@@ -1737,7 +1737,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FieldMap"
+                }
               }
             }
           },
@@ -1792,7 +1794,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/FieldMap"
+                }
               }
             }
           },
@@ -2852,6 +2856,77 @@
         ],
         "title": "FetcherAuth",
         "description": "Fetcher authentication configuration."
+      },
+      "FieldMap": {
+        "properties": {
+          "standard": {
+            "type": "string",
+            "title": "Standard",
+            "description": "Standard identifier (sigma, ecs, cim)"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source name, or None for the default map"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Standard version (e.g. '8.11' for ECS)"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Human description"
+          },
+          "inherits": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inherits",
+            "description": "Reference to base map (declarative)"
+          },
+          "mappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Mappings",
+            "description": "standard_field \u2192 dfe_column_name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "standard"
+        ],
+        "title": "FieldMap",
+        "description": "A mapping from a detection/analytics standard's fields to DFE columns.\n\nTwo-tier resolution: a default map applies to all sources for a\nstandard, and source-specific maps override individual entries.\n\nAttributes:\n    standard: Standard identifier (e.g. \"sigma\", \"ecs\", \"cim\").\n    source: Source name this map applies to, or None for default map.\n    version: Standard version (e.g. \"8.11\" for ECS). Informational.\n    description: Human-readable description.\n    inherits: Reference to base map (e.g. \"_default\"). Declarative\n        \u2014 the resolver does not auto-fetch, caller is responsible.\n    mappings: Dict of standard_field \u2192 dfe_column_name."
       },
       "FieldMapSummary": {
         "properties": {
