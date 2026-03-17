@@ -10,13 +10,12 @@ POST   /api/v1/field-maps/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
-from typing import Any
-
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.fieldmap.models import FieldMap
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
@@ -75,10 +74,11 @@ async def list_field_maps(
 @router.post(
     "",
     status_code=201,
+    response_model=FieldMap,
     dependencies=[Depends(require_action("config:write"))],
 )
 async def create_field_map(
-    body: dict[str, Any],
+    body: FieldMap,
     user: CurrentUser,
     registry: FieldMapReg,
 ):
@@ -95,11 +95,12 @@ async def create_field_map(
                 "message": str(e),
             },
         )
-    return fm.model_dump(mode="json")
+    return fm
 
 
 @router.get(
     "/{standard}",
+    response_model=FieldMap,
     dependencies=[Depends(require_action("config:read"))],
 )
 async def get_default_field_map(standard: str, user: CurrentUser, registry: FieldMapReg):
@@ -116,11 +117,12 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
                 "message": f"Field map for standard '{standard}' not found",
             },
         )
-    return fm.model_dump(mode="json")
+    return fm
 
 
 @router.get(
     "/{standard}/{source}",
+    response_model=FieldMap,
     dependencies=[Depends(require_action("config:read"))],
 )
 async def get_source_field_map(
@@ -139,7 +141,7 @@ async def get_source_field_map(
                 "message": f"Field map for '{standard}/{source}' not found",
             },
         )
-    return fm.model_dump(mode="json")
+    return fm
 
 
 @router.delete(
