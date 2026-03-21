@@ -2,6 +2,12 @@
 
 import pytest
 
+from dfe_engine.services.models.base import BaseServiceConfig
+from dfe_engine.services.models.fetcher import (
+    FetcherAuthConfig,
+    FetcherConfig,
+    FetcherSourceConfig,
+)
 from dfe_engine.services.models.source_common import BaseSourceConfig, SourceFileConfig
 from dfe_engine.services.models.transform_vector import (
     TransformVectorConfig,
@@ -11,12 +17,6 @@ from dfe_engine.services.models.transform_wasm import (
     TransformWasmConfig,
     WasmSourceConfig,
 )
-from dfe_engine.services.models.fetcher import (
-    FetcherAuthConfig,
-    FetcherConfig,
-    FetcherSourceConfig,
-)
-from dfe_engine.services.models.base import BaseServiceConfig
 
 
 class TestBaseSourceConfig:

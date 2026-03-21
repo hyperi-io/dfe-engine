@@ -4,14 +4,12 @@ These tests require a running ClickHouse instance.
 Use `docker compose up -d` to start the test infrastructure.
 """
 
-import pytest
-
 import pyarrow as pa
+import pytest
 
 from dfe_engine.query import QueryClient
 from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
 from dfe_engine.query.models import ExplainStepType
-
 
 # Skip all tests in this module if ClickHouse is not available
 pytestmark = pytest.mark.integration
@@ -343,8 +341,8 @@ class TestQueryResultExportsIntegration:
 
     def test_arrow_ipc_roundtrip(self, clickhouse_available, test_table):
         """Test Arrow IPC serialization roundtrip."""
-        from dfe_engine.query.result import QueryResult
         from dfe_engine.query.models import QueryMetadata
+        from dfe_engine.query.result import QueryResult
 
         client = QueryClient(direct=True)
         result = client.query_with_explain(

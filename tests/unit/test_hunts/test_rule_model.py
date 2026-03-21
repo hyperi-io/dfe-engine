@@ -4,7 +4,6 @@ import pytest
 
 from dfe_engine.hunts.rule_model import Rule, RuleCreate
 
-
 # ── RuleCreate ──────────────────────────────────────────────────
 
 

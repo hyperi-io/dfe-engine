@@ -2,8 +2,6 @@
 
 import pytest
 
-from tests.unit.test_schema.conftest import requires_schemas
-
 from dfe_engine.schema.schema_loader import (
     SchemaLoader,
     SchemaLoadError,
@@ -13,6 +11,7 @@ from dfe_engine.schema.schema_loader import (
 )
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump
+from tests.unit.test_schema.conftest import requires_schemas
 
 
 @pytest.fixture

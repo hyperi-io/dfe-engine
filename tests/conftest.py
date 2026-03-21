@@ -400,7 +400,7 @@ def clickhouse_client(clickhouse_test_database):
         password=password,
         database=clickhouse_test_database,
     )
-    yield client
+    return client
 
 
 @pytest.fixture

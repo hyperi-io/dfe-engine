@@ -7,7 +7,6 @@ from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.fieldmap.view_generator import ViewGenerator
 from dfe_engine.schema.schema_ddl import DDLConfig
 
-
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------

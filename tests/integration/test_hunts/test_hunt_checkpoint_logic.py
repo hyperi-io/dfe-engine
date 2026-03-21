@@ -1,13 +1,15 @@
+import time
 import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
 import pytest
+import yaml
+from hyperi_pylib.logger import logger
+
+from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 from dfe_engine.settings import get_settings
-import time
-from hyperi_pylib.logger import logger
-from datetime import datetime, timezone, timedelta
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-import yaml
-from pathlib import Path
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
@@ -20,7 +22,7 @@ def create_unique_name(base_name: str) -> str:
 
 def load_config(file_path: Path) -> dict:
     """Loads the configuration from a YAML file."""
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         config = yaml.safe_load(f)
     return config
 
@@ -38,7 +40,7 @@ def ch_client():
         "ch_verify": settings.clickhouse.verify,
     }
     ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-    yield ch_client
+    return ch_client
 
 
 @pytest.fixture(scope="function")
@@ -96,8 +98,8 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
 
     try:
-        execution_time = datetime.now(timezone.utc)
-        end_time = datetime.now(timezone.utc)
+        execution_time = datetime.now(UTC)
+        end_time = datetime.now(UTC)
         end_time_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
         execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
         execution_time_ms = (end_time - execution_time).total_seconds() * 1000
@@ -106,7 +108,7 @@ def test_create_and_update_checkpoint_success(ch_client, unique_names):
         log_buffer = 60
         query_window_seconds = 600
 
-        scheduled_start_time = datetime.now(timezone.utc)
+        scheduled_start_time = datetime.now(UTC)
         last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
         scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
         scheduled_start_time_w_buffer_str = scheduled_start_time_w_buffer.strftime(
@@ -162,9 +164,9 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
         )
 
         previous_success_time = None
-        execution_time = datetime.now(timezone.utc)
-        end_time = datetime.now(timezone.utc)
-        scheduled_start_time = datetime.now(timezone.utc)
+        execution_time = datetime.now(UTC)
+        end_time = datetime.now(UTC)
+        scheduled_start_time = datetime.now(UTC)
         execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
         end_time_str = end_time.strftime("%Y-%m-%d %H:%M:%S")
         execution_time_ms = (end_time - execution_time).total_seconds() * 1000
@@ -207,12 +209,12 @@ def test_create_and_update_checkpoint_success_windows_validation(ch_client, uniq
         assert query_checkpoint_time is not None
 
         if query_checkpoint_time.tzinfo is None:
-            query_checkpoint_time = query_checkpoint_time.replace(tzinfo=timezone.utc)
+            query_checkpoint_time = query_checkpoint_time.replace(tzinfo=UTC)
 
         logger.info(f"Retrieved previous successful run time: {previous_success_time}")
         logger.info(f"Retrieved last successful run time: {query_checkpoint_time}")
 
-        current_time = datetime.now(timezone.utc)
+        current_time = datetime.now(UTC)
         time_diff = current_time - query_checkpoint_time
         logger.info(f"Time difference between checkpoints: {time_diff.total_seconds()} seconds")
 

@@ -1,13 +1,15 @@
+import pathlib
+
 import pytest
 import yaml
-import pathlib
 from jinja2 import Environment
+
 from dfe_engine.hunts.validator import HuntValidator
 
 
 def load_config(file_path: pathlib.Path) -> dict:
     """Load YAML configuration from a file."""
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         return yaml.safe_load(f)
 
 

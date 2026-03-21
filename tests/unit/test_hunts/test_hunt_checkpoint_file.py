@@ -1,14 +1,16 @@
-import uuid
-import pytest
-import time
 import os
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-from hyperi_pylib.logger import logger
 import shutil
+import time
+import uuid
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
-execution_time = datetime.now(timezone.utc)
+import pytest
+from hyperi_pylib.logger import logger
+
+from dfe_engine.hunts.checkpoint import HuntCheckpointManager
+
+execution_time = datetime.now(UTC)
 execution_time_str = execution_time.strftime("%Y-%m-%d %H:%M:%S")
 
 
@@ -45,8 +47,8 @@ def test_create_update_checkpoint(
     create_checkpoint_manager,
 ):
     customer = "detectionlab"
-    end_time = datetime.now(timezone.utc)
-    scheduled_start_time = datetime.now(timezone.utc)
+    end_time = datetime.now(UTC)
+    scheduled_start_time = datetime.now(UTC)
     execution_time_ms = (end_time - execution_time).total_seconds() * 1000
     generated_query_id = str(uuid.uuid4())
     log_buffer = 60

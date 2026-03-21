@@ -151,6 +151,17 @@ ignore = [
     "PIE810", # multiple-starts-ends-with (stylistic, low value)
     "E402",   # module-import-not-at-top (conditional imports)
     "T201",   # print (TEMP: needs audit — may be intentional CLI output)
+    "PT003",  # pytest-extraneous-scope-function
+    "PT006",  # pytest-parametrize-names-wrong-type
+    "PT011",  # pytest-raises-too-broad
+    "PT012",  # pytest-raises-with-multiple-statements
+    "PT017",  # pytest-assert-in-except
+    "PT018",  # pytest-composite-assertion
+    "N803",   # invalid-argument-name (test param names)
+    "RUF003", # ambiguous-unicode-character-comment
+    "RUF005", # collection-literal-concatenation
+    "RUF015", # unnecessary-iterable-allocation-for-first-element
+    "RUF043", # pytest-raises-ambiguous-pattern
 ]
 
 [tool.ruff.lint.pydocstyle]

@@ -1,7 +1,8 @@
 import pytest
 import yaml
-from dfe_engine.sigma.sigma_converter import SigmaRuleConverter as SigmaConverter
+
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
+from dfe_engine.sigma.sigma_converter import SigmaRuleConverter as SigmaConverter
 
 # ============================================================================
 # Test Fixtures
@@ -720,5 +721,3 @@ def test_customer_specific_filters(mocker, tmp_path):
                 EventID: 4625
             condition: selection
     """)
-
-    pass
