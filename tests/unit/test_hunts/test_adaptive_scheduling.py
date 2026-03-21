@@ -3,12 +3,10 @@
 from datetime import datetime
 from unittest.mock import MagicMock
 
-
-from dfe_engine.hunts.job import JobScheduler
 from dfe_engine.hunts.cron_job import CronJob
 from dfe_engine.hunts.hunt_engine import HuntEngine
+from dfe_engine.hunts.job import JobScheduler
 from dfe_engine.settings import DFESettings, HuntsSettings
-
 
 # ── JobScheduler Adaptive Mode ────────────────────────────────────
 

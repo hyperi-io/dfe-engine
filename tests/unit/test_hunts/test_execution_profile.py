@@ -2,9 +2,8 @@
 
 from unittest.mock import MagicMock
 
-from dfe_engine.hunts.hunt import Hunt
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-
+from dfe_engine.hunts.hunt import Hunt
 
 # ── Hunt._capture_execution_profile ─────────────────────────────
 

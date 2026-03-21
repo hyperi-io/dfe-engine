@@ -1,7 +1,8 @@
 """Tests for hunt Source model wiring — SourceRegistry resolution."""
 
 from unittest.mock import MagicMock
-from jinja2 import Environment, DictLoader
+
+from jinja2 import DictLoader, Environment
 
 from dfe_engine.hunts.hunt import Hunt
 

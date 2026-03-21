@@ -2,7 +2,6 @@
 
 import importlib.resources as resources
 
-
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
 

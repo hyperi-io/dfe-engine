@@ -3,7 +3,6 @@
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.resolver import resolve_field, resolve_field_map
 
-
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------

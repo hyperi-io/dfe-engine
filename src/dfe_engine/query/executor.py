@@ -29,7 +29,6 @@ class ViewExecutionError(Exception):
     """View execution failed."""
 
 
-
 class ViewExecutor:
     """Executes parameterized views via a restricted ClickHouse connection.
 

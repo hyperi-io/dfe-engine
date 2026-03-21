@@ -1,10 +1,12 @@
 import tempfile
-import pytest
 import textwrap
-import yaml
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from datetime import datetime, timezone, timedelta
+
+import pytest
+import yaml
 from jinja2 import Environment, FileSystemLoader
+
 from dfe_engine.hunts.hunt import Hunt
 from dfe_engine.settings import get_settings
 
@@ -14,7 +16,7 @@ pytestmark = pytest.mark.integration
 
 def load_config(file_path: Path) -> dict:
     """Load YAML configuration from a file."""
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         return yaml.safe_load(f)
 
 
@@ -151,5 +153,5 @@ def test_basic_hunt_alerts(
         assert expected_query == hunt.queries_by_customer["detectionlab"][0], (
             f"-->Expected query:{expected_query}-->Generated query:{hunt.queries_by_customer['detectionlab'][0]}"
         )
-        scheduled_start_time_w_buffer = datetime.now(timezone.utc) - timedelta(seconds=60)
+        scheduled_start_time_w_buffer = datetime.now(UTC) - timedelta(seconds=60)
         hunt.execute_hunt(customer=org_id, scheduled_start_time=scheduled_start_time_w_buffer)

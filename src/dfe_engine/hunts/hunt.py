@@ -557,9 +557,7 @@ class Hunt:
             )
         return None
 
-    def _execute_queries(
-        self, execution_context: dict[str, Any], file_path: str | None
-    ) -> tuple:
+    def _execute_queries(self, execution_context: dict[str, Any], file_path: str | None) -> tuple:
         """Execute all queries and return success/failure counts + per-rule metadata."""
         successful_queries = 0
         failed_queries = 0
@@ -645,9 +643,7 @@ class Hunt:
             try:
                 explain_start = datetime.now(UTC)
                 explain_result = ch_client.execute(f"EXPLAIN PLAN {query}")
-                explain_duration_ms = (
-                    datetime.now(UTC) - explain_start
-                ).total_seconds() * 1000
+                explain_duration_ms = (datetime.now(UTC) - explain_start).total_seconds() * 1000
                 explain_plan = "\n".join(
                     str(row[0]) if isinstance(row, (list, tuple)) else str(row)
                     for row in explain_result

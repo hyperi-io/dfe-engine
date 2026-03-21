@@ -17,8 +17,8 @@ from dfe_engine.settings import (
     AuthSettings,
     DFESettings,
     LocalAuthSettings,
-    SourceSettings,
     ServicesSettings,
+    SourceSettings,
 )
 
 

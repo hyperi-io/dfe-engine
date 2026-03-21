@@ -320,9 +320,7 @@ class RuleCreationService:
 
             explain_start = datetime.now(UTC)
             explain_result = client.execute(explain_sql)
-            explain_duration_ms = (
-                datetime.now(UTC) - explain_start
-            ).total_seconds() * 1000
+            explain_duration_ms = (datetime.now(UTC) - explain_start).total_seconds() * 1000
 
             explain_plan = "\n".join(
                 str(row[0]) if isinstance(row, (list, tuple)) else str(row)

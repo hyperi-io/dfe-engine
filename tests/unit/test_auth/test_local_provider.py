@@ -12,7 +12,6 @@ from dfe_engine.auth import (
 from dfe_engine.auth.local_provider import _is_bcrypt_hash
 from dfe_engine.settings import LocalAuthSettings
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------

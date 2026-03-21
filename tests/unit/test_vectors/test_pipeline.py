@@ -1,7 +1,9 @@
-import pytest
 import os
 import tempfile
+
+import pytest
 import yaml
+
 from dfe_engine.pipeline.pipeline import Pipeline
 from dfe_engine.pipeline.pipeline_util import PipelineSchemaError
 

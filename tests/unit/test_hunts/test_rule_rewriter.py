@@ -2,7 +2,7 @@
 
 import pytest
 
-from dfe_engine.hunts.rule_rewriter import RuleRewriter, ParsedRule
+from dfe_engine.hunts.rule_rewriter import ParsedRule, RuleRewriter
 
 
 @pytest.fixture

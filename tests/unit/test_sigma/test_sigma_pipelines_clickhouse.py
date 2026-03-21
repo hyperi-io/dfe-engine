@@ -1,7 +1,8 @@
 import pytest
+from sigma.collection import SigmaCollection
+
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 from dfe_engine.sigma.sigma_pipelines import SigmaPipeline
-from sigma.collection import SigmaCollection
 
 
 @pytest.fixture

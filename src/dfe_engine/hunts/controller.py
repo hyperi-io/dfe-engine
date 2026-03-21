@@ -179,9 +179,7 @@ class HuntController:
         }
 
     @staticmethod
-    def _load_target_config(
-        target_name: str | None, targets_file_path: str | None
-    ) -> dict | None:
+    def _load_target_config(target_name: str | None, targets_file_path: str | None) -> dict | None:
         """Load target configuration from settings."""
         target_config_data = _get_target_config(target_name)
         settings = get_settings()

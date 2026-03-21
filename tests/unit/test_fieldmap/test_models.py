@@ -4,7 +4,6 @@ import pytest
 
 from dfe_engine.fieldmap.models import DEFAULT_MAP_NAME, FieldMap
 
-
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------

@@ -1,7 +1,9 @@
-import pytest
 import re
+
+import pytest
 from sigma.collection import SigmaCollection
 from sigma.rule import SigmaRule
+
 from dfe_engine.sigma.sigma_backend_clickhouse import SqlBackend
 
 

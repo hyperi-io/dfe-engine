@@ -1,15 +1,17 @@
-import pytest
-from unittest.mock import MagicMock, patch
-from jinja2 import Environment, FileSystemLoader
-from dfe_engine.hunts.hunt import Hunt
-import yaml
-from pathlib import Path
 import shutil
 import tempfile
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+import yaml
+from jinja2 import Environment, FileSystemLoader
+
+from dfe_engine.hunts.hunt import Hunt
 
 
 def load_config(file_path: Path) -> dict:
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         return yaml.safe_load(f)
 
 

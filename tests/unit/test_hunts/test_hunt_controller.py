@@ -1,4 +1,5 @@
 import pytest
+
 from dfe_engine.hunts.controller import HuntController
 
 

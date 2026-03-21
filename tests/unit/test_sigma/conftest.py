@@ -1,8 +1,9 @@
 import os
 import shutil
+
+import pandas as pd
 import pytest
 import yaml
-import pandas as pd
 
 
 def _create_base_meta_schema_nxlog_windows():

@@ -11,9 +11,8 @@ Three creation paths:
 
 import pytest
 
-from dfe_engine.hunts.rule_model import Rule, RuleCreate
 from dfe_engine.hunts.hunt_output import HuntResultSchema
-
+from dfe_engine.hunts.rule_model import Rule, RuleCreate
 
 # ── RuleCreate validation ────────────────────────────────────────
 

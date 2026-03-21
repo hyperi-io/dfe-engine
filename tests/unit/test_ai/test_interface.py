@@ -1,7 +1,6 @@
 """Tests for AI Module Interface — ABCs, models, and registry."""
 
 import pytest
-
 from pydantic import BaseModel
 
 from dfe_engine.ai import (
@@ -13,7 +12,6 @@ from dfe_engine.ai import (
     QueryOptimiser,
     SchemaOptimiser,
 )
-
 
 # ── Concrete test implementations ──────────────────────────
 

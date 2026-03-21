@@ -36,7 +36,6 @@ class StorageListingError(Exception):
     """Error during storage listing."""
 
 
-
 @register_adapter("s3")
 class S3Adapter(DatasourceAdapter):
     """
@@ -243,7 +242,6 @@ class MinIOAdapter(S3Adapter):
 
     Same as S3Adapter but with MinIO-specific defaults.
     """
-
 
 
 @register_adapter("file")

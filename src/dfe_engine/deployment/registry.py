@@ -309,9 +309,7 @@ class DeploymentConfigRegistry:
                         "commit": commit.id.decode("ascii"),
                         "message": commit.message.decode("utf-8", errors="replace").strip(),
                         "author": author_name,
-                        "date": datetime.fromtimestamp(
-                            commit.author_time, tz=UTC
-                        ).isoformat(),
+                        "date": datetime.fromtimestamp(commit.author_time, tz=UTC).isoformat(),
                     }
                 )
 

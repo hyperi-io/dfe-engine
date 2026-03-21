@@ -1,10 +1,10 @@
 """Unit tests for parameterized view models."""
 
 from dfe_engine.query.models import (
+    QueryOptions,
     ViewDefinition,
     ViewExecuteRequest,
     ViewParameter,
-    QueryOptions,
 )
 
 

@@ -4,7 +4,7 @@ Requires a running ClickHouse instance (Docker or DevEx cluster).
 """
 
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -34,7 +34,7 @@ def ch_client():
         "ch_verify": settings.clickhouse.verify,
     }
     client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-    yield client
+    return client
 
 
 @pytest.fixture(scope="module")
@@ -68,7 +68,7 @@ def results_table(ch_client, test_db):
     """)
 
     # Seed 50 rows across 3 severities and 4 source_ip values
-    base_ts = datetime(2026, 3, 3, 10, 0, 0, tzinfo=timezone.utc)
+    base_ts = datetime(2026, 3, 3, 10, 0, 0, tzinfo=UTC)
     rows = []
     source_ips = ["10.0.0.1", "10.0.0.2", "10.0.0.3", "10.0.0.4"]
     severities = ["high", "medium", "low"]
@@ -89,7 +89,7 @@ def results_table(ch_client, test_db):
         f"(_timestamp, _org_id, rule_id, rule_name, source_table, hunt_name, severity, _json) "
         f"VALUES {values}"
     )
-    yield table
+    return table
 
 
 @pytest.fixture
@@ -97,7 +97,7 @@ def alert_state_db(ch_client, test_db):
     """Provide an AlertStateManager using the test database."""
     mgr = AlertStateManager(database=test_db)
     mgr.ensure_table_exists(ch_client)
-    yield mgr
+    return mgr
 
 
 RESULTS_COLS = frozenset(

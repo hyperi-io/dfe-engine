@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 import pytest
 
 from dfe_engine.fieldmap.models import FieldMap
@@ -10,7 +9,6 @@ from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.source.models import Source, SourceSigma
 from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.source.type_registry import TypeRegistry
-
 
 # ---------------------------------------------------------------------------
 # Helpers

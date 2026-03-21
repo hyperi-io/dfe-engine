@@ -1,13 +1,14 @@
 import os
+import shutil
+import stat
+import uuid
+
 import pytest
 import yaml
-import uuid
-import stat
-import shutil
-
 from hyperi_pylib.logger import logger
-from dfe_engine.settings import get_settings, reset_settings
+
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+from dfe_engine.settings import get_settings, reset_settings
 
 # Reset settings and ClickHouseManager to pick up dotenv values
 reset_settings()

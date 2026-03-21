@@ -1,8 +1,7 @@
 """Tests for EXPLAIN plan capture in hunt query execution."""
 
-from dfe_engine.hunts.hunt import Hunt
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
-
+from dfe_engine.hunts.hunt import Hunt
 
 # ── Hunt EXPLAIN Configuration ────────────────────────────────────
 

@@ -15,7 +15,6 @@ from dfe_engine.hunts.scoring import (
     validate_condition,
 )
 
-
 # ── ScoreFactor Validation ─────────────────────────────────────
 
 

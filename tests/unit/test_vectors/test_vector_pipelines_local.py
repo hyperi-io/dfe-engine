@@ -1,13 +1,15 @@
-import pytest
 import os
 import tempfile
+
+import pytest
 import yaml
+
 from dfe_engine.pipeline.pipeline_controller import PipelineBuilderController
 from dfe_engine.pipeline.pipeline_util import (
     PipelineSchemaError,
-    get_vector_pipelines,
-    get_pipeline,
     gather_env_variables_for_pipeline,
+    get_pipeline,
+    get_vector_pipelines,
     read_vector_step_config,
 )
 
