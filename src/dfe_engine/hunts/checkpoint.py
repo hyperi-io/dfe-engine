@@ -1,10 +1,10 @@
+import json
 import os
-from typing import Any, Dict, List, Optional
 from datetime import datetime
 from enum import Enum
-from hyperi_pylib.logger import logger
+from typing import Any
 
-import json
+from hyperi_pylib.logger import logger
 
 
 class Status(Enum):
@@ -21,8 +21,8 @@ class HuntCheckpointManager:
 
     def __init__(
         self,
-        database_name: Optional[str] = None,
-        table_name: Optional[str] = None,
+        database_name: str | None = None,
+        table_name: str | None = None,
     ) -> None:
         """
         Initialize the HuntCheckpointManager.
@@ -208,7 +208,7 @@ class HuntCheckpointManager:
         hunt_name: str = "",
         rule_name: str = "",
         file_path: str = "",
-    ) -> Optional[datetime]:
+    ) -> datetime | None:
         """
         A method to fetch the last successful run's timestamp based on the destination type.
 
@@ -249,7 +249,7 @@ class HuntCheckpointManager:
         hunt_name: str,
         rule_name: str,
         customer: str,
-    ) -> Optional[datetime]:
+    ) -> datetime | None:
         """
         Fetch the last successful run's timestamp from ClickHouse.
 
@@ -294,7 +294,7 @@ class HuntCheckpointManager:
         rule_name: str,
         customer: str,
         file_path: str,
-    ) -> Optional[datetime]:
+    ) -> datetime | None:
         """
         Fetch the last successful run's timestamp from file.
 
@@ -310,7 +310,7 @@ class HuntCheckpointManager:
         """
 
         try:
-            with open(file_path, "r") as file:
+            with open(file_path) as file:
                 checkpoints = json.load(file)
 
             relevant_checkpoints = [
@@ -516,7 +516,7 @@ class HuntCheckpointManager:
 
         try:
             if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
-                with open(file_path, "r") as file:
+                with open(file_path) as file:
                     checkpoints = json.load(file)
             else:
                 checkpoints = []
@@ -545,7 +545,7 @@ class HuntCheckpointManager:
         except Exception as e:
             logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
 
-    def create_batch_checkpoint_clickhouse(self, ch_client, checkpoints: List[Dict[str, Any]]):
+    def create_batch_checkpoint_clickhouse(self, ch_client, checkpoints: list[dict[str, Any]]):
         """
         Insert the checkpoint data into the ClickHouse table.
 
@@ -622,7 +622,7 @@ class HuntCheckpointManager:
 
     def create_batch_checkpoint_file(
         self,
-        checkpoints: List[Dict[str, Any]],
+        checkpoints: list[dict[str, Any]],
         file_path: str,
     ) -> None:
         """

@@ -54,14 +54,14 @@ Usage:
 from __future__ import annotations
 
 import copy
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
-from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
-from dfe_engine.yaml_utils import yaml_load, yaml_dump
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 class SchemaVersionError(Exception):
@@ -100,7 +100,7 @@ def _validate_columns(columns: list[dict[str, Any]]) -> None:
 
 
 def _today() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return datetime.now(UTC).strftime("%Y-%m-%d")
 
 
 def _apply_modifications(

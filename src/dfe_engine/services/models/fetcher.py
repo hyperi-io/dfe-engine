@@ -22,7 +22,6 @@ from dfe_engine.services.models.common import (
 )
 from dfe_engine.services.models.source_common import BaseSourceConfig
 
-
 # ---------------------------------------------------------------------------
 # Fetcher source configs
 # ---------------------------------------------------------------------------

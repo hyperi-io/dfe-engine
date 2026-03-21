@@ -1,35 +1,38 @@
-import re
 import ipaddress
 import json
-from typing import ClassVar, Dict, Tuple, Pattern, List, Any, Union, Optional
-from sigma.conversion.state import ConversionState
-from sigma.rule import SigmaRule, SigmaRuleTag
-from sigma.conversion.base import TextQueryBackend
+import re
+from re import Pattern
+from typing import Any, ClassVar
+
 from sigma.conditions import (
-    ConditionItem,
     ConditionAND,
-    ConditionOR,
-    ConditionNOT,
     ConditionFieldEqualsValueExpression,
+    ConditionItem,
+    ConditionNOT,
+    ConditionOR,
 )
-from sigma.types import SigmaCompareExpression, SigmaString, SigmaCIDRExpression
-from sigma.processing.pipeline import ProcessingPipeline
+from sigma.conversion.base import TextQueryBackend
 from sigma.conversion.deferred import DeferredQueryExpression
-from ..sigma.field_mapping_service import resolve_schema_path, read_csv_mappings
+from sigma.conversion.state import ConversionState
+from sigma.processing.pipeline import ProcessingPipeline
+from sigma.rule import SigmaRule, SigmaRuleTag
+from sigma.types import SigmaCIDRExpression, SigmaCompareExpression, SigmaString
+
+from ..sigma.field_mapping_service import read_csv_mappings, resolve_schema_path
 
 
 class SqlBackend(TextQueryBackend):
     """ClickHouse backend for translating Sigma rules to SQL-like queries."""
 
     name: ClassVar[str] = "clickhouse backend"
-    formats: Dict[str, str] = {
+    formats: dict[str, str] = {
         "default": "Plain ClickHouse queries",
         "full_alert": "ClickHouse Query with Insert into Alerting table",
         "format1": "'format1' output format",
         "format2": "'format2' output format",
     }
     requires_pipeline: bool = False
-    precedence: ClassVar[Tuple[ConditionItem, ConditionItem, ConditionItem]] = (
+    precedence: ClassVar[tuple[ConditionItem, ConditionItem, ConditionItem]] = (
         ConditionNOT,
         ConditionAND,
         ConditionOR,
@@ -60,7 +63,7 @@ class SqlBackend(TextQueryBackend):
     wildcard_single: ClassVar[str] = "*"
     add_escaped: ClassVar[str] = "\\"
     filter_chars: ClassVar[str] = ""
-    bool_values: ClassVar[Dict[bool, str]] = {
+    bool_values: ClassVar[dict[bool, str]] = {
         True: "true",
         False: "false",
     }
@@ -72,7 +75,7 @@ class SqlBackend(TextQueryBackend):
 
     re_expression: ClassVar[str] = "match(FIELD, 'REGEX')"
     re_escape_char: ClassVar[str] = "\\"
-    re_escape: ClassVar[Tuple[str]] = ()
+    re_escape: ClassVar[tuple[str]] = ()
     re_escape_escape_char: bool = True
 
     cidr_wildcard: ClassVar[str] = "*"
@@ -80,7 +83,7 @@ class SqlBackend(TextQueryBackend):
     cidr_in_list_expression: ClassVar[str] = "FIELD in (VALUE)"
 
     compare_op_expression: ClassVar[str] = "FIELD OPERATOR VALUE"
-    compare_operators: ClassVar[Dict[SigmaCompareExpression.CompareOperators, str]] = {
+    compare_operators: ClassVar[dict[SigmaCompareExpression.CompareOperators, str]] = {
         SigmaCompareExpression.CompareOperators.LT: "<",
         SigmaCompareExpression.CompareOperators.LTE: "<=",
         SigmaCompareExpression.CompareOperators.GT: ">",
@@ -106,15 +109,15 @@ class SqlBackend(TextQueryBackend):
     deferred_separator: ClassVar[str] = "\n| "
     deferred_only_query: ClassVar[str] = "*"
 
-    last_processing_pipeline: ClassVar[Optional[ProcessingPipeline]] = None
+    last_processing_pipeline: ClassVar[ProcessingPipeline | None] = None
 
     def __init__(
         self,
-        processing_pipeline: Optional[ProcessingPipeline] = None,
-        alert_metadata: Optional[Dict] = None,
-        dynamic_metadata: Optional[Dict] = None,
-        schema_metadata: Optional[Dict] = None,
-        field_mappings: Optional[Dict] = None,
+        processing_pipeline: ProcessingPipeline | None = None,
+        alert_metadata: dict | None = None,
+        dynamic_metadata: dict | None = None,
+        schema_metadata: dict | None = None,
+        field_mappings: dict | None = None,
     ):
         """Initialize the backend with optional alert metadata, dynamic metadata, schema metadata and field mappings."""
         super().__init__(processing_pipeline)
@@ -147,7 +150,7 @@ class SqlBackend(TextQueryBackend):
     ) -> str:
         return resolve_schema_path(self.config, schema_name, schema_version, is_meta)
 
-    def _read_csv_mappings(self, schema_path: str) -> Dict[str, str]:
+    def _read_csv_mappings(self, schema_path: str) -> dict[str, str]:
         return read_csv_mappings(schema_path)
 
     def is_valid_cidr(self, cidr_str: str) -> bool:
@@ -162,7 +165,7 @@ class SqlBackend(TextQueryBackend):
         """Escape special characters in values."""
         return value.replace("'", "''")
 
-    def _get_base_field_and_modifier(self, field_expr: str) -> Tuple[str, Optional[str]]:
+    def _get_base_field_and_modifier(self, field_expr: str) -> tuple[str, str | None]:
         """Extract base field and modifier from field expression."""
         field_parts = field_expr.split("|")
         base_field = field_parts[0]
@@ -209,7 +212,7 @@ class SqlBackend(TextQueryBackend):
         return result
 
     def _handle_field_value_expression(
-        self, field: str, value: Any, modifier: Optional[str] = None
+        self, field: str, value: Any, modifier: str | None = None
     ) -> str:
         """Handle different value types and modifiers for field expressions."""
         if hasattr(value, "regexp"):
@@ -407,7 +410,7 @@ class SqlBackend(TextQueryBackend):
 
     def convert_condition_field_eq_val_str(
         self, cond: ConditionFieldEqualsValueExpression, state: ConversionState
-    ) -> Union[str, DeferredQueryExpression]:
+    ) -> str | DeferredQueryExpression:
         """Converts field-equals-value conditions into ClickHouse-compatible SQL expressions."""
         try:
             value = cond.value
@@ -451,7 +454,7 @@ class SqlBackend(TextQueryBackend):
 
     def convert_condition_and(
         self, cond: ConditionAND, state: ConversionState
-    ) -> Union[str, DeferredQueryExpression]:
+    ) -> str | DeferredQueryExpression:
         """Convert AND condition with proper parentheses balancing."""
         try:
             converted_args = []
@@ -473,7 +476,7 @@ class SqlBackend(TextQueryBackend):
 
     def convert_condition_or(
         self, cond: ConditionOR, state: ConversionState
-    ) -> Union[str, DeferredQueryExpression]:
+    ) -> str | DeferredQueryExpression:
         """Convert OR condition with proper parentheses balancing."""
         try:
             if all(isinstance(arg, ConditionFieldEqualsValueExpression) for arg in cond.args):
@@ -522,7 +525,7 @@ class SqlBackend(TextQueryBackend):
 
     def convert_condition_not(
         self, cond: ConditionNOT, state: ConversionState
-    ) -> Union[str, DeferredQueryExpression]:
+    ) -> str | DeferredQueryExpression:
         """Convert NOT condition with proper parentheses balancing."""
         arg = cond.args[0]
         try:
@@ -536,13 +539,13 @@ class SqlBackend(TextQueryBackend):
         except TypeError:
             raise NotImplementedError("Operator 'not' not supported by the backend")
 
-    def extract_tactics_techniques(self, tags: List[SigmaRuleTag]) -> Tuple[str, str]:
+    def extract_tactics_techniques(self, tags: list[SigmaRuleTag]) -> tuple[str, str]:
         """Extract MITRE ATT&CK tactics and techniques from rule tags."""
         techniques = [tag.name.upper() for tag in tags if re.match(r"[tT]\d{4}", tag.name)]
         tactics = [tag.name.lower() for tag in tags if not re.match(r"[tT]\d{4}", tag.name)]
         return (", ".join(tactics), ", ".join(techniques))
 
-    def _get_alert_field_values(self, rule: SigmaRule) -> Dict[str, str]:
+    def _get_alert_field_values(self, rule: SigmaRule) -> dict[str, str]:
         """Get the values for alert fields based on rule and alert metadata."""
         tactics, techniques = self.extract_tactics_techniques(rule.tags)
 
@@ -654,17 +657,17 @@ class SqlBackend(TextQueryBackend):
         """Finalize query for default output format."""
         return query
 
-    def finalize_output_default(self, queries: List[str]) -> Any:
+    def finalize_output_default(self, queries: list[str]) -> Any:
         """Finalize output for default format."""
         return list(queries)
 
     def finalize_query_full_alert(
         self, rule: SigmaRule, query: str, index: int, state: ConversionState
-    ) -> Dict:
+    ) -> dict:
         """Finalize query for full alert output format."""
         return self._build_alert_insert_query(rule, f"{{timestamp_condition}} AND ({query})")
 
-    def finalize_output_full_alert(self, queries: List[str]) -> Any:
+    def finalize_output_full_alert(self, queries: list[str]) -> Any:
         """Finalize output for full alert format."""
         return "\n".join(queries)
 
@@ -674,7 +677,7 @@ class SqlBackend(TextQueryBackend):
         """Finalize query for format1."""
         return query
 
-    def finalize_output_format1(self, queries: List[str]) -> Any:
+    def finalize_output_format1(self, queries: list[str]) -> Any:
         """Finalize output for format1."""
         return "\n".join(queries)
 
@@ -684,6 +687,6 @@ class SqlBackend(TextQueryBackend):
         """Finalize query for format2."""
         return query
 
-    def finalize_output_format2(self, queries: List[str]) -> Any:
+    def finalize_output_format2(self, queries: list[str]) -> Any:
         """Finalize output for format2."""
         return "\n".join(queries)

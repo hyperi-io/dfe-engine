@@ -34,17 +34,15 @@ Usage::
 from __future__ import annotations
 
 import re
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
-
 from hyperi_pylib.logger import logger
+from pydantic import BaseModel, Field, model_validator
 
 from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .rule_model import Rule, RuleCreate
 from .rule_rewriter import RuleRewriter
-
 
 # ── Request / Response models ──────────────────────────────
 
@@ -320,10 +318,10 @@ class RuleCreationService:
             else:
                 explain_sql = f"EXPLAIN ESTIMATE SELECT count() FROM {db_table}"
 
-            explain_start = datetime.now(timezone.utc)
+            explain_start = datetime.now(UTC)
             explain_result = client.execute(explain_sql)
             explain_duration_ms = (
-                datetime.now(timezone.utc) - explain_start
+                datetime.now(UTC) - explain_start
             ).total_seconds() * 1000
 
             explain_plan = "\n".join(

@@ -13,11 +13,10 @@ Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 """
 
 from threading import Lock
-from typing import Annotated, Optional
+from typing import Annotated
 
 import clickhouse_connect
-from clickhouse_connect.driver import Client
-from clickhouse_connect.driver import httputil
+from clickhouse_connect.driver import Client, httputil
 from hyperi_pylib.logger import logger
 
 from ..settings import get_settings
@@ -135,16 +134,16 @@ class ClickHouseManager:
 
     _instance = None  # Singleton instance
 
-    def __init__(self, target_config_data: Optional[dict] = None):
+    def __init__(self, target_config_data: dict | None = None):
         self.lock = Lock()
         self.target_config_data = target_config_data or {}
         settings = get_settings()
         self.connections_max = settings.clickhouse.connections_max
-        self._client: Optional[Client] = None
+        self._client: Client | None = None
         self._pool_manager = None
 
     @classmethod
-    def get_instance(cls, target_config_data: Optional[dict] = None):
+    def get_instance(cls, target_config_data: dict | None = None):
         if cls._instance is None:
             cls._instance = cls(target_config_data)
         return cls._instance

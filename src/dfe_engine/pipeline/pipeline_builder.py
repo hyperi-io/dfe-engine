@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from hyperi_pylib.logger import logger
+
 from .pipeline import Pipeline
 
 

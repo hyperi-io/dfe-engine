@@ -1,12 +1,14 @@
 import os
 import uuid
-from datetime import datetime, timezone, timedelta
-from typing import Any, List, Dict, Optional
-from jinja2 import Environment
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
 from hyperi_pylib.logger import logger
+from jinja2 import Environment
+
+from ..clickhouse.clickhouse_manager import ClickHouseManager
 from .checkpoint import HuntCheckpointManager
 from .fingerprint import fingerprint_query
-from ..clickhouse.clickhouse_manager import ClickHouseManager
 
 
 class Hunt:
@@ -20,23 +22,23 @@ class Hunt:
         cron: str,
         log_buffer: int,
         customer: str,
-        rules: List[str],
+        rules: list[str],
         name: str,
         global_source_table_name: str,
         global_target_table_name: str,
         hunt_log_path: str,
-        target_config_data: Dict,
+        target_config_data: dict,
         checkpoint_timestamp_field: str = "timestamp_load",
-        customer_filters: Dict[str, Dict[str, str]] = None,
+        customer_filters: dict[str, dict[str, str]] = None,
         checkpoint_destination: str = "clickhouse",
-        hunt_checkpoint_path: Optional[str] = None,
+        hunt_checkpoint_path: str | None = None,
         thread_id: str = None,
         explain_queries: bool = False,
-        source_registry: Optional[Any] = None,
-        resource_limits: Optional[Dict[str, int]] = None,
-        alert_config: Optional[Any] = None,
-        alert_grouping: Optional[Any] = None,
-        scoring: Optional[Any] = None,
+        source_registry: Any | None = None,
+        resource_limits: dict[str, int] | None = None,
+        alert_config: Any | None = None,
+        alert_grouping: Any | None = None,
+        scoring: Any | None = None,
     ):
         """
         Initialize a new Hunt instance.
@@ -75,7 +77,7 @@ class Hunt:
         if not os.path.exists(hunt_log_path):
             os.makedirs(hunt_log_path, exist_ok=True)
         self.unique_id = str(uuid.uuid4())
-        self.execution_time = datetime.now(timezone.utc)
+        self.execution_time = datetime.now(UTC)
         self.execution_time_str = self.execution_time.strftime("%Y-%m-%d_%H-%M-%S")
         self.successful_log_file_name = f"{self.hunt_log_name}_successful_queries_pid_{os.getpid()}_{self.execution_time_str}.log"
         self.unsuccessful_log_file_name = f"{self.hunt_log_name}_unsuccessful_queries_pid_{os.getpid()}_{self.execution_time_str}.log"
@@ -131,8 +133,8 @@ class Hunt:
         return name.replace(" ", "_")
 
     def convert_yaml_to_sql(
-        self, env: Environment, org_id: str, customer_filters: Dict[str, Dict[str, str]]
-    ) -> List[str]:
+        self, env: Environment, org_id: str, customer_filters: dict[str, dict[str, str]]
+    ) -> list[str]:
         """
         Convert YAML rules to SQL queries for a specific customer.
 
@@ -260,13 +262,13 @@ class Hunt:
                 index += 1
         return 0
 
-    def execute_hunt(self, customer: str, scheduled_start_time: datetime) -> Dict[str, Any]:
+    def execute_hunt(self, customer: str, scheduled_start_time: datetime) -> dict[str, Any]:
         """
         Execute the hunt with the built SQL queries, considering the last successful run.
         Returns execution metrics including total execution time, number of successful queries,
         number of failed queries, etc.
         """
-        execution_time = datetime.now(timezone.utc)
+        execution_time = datetime.now(UTC)
         execution_context = self._prepare_execution_context(scheduled_start_time, execution_time)
 
         logger.info(
@@ -284,12 +286,12 @@ class Hunt:
         except Exception as e:
             base_error_message = (
                 f"Hunt {self.name} failed during hunt execution. See specific log for {self.name} - "
-                f"{self.pid} for more details: {str(e)}"
+                f"{self.pid} for more details: {e!s}"
             )
             logger.error(base_error_message, exc_info=True)
             raise e
 
-        total_execution_time = (datetime.now(timezone.utc) - execution_time).total_seconds()
+        total_execution_time = (datetime.now(UTC) - execution_time).total_seconds()
 
         # Fire alerts if any detections occurred
         if successful_queries > 0 and self.alert_config:
@@ -302,7 +304,7 @@ class Hunt:
             "hunt_name": self.name,
         }
 
-    def _dispatch_alerts(self, customer: str, rule_results: List[Dict]) -> None:
+    def _dispatch_alerts(self, customer: str, rule_results: list[dict]) -> None:
         """Send alerts via configured AlertDispatcher.
 
         When alert_grouping is configured with group_by fields, runs a
@@ -412,7 +414,7 @@ class Hunt:
         self,
         dispatcher,
         customer: str,
-        rule_result: Dict,
+        rule_result: dict,
         alerts_sent: int,
         max_alerts: int,
     ) -> int:
@@ -531,7 +533,7 @@ class Hunt:
 
     def _prepare_execution_context(
         self, scheduled_start_time: datetime, execution_time: datetime
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Prepare execution context with timestamps and formatting."""
         scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=self.log_buffer)
         return {
@@ -545,7 +547,7 @@ class Hunt:
             ),
         }
 
-    def _get_checkpoint_file_path(self, customer: str) -> Optional[str]:
+    def _get_checkpoint_file_path(self, customer: str) -> str | None:
         """Get checkpoint file path if using file-based checkpointing."""
         if self.checkpoint_destination == self.FILE:
             self.checkpoint_manager.ensure_checkpoint_file_path_exists(self.hunt_checkpoint_path)
@@ -556,12 +558,12 @@ class Hunt:
         return None
 
     def _execute_queries(
-        self, execution_context: Dict[str, Any], file_path: Optional[str]
+        self, execution_context: dict[str, Any], file_path: str | None
     ) -> tuple:
         """Execute all queries and return success/failure counts + per-rule metadata."""
         successful_queries = 0
         failed_queries = 0
-        rule_results: List[Dict] = []
+        rule_results: list[dict] = []
 
         with ClickHouseManager.get_instance(
             self.target_config_data
@@ -609,10 +611,10 @@ class Hunt:
         query: str,
         index: int,
         customer: str,
-        execution_context: Dict[str, Any],
-        file_path: Optional[str],
+        execution_context: dict[str, Any],
+        file_path: str | None,
         total_number_of_queries: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Execute a single query and return result with checkpoint data."""
         rule = self.rules[index]
         generated_query_id = str(uuid.uuid4())
@@ -641,10 +643,10 @@ class Hunt:
         explain_duration_ms = None
         if self.explain_queries:
             try:
-                explain_start = datetime.now(timezone.utc)
+                explain_start = datetime.now(UTC)
                 explain_result = ch_client.execute(f"EXPLAIN PLAN {query}")
                 explain_duration_ms = (
-                    datetime.now(timezone.utc) - explain_start
+                    datetime.now(UTC) - explain_start
                 ).total_seconds() * 1000
                 explain_plan = "\n".join(
                     str(row[0]) if isinstance(row, (list, tuple)) else str(row)
@@ -665,9 +667,9 @@ class Hunt:
                 f"Timestamp Condition [{timestamp_condition}]."
             )
 
-            query_start_time = datetime.now(timezone.utc)
+            query_start_time = datetime.now(UTC)
             query_result = ch_client.execute(query, query_id=generated_query_id)
-            query_end_time = datetime.now(timezone.utc)
+            query_end_time = datetime.now(UTC)
             query_execution_time_ms = (query_end_time - query_start_time).total_seconds() * 1000
 
             logger.debug(
@@ -731,12 +733,12 @@ class Hunt:
         except Exception as e:
             error_message = str(e).split("Stack trace")[0]
             logger.error(
-                f"Hunt {self.name} failed\n error: {str(e)}\n SQL ---> [{query}] ERROR MESSAGE [{error_message}] \n"
+                f"Hunt {self.name} failed\n error: {e!s}\n SQL ---> [{query}] ERROR MESSAGE [{error_message}] \n"
             )
             return {"success": False}
 
     def _resolve_last_success_time(
-        self, last_success_time: Optional[datetime], execution_context: Dict[str, Any]
+        self, last_success_time: datetime | None, execution_context: dict[str, Any]
     ) -> tuple:
         """Resolve the last success time, using lookback if none exists."""
         if last_success_time is None:
@@ -765,7 +767,7 @@ class Hunt:
         return last_success_time, last_success_time_str
 
     @staticmethod
-    def _capture_execution_profile(ch_client, query_id: str, rule_name: str) -> Dict[str, int]:
+    def _capture_execution_profile(ch_client, query_id: str, rule_name: str) -> dict[str, int]:
         """Capture execution profile from system.query_log.
 
         Queries ClickHouse system.query_log for the completed query
@@ -804,7 +806,7 @@ class Hunt:
         self,
         rule_name: str,
         customer: str,
-        profile: Dict[str, int],
+        profile: dict[str, int],
         execution_time_ms: float,
     ) -> None:
         """Check execution profile against configurable thresholds.
@@ -836,7 +838,7 @@ class Hunt:
             )
 
     def _save_checkpoints(
-        self, ch_client, successful_checkpoints: List[Dict], file_path: Optional[str]
+        self, ch_client, successful_checkpoints: list[dict], file_path: str | None
     ) -> None:
         """Save checkpoints to the appropriate destination."""
         if self.checkpoint_destination == Hunt.CLICKHOUSE:
