@@ -1,4 +1,4 @@
-from sigma.processing.pipeline import ProcessingPipeline, ProcessingItem
+from sigma.processing.pipeline import ProcessingItem, ProcessingPipeline
 from sigma.processing.transformations import FieldMappingTransformation
 
 

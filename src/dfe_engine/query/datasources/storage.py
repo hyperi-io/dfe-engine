@@ -12,10 +12,10 @@ from pathlib import Path
 from typing import Any
 
 import pyarrow as pa
+from hyperi_pylib.logger import logger
 
 from dfe_engine.query.datasources import DatasourceAdapter, register_adapter
 from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
-from hyperi_pylib.logger import logger
 
 # Arrow schema for directory listings
 LISTING_SCHEMA = pa.schema(
@@ -35,7 +35,6 @@ LISTING_SCHEMA = pa.schema(
 class StorageListingError(Exception):
     """Error during storage listing."""
 
-    pass
 
 
 @register_adapter("s3")
@@ -245,7 +244,6 @@ class MinIOAdapter(S3Adapter):
     Same as S3Adapter but with MinIO-specific defaults.
     """
 
-    pass
 
 
 @register_adapter("file")

@@ -1,16 +1,18 @@
 import os
 import re
-from pathlib import Path
 import signal
+import time
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
 import pandas as pd
-from tabulate import tabulate
-from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Union
 from hyperi_pylib.logger import logger
-from .cron_runner import CronRunner
+from tabulate import tabulate
+
 from ..settings import get_settings
 from ..yaml_utils import yaml_load_string
-import time
+from .cron_runner import CronRunner
 
 
 def _load_yaml_config(config_file_path: str | None = None, require: bool = True) -> dict:
@@ -44,16 +46,16 @@ class HuntController:
     @staticmethod
     def process_hunt(
         arg_dfe_config_path: str,
-        arg_hunt_dir: Optional[str],
-        arg_hunt_rule_repo_dir: Optional[str],
+        arg_hunt_dir: str | None,
+        arg_hunt_rule_repo_dir: str | None,
         arg_hunt_timeout: int,
         arg_hunt_num_threads: int,
         arg_checkpoint_destination: str,
         arg_checkpoint_timestamp_field: str,
         arg_dfe_log_path: str,
-        arg_hunt_log_path: Optional[str],
-        arg_target: Optional[str],
-        arg_target_file_path: Optional[str],
+        arg_hunt_log_path: str | None,
+        arg_target: str | None,
+        arg_target_file_path: str | None,
         test_mode: bool = False,
         verbose: bool = False,
     ) -> None:
@@ -101,7 +103,7 @@ class HuntController:
         )
 
     @staticmethod
-    def _load_dfe_config(config_path: str, target_file_path: Optional[str]) -> Optional[dict]:
+    def _load_dfe_config(config_path: str, target_file_path: str | None) -> dict | None:
         """Load DFE config and perform initial validation."""
         try:
             dfe_config = _load_yaml_config(config_path, require=False)
@@ -124,13 +126,13 @@ class HuntController:
     @staticmethod
     def _resolve_config_values(
         dfe_config: dict,
-        arg_target_file_path: Optional[str],
+        arg_target_file_path: str | None,
         arg_hunt_timeout: int,
         arg_hunt_num_threads: int,
         arg_checkpoint_destination: str,
-        arg_hunt_log_path: Optional[str],
-        arg_hunt_dir: Optional[str],
-        arg_hunt_rule_repo_dir: Optional[str],
+        arg_hunt_log_path: str | None,
+        arg_hunt_dir: str | None,
+        arg_hunt_rule_repo_dir: str | None,
         arg_checkpoint_timestamp_field: str,
     ) -> dict:
         """Resolve all configuration values from args and config."""
@@ -178,8 +180,8 @@ class HuntController:
 
     @staticmethod
     def _load_target_config(
-        target_name: Optional[str], targets_file_path: Optional[str]
-    ) -> Optional[dict]:
+        target_name: str | None, targets_file_path: str | None
+    ) -> dict | None:
         """Load target configuration from settings."""
         target_config_data = _get_target_config(target_name)
         settings = get_settings()
@@ -191,7 +193,7 @@ class HuntController:
         return target_config_data
 
     @staticmethod
-    def _resolve_hunt_paths(config_values: dict, target_config_data: dict) -> Optional[dict]:
+    def _resolve_hunt_paths(config_values: dict, target_config_data: dict) -> dict | None:
         """Resolve hunt and rules paths, validating required values."""
         hunt_config_path = config_values["hunt_config_path"] or target_config_data.get(
             "hunt_config_path", None
@@ -216,7 +218,7 @@ class HuntController:
         }
 
     @staticmethod
-    def _validate_directories(hunt_config_path: str, hunt_rules_path: str) -> Optional[tuple]:
+    def _validate_directories(hunt_config_path: str, hunt_rules_path: str) -> tuple | None:
         """Parse and validate hunt and rule directories."""
         hunt_dirs = (
             [dir.strip() for dir in hunt_config_path.split(",")]
@@ -252,7 +254,7 @@ class HuntController:
         return hunt_dirs, rule_dirs
 
     @staticmethod
-    def _resolve_hunt_log_path(hunt_log_path: Optional[str]) -> str:
+    def _resolve_hunt_log_path(hunt_log_path: str | None) -> str:
         """Resolve the hunt log path from config or settings."""
         if not hunt_log_path:
             settings = get_settings()
@@ -263,8 +265,8 @@ class HuntController:
 
     @staticmethod
     def _start_schedulers(
-        hunt_dirs: List[str],
-        rule_dirs: List[str],
+        hunt_dirs: list[str],
+        rule_dirs: list[str],
         config_values: dict,
         hunt_log_path: str,
         target_config_data: dict,
@@ -301,11 +303,11 @@ class HuntController:
 
     @staticmethod
     def _get_config_value(
-        arg_value: Optional[Any],
+        arg_value: Any | None,
         config: dict,
         section: str,
         key: str,
-        default: Optional[Any] = None,
+        default: Any | None = None,
     ) -> Any:
         """
         Get config value from the provided arguments or fallback to config file.
@@ -325,8 +327,8 @@ class HuntController:
     @staticmethod
     def list_hunts(
         args_look_back_hours: int,
-        args_log_path: Optional[str],
-        args_hunt_log_path: Optional[str],
+        args_log_path: str | None,
+        args_hunt_log_path: str | None,
     ) -> None:
         """
         List hunts within a specified time range.
@@ -346,8 +348,8 @@ class HuntController:
 
         hunt_log_file_path = os.path.join(args_hunt_log_path, CronRunner.THREAD_TRACKING_LOG)
 
-        start_time = datetime.now(timezone.utc) - timedelta(hours=args_look_back_hours)
-        end_time = datetime.now(timezone.utc)
+        start_time = datetime.now(UTC) - timedelta(hours=args_look_back_hours)
+        end_time = datetime.now(UTC)
         log_entries = HuntController.parse_logs(hunt_log_file_path, start_time, end_time)
 
         if log_entries:
@@ -392,9 +394,9 @@ class HuntController:
 
     @staticmethod
     def view_hunts(
-        args_pid: Union[int, List[int]],
-        args_log_path: Optional[str],
-        args_hunt_log_path: Optional[str],
+        args_pid: int | list[int],
+        args_log_path: str | None,
+        args_hunt_log_path: str | None,
     ) -> None:
         """
         View hunts associated with one or more process IDs (PIDs).
@@ -417,7 +419,7 @@ class HuntController:
         data = []
 
         try:
-            with open(hunt_log_file_path, "r") as file:
+            with open(hunt_log_file_path) as file:
                 for line in file:
                     log_entry = HuntController.parse_log_entry(line)
                     if int(log_entry["pid"]) in pids:
@@ -470,9 +472,9 @@ class HuntController:
     def print_hunt_parameters(
         args_dfe_package_file_path: str,
         args_log_path: str,
-        args_hunt_log_path: Optional[str],
-        args_target: Optional[str],
-        args_target_file_path: Optional[str],
+        args_hunt_log_path: str | None,
+        args_target: str | None,
+        args_target_file_path: str | None,
     ) -> None:
         """Logs hunt configuration settings."""
         try:
@@ -517,7 +519,7 @@ class HuntController:
             logger.error(f"Error accessing directory '{hunt_rules_path}': {e}")
 
     @staticmethod
-    def kill_all_hunts(args_log_path: str, args_hunt_log_path: Optional[str]) -> None:
+    def kill_all_hunts(args_log_path: str, args_hunt_log_path: str | None) -> None:
         """
         Terminate all activities based on PIDs in the thread_tracking.log and delete the file.
 
@@ -556,8 +558,8 @@ class HuntController:
 
     @staticmethod
     def kill_hunt(
-        args_kill_pid: Optional[int],
-        args_log_path: Optional[str] = None,
+        args_kill_pid: int | None,
+        args_log_path: str | None = None,
     ) -> None:
         """Kill a hunt associated with a specified PID."""
         settings = get_settings()
@@ -573,7 +575,7 @@ class HuntController:
             logger.warning(f"Process with PID {args_kill_pid} not found.")
 
     @staticmethod
-    def parse_log_entry(line: str) -> Dict[str, Any]:
+    def parse_log_entry(line: str) -> dict[str, Any]:
         """
         Parse a single log entry into a dictionary.
 
@@ -592,7 +594,7 @@ class HuntController:
     @staticmethod
     def parse_logs(
         log_file_path: str, start_time: datetime, end_time: datetime
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """
         Parse the logs from the log file within a specified time frame.
 
@@ -605,17 +607,17 @@ class HuntController:
             List[Dict[str, Any]]: A list of log entry dictionaries.
         """
         log_entries = []
-        with open(log_file_path, "r") as log_file:
+        with open(log_file_path) as log_file:
             for line in log_file:
                 log_entry = HuntController.parse_log_entry(line)
                 log_date = datetime.strptime(log_entry["timestamp"], "%Y-%m-%d %H:%M:%S")
-                log_date = log_date.replace(tzinfo=timezone.utc)
+                log_date = log_date.replace(tzinfo=UTC)
                 if start_time <= log_date <= end_time:
                     log_entries.append(log_entry)
         return log_entries
 
     @staticmethod
-    def get_process_info(pid: int) -> Dict[str, Any]:
+    def get_process_info(pid: int) -> dict[str, Any]:
         """
         Retrieve process information for a given PID.
 

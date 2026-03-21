@@ -26,10 +26,12 @@ Usage:
 
 from io import StringIO
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 
-from ruamel.yaml import YAML
-from ruamel.yaml import YAMLError  # noqa: F401 - re-exported
+from ruamel.yaml import (
+    YAML,
+    YAMLError,  # noqa: F401 - re-exported
+)
 
 # Create a safe YAML instance for loading untrusted content
 _yaml_safe = YAML(typ="safe")
@@ -42,7 +44,7 @@ _yaml_rt.preserve_quotes = True
 _yaml_rt.indent(mapping=2, sequence=4, offset=2)
 
 
-def yaml_load(source: Union[str, Path]) -> Any:
+def yaml_load(source: str | Path) -> Any:
     """
     Load YAML from a file path.
 
@@ -57,7 +59,7 @@ def yaml_load(source: Union[str, Path]) -> Any:
         FileNotFoundError: If the file doesn't exist
     """
     path = Path(source)
-    with open(path, "r") as f:
+    with open(path) as f:
         return _yaml_safe.load(f)
 
 
@@ -77,7 +79,7 @@ def yaml_load_string(content: str) -> Any:
     return _yaml_safe.load(StringIO(content))
 
 
-def yaml_dump(data: Any, dest: Union[str, Path]) -> None:
+def yaml_dump(data: Any, dest: str | Path) -> None:
     """
     Dump data to a YAML file.
 

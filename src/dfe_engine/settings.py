@@ -68,14 +68,13 @@ Storage:
 
 import os
 from pathlib import Path
-from typing import Optional
 
 from pydantic import BaseModel, Field
 
 from .yaml_utils import yaml_load
 
 
-def _get_env(primary: str, *fallbacks: str) -> Optional[str]:
+def _get_env(primary: str, *fallbacks: str) -> str | None:
     """Get env var with fallback support. Primary (DFE_*) takes precedence over legacy names."""
     if val := os.getenv(primary):
         return val
@@ -695,7 +694,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
     return result
 
 
-def load_settings(config_file: Optional[str] = None) -> DFESettings:
+def load_settings(config_file: str | None = None) -> DFESettings:
     """
     Load DFE settings with the following precedence:
     1. Environment variables (highest priority)
@@ -725,7 +724,7 @@ def load_settings(config_file: Optional[str] = None) -> DFESettings:
     return DFESettings(**config)
 
 
-def get_clickhouse_config(settings: Optional[DFESettings] = None) -> dict:
+def get_clickhouse_config(settings: DFESettings | None = None) -> dict:
     """
     Get ClickHouse configuration as a dictionary.
 
@@ -753,7 +752,7 @@ def get_clickhouse_config(settings: Optional[DFESettings] = None) -> dict:
 
 
 # Global settings instance (lazy loaded)
-_settings: Optional[DFESettings] = None
+_settings: DFESettings | None = None
 
 
 def get_settings() -> DFESettings:

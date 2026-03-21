@@ -5,7 +5,8 @@ QueryResult - Arrow-native result container with export utilities.
 from __future__ import annotations
 
 import io
-from typing import TYPE_CHECKING, Any, Iterator
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Any
 
 import pyarrow as pa
 from pyarrow import ipc
@@ -28,7 +29,7 @@ class QueryResult:
         explain: Optional EXPLAIN plan (if requested)
     """
 
-    __slots__ = ("_table", "_metadata", "_explain")
+    __slots__ = ("_explain", "_metadata", "_table")
 
     def __init__(
         self,

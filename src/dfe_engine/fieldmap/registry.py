@@ -26,7 +26,7 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -234,7 +234,7 @@ class FieldMapRegistry:
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
-                    message=f"fieldmap: delete {table}".encode("utf-8"),
+                    message=f"fieldmap: delete {table}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()
@@ -278,7 +278,7 @@ class FieldMapRegistry:
             yaml_path = self._directory / parsed_std / f"{name}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
             except OSError:
                 updated_at = None
 

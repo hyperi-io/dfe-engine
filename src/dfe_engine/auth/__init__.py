@@ -38,13 +38,13 @@ from dfe_engine.auth.models import (
 __all__ = [
     "ALL_ACTIONS",
     "ARGO_ACTION_PREFIX",
+    "DEFAULT_ROLE_PERMISSIONS",
+    "ENGINE_ACTIONS",
     "AuthContext",
     "AuthenticationError",
     "AuthorizationError",
     "AuthzRequest",
     "AuthzResult",
-    "DEFAULT_ROLE_PERMISSIONS",
-    "ENGINE_ACTIONS",
     "LocalAuthProvider",
     "authorize",
 ]

@@ -28,7 +28,6 @@ from dfe_engine.query.result import QueryResult
 class ViewExecutionError(Exception):
     """View execution failed."""
 
-    pass
 
 
 class ViewExecutor:

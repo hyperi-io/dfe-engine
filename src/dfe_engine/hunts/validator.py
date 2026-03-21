@@ -1,9 +1,10 @@
 import os
 from typing import Any
 
-from jinja2 import Environment, TemplateSyntaxError
-from ..yaml_utils import yaml_dump_string, yaml_load_string, YAMLError
 from hyperi_pylib.logger import logger
+from jinja2 import Environment, TemplateSyntaxError
+
+from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load_string
 
 
 class HuntValidator:
@@ -176,7 +177,7 @@ class HuntValidator:
         :param env: A Jinja2 Environment instance for template rendering.
         """
         try:
-            with open(rule_path, "r") as file:
+            with open(rule_path) as file:
                 template_content = file.read()
                 env.parse(template_content)
         except TemplateSyntaxError as e:

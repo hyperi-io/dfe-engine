@@ -15,7 +15,6 @@ from dfe_engine.services.models.common import (
     SaslConfig,
 )
 
-
 # ---------------------------------------------------------------------------
 # Kafka (Loader-specific: consumer settings)
 # ---------------------------------------------------------------------------

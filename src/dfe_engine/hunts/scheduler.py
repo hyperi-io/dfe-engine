@@ -1,8 +1,9 @@
 import asyncio
+import os
 from concurrent.futures import ThreadPoolExecutor
 
-import os
 from hyperi_pylib.logger import logger
+
 from .cron_runner import CronRunner
 
 
@@ -75,7 +76,7 @@ class HuntScheduler:
         loop.run_until_complete(self._run_schedule_with_hunts_threadpool())
 
     async def _run_schedule_with_hunts_threadpool(self):
-        logger.info("Scheduling hunts with {0} threads.".format(self.max_threads))
+        logger.info(f"Scheduling hunts with {self.max_threads} threads.")
 
         async def async_tasks():
             with ThreadPoolExecutor():

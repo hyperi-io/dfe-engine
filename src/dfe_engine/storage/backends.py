@@ -7,7 +7,6 @@ Supports local filesystem, HTTP, and S3 storage backends with auto-sensing.
 import shutil
 from abc import ABC, abstractmethod
 from pathlib import Path
-from typing import List, Optional
 
 import httpx
 from hyperi_pylib.http import HttpClient
@@ -17,7 +16,7 @@ from hyperi_pylib.logger import logger
 class StorageError(Exception):
     """Exception raised for storage operation errors."""
 
-    def __init__(self, message: str, cause: Optional[Exception] = None):
+    def __init__(self, message: str, cause: Exception | None = None):
         super().__init__(message)
         self.message = message
         self.cause = cause
@@ -38,10 +37,9 @@ class StorageBackend(ABC):
         Raises:
             StorageError: If the download fails.
         """
-        pass
 
     @abstractmethod
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         """
         List files in the storage backend.
 
@@ -54,7 +52,6 @@ class StorageBackend(ABC):
         Raises:
             StorageError: If listing fails.
         """
-        pass
 
     @abstractmethod
     def exists(self, path: str) -> bool:
@@ -67,7 +64,6 @@ class StorageBackend(ABC):
         Returns:
             True if the file exists, False otherwise.
         """
-        pass
 
 
 class LocalStorageBackend(StorageBackend):
@@ -113,7 +109,7 @@ class LocalStorageBackend(StorageBackend):
         except Exception as e:
             raise StorageError(f"Failed to copy {source} to {dest}: {e}", cause=e) from e
 
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         """List files in the storage directory."""
         search_path = self._resolve_path(prefix)
 
@@ -147,8 +143,8 @@ class HTTPStorageBackend(StorageBackend):
     def __init__(
         self,
         base_url: str,
-        username: Optional[str] = None,
-        password: Optional[str] = None,
+        username: str | None = None,
+        password: str | None = None,
         timeout: float = 120.0,
     ):
         """
@@ -207,7 +203,7 @@ class HTTPStorageBackend(StorageBackend):
         except Exception as e:
             raise StorageError(f"Failed to download {url}: {e}", cause=e) from e
 
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         """
         List files is not typically supported for HTTP backends.
 
@@ -237,7 +233,7 @@ class S3StorageBackend(StorageBackend):
         self,
         bucket: str,
         prefix: str = "",
-        region: Optional[str] = None,
+        region: str | None = None,
     ):
         """
         Initialize S3 storage backend.
@@ -281,7 +277,7 @@ class S3StorageBackend(StorageBackend):
         except Exception as e:
             raise StorageError(f"Failed to download s3://{self.bucket}/{key}: {e}", cause=e)
 
-    def list_files(self, prefix: str = "") -> List[str]:
+    def list_files(self, prefix: str = "") -> list[str]:
         """List files in S3 bucket with prefix."""
         search_prefix = self._build_key(prefix)
 
@@ -310,8 +306,8 @@ class S3StorageBackend(StorageBackend):
 
 def get_storage_backend(
     path: str,
-    username: Optional[str] = None,
-    password: Optional[str] = None,
+    username: str | None = None,
+    password: str | None = None,
 ) -> StorageBackend:
     """
     Auto-detect and return the appropriate storage backend based on the path.

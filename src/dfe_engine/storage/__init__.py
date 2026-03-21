@@ -22,19 +22,19 @@ Usage:
 """
 
 from .backends import (
-    StorageBackend,
-    LocalStorageBackend,
     HTTPStorageBackend,
+    LocalStorageBackend,
     S3StorageBackend,
-    get_storage_backend,
+    StorageBackend,
     StorageError,
+    get_storage_backend,
 )
 
 __all__ = [
-    "StorageBackend",
-    "LocalStorageBackend",
     "HTTPStorageBackend",
+    "LocalStorageBackend",
     "S3StorageBackend",
-    "get_storage_backend",
+    "StorageBackend",
     "StorageError",
+    "get_storage_backend",
 ]

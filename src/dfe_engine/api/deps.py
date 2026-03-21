@@ -7,14 +7,13 @@ and returns ``AuthContext`` — the engine's canonical identity model.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 
 from dfe_engine.auth import AuthContext, AuthorizationError, authorize
 from dfe_engine.settings import DFESettings
-
 
 # ── Settings ──────────────────────────────────────────────────
 
@@ -250,7 +249,7 @@ def create_access_token(
     from jose import jwt
 
     to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + (
+    expire = datetime.now(UTC) + (
         expires_delta or timedelta(minutes=settings.api.jwt_expire_minutes)
     )
     to_encode["exp"] = expire

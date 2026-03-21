@@ -38,7 +38,7 @@ Usage:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -132,7 +132,7 @@ class Rule(BaseModel):
     source: str | None = Field(default=None, description="Source name for registry")
     warnings: list[str] = Field(default_factory=list, description="Parse warnings")
     created_at: str = Field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat(),
+        default_factory=lambda: datetime.now(UTC).isoformat(),
         description="Creation timestamp (ISO 8601)",
     )
 

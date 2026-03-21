@@ -12,13 +12,12 @@ Or via CLI::
 
 from __future__ import annotations
 
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-
 from hyperi_pylib.logger import logger
 
 from dfe_engine.settings import DFESettings, load_settings

@@ -1,6 +1,6 @@
 import re
+
 from pydantic import StrictInt, validate_call
-from typing import Dict, Optional
 
 
 class ClickHouseErrorHandler:
@@ -108,7 +108,7 @@ class ClickHouseErrorHandler:
     }
 
     @classmethod
-    def parse_error(cls, error: Exception) -> Dict:
+    def parse_error(cls, error: Exception) -> dict:
         """
         Parse a ClickHouse error and return structured error information.
 
@@ -152,7 +152,7 @@ class ClickHouseErrorHandler:
 
     @classmethod
     @validate_call
-    def get_error_message(cls, error_code: StrictInt) -> Optional[str]:
+    def get_error_message(cls, error_code: StrictInt) -> str | None:
         """
         Get user-friendly error message for a specific error code.
 
@@ -165,7 +165,7 @@ class ClickHouseErrorHandler:
 
     @classmethod
     @validate_call
-    def get_error_type(cls, error_code: StrictInt) -> Optional[str]:
+    def get_error_type(cls, error_code: StrictInt) -> str | None:
         """
         Get error type for a specific error code.
 
@@ -179,7 +179,7 @@ class ClickHouseErrorHandler:
 
     @classmethod
     @validate_call
-    def get_error_category(cls, error_code: StrictInt) -> Optional[str]:
+    def get_error_category(cls, error_code: StrictInt) -> str | None:
         """
         Get error category for a specific error code.
 
@@ -213,7 +213,7 @@ class ClickHouseErrorHandler:
         return category in retryable_categories
 
     @classmethod
-    def format_error_for_api(cls, error: Exception) -> Dict:
+    def format_error_for_api(cls, error: Exception) -> dict:
         """
         Format a ClickHouse error for API response.
 

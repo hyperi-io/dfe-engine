@@ -9,10 +9,8 @@ from __future__ import annotations
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-
 from hyperi_pylib.logger import logger
-
+from pydantic import BaseModel, Field
 
 # ── Response models ──────────────────────────────────────────
 

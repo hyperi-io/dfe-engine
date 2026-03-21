@@ -32,17 +32,17 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import apprise
-from pydantic import BaseModel, Field, field_validator
-
 from hyperi_pylib.expression import (
     evaluate_condition,
+)
+from hyperi_pylib.expression import (
     validate as validate_expression,
 )
 from hyperi_pylib.logger import logger
-
+from pydantic import BaseModel, Field, field_validator
 
 # ── Destination Registry ──────────────────────────────────────────
 
@@ -75,7 +75,7 @@ class AlertDestinationRegistry:
         url = registry.resolve("slack-dfe")
     """
 
-    def __init__(self, directory: Optional[str] = None) -> None:
+    def __init__(self, directory: str | None = None) -> None:
         self._store = None
         self._memory: dict[str, AlertDestination] = {}
 

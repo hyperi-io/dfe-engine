@@ -11,9 +11,8 @@ from typing import Any
 
 import httpx
 from hyperi_pylib.http import AsyncHttpClient
-from pydantic import BaseModel
-
 from hyperi_pylib.logger import logger
+from pydantic import BaseModel
 
 
 class HealthStatus(BaseModel):

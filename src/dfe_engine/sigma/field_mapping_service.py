@@ -1,7 +1,7 @@
-import os
 import csv
+import os
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any
 
 from hyperi_pylib.logger import logger
 
@@ -27,11 +27,11 @@ def resolve_schema_path(
         return str(derived_schema_base / schema_name)
 
 
-def read_csv_mappings(schema_path: str) -> Dict[str, str]:
+def read_csv_mappings(schema_path: str) -> dict[str, str]:
     """Read field mappings from a CSV file."""
     mappings = {}
     try:
-        with open(schema_path, "r") as file:
+        with open(schema_path) as file:
             reader = csv.DictReader(file)
             for row in reader:
                 sigma_field_name = row.get("sigma_field_name", "")
@@ -157,7 +157,7 @@ class FieldMappingService:
         """
         return resolve_schema_path(self.config, schema_name, schema_version, is_meta)
 
-    def _read_csv_mappings(self, schema_path: str) -> Dict[str, str]:
+    def _read_csv_mappings(self, schema_path: str) -> dict[str, str]:
         """
         Reads field mappings from a CSV file, using the sigma_field_name column.
 
@@ -169,7 +169,7 @@ class FieldMappingService:
         """
         return read_csv_mappings(schema_path)
 
-    def _read_schema_metadata(self, schema_path: str) -> Dict[str, Dict[str, str]]:
+    def _read_schema_metadata(self, schema_path: str) -> dict[str, dict[str, str]]:
         """
         Reads schema metadata from a CSV file.
 
@@ -181,7 +181,7 @@ class FieldMappingService:
         """
         metadata = {}
         try:
-            with open(schema_path, "r") as file:
+            with open(schema_path) as file:
                 reader = csv.DictReader(file)
                 for row in reader:
                     column = row.get("column", "")
@@ -197,7 +197,7 @@ class FieldMappingService:
             logger.error(f"Error reading schema metadata from {schema_path}: {e}")
             return {}
 
-    def get_rule_metadata(self, schema_config: dict, rule_name: str, rule: dict) -> Dict[str, Any]:
+    def get_rule_metadata(self, schema_config: dict, rule_name: str, rule: dict) -> dict[str, Any]:
         """
         Get metadata for a specific rule, including alert metadata and dynamic metadata.
 
@@ -230,7 +230,7 @@ class FieldMappingService:
 
         if "title" in rule:
             metadata["alert_type"] = rule["title"]
-        elif "tags" in rule and rule["tags"]:
+        elif rule.get("tags"):
             metadata["alert_type"] = (
                 rule["tags"][0].replace("attack.", "").replace("_", " ").title()
             )
@@ -266,11 +266,11 @@ class FieldMappingService:
 
     def validate_field_mappings(
         self,
-        source_fields: List[str],
-        mappings: Dict[str, str],
-        schema_metadata: Dict[str, Dict[str, str]],
+        source_fields: list[str],
+        mappings: dict[str, str],
+        schema_metadata: dict[str, dict[str, str]],
         schema_name: str = None,
-    ) -> List[str]:
+    ) -> list[str]:
         """
         Validate field mappings to ensure all source fields are properly mapped to schema fields.
 
@@ -335,7 +335,7 @@ class FieldMappingService:
 
         return missing_mappings
 
-    def get_combined_schema_mappings(self, schema_config: dict, rule_name: str) -> Dict[str, str]:
+    def get_combined_schema_mappings(self, schema_config: dict, rule_name: str) -> dict[str, str]:
         """
         Gets field mappings from schema files.
 
@@ -352,7 +352,7 @@ class FieldMappingService:
 
     def get_schema_mappings(
         self, schema_config: dict, rule_name: str
-    ) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+    ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
         """
         Gets field mappings from schema configuration and global mappings.
 
@@ -425,7 +425,7 @@ class FieldMappingService:
 
         return mappings, schema_metadata
 
-    def get_rule_source_fields(self, rule: dict) -> List[str]:
+    def get_rule_source_fields(self, rule: dict) -> list[str]:
         """
         Extracts source fields used in a sigma rule.
 

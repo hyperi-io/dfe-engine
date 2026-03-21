@@ -16,7 +16,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from hyperi_pylib.logger import logger
 
@@ -127,7 +127,7 @@ class DDLGenerator:
         lines: list[str] = []
 
         # Header comment
-        ts = datetime.now(tz=timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+        ts = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
         lines.append(f"-- HyperI DFE {table_name} {ts}")
 
         # CREATE TABLE

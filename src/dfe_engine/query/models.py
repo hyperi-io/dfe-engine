@@ -15,13 +15,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Exceptions — re-exported from auth.models for backward compat
 # =============================================================================
-
-from dfe_engine.auth.models import AuthorizationError as AuthorizationError  # noqa: E402
-
+from dfe_engine.auth.models import AuthorizationError as AuthorizationError
 
 # =============================================================================
 # Query Request Models (Client -> Server)
@@ -223,8 +220,7 @@ class ExplainPlan(BaseModel):
 
 
 # AuthContext moved to auth.models — re-export for backward compat
-from dfe_engine.auth.models import AuthContext as AuthContext  # noqa: E402
-
+from dfe_engine.auth.models import AuthContext as AuthContext
 
 # =============================================================================
 # Audit Models

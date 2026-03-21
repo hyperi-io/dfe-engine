@@ -1,5 +1,4 @@
 import os
-from typing import Dict, List, Tuple
 
 from hyperi_pylib.logger import logger
 from sigma.collection import SigmaCollection
@@ -177,7 +176,7 @@ class SigmaRuleConverter:
 
         if "title" in rule:
             metadata["alert_type"] = rule["title"]
-        elif "tags" in rule and rule["tags"]:
+        elif rule.get("tags"):
             metadata["alert_type"] = (
                 rule["tags"][0].replace("attack.", "").replace("_", " ").title()
             )
@@ -202,7 +201,7 @@ class SigmaRuleConverter:
 
     def _get_schema_mappings(
         self, schema_config: dict, rule_name: str
-    ) -> Tuple[Dict[str, str], Dict[str, Dict[str, str]]]:
+    ) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
         """
         Gets field mappings from schema configuration and global mappings.
 
@@ -548,7 +547,7 @@ class SigmaRuleConverter:
 
         return "\n".join(formatted)
 
-    def _get_rule_source_fields(self, rule: dict) -> List[str]:
+    def _get_rule_source_fields(self, rule: dict) -> list[str]:
         """
         Extracts source fields used in a sigma rule.
 
@@ -557,7 +556,7 @@ class SigmaRuleConverter:
         """
         return self.field_mapping_service.get_rule_source_fields(rule)
 
-    def list_rules_by_schema(self) -> Dict[str, List[Dict[str, str]]]:
+    def list_rules_by_schema(self) -> dict[str, list[dict[str, str]]]:
         """
         Lists all sigma rules mapped to each schema with their metadata.
 

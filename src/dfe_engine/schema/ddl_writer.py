@@ -20,7 +20,6 @@ from ..source.type_registry import TypeRegistry
 from .schema_ddl import DDLConfig, DDLGenerator
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
 
-
 _PROFILES = ("timeseries", "minimal", "passthrough")
 
 
