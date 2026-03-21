@@ -13,7 +13,6 @@ from dfe_engine.hunts.alert import (
     build_alert_config,
 )
 
-
 # ── AlertTrigger ──────────────────────────────────────────────────
 
 

@@ -1,6 +1,6 @@
 """Tests for hunt alert grouping + cooldown."""
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -12,7 +12,6 @@ from dfe_engine.hunts.alert_grouping import (
     build_grouping_query,
     parse_duration,
 )
-
 
 # ── parse_duration ───────────────────────────────────────────────
 
@@ -328,7 +327,7 @@ class TestAlertStateManager:
         mgr._table_ensured = True
         ch_client = MagicMock()
         # Last fired 10 minutes ago
-        recent = datetime.now(timezone.utc) - timedelta(minutes=10)
+        recent = datetime.now(UTC) - timedelta(minutes=10)
         ch_client.execute.return_value = [(recent,)]
 
         can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
@@ -339,7 +338,7 @@ class TestAlertStateManager:
         mgr._table_ensured = True
         ch_client = MagicMock()
         # Last fired 2 hours ago
-        old = datetime.now(timezone.utc) - timedelta(hours=2)
+        old = datetime.now(UTC) - timedelta(hours=2)
         ch_client.execute.return_value = [(old,)]
 
         can_fire = mgr.check_cooldown(ch_client, "hunt1", "rule1", "acme", timedelta(hours=1))
@@ -368,7 +367,7 @@ class TestAlertStateManager:
         mgr = AlertStateManager()
         mgr._table_ensured = True
         ch_client = MagicMock()
-        fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
+        fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=UTC)
 
         mgr.record_fire(ch_client, "hunt1", "rule1", "acme", fired_at=fired_at)
         ch_client.execute.assert_called_once()
@@ -388,7 +387,7 @@ class TestAlertStateManager:
         ch_client = MagicMock()
 
         # Group A fired recently — should block
-        recent = datetime.now(timezone.utc) - timedelta(minutes=10)
+        recent = datetime.now(UTC) - timedelta(minutes=10)
         ch_client.execute.return_value = [(recent,)]
 
         can_fire_a = mgr.check_cooldown(
@@ -427,7 +426,7 @@ class TestAlertStateManager:
         mgr = AlertStateManager()
         mgr._table_ensured = True
         ch_client = MagicMock()
-        fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=timezone.utc)
+        fired_at = datetime(2026, 3, 3, 12, 0, 0, tzinfo=UTC)
 
         mgr.record_fire(
             ch_client,

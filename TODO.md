@@ -8,6 +8,7 @@ This is the **single source of truth** for all tasks and progress.
 
 - [ ] Phase 3: Operational API routers `[PENDING]`
 - [ ] CI/CD: verify container + helm publish pipeline triggers correctly on next release
+- [ ] Standardise test infrastructure: dual-mode (remote devex + docker-local via dfe-docker infra profile). See `~/DFE-TEST-INFRA-PROMPT.md`
 
 ---
 

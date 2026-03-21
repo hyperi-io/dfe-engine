@@ -10,7 +10,6 @@ from dfe_engine.fieldmap.registry import (
     FieldMapValidationError,
 )
 
-
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------

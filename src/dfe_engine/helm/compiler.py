@@ -222,9 +222,7 @@ class HelmValuesCompiler:
 
         return values
 
-    def compile_external_component(
-        self, component: ExternalComponent
-    ) -> dict[str, dict[str, Any]]:
+    def compile_external_component(self, component: ExternalComponent) -> dict[str, dict[str, Any]]:
         """Compile Helm values for an external (Mode 2) component.
 
         Loads base values from each instance's values file path, then

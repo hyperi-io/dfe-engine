@@ -1,13 +1,14 @@
-import tempfile
-import pytest
-import textwrap
-from pathlib import Path
-from jinja2 import Environment, FileSystemLoader
-from dfe_engine.hunts.hunt import Hunt
 import re
+import tempfile
+import textwrap
 import warnings
+from pathlib import Path
 
+import pytest
 from hyperi_pylib.logger import logger
+from jinja2 import Environment, FileSystemLoader
+
+from dfe_engine.hunts.hunt import Hunt
 
 
 @pytest.fixture(scope="session")

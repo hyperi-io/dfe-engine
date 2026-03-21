@@ -3,7 +3,6 @@
 import asyncio
 from unittest.mock import patch
 
-
 from dfe_engine.hunts.cron_job import CronJob
 from dfe_engine.hunts.hunt import Hunt
 
