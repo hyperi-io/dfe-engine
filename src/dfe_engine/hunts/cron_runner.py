@@ -1,14 +1,14 @@
 import asyncio
-import time
-import threading
 import os
+import threading
+import time
+from datetime import UTC, datetime
 
-from datetime import datetime, timezone
-from typing import Optional
-from jinja2 import Environment, FileSystemLoader
-from .cron_job import CronJob
 from hyperi_pylib.logger import logger
+from jinja2 import Environment, FileSystemLoader
+
 from ..settings import get_settings
+from .cron_job import CronJob
 
 
 class CronRunner:
@@ -26,9 +26,9 @@ class CronRunner:
         hunt_checkpoint_path: str,
         hunt_cron_task_timeout: int,
         checkpoint_destination: str,
-        hunt_log_path: Optional[str] = None,
-        checkpoint_timestamp_field: Optional[str] = None,
-        target_config_data: Optional[dict] = None,
+        hunt_log_path: str | None = None,
+        checkpoint_timestamp_field: str | None = None,
+        target_config_data: dict | None = None,
     ):
         self.hunt_dir = hunt_dir
         self.rule_repo_dir = rule_repo_dir
@@ -45,7 +45,7 @@ class CronRunner:
         else:
             settings = get_settings()
             self.hunt_log_path = settings.hunts.log_path or CronRunner.DEFAULT_HUNT_LOG_FILE_PATH
-        self.execution_time_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        self.execution_time_str = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
         self.thread_tracking_file_path = os.path.join(self.hunt_log_path, self.THREAD_TRACKING_LOG)
         os.makedirs(self.hunt_log_path, exist_ok=True)
 

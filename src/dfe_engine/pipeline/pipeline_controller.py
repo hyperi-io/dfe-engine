@@ -1,15 +1,14 @@
 import os
 import re
-from pathlib import Path
-from typing import Optional, List, Dict
 from importlib import resources
+from pathlib import Path
 from zipfile import ZipFile
 
 from hyperi_pylib.logger import logger
 from tabulate import tabulate
 
 from ..settings import get_settings
-from ..storage import get_storage_backend, StorageError
+from ..storage import StorageError, get_storage_backend
 from ..yaml_utils import yaml_load_string
 from .pipeline_builder import PipelineBuilder
 from .pipeline_util import merge_configs
@@ -41,7 +40,7 @@ class PipelineBuilderController:
         args_dfe_package_file_path: str,
         args_log_path: str,
         args_download: bool = False,
-    ) -> Dict[str, List[str]]:
+    ) -> dict[str, list[str]]:
         """
         List all vector templates from the provided DFE package file.
 
@@ -107,11 +106,11 @@ class PipelineBuilderController:
     @staticmethod
     def build_ingestion_pipelines(
         args_dfe_package_file_path: str,
-        args_ingestion_output_path: Optional[str],
+        args_ingestion_output_path: str | None,
         args_log_path: str,
         args_core_config: str = None,
-        args_pipeline_template: Optional[str] = None,
-        args_extra_config: Optional[dict] = None,
+        args_pipeline_template: str | None = None,
+        args_extra_config: dict | None = None,
         args_build_core: bool = False,
         args_download: bool = False,
     ) -> None:
@@ -195,12 +194,12 @@ class PipelineBuilderController:
 
     @staticmethod
     def download_templates(
-        args_log_path: Optional[str] = "./tmp/logs",
-        args_output: Optional[str] = "./hs_artefacts",
-        args_repo_url: Optional[str] = None,
-        args_version: Optional[str] = None,
-        args_username: Optional[str] = None,
-        args_password: Optional[str] = None,
+        args_log_path: str | None = "./tmp/logs",
+        args_output: str | None = "./hs_artefacts",
+        args_repo_url: str | None = None,
+        args_version: str | None = None,
+        args_username: str | None = None,
+        args_password: str | None = None,
     ) -> None:
         """
         Download templates from storage backend (local, HTTP, or S3).

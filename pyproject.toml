@@ -126,7 +126,7 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "B", "S"]
+select = ["E4", "E7", "E9", "F", "B", "S", "I", "UP", "N", "PT", "RUF", "PIE", "T20"]
 ignore = [
     "S101",  # S101=assert in tests
     "S608",  # S608=SQL (ClickHouse queries)
@@ -138,7 +138,23 @@ ignore = [
     "B017",  # B017=pytest.raises without match (legacy tests)
     "B904",  # B904=raise from (TEMP: too many to fix now)
     "B008",  # B008=Depends in defaults (idiomatic FastAPI pattern)
+    "RUF013",  # implicit-optional (TEMP: too many to fix now, needs unsafe-fixes)
+    "RUF002",  # ambiguous-unicode-character-docstring (false positives on en-dash)
+    "RUF012",  # mutable-class-default (Pydantic/SQLModel models use this pattern)
+    "UP042",  # replace-str-enum (TEMP: requires migration from str,Enum to StrEnum)
+    "N805",   # invalid-first-argument-name (Pydantic validators use cls)
+    "N818",   # error-suffix-on-exception-name (existing exception names)
+    "UP046",  # non-pep695-generic-class (TEMP: needs 3.12+ generic syntax migration)
+    "RUF022", # unsorted-dunder-all (TEMP: needs unsafe-fixes)
+    "RUF046", # unnecessary-cast-to-int (TEMP)
+    "RUF059", # unused-unpacked-variable (TEMP)
+    "PIE810", # multiple-starts-ends-with (stylistic, low value)
+    "E402",   # module-import-not-at-top (conditional imports)
+    "T201",   # print (TEMP: needs audit — may be intentional CLI output)
 ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S"]  # Allow all security checks in tests

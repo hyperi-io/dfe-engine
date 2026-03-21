@@ -33,15 +33,15 @@ Or omitted entirely (default score: 50, no factors).
 
 from __future__ import annotations
 
-from typing import Any, Optional
-
-from pydantic import BaseModel, Field, field_validator, model_validator
+from typing import Any
 
 from hyperi_pylib.expression import (
     evaluate_condition,
+)
+from hyperi_pylib.expression import (
     validate as validate_condition,
 )
-
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Models ─────────────────────────────────────────────────────
 
@@ -53,8 +53,8 @@ class ScoreFactor(BaseModel):
     """
 
     when: str = Field(..., description="CEL condition expression (e.g. 'severity == \"critical\"')")
-    add: Optional[int] = Field(default=None, description="Points to add (can be negative)")
-    multiply: Optional[float] = Field(default=None, description="Multiplier to apply")
+    add: int | None = Field(default=None, description="Points to add (can be negative)")
+    multiply: float | None = Field(default=None, description="Multiplier to apply")
 
     @field_validator("when")
     @classmethod

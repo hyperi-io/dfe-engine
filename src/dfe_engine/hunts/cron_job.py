@@ -1,28 +1,29 @@
 import asyncio
+import os
+import threading
 import uuid
-from typing import List, Callable, Tuple
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from functools import partial
 
-import os
-from datetime import datetime, timezone
-from jinja2 import Environment
-import threading
-from .job import JobScheduler
-from .hunt import Hunt
-from .alert import AlertDestinationRegistry, build_alert_config
-from .alert_grouping import AlertGroupingConfig
-from .validator import HuntValidator
 import croniter
 from hyperi_pylib.logger import logger
-from ..yaml_utils import yaml_load, YAMLError
+from jinja2 import Environment
+
+from ..yaml_utils import YAMLError, yaml_load
+from .alert import AlertDestinationRegistry, build_alert_config
+from .alert_grouping import AlertGroupingConfig
+from .hunt import Hunt
+from .job import JobScheduler
+from .validator import HuntValidator
 
 
 def compute_stagger_offsets(
     cron_expression: str,
     total_jobs: int,
     jitter_seconds: int = 15,
-) -> List[Tuple[str, int]]:
+) -> list[tuple[str, int]]:
     """
     Compute evenly-distributed staggered cron expressions for N jobs.
 
@@ -157,7 +158,7 @@ class CronJob:
         self._alert_channels = alert_channels or []
         self._destination_registry = destination_registry
         logger.info("cron job dfe logger initialized")
-        self.scheduled_start_time = datetime.now(timezone.utc)
+        self.scheduled_start_time = datetime.now(UTC)
         self.executor = ThreadPoolExecutor(max_workers=max_workers)
         self.stagger_minutes = 0
 
@@ -165,7 +166,7 @@ class CronJob:
         """
         Logs the details of the current thread, associated with all hunts in the hunt directory, and timestamp to a tracking file.
         """
-        timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S")
 
         hunt_files = [
             file for file in os.listdir(hunt_dir) if os.path.isfile(os.path.join(hunt_dir, file))
@@ -533,7 +534,7 @@ class CronJob:
         (backpressure signal) comparing execution duration to cron interval.
         """
         try:
-            scheduled_start_time = datetime.now(timezone.utc)
+            scheduled_start_time = datetime.now(UTC)
 
             if self._concurrency_semaphore is not None:
                 async with self._concurrency_semaphore:
@@ -628,7 +629,7 @@ class CronJob:
         except Exception as e:
             logger.error(f"Error starting scheduler: {e}", exc_info=True)
 
-    def get_scheduled_jobs(self) -> List[str]:
+    def get_scheduled_jobs(self) -> list[str]:
         """
         Returns a list of scheduled jobs.
 

@@ -102,9 +102,10 @@ async def create_rule(
 
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
+    )
+    from dfe_engine.hunts.rule_creation_service import (
         RuleCreationService,
     )
-
     from dfe_engine.settings import get_clickhouse_config
 
     service = RuleCreationService(ch_config=get_clickhouse_config(settings))

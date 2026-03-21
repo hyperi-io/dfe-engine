@@ -1,11 +1,11 @@
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
+
+from apscheduler.events import EVENT_JOB_ERROR, EVENT_JOB_EXECUTED
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.events import EVENT_JOB_EXECUTED, EVENT_JOB_ERROR
 from apscheduler.triggers.interval import IntervalTrigger
-
-from typing import Callable, Any, List, Optional, Dict
-from datetime import datetime
-
 from hyperi_pylib.logger import logger
 
 
@@ -23,7 +23,7 @@ class JobScheduler:
         self.active_jobs = []
         self.scheduler_started = False
         self.scheduled_start_time = None
-        self._adaptive_intervals: Dict[str, int] = {}
+        self._adaptive_intervals: dict[str, int] = {}
         self._rescheduled_jobs: set = set()
         self.scheduler.add_listener(self.job_listener, EVENT_JOB_EXECUTED | EVENT_JOB_ERROR)
 
@@ -179,7 +179,7 @@ class JobScheduler:
             logger.error(f"Error adding job with interval: {e}")
             raise
 
-    async def start_scheduler(self) -> Optional[bool]:
+    async def start_scheduler(self) -> bool | None:
         """
         Start the scheduler with all configured jobs.
 
@@ -206,7 +206,7 @@ class JobScheduler:
             logger.warning("Scheduler is already running.")
             return False
 
-    async def stop_all_jobs(self) -> List[str]:
+    async def stop_all_jobs(self) -> list[str]:
         """
         Stop all running jobs and clean up.
 
@@ -220,7 +220,7 @@ class JobScheduler:
         self.active_jobs.clear()
         return job_details
 
-    def get_scheduled_jobs(self) -> List[Any]:
+    def get_scheduled_jobs(self) -> list[Any]:
         """
         Get a list of scheduled jobs with their details.
 
@@ -241,7 +241,7 @@ class JobScheduler:
         else:
             logger.info("No scheduled jobs to display.")
 
-    def get_job_info(self, job) -> Dict[str, Any]:
+    def get_job_info(self, job) -> dict[str, Any]:
         """
         Get information about a job.
 
@@ -262,7 +262,7 @@ class JobScheduler:
         ]
         return {attr: getattr(job, attr) for attr in job_attributes}
 
-    def describe_all_job_functions(self) -> List[Dict[str, Any]]:
+    def describe_all_job_functions(self) -> list[dict[str, Any]]:
         """
         Describe all job functions along with their states.
 

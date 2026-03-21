@@ -25,12 +25,10 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from hyperi_pylib.logger import logger
 
 from ..schema.schema_loader import SchemaLoader
-
 
 # Common header columns to copy from source → hunt results.
 # These are the columns we SELECT from the source table.
@@ -59,7 +57,7 @@ class HuntDetectionColumn:
     """A hunt-specific detection column."""
 
     name: str
-    select_expr: Optional[str] = None  # None = literal value injected at query time
+    select_expr: str | None = None  # None = literal value injected at query time
     ch_type: str = "LowCardinality(String)"
     codec: str = "ZSTD(1)"
     comment: str = ""

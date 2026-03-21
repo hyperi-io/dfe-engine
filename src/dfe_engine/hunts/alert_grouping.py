@@ -30,13 +30,10 @@ Hunt YAML format::
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta, timezone
-from typing import Optional
-
-from pydantic import BaseModel, Field, field_validator
+from datetime import UTC, datetime, timedelta
 
 from hyperi_pylib.logger import logger
-
+from pydantic import BaseModel, Field, field_validator
 
 # ── Duration Parser ──────────────────────────────────────────────
 
@@ -289,9 +286,9 @@ class AlertStateManager:
 
             # Ensure timezone-aware comparison
             if last_fired.tzinfo is None:
-                last_fired = last_fired.replace(tzinfo=timezone.utc)
+                last_fired = last_fired.replace(tzinfo=UTC)
 
-            elapsed = datetime.now(timezone.utc) - last_fired
+            elapsed = datetime.now(UTC) - last_fired
             return elapsed >= cooldown
 
         except Exception as e:
@@ -305,11 +302,11 @@ class AlertStateManager:
         rule_name: str,
         customer: str,
         group_key: str = "",
-        fired_at: Optional[datetime] = None,
+        fired_at: datetime | None = None,
         suppressed_count: int = 0,
     ) -> None:
         """Record that an alert was fired."""
-        fired_at = fired_at or datetime.now(timezone.utc)
+        fired_at = fired_at or datetime.now(UTC)
         fired_at_str = fired_at.strftime("%Y-%m-%d %H:%M:%S")
 
         try:
