@@ -1,3 +1,11 @@
+## [1.6.9-dev.2](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.1...v1.6.9-dev.2) (2026-03-21)
+
+
+### Bug Fixes
+
+* add ruff I,UP,N,PT,RUF,PIE,T20 rules, pydocstyle config ([097bf1f](https://github.com/hyperi-io/dfe-engine/commit/097bf1fd2435510a7ea7fde6db2f0d5a0884bec8))
+* resolve ruff violations for full-repo CI check ([16774e1](https://github.com/hyperi-io/dfe-engine/commit/16774e1897b79c42762195c1ea7f9037963cb14c))
+
 ## [1.6.9-dev.1](https://github.com/hyperi-io/dfe-engine/compare/v1.6.8...v1.6.9-dev.1) (2026-03-16)
 
 
