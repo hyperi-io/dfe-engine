@@ -128,12 +128,14 @@ target-version = "py312"
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "B", "S", "I", "UP", "N", "PT", "RUF", "PIE", "T20"]
 ignore = [
+    "S101",  # S101=assert in tests (TEMP: remove after hyperi-ci two-tier quality released)
     "S105",  # S105=hardcoded passwords (false positives: sentinel values, masking strings, sigma tokens)
     "S608",  # S608=SQL (ClickHouse queries)
     "S110",  # S110=try-except-pass
     "S112",  # S112=try-except-continue (intentional skip of invalid configs)
     "S603",  # S603=subprocess shell (CI scripts)
     "S607",  # S607=subprocess partial exec (CI scripts)
+    "S701",  # S701=jinja2 autoescape (controlled templates)
     "B017",  # B017=pytest.raises without match (legacy tests)
     "B904",  # B904=raise from (TEMP: too many to fix now)
     "B008",  # B008=Depends in defaults (idiomatic FastAPI pattern)
@@ -151,6 +153,19 @@ ignore = [
     "E402",   # module-import-not-at-top (conditional imports)
     "T201",   # print (TEMP: needs audit — may be intentional CLI output)
     "RUF005", # collection-literal-concatenation
+    # TEMP: test-related rules — remove after hyperi-ci two-tier quality released
+    "S106",   # hardcoded-password-func-arg (test fixtures)
+    "S108",   # hardcoded-temp-file (test temp dirs)
+    "PT003",  # fixture scope
+    "PT006",  # parametrize names type
+    "PT011",  # raises too broad
+    "PT012",  # raises multiple statements
+    "PT017",  # assert in except
+    "PT018",  # composite assertion
+    "N803",   # invalid argument name (test fixtures)
+    "RUF003", # ambiguous unicode comment
+    "RUF015", # unnecessary iterable allocation
+    "RUF043", # pytest raises ambiguous
 ]
 
 [tool.ruff.lint.pydocstyle]

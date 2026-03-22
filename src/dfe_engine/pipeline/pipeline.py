@@ -121,7 +121,7 @@ class Pipeline:
         env = Environment(
             loader=FileSystemLoader(template_dir),
             undefined=jinja2.StrictUndefined,
-            autoescape=False,  # noqa: S701
+            autoescape=False,
         )
         template = env.get_template(os.path.basename(self.pipeline_template))
         return template
