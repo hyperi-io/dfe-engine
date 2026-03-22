@@ -1,3 +1,11 @@
+## [1.6.9-dev.3](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.2...v1.6.9-dev.3) (2026-03-22)
+
+
+### Bug Fixes
+
+* restore test rule ignores pending hyperi-ci two-tier release ([c982ab1](https://github.com/hyperi-io/dfe-engine/commit/c982ab1fc27cab2b6843681a5dcb657cf6283b91))
+* shrink ruff ignore list, test rules handled by hyperi-ci ([37f3506](https://github.com/hyperi-io/dfe-engine/commit/37f3506125c0da306529201cc5a9b50efa278079))
+
 ## [1.6.9-dev.2](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.1...v1.6.9-dev.2) (2026-03-21)
 
 
