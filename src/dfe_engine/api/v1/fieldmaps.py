@@ -35,6 +35,7 @@ class FieldMapSummary(BaseModel):
     mapping_count: int = 0
     updated_at: str | None = None
 
+
 class FieldMapGroup(BaseModel):
     """One group of field maps, keyed by standard or version."""
 
@@ -98,9 +99,7 @@ async def list_field_maps_grouped(
     group_by: Literal["standard", "version"] = Query(
         ..., description="Group items by standard or version"
     ),
-    max_per_group: int = Query(
-        10, ge=-1, le=100, description="Max items per group (-1 for all)"
-    ),
+    max_per_group: int = Query(10, ge=-1, le=100, description="Max items per group (-1 for all)"),
 ):
     """List field maps with grouping by standard or version."""
     raw = registry.list_maps(standard=standard)

@@ -39,7 +39,7 @@ def group_summaries(
         sort_key = "standard" if group_by == "version" else "version"
         sorted_items = sorted(
             items,
-            key=lambda x: (getattr(x, sort_key) or ""),
+            key=lambda x: getattr(x, sort_key) or "",
             reverse=descending,
         )
         limited = sorted_items if max_per_group == -1 else sorted_items[:max_per_group]
