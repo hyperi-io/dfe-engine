@@ -1713,6 +1713,149 @@
         ]
       }
     },
+    "/api/v1/field-maps/group": {
+      "get": {
+        "tags": [
+          "Field Maps"
+        ],
+        "summary": "List Field Maps Grouped",
+        "description": "List field maps with grouping by standard or version.",
+        "operationId": "list_field_maps_grouped_api_v1_field_maps_group_get",
+        "parameters": [
+          {
+            "name": "standard",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by mapping standard (e.g. sigma, ecs)",
+              "title": "Standard"
+            },
+            "description": "Filter by mapping standard (e.g. sigma, ecs)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in standard/source names",
+              "title": "Search"
+            },
+            "description": "Search in standard/source names"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "enum": [
+                "standard",
+                "version"
+              ],
+              "type": "string",
+              "description": "Group items by standard or version",
+              "title": "Group By"
+            },
+            "description": "Group items by standard or version"
+          },
+          {
+            "name": "max_per_group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": -1,
+              "description": "Max items per group (-1 for all)",
+              "default": 10,
+              "title": "Max Per Group"
+            },
+            "description": "Max items per group (-1 for all)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number (1-based)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number (1-based)"
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 25,
+              "title": "Per Page"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_FieldMapGroup_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/field-maps/{standard}": {
       "get": {
         "tags": [
@@ -2928,6 +3071,50 @@
         "title": "FieldMap",
         "description": "A mapping from a detection/analytics standard's fields to DFE columns.\n\nTwo-tier resolution: a default map applies to all sources for a\nstandard, and source-specific maps override individual entries.\n\nAttributes:\n    standard: Standard identifier (e.g. \"sigma\", \"ecs\", \"cim\").\n    source: Source name this map applies to, or None for default map.\n    version: Standard version (e.g. \"8.11\" for ECS). Informational.\n    description: Human-readable description.\n    inherits: Reference to base map (e.g. \"_default\"). Declarative\n        \u2014 the resolver does not auto-fetch, caller is responsible.\n    mappings: Dict of standard_field \u2192 dfe_column_name."
       },
+      "FieldMapGroup": {
+        "properties": {
+          "standard": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Standard"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FieldMapSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total"
+        ],
+        "title": "FieldMapGroup",
+        "description": "One group of field maps, keyed by standard or version."
+      },
       "FieldMapSummary": {
         "properties": {
           "standard": {
@@ -3148,6 +3335,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[DeploymentSummary]"
+      },
+      "PaginatedResponse_FieldMapGroup_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/FieldMapGroup"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[FieldMapGroup]"
       },
       "PaginatedResponse_FieldMapSummary_": {
         "properties": {
