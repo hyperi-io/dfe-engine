@@ -83,6 +83,66 @@ class TestFieldMapsList:
         resp = fm_client.get("/api/v1/field-maps")
         assert resp.status_code == 401
 
+    def test_list_with_group_by_standard(self, fm_client, fm_admin_headers, sample_fieldmap):
+        """When group_by=standard, items are group keys and object maps key to list of maps."""
+        fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "sigma", "source": "test"},
+            headers=fm_admin_headers,
+        )
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={
+                **sample_fieldmap,
+                "standard": "ecs",
+                "source": None,
+                "version": "8.11",
+            },
+            headers=fm_admin_headers,
+        )
+        resp = fm_client.get(
+            "/api/v1/field-maps/group",
+            params={"group_by": "standard"},
+            headers=fm_admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert "total" in data
+        assert "page" in data
+        assert "per_page" in data
+        items = data["items"]
+        assert isinstance(items, list)
+        standards = [g["standard"] for g in items if g.get("standard")]
+        assert "sigma" in standards
+        assert "ecs" in standards
+        for g in items:
+            assert "items" in g
+            assert isinstance(g["items"], list)
+
+    def test_list_with_group_by_version(self, fm_client, fm_admin_headers, sample_fieldmap):
+        fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "sigma", "version": "1.0.0"},
+            headers=fm_admin_headers,
+        )
+        resp = fm_client.get(
+            "/api/v1/field-maps/group",
+            params={"group_by": "version"},
+            headers=fm_admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert "total" in data
+        items = data["items"]
+        assert isinstance(items, list)
+        for g in items:
+            assert "items" in g
+            assert isinstance(g["items"], list)
+
 
 class TestFieldMapsNotFound:
     def test_get_missing_standard(self, fm_client, fm_admin_headers):
