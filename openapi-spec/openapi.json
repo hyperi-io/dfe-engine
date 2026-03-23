@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.6.9.dev1"
+    "version": "1.6.9.dev3"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -3169,7 +3169,8 @@
         "required": [
           "standard"
         ],
-        "title": "FieldMapSummary"
+        "title": "FieldMapSummary",
+        "description": "Summary of a field map for list/group endpoints."
       },
       "HTTPValidationError": {
         "properties": {

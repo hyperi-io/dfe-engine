@@ -1,8 +1,8 @@
-"""Tests for field map helpers — group_summaries."""
+"""Tests for field map helpers — group_summaries, raw_to_summaries."""
 
 from dataclasses import dataclass
 
-from dfe_engine.fieldmap.helpers import group_summaries
+from dfe_engine.fieldmap.helpers import group_summaries, raw_to_summaries
 
 # ---------------------------------------------------------------
 # Helpers
@@ -28,6 +28,68 @@ def _key(g: dict) -> str:
 
 def _items(g: dict) -> list:
     return g["items"]
+
+
+# ---------------------------------------------------------------
+# raw_to_summaries
+# ---------------------------------------------------------------
+
+
+class TestRawToSummaries:
+    def test_empty_raw_returns_empty_list(self):
+        assert raw_to_summaries([]) == []
+
+    def test_raw_with_all_fields(self):
+        raw = [
+            {
+                "standard": "sigma",
+                "source": "test",
+                "is_default": True,
+                "version": "1.0.0",
+                "mapping_count": 5,
+                "updated_at": "2024-01-15T12:00:00Z",
+            },
+        ]
+        result = raw_to_summaries(raw)
+        assert len(result) == 1
+        assert result[0].standard == "sigma"
+        assert result[0].source == "test"
+        assert result[0].is_default is True
+        assert result[0].version == "1.0.0"
+        assert result[0].mapping_count == 5
+        assert result[0].updated_at == "2024-01-15T12:00:00Z"
+
+    def test_raw_with_missing_optional_fields_applies_defaults(self):
+        raw = [{"standard": "ecs"}]
+        result = raw_to_summaries(raw)
+        assert len(result) == 1
+        assert result[0].standard == "ecs"
+        assert result[0].source is None
+        assert result[0].is_default is False
+        assert result[0].version is None
+        assert result[0].mapping_count == 0
+        assert result[0].updated_at is None
+
+    def test_raw_with_empty_standard_maps_to_empty_string(self):
+        raw = [{}]
+        result = raw_to_summaries(raw)
+        assert len(result) == 1
+        assert result[0].standard == ""
+
+    def test_raw_multiple_items(self):
+        raw = [
+            {"standard": "sigma", "source": "a"},
+            {"standard": "ecs", "source": None, "version": "8.11"},
+        ]
+        result = raw_to_summaries(raw)
+        assert len(result) == 2
+        assert result[0].standard == "sigma" and result[0].source == "a"
+        assert result[1].standard == "ecs" and result[1].version == "8.11"
+
+
+# ---------------------------------------------------------------
+# group_summaries
+# ---------------------------------------------------------------
 
 
 class TestGroupSummaries:

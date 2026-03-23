@@ -4,6 +4,23 @@ from __future__ import annotations
 
 from typing import Literal, Protocol
 
+from dfe_engine.fieldmap.models import FieldMapSummary
+
+
+def raw_to_summaries(raw: list[dict]) -> list[FieldMapSummary]:
+    """Convert raw registry list_maps output to FieldMapSummary list."""
+    return [
+        FieldMapSummary(
+            standard=item.get("standard", ""),
+            source=item.get("source"),
+            is_default=item.get("is_default", False),
+            version=item.get("version"),
+            mapping_count=item.get("mapping_count", 0),
+            updated_at=item.get("updated_at"),
+        )
+        for item in raw
+    ]
+
 
 class _GroupableSummary(Protocol):
     """Protocol for items groupable by standard or version."""

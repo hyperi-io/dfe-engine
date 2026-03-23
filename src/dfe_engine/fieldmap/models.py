@@ -97,3 +97,14 @@ class FieldMap(BaseModel):
             if isinstance(data[key], (dict, list)) and not data[key]:
                 del data[key]
         return data
+
+
+class FieldMapSummary(BaseModel):
+    """Summary of a field map for list/group endpoints."""
+
+    standard: str
+    source: str | None = None
+    is_default: bool = False
+    version: str | None = None
+    mapping_count: int = 0
+    updated_at: str | None = None

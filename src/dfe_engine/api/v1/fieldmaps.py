@@ -18,22 +18,13 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
-from dfe_engine.fieldmap.helpers import group_summaries
-from dfe_engine.fieldmap.models import FieldMap
+from dfe_engine.fieldmap.helpers import group_summaries, raw_to_summaries
+from dfe_engine.fieldmap.models import FieldMap, FieldMapSummary
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
 
 # ── Response models ──────────────────────────────────────────
-
-
-class FieldMapSummary(BaseModel):
-    standard: str
-    source: str | None = None
-    is_default: bool = False
-    version: str | None = None
-    mapping_count: int = 0
-    updated_at: str | None = None
 
 
 class FieldMapGroup(BaseModel):
@@ -70,17 +61,7 @@ async def list_field_maps(
     raw = registry.list_maps(standard=standard)
     raw = apply_search(raw, search, ["standard", "source"])
     raw = apply_sort(raw, sort_by, sort_order)
-    summaries = [
-        FieldMapSummary(
-            standard=item.get("standard", ""),
-            source=item.get("source"),
-            is_default=item.get("is_default", False),
-            version=item.get("version"),
-            mapping_count=item.get("mapping_count", 0),
-            updated_at=item.get("updated_at"),
-        )
-        for item in raw
-    ]
+    summaries = raw_to_summaries(raw)
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
@@ -108,17 +89,7 @@ async def list_field_maps_grouped(
     """List field maps with grouping by standard or version."""
     raw = registry.list_maps(standard=standard)
     raw = apply_search(raw, search, ["standard", "source"])
-    summaries = [
-        FieldMapSummary(
-            standard=item.get("standard", ""),
-            source=item.get("source"),
-            is_default=item.get("is_default", False),
-            version=item.get("version"),
-            mapping_count=item.get("mapping_count", 0),
-            updated_at=item.get("updated_at"),
-        )
-        for item in raw
-    ]
+    summaries = raw_to_summaries(raw)
     grouped = group_summaries(
         summaries, group_by, max_per_group=max_per_group, sort_order=sort_order
     )
