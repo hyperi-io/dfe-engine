@@ -95,7 +95,11 @@ async def list_field_maps_grouped(
     pagination: PaginationParams = Depends(),
     standard: str | None = Query(None, description="Filter by mapping standard (e.g. sigma, ecs)"),
     search: str | None = Query(None, description="Search in standard/source names"),
-    sort_order: str = Query("asc", description="Sort order: asc/desc"),
+    sort_order: str = Query(
+        "asc",
+        description="Sort order (asc/desc): orders groups by the group_by key (standard or version), "
+        "and items within each group by the other dimension.",
+    ),
     group_by: Literal["standard", "version"] = Query(
         ..., description="Group items by standard or version"
     ),
@@ -118,6 +122,8 @@ async def list_field_maps_grouped(
     grouped = group_summaries(
         summaries, group_by, max_per_group=max_per_group, sort_order=sort_order
     )
+    descending = sort_order in ("desc", "descend")
+    grouped = sorted(grouped, key=lambda g: g["key"], reverse=descending)
     groups = [
         FieldMapGroup(
             **{group_by: g["key"]},

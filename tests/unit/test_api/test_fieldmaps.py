@@ -121,6 +121,48 @@ class TestFieldMapsList:
             assert "items" in g
             assert isinstance(g["items"], list)
 
+    def test_list_grouped_sorts_groups_by_standard_asc(self, fm_client, fm_admin_headers, sample_fieldmap):
+        fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "zebra", "source": "z"},
+            headers=fm_admin_headers,
+        )
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "alpha", "source": "a"},
+            headers=fm_admin_headers,
+        )
+        resp = fm_client.get(
+            "/api/v1/field-maps/group",
+            params={"group_by": "standard", "sort_order": "asc"},
+            headers=fm_admin_headers,
+        )
+        assert resp.status_code == 200
+        keys = [g["standard"] for g in resp.json()["items"] if g.get("standard")]
+        assert keys == sorted(keys)
+
+    def test_list_grouped_sorts_groups_by_version_desc(self, fm_client, fm_admin_headers, sample_fieldmap):
+        fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "sigma", "version": "9.0.0", "source": None},
+            headers=fm_admin_headers,
+        )
+        fm_client.post(
+            "/api/v1/field-maps",
+            json={**sample_fieldmap, "standard": "ecs", "version": "1.0.0", "source": None},
+            headers=fm_admin_headers,
+        )
+        resp = fm_client.get(
+            "/api/v1/field-maps/group",
+            params={"group_by": "version", "sort_order": "desc"},
+            headers=fm_admin_headers,
+        )
+        assert resp.status_code == 200
+        keys = [g["version"] for g in resp.json()["items"] if g.get("version") is not None]
+        assert keys == sorted(keys, reverse=True)
+
     def test_list_with_group_by_version(self, fm_client, fm_admin_headers, sample_fieldmap):
         fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
         fm_client.post(
