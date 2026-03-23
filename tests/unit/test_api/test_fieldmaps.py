@@ -121,7 +121,9 @@ class TestFieldMapsList:
             assert "items" in g
             assert isinstance(g["items"], list)
 
-    def test_list_grouped_sorts_groups_by_standard_asc(self, fm_client, fm_admin_headers, sample_fieldmap):
+    def test_list_grouped_sorts_groups_by_standard_asc(
+        self, fm_client, fm_admin_headers, sample_fieldmap
+    ):
         fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
         fm_client.post(
             "/api/v1/field-maps",
@@ -142,7 +144,9 @@ class TestFieldMapsList:
         keys = [g["standard"] for g in resp.json()["items"] if g.get("standard")]
         assert keys == sorted(keys)
 
-    def test_list_grouped_sorts_groups_by_version_desc(self, fm_client, fm_admin_headers, sample_fieldmap):
+    def test_list_grouped_sorts_groups_by_version_desc(
+        self, fm_client, fm_admin_headers, sample_fieldmap
+    ):
         fm_client.post("/api/v1/field-maps/seed", headers=fm_admin_headers)
         fm_client.post(
             "/api/v1/field-maps",
