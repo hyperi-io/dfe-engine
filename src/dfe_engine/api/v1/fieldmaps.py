@@ -1,6 +1,7 @@
 """Field maps router — FieldMapRegistry CRUD.
 
 GET    /api/v1/field-maps                  → Paginated list
+GET    /api/v1/field-maps/group            → Paginated list with grouping
 POST   /api/v1/field-maps                  → Create field map
 GET    /api/v1/field-maps/{standard}       → Default map for standard
 GET    /api/v1/field-maps/{standard}/{source} → Source-specific map
@@ -10,11 +11,14 @@ POST   /api/v1/field-maps/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.fieldmap.helpers import group_summaries
 from dfe_engine.fieldmap.models import FieldMap
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
@@ -30,6 +34,14 @@ class FieldMapSummary(BaseModel):
     version: str | None = None
     mapping_count: int = 0
     updated_at: str | None = None
+
+class FieldMapGroup(BaseModel):
+    """One group of field maps, keyed by standard or version."""
+
+    standard: str | None = None
+    version: str | None = None
+    items: list[FieldMapSummary]
+    total: int
 
 
 class SeedResponse(BaseModel):
@@ -69,6 +81,53 @@ async def list_field_maps(
         for item in raw
     ]
     return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+
+
+@router.get(
+    "/group",
+    response_model=PaginatedResponse[FieldMapGroup],
+    dependencies=[Depends(require_action("config:read"))],
+)
+async def list_field_maps_grouped(
+    user: CurrentUser,
+    registry: FieldMapReg,
+    pagination: PaginationParams = Depends(),
+    standard: str | None = Query(None, description="Filter by mapping standard (e.g. sigma, ecs)"),
+    search: str | None = Query(None, description="Search in standard/source names"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
+    group_by: Literal["standard", "version"] = Query(
+        ..., description="Group items by standard or version"
+    ),
+    max_per_group: int = Query(
+        10, ge=-1, le=100, description="Max items per group (-1 for all)"
+    ),
+):
+    """List field maps with grouping by standard or version."""
+    raw = registry.list_maps(standard=standard)
+    raw = apply_search(raw, search, ["standard", "source"])
+    summaries = [
+        FieldMapSummary(
+            standard=item.get("standard", ""),
+            source=item.get("source"),
+            is_default=item.get("is_default", False),
+            version=item.get("version"),
+            mapping_count=item.get("mapping_count", 0),
+            updated_at=item.get("updated_at"),
+        )
+        for item in raw
+    ]
+    grouped = group_summaries(
+        summaries, group_by, max_per_group=max_per_group, sort_order=sort_order
+    )
+    groups = [
+        FieldMapGroup(
+            **{group_by: g["key"]},
+            items=g["items"],
+            total=g["total"],
+        )
+        for g in grouped
+    ]
+    return PaginatedResponse.from_list(groups, pagination.page, pagination.per_page)
 
 
 @router.post(
