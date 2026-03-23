@@ -13,16 +13,16 @@ Storage model:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
-from dfe_engine.services.plugins import deployment_classes, valid_services
 from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config
+from dfe_engine.services.plugins import deployment_classes, valid_services
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -204,7 +204,7 @@ class DeploymentConfigRegistry:
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
-                    message=f"deploy: delete {service}/{instance}".encode("utf-8"),
+                    message=f"deploy: delete {service}/{instance}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()
@@ -232,7 +232,7 @@ class DeploymentConfigRegistry:
             yaml_path = self._config_directory / f"{table}.yaml"
             try:
                 stat = yaml_path.stat()
-                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat()
+                updated_at = datetime.fromtimestamp(stat.st_mtime, tz=UTC).isoformat()
             except OSError:
                 updated_at = None
 
@@ -309,9 +309,7 @@ class DeploymentConfigRegistry:
                         "commit": commit.id.decode("ascii"),
                         "message": commit.message.decode("utf-8", errors="replace").strip(),
                         "author": author_name,
-                        "date": datetime.fromtimestamp(
-                            commit.author_time, tz=timezone.utc
-                        ).isoformat(),
+                        "date": datetime.fromtimestamp(commit.author_time, tz=UTC).isoformat(),
                     }
                 )
 

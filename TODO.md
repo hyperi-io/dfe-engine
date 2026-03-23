@@ -8,6 +8,7 @@ This is the **single source of truth** for all tasks and progress.
 
 - [ ] Phase 3: Operational API routers `[PENDING]`
 - [ ] CI/CD: verify container + helm publish pipeline triggers correctly on next release
+- [ ] Standardise test infrastructure: dual-mode (remote devex + docker-local via dfe-docker infra profile). See `~/DFE-TEST-INFRA-PROMPT.md`
 
 ---
 
@@ -58,6 +59,7 @@ This is the **single source of truth** for all tasks and progress.
 
 ### Low Priority
 
+- [ ] **WASM transform module versioning** — registry, S3 storage, deploy/rollback API. Moved from dfe-transform-wasm Phase 7.4. See `docs/superpowers/specs/2026-03-19-wasm-module-versioning-wbs.md` for full WBS.
 - [ ] Deploy HyperDX (ClickStack) as observability UI
 - [ ] Implement HyperDX OIDC middleware (docs/oauth2/HYPERDX-MIDDLEWARE.md)
 - [ ] Deploy Envoy Gateway with native OIDC (replaces nginx-ingress + oauth2-proxy)

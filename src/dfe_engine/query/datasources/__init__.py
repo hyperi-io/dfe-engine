@@ -56,7 +56,6 @@ class DatasourceAdapter(ABC):
         Returns:
             PyArrow Table with results
         """
-        pass
 
     @abstractmethod
     def explain(
@@ -74,7 +73,6 @@ class DatasourceAdapter(ABC):
         Returns:
             ExplainPlan with execution steps
         """
-        pass
 
     def execute_with_explain(
         self,
@@ -132,11 +130,9 @@ class DatasourceAdapter(ABC):
         Returns:
             True if healthy, False otherwise
         """
-        pass
 
     def close(self) -> None:  # noqa: B027
         """Close any open connections. Override if needed."""
-        pass
 
 
 def register_adapter(name: str):
@@ -185,9 +181,11 @@ def list_adapters() -> list[str]:
 
 
 # Import adapters to trigger registration
-from dfe_engine.query.datasources import clickhouse  # noqa: F401, E402
-from dfe_engine.query.datasources import storage  # noqa: F401, E402
+from dfe_engine.query.datasources import (
+    clickhouse,  # noqa: F401
+    storage,  # noqa: F401
+)
 
 # Future: postgres, prometheus
-# from dfe_engine.query.datasources import postgres  # noqa: F401, E402
-# from dfe_engine.query.datasources import prometheus  # noqa: F401, E402
+# from dfe_engine.query.datasources import postgres
+# from dfe_engine.query.datasources import prometheus

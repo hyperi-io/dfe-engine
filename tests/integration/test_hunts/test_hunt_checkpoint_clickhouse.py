@@ -1,10 +1,12 @@
+import time
 import uuid
+from datetime import UTC, datetime, timedelta
+
 import pytest
+
+from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 from dfe_engine.settings import get_settings
-import time
-from datetime import datetime, timezone, timedelta
-from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 
 # These tests require a running ClickHouse instance
 pytestmark = pytest.mark.integration
@@ -31,7 +33,7 @@ def ch_client():
         "ch_verify": settings.clickhouse.verify,
     }
     ch_client = ClickHouseManager.get_instance(target_config_data=config).get_clickhouse_client()
-    yield ch_client
+    return ch_client
 
 
 @pytest.mark.parametrize(
@@ -102,9 +104,9 @@ def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_
         log_buffer = 60
         query_window_seconds = 600
 
-        execution_time = datetime.now(timezone.utc)
-        end_time = datetime.now(timezone.utc)
-        scheduled_start_time = datetime.now(timezone.utc)
+        execution_time = datetime.now(UTC)
+        end_time = datetime.now(UTC)
+        scheduled_start_time = datetime.now(UTC)
         execution_time_ms = (end_time - execution_time).total_seconds() * 1000
         scheduled_start_time_w_buffer = scheduled_start_time - timedelta(seconds=log_buffer)
         last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
@@ -156,7 +158,7 @@ def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, uniqu
         )
 
         checkpoints = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         for _ in range(num_records):
             generated_query_id = str(uuid.uuid4())

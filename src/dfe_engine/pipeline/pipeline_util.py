@@ -1,6 +1,6 @@
-from enum import Enum
-import re
 import os
+import re
+from enum import Enum
 
 
 class VectorStepType(Enum):
@@ -98,7 +98,7 @@ def read_vector_step_config(vector_step: str, package_config: dict) -> str:
             f"Vector config file {full_path} not found. Make sure the template exists or you are using the correct version"
         )
     # Read as raw text - Vector configs contain ${VAR} syntax that isn't valid YAML
-    with open(full_path, "r") as f:
+    with open(full_path) as f:
         return f.read()
 
 

@@ -598,7 +598,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.6.6"
+version = "1.6.9.dev3"
 source = { editable = "." }
 dependencies = [
     { name = "aiocron" },

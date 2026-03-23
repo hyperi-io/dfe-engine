@@ -1,5 +1,6 @@
 import pytest
 import yaml
+
 from dfe_engine.sigma.sigma_converter import SigmaRuleConverter
 from dfe_engine.yaml_utils import YAMLError
 

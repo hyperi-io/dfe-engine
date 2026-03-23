@@ -1,7 +1,5 @@
-from pydantic import StrictStr
-from typing import Dict
-
 from hyperi_pylib.logger import logger
+from pydantic import StrictStr
 
 from .clickhouse_manager import ClickHouseManager
 
@@ -13,7 +11,7 @@ class ClickHouseMetrics:
         """Initialize with target configuration data."""
         self.ch_manager = ClickHouseManager.get_instance(target_config_data)
 
-    def get_hunt_metrics(self, hunt_name: StrictStr) -> Dict:
+    def get_hunt_metrics(self, hunt_name: StrictStr) -> dict:
         """
         Get metrics for a specific hunt from ClickHouse.
 
@@ -75,7 +73,7 @@ class ClickHouseMetrics:
             }
 
         except Exception as e:
-            logger.error(f"Error getting hunt metrics from ClickHouse: {str(e)}")
+            logger.error(f"Error getting hunt metrics from ClickHouse: {e!s}")
             return {
                 "total_executions": 0,
                 "last_execution_time": None,

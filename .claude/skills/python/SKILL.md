@@ -1,1 +1,1 @@
-../../../ai/standards/languages/PYTHON.md
+../../../hyperi-ai/standards/languages/PYTHON.md

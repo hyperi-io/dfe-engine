@@ -16,11 +16,10 @@ Usage:
 import asyncio
 import os
 import threading
-from typing import Optional
 
 from hyperi_pylib.logger import logger
 
-from ..settings import DFESettings, get_settings, get_clickhouse_config
+from ..settings import DFESettings, get_clickhouse_config, get_settings
 
 
 class HuntEngine:
@@ -33,15 +32,15 @@ class HuntEngine:
     DFESettings (no dfe_package.yaml dependency).
     """
 
-    def __init__(self, settings: Optional[DFESettings] = None):
+    def __init__(self, settings: DFESettings | None = None):
         self._settings = settings or get_settings()
-        self._thread: Optional[threading.Thread] = None
-        self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._stop_event: Optional[asyncio.Event] = None
+        self._thread: threading.Thread | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._stop_event: asyncio.Event | None = None
         self._started = threading.Event()
         self._cron_jobs: list = []
         self._lock = threading.Lock()
-        self._concurrency_semaphore: Optional[asyncio.Semaphore] = None
+        self._concurrency_semaphore: asyncio.Semaphore | None = None
 
     @property
     def is_running(self) -> bool:
@@ -171,7 +170,7 @@ class HuntEngine:
                     self._stop_event.wait(),
                     timeout=hunts_cfg.cron_task_timeout,
                 )
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.info(f"HuntEngine: timeout reached ({hunts_cfg.cron_task_timeout}s).")
         else:
             await self._stop_event.wait()

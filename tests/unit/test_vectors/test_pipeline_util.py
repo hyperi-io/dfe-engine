@@ -1,17 +1,18 @@
 import pytest
 import yaml
+
 from dfe_engine.pipeline.pipeline_util import (
+    PipelineSchemaError,
     VectorStepType,
     find_vector_type,
-    get_vector_step_type,
-    read_vector_step_config,
+    gather_env_variables_for_pipeline,
+    get_pipeline,
     get_required_env_vars,
     get_vector_pipelines,
-    get_pipeline,
+    get_vector_step_type,
+    read_vector_step_config,
     vector_step_name_to_input,
     vector_step_name_to_output,
-    gather_env_variables_for_pipeline,
-    PipelineSchemaError,
 )
 
 

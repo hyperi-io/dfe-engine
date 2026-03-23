@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Any
 
 from dfe_engine.deployment.models.common import TShirtSize
-from dfe_engine.deployment.sizing import get_keda_defaults, get_default_size, get_resources
+from dfe_engine.deployment.sizing import get_default_size, get_keda_defaults, get_resources
 from dfe_engine.services.plugins import deployment_classes, valid_services
 
 

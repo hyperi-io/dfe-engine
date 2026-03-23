@@ -1,3 +1,26 @@
+## [1.6.9-dev.3](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.2...v1.6.9-dev.3) (2026-03-22)
+
+
+### Bug Fixes
+
+* restore test rule ignores pending hyperi-ci two-tier release ([c982ab1](https://github.com/hyperi-io/dfe-engine/commit/c982ab1fc27cab2b6843681a5dcb657cf6283b91))
+* shrink ruff ignore list, test rules handled by hyperi-ci ([37f3506](https://github.com/hyperi-io/dfe-engine/commit/37f3506125c0da306529201cc5a9b50efa278079))
+
+## [1.6.9-dev.2](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.1...v1.6.9-dev.2) (2026-03-21)
+
+
+### Bug Fixes
+
+* add ruff I,UP,N,PT,RUF,PIE,T20 rules, pydocstyle config ([097bf1f](https://github.com/hyperi-io/dfe-engine/commit/097bf1fd2435510a7ea7fde6db2f0d5a0884bec8))
+* resolve ruff violations for full-repo CI check ([16774e1](https://github.com/hyperi-io/dfe-engine/commit/16774e1897b79c42762195c1ea7f9037963cb14c))
+
+## [1.6.9-dev.1](https://github.com/hyperi-io/dfe-engine/compare/v1.6.8...v1.6.9-dev.1) (2026-03-16)
+
+
+### Bug Fixes
+
+* add build.type app to CI config ([630fbcc](https://github.com/hyperi-io/dfe-engine/commit/630fbcc20b5689533d8e92f6abde59f127f45947))
+
 ## [1.6.8](https://github.com/hyperi-io/dfe-engine/compare/v1.6.7...v1.6.8) (2026-03-10)
 
 

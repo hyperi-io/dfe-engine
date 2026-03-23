@@ -6,8 +6,8 @@ from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.registry import FieldMapRegistry
 from dfe_engine.schema.schema_builder_v2 import (
     SchemaBuildError,
-    SchemaBuildResult,
     SchemaBuilderV2,
+    SchemaBuildResult,
 )
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry

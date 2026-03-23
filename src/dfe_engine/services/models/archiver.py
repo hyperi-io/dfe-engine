@@ -11,7 +11,6 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 from dfe_engine.services.models.base import BaseServiceConfig
 from dfe_engine.services.models.common import MemoryConfig
 
-
 # ---------------------------------------------------------------------------
 # Kafka (Archiver-specific: consumer with flat SASL fields)
 # ---------------------------------------------------------------------------

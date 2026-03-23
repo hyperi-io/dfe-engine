@@ -76,3 +76,6 @@ meta_schemas.zip
 
 # Docker
 docker-compose.yml
+
+# AI agent working files (not committed)
+docs/superpowers/

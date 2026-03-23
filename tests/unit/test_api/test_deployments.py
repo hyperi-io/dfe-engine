@@ -12,8 +12,8 @@ def app_with_deployments(tmp_path):
     from dfe_engine.settings import (
         APISettings,
         AuthSettings,
-        DFESettings,
         DeploymentSettings,
+        DFESettings,
         HuntsSettings,
         LocalAuthSettings,
         ServicesSettings,

@@ -1,14 +1,15 @@
 import os
-import jinja2
 import re
-from jinja2 import Environment, FileSystemLoader, meta
-from .pipeline_util import (
-    gather_env_variables_for_pipeline,
-    PipelineSchemaError,
-)
-from typing import Dict
+
+import jinja2
 from hyperi_pylib.logger import logger
-from ..yaml_utils import yaml_load_string, YAMLError
+from jinja2 import Environment, FileSystemLoader, meta
+
+from ..yaml_utils import YAMLError, yaml_load_string
+from .pipeline_util import (
+    PipelineSchemaError,
+    gather_env_variables_for_pipeline,
+)
 
 
 class Pipeline:
@@ -33,12 +34,12 @@ class Pipeline:
     def __init__(
         self,
         name: str,
-        dfe_config: Dict,
-        pipeline_config: Dict,
+        dfe_config: dict,
+        pipeline_config: dict,
         output_dir: str,
         logger=None,
         ingestion_pipeline_template_path: str = None,
-        extra_config: Dict = None,
+        extra_config: dict = None,
     ):
         """
         Initialize the Pipeline instance.
@@ -72,7 +73,7 @@ class Pipeline:
         self.pipeline_template = template_path
         self.extra_config = extra_config
 
-    def combine_global_and_pipeline_env_vars(self) -> Dict:
+    def combine_global_and_pipeline_env_vars(self) -> dict:
         """
         Combines the global environment variables with the pipeline environment variables.
         Global args are used as base, and pipeline-specific env vars override them.
@@ -120,7 +121,7 @@ class Pipeline:
         env = Environment(
             loader=FileSystemLoader(template_dir),
             undefined=jinja2.StrictUndefined,
-            autoescape=False,  # noqa: S701
+            autoescape=False,
         )
         template = env.get_template(os.path.basename(self.pipeline_template))
         return template
@@ -216,7 +217,7 @@ class Pipeline:
 
     def _read_template_source(self) -> str:
         """Read the template source file."""
-        with open(self.pipeline_template, "r") as f:
+        with open(self.pipeline_template) as f:
             return f.read()
 
     def _find_variables_with_defaults(self, template_source: str) -> dict:
@@ -281,7 +282,7 @@ class Pipeline:
                     f"Variable {var} is not defined in the pipeline or global settings or in the .env file."
                 )
 
-    def gather_env_variables_for_pipeline(self) -> Dict:
+    def gather_env_variables_for_pipeline(self) -> dict:
         """
         Gathers the environment variables for the specified pipeline.
 
@@ -319,7 +320,7 @@ class Pipeline:
                     )
         return env_vars, self.vector_env_vars
 
-    def convert_all_env_vars_to_str(self, env_vars: Dict) -> Dict:
+    def convert_all_env_vars_to_str(self, env_vars: dict) -> dict:
         """
         Converts all the environment variables to strings.
 
@@ -338,7 +339,7 @@ class Pipeline:
                 else:
                     str_env_vars[k] = f'"{v}"'
             elif not isinstance(v, str):
-                str_env_vars[k] = f'"{str(v)}"'
+                str_env_vars[k] = f'"{v!s}"'
             else:
                 str_env_vars[k] = v
         return str_env_vars
@@ -362,7 +363,7 @@ class Pipeline:
         # Validate if the written file is a valid YAML file
         # Vector configs use ${VAR} syntax which YAML parsers interpret as invalid anchors
         # We temporarily escape these before validation
-        with open(output_file, "r") as f:
+        with open(output_file) as f:
             content = f.read()
             # Escape ${...} patterns so YAML parser doesn't treat them as anchors
             escaped_content = re.sub(r"\$\{", r"__DOLLAR_BRACE__", content)

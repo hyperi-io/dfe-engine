@@ -1,6 +1,6 @@
 [project]
 name = "dfe-engine"
-version = "1.6.8"
+version = "1.6.9-dev.3"
 description = "DFE Engine - Core library for Data Fusion Engine"
 authors = [{ name = "HyperSec", email = "engineering@hypersec.io" }]
 license = { text = "LicenseRef-HyperSec-EULA" }
@@ -101,11 +101,13 @@ log_cli_level = "INFO"
 python_files = "test_*.py"
 addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration'"
 testpaths = ["tests"]
+asyncio_mode = "auto"
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
+    "smoke: Startup smoke tests (mandatory, every push)",
     "requires_schemas: Tests that need the dfe-schemas submodule checked out",
 ]
 
@@ -114,6 +116,7 @@ exclude_lines = [
     "pragma: no cover",
     "except Exception as e:",  # Exclude generic exception handlers
 ]
+fail_under = 80
 
 [tool.coverage.run]
 omit = [
@@ -126,22 +129,38 @@ line-length = 100
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E4", "E7", "E9", "F", "B", "S"]
+select = ["E4", "E7", "E9", "F", "B", "S", "I", "UP", "N", "PT", "RUF", "PIE", "T20"]
 ignore = [
-    "S101",  # S101=assert in tests
-    "S608",  # S608=SQL (ClickHouse queries)
-    "S105",  # S105=hardcoded passwords (test fixtures)
-    "S110",  # S110=try-except-pass
-    "S112",  # S112=try-except-continue (intentional skip of invalid configs)
-    "S603",  # S603=subprocess shell (CI scripts)
-    "S607",  # S607=subprocess partial exec (CI scripts)
-    "B017",  # B017=pytest.raises without match (legacy tests)
-    "B904",  # B904=raise from (TEMP: too many to fix now)
-    "B008",  # B008=Depends in defaults (idiomatic FastAPI pattern)
+    "S105",  # hardcoded passwords (false positives: sentinel values, masking strings, sigma tokens)
+    "S608",  # SQL (ClickHouse queries, not user input)
+    "S110",  # try-except-pass (intentional)
+    "S112",  # try-except-continue (intentional skip of invalid configs)
+    "S603",  # subprocess shell (CI scripts)
+    "S607",  # subprocess partial exec (CI scripts)
+    "S701",  # jinja2 autoescape (controlled templates, not HTML)
+    "B017",  # pytest.raises without match (legacy tests)
+    "B904",  # raise from (TEMP: too many to fix now)
+    "B008",  # Depends in defaults (idiomatic FastAPI)
+    "RUF013",  # implicit-optional (TEMP: needs unsafe-fixes)
+    "RUF002",  # ambiguous-unicode-character-docstring (en-dash false positives)
+    "RUF012",  # mutable-class-default (Pydantic/SQLModel pattern)
+    "UP042",  # replace-str-enum (TEMP: migration needed)
+    "N805",   # invalid-first-argument-name (Pydantic validators)
+    "N818",   # error-suffix-on-exception-name
+    "UP046",  # non-pep695-generic-class (TEMP: 3.12+ migration)
+    "RUF022", # unsorted-dunder-all (TEMP: needs unsafe-fixes)
+    "RUF046", # unnecessary-cast-to-int (TEMP)
+    "RUF059", # unused-unpacked-variable (TEMP)
+    "PIE810", # multiple-starts-ends-with (stylistic)
+    "E402",   # module-import-not-at-top (conditional imports)
+    "T201",   # print (TEMP: needs audit)
+    "RUF005", # collection-literal-concatenation
 ]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S"]  # Allow all security checks in tests
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
 "ci/*" = ["S", "F841"]  # CI submodule (legacy, being removed)
 

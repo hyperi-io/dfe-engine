@@ -222,9 +222,7 @@ class HelmValuesCompiler:
 
         return values
 
-    def compile_external_component(
-        self, component: "ExternalComponent"
-    ) -> dict[str, dict[str, Any]]:
+    def compile_external_component(self, component: ExternalComponent) -> dict[str, dict[str, Any]]:
         """Compile Helm values for an external (Mode 2) component.
 
         Loads base values from each instance's values file path, then
@@ -258,7 +256,7 @@ class HelmValuesCompiler:
             results[key] = merged
         return results
 
-    def _compile_external_argo_apps(self, component: "ExternalComponent") -> list[dict[str, Any]]:
+    def _compile_external_argo_apps(self, component: ExternalComponent) -> list[dict[str, Any]]:
         """Generate Argo CD Application CRDs for an external component."""
         from dfe_engine.helm.argo_app import generate_application
 
