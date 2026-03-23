@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from dfe_engine.fieldmap.helpers import group_summaries
 
-
 # ---------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------

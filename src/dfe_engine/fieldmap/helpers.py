@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Protocol, TypeVar
+from typing import Literal, Protocol
 
 
 class _GroupableSummary(Protocol):
@@ -12,10 +12,7 @@ class _GroupableSummary(Protocol):
     version: str | None
 
 
-T = TypeVar("T", bound=_GroupableSummary)
-
-
-def group_summaries(
+def group_summaries[T: _GroupableSummary](
     summaries: list[T],
     group_by: Literal["standard", "version"],
     max_per_group: int = 10,
