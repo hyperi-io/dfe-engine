@@ -101,11 +101,13 @@ log_cli_level = "INFO"
 python_files = "test_*.py"
 addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration'"
 testpaths = ["tests"]
+asyncio_mode = "auto"
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "slow: Slow running tests",
+    "smoke: Startup smoke tests (mandatory, every push)",
     "requires_schemas: Tests that need the dfe-schemas submodule checked out",
 ]
 
@@ -114,6 +116,7 @@ exclude_lines = [
     "pragma: no cover",
     "except Exception as e:",  # Exclude generic exception handlers
 ]
+fail_under = 80
 
 [tool.coverage.run]
 omit = [
