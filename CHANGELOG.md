@@ -1,3 +1,15 @@
+## [1.6.9-dev.4](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.3...v1.6.9-dev.4) (2026-03-24)
+
+
+### Bug Fixes
+
+* lower coverage threshold to 70% (current: 75%, target: 80%) ([5edc45e](https://github.com/hyperi-io/dfe-engine/commit/5edc45ec90649c5ca0d3f4325a58ea7950b4874d))
+* remove TEMP test ignores, handled by hyperi-ci two-tier quality ([80dd2a1](https://github.com/hyperi-io/dfe-engine/commit/80dd2a1da1099fdbcfa504abd6620bd4d856ff66))
+* restructure tests per testing standards ([b65517b](https://github.com/hyperi-io/dfe-engine/commit/b65517b04d80bef76f5f4f97626a05c4c365bb3f))
+* set min_coverage to 70% in CI config (overrides hyperi-ci 80% default) ([6f26b8d](https://github.com/hyperi-io/dfe-engine/commit/6f26b8de1ff94eb41db557e5512fb683401ac71e))
+* trigger CI on push to release branch ([e5a978d](https://github.com/hyperi-io/dfe-engine/commit/e5a978dfff9c0bcac14c183113b148e3c5ac1e2e))
+* update hyperi-ai submodule and lock file ([850ed0b](https://github.com/hyperi-io/dfe-engine/commit/850ed0be150f9b4e48f14c6182442da5b673c2fd))
+
 ## [1.6.9-dev.3](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.2...v1.6.9-dev.3) (2026-03-22)
 
 
