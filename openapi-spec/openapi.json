@@ -3175,7 +3175,7 @@
                 "type": "integer"
               },
               {
-                "type": "null"
+                "type": "string"
               }
             ],
             "title": "Next Page",
