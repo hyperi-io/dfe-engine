@@ -41,6 +41,7 @@ from dfe_engine.source.models import (
     SourceTransform,
 )
 from dfe_engine.source.registry import (
+    SourceMatchConflictError,
     SourceNotFoundError,
     SourceRegistry,
     SourceRegistryError,
@@ -81,6 +82,7 @@ __all__ = [
     "SourceSigma",
     "SourceTransform",
     # Registry
+    "SourceMatchConflictError",
     "SourceNotFoundError",
     "SourceRegistry",
     "SourceRegistryError",

@@ -4,6 +4,7 @@ import pytest
 
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import (
+    SourceMatchConflictError,
     SourceNotFoundError,
     SourceRegistry,
     SourceValidationError,
@@ -160,8 +161,10 @@ class TestValidation:
     def test_match_conflict(self, registry: SourceRegistry):
         registry.save_source(_make_source("filebeat", match_value="fb"))
 
-        with pytest.raises(SourceValidationError, match="Match conflict"):
+        with pytest.raises(SourceMatchConflictError) as exc_info:
             registry.save_source(_make_source("another_source", match_value="fb"))
+        assert exc_info.value.conflicting_source == "filebeat"
+        assert exc_info.value.source == "another_source"
 
     def test_match_conflict_same_source_ok(self, registry: SourceRegistry):
         """Updating the same source should not conflict with itself."""
