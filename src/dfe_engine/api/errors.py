@@ -6,6 +6,8 @@ Pydantic 422 errors are reshaped into the same format with field-level detail.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -30,11 +32,21 @@ class ErrorResponse(BaseModel):
     - ``code`` for programmatic branching
     - ``message`` for a human-readable summary
     - ``errors`` for field-level validation details (422 only)
+    - ``context`` for optional structured data on specific errors (e.g. conflicts)
     """
 
     code: str = Field(description="Machine-readable error code")
     message: str = Field(description="Human-readable error summary")
     errors: list[FieldError] = Field(default_factory=list)
+    context: dict[str, Any] | None = Field(
+        default=None,
+        description="Structured details for specific errors (e.g. match_conflict)",
+    )
+
+
+def _error_response_json(body: ErrorResponse) -> dict[str, Any]:
+    """Serialize for HTTP; omit null optional fields."""
+    return body.model_dump(mode="json", exclude_none=True)
 
 
 # ── Error codes ──────────────────────────────────────────────
@@ -63,13 +75,19 @@ def install_exception_handlers(app: FastAPI) -> None:
         if isinstance(exc.detail, str):
             body = ErrorResponse(code="request_error", message=exc.detail)
         elif isinstance(exc.detail, dict):
-            body = ErrorResponse(
-                code=exc.detail.get("error", exc.detail.get("code", "request_error")),
-                message=exc.detail.get("message", str(exc.detail)),
-            )
+            d = exc.detail
+            code = d.get("error") or d.get("code") or "request_error"
+            if not isinstance(code, str):
+                code = "request_error"
+            message = d.get("message")
+            if not isinstance(message, str):
+                message = str(d)
+            reserved = {"code", "message", "error"}
+            ctx = {k: v for k, v in d.items() if k not in reserved}
+            body = ErrorResponse(code=code, message=message, context=ctx or None)
         else:
             body = ErrorResponse(code="request_error", message=str(exc.detail))
-        return JSONResponse(status_code=exc.status_code, content=body.model_dump(mode="json"))
+        return JSONResponse(status_code=exc.status_code, content=_error_response_json(body))
 
     @app.exception_handler(RequestValidationError)
     async def validation_exception_handler(_request: Request, exc: RequestValidationError):
@@ -86,7 +104,7 @@ def install_exception_handlers(app: FastAPI) -> None:
             message=f"{len(field_errors)} validation error(s)",
             errors=field_errors,
         )
-        return JSONResponse(status_code=422, content=body.model_dump(mode="json"))
+        return JSONResponse(status_code=422, content=_error_response_json(body))
 
     # Import engine exceptions here to avoid circular imports at module level
     from dfe_engine.auth.models import AuthenticationError, AuthorizationError
@@ -94,15 +112,15 @@ def install_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AuthenticationError)
     async def auth_error_handler(_request: Request, exc: AuthenticationError):
         body = ErrorResponse(code=ErrorCode.UNAUTHORIZED, message=str(exc))
-        return JSONResponse(status_code=401, content=body.model_dump(mode="json"))
+        return JSONResponse(status_code=401, content=_error_response_json(body))
 
     @app.exception_handler(AuthorizationError)
     async def authz_error_handler(_request: Request, exc: AuthorizationError):
         body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
-        return JSONResponse(status_code=403, content=body.model_dump(mode="json"))
+        return JSONResponse(status_code=403, content=_error_response_json(body))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
         logger.exception(f"Unhandled exception on {request.method} {request.url.path}")
         body = ErrorResponse(code=ErrorCode.INTERNAL_ERROR, message="An unexpected error occurred")
-        return JSONResponse(status_code=500, content=body.model_dump(mode="json"))
+        return JSONResponse(status_code=500, content=_error_response_json(body))

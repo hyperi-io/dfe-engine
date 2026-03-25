@@ -11,7 +11,7 @@ POST   /api/v1/sources/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -19,8 +19,32 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.source.models import Source
+from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
+
+
+def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
+    """Map registry validation errors to HTTP responses (never 500)."""
+    if isinstance(exc, SourceMatchConflictError):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "match_conflict",
+                "message": str(exc),
+                "source": exc.source,
+                "conflicting_source": exc.conflicting_source,
+                "field": exc.field,
+                "value": exc.value,
+            },
+        ) from exc
+    raise HTTPException(
+        status_code=422,
+        detail={
+            "code": "validation_error",
+            "message": str(exc),
+        },
+    ) from exc
 
 
 # ── Response models ──────────────────────────────────────────
@@ -135,7 +159,10 @@ async def create_source(
             },
         )
 
-    source = registry.save_source(body, created_by=user.user_id)
+    try:
+        source = registry.save_source(body, created_by=user.user_id)
+    except SourceValidationError as e:
+        _raise_save_validation_http(e)
     return SourceResponse(source=source.source, message="created")
 
 
@@ -182,7 +209,12 @@ async def update_source(
             },
         )
 
-    source = registry.save_source(body.model_copy(update={"source": name}), created_by=user.user_id)
+    try:
+        source = registry.save_source(
+            body.model_copy(update={"source": name}), created_by=user.user_id
+        )
+    except SourceValidationError as e:
+        _raise_save_validation_http(e)
     return SourceResponse(source=source.source, message="updated")
 
 
