@@ -47,6 +47,28 @@ class SourceValidationError(SourceRegistryError):
     """Source definition failed validation."""
 
 
+class SourceMatchConflictError(SourceValidationError):
+    """Two enabled sources share the same receiver match (field + value)."""
+
+    def __init__(
+        self,
+        *,
+        source: str,
+        conflicting_source: str,
+        field: str,
+        value: str,
+    ) -> None:
+        self.source = source
+        self.conflicting_source = conflicting_source
+        self.field = field
+        self.value = value
+        super().__init__(
+            f"Cannot save source {source!r}: the match field {field!r} with value {value!r} "
+            f"is already used by enabled source {conflicting_source!r}. "
+            f"Use a different field/value pair, or disable {conflicting_source!r} first."
+        )
+
+
 class SourceRegistry:
     """Registry for managing Source definitions.
 
@@ -354,10 +376,11 @@ class SourceRegistry:
                 and source.match.field == existing.match.field
                 and source.match.value == existing.match.value
             ):
-                raise SourceValidationError(
-                    f"Match conflict: source '{source.source}' matches "
-                    f"field='{source.match.field}' value='{source.match.value}' "
-                    f"which already matches source '{existing.source}'"
+                raise SourceMatchConflictError(
+                    source=source.source,
+                    conflicting_source=existing.source,
+                    field=source.match.field,
+                    value=source.match.value,
                 )
 
     # -----------------------------------------------------------------
