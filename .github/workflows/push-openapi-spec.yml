@@ -68,8 +68,9 @@ jobs:
             [ -z "$pr_num" ] && continue
             gh pr close "$pr_num" --repo "${DFE_UI_REPO}" --delete-branch \
               --comment "Superseded by newer OpenAPI sync from ${{ github.repository }}@${{ github.sha }}."
-          done < <(gh pr list --repo "${DFE_UI_REPO}" --state open --json number,headRefName \
-            --jq -r '.[] | select(.headRefName | startswith("sync-openapi-spec-")) | .number')
+          # Pipe to system jq — do not use "gh ... --jq -r ..." (-r is parsed as gh flags, not jq -r)
+          done < <(gh pr list --repo "${DFE_UI_REPO}" --state open --limit 100 --json number,headRefName \
+            | jq -r '.[] | select(.headRefName | startswith("sync-openapi-spec-")) | .number')
           
           BRANCH_NAME="sync-openapi-spec-$(echo ${{ github.sha }} | cut -c1-7)"
           git checkout -b "$BRANCH_NAME"
