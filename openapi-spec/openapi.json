@@ -293,6 +293,31 @@
               }
             }
           },
+          "409": {
+            "description": "Source name already exists (code conflict), or receiver match duplicates another enabled source (code match_conflict)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/SourceNameConflictErrorResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                    }
+                  ],
+                  "discriminator": {
+                    "propertyName": "code",
+                    "mapping": {
+                      "conflict": "#/components/schemas/SourceNameConflictErrorResponse",
+                      "match_conflict": "#/components/schemas/MatchConflictErrorResponse"
+                    }
+                  },
+                  "title": "Response 409 Create Source Api V1 Sources Post"
+                }
+              }
+            }
+          },
           "422": {
             "description": "Validation Error",
             "content": {
@@ -393,6 +418,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Receiver match duplicates another enabled source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchConflictErrorResponse"
                 }
               }
             }
@@ -2853,6 +2888,33 @@
         "title": "FetcherAuth",
         "description": "Fetcher authentication configuration."
       },
+      "FieldError": {
+        "properties": {
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Dotted path to the invalid field"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error message"
+          },
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Machine-readable error code",
+            "default": "validation_error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "field",
+          "message"
+        ],
+        "title": "FieldError",
+        "description": "A validation error on a specific field."
+      },
       "FieldMap": {
         "properties": {
           "standard": {
@@ -3012,6 +3074,71 @@
           "password"
         ],
         "title": "LoginRequest"
+      },
+      "MatchConflictContext": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source identifier being saved"
+          },
+          "conflicting_source": {
+            "type": "string",
+            "title": "Conflicting Source",
+            "description": "Other enabled source that already uses this (field, value) pair"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field",
+            "description": "Receiver match JSON field name"
+          },
+          "value": {
+            "type": "string",
+            "title": "Value",
+            "description": "Receiver match expected value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "conflicting_source",
+          "field",
+          "value"
+        ],
+        "title": "MatchConflictContext",
+        "description": "Structured context for duplicate receiver match (field + value)."
+      },
+      "MatchConflictErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "match_conflict",
+            "title": "Code",
+            "default": "match_conflict"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "$ref": "#/components/schemas/MatchConflictContext"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message",
+          "context"
+        ],
+        "title": "MatchConflictErrorResponse",
+        "description": "409 when two enabled sources share the same receiver match rule."
       },
       "PaginatedResponse_AlertDestinationSummary_": {
         "properties": {
@@ -4027,6 +4154,34 @@
         ],
         "title": "SourceMatch",
         "description": "Receiver match rule \u2014 how the receiver identifies this source."
+      },
+      "SourceNameConflictErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "const": "conflict",
+            "title": "Code",
+            "default": "conflict"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable explanation"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "message"
+        ],
+        "title": "SourceNameConflictErrorResponse",
+        "description": "409 when POST /sources and the source name already exists."
       },
       "SourceResponse": {
         "properties": {

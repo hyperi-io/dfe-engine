@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
+from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
@@ -131,6 +132,15 @@ async def list_sources(
     "",
     response_model=SourceResponse,
     status_code=201,
+    responses={
+        409: {
+            "model": SourceCreateConflictResponse,
+            "description": (
+                "Source name already exists (code conflict), or receiver match duplicates "
+                "another enabled source (code match_conflict)"
+            ),
+        },
+    },
     dependencies=[Depends(require_action("source:write"))],
 )
 async def create_source(
@@ -191,6 +201,12 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
 @router.put(
     "/{name}",
     response_model=SourceResponse,
+    responses={
+        409: {
+            "model": MatchConflictErrorResponse,
+            "description": "Receiver match duplicates another enabled source",
+        },
+    },
     dependencies=[Depends(require_action("source:write"))],
 )
 async def update_source(

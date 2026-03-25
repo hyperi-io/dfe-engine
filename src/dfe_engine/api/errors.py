@@ -6,7 +6,7 @@ Pydantic 422 errors are reshaped into the same format with field-level detail.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
@@ -42,6 +42,40 @@ class ErrorResponse(BaseModel):
         default=None,
         description="Structured details for specific errors (e.g. match_conflict)",
     )
+
+
+class SourceNameConflictErrorResponse(BaseModel):
+    """409 when POST /sources and the source name already exists."""
+
+    code: Literal["conflict"] = "conflict"
+    message: str = Field(description="Human-readable explanation")
+    errors: list[FieldError] = Field(default_factory=list)
+
+
+class MatchConflictContext(BaseModel):
+    """Structured context for duplicate receiver match (field + value)."""
+
+    source: str = Field(description="Source identifier being saved")
+    conflicting_source: str = Field(
+        description="Other enabled source that already uses this (field, value) pair",
+    )
+    field: str = Field(description="Receiver match JSON field name")
+    value: str = Field(description="Receiver match expected value")
+
+
+class MatchConflictErrorResponse(BaseModel):
+    """409 when two enabled sources share the same receiver match rule."""
+
+    code: Literal["match_conflict"] = "match_conflict"
+    message: str = Field(description="Human-readable explanation")
+    errors: list[FieldError] = Field(default_factory=list)
+    context: MatchConflictContext
+
+
+SourceCreateConflictResponse = Annotated[
+    SourceNameConflictErrorResponse | MatchConflictErrorResponse,
+    Field(discriminator="code"),
+]
 
 
 def _error_response_json(body: ErrorResponse) -> dict[str, Any]:
