@@ -159,6 +159,47 @@ class TestUpdateSource:
         )
         assert resp.status_code == 404
 
+    def test_update_match_conflict_returns_409(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        shared = {"field": "ingest_type", "value": "shared_value"}
+        first = {
+            **sample_source,
+            "source": "source_alpha",
+            "match": shared,
+            "mapping_standards": [],
+        }
+        second = {
+            **sample_source,
+            "source": "source_beta",
+            "match": {"field": "ingest_type", "value": "other_value"},
+            "mapping_standards": [],
+        }
+        assert client.post("/api/v1/sources", json=first, headers=admin_headers).status_code == 201
+        assert client.post("/api/v1/sources", json=second, headers=admin_headers).status_code == 201
+
+        create_dup = client.post(
+            "/api/v1/sources",
+            json={**second, "source": "source_gamma", "match": shared},
+            headers=admin_headers,
+        )
+        assert create_dup.status_code == 409
+        dup_body = create_dup.json()
+        assert dup_body["code"] == "match_conflict"
+        assert dup_body["context"]["conflicting_source"] == "source_alpha"
+        assert dup_body["context"]["source"] == "source_gamma"
+        assert dup_body["context"]["field"] == "ingest_type"
+        assert dup_body["context"]["value"] == "shared_value"
+        assert "source_alpha" in dup_body["message"]
+
+        conflict_put = client.put(
+            "/api/v1/sources/source_beta",
+            json={**second, "match": shared},
+            headers=admin_headers,
+        )
+        assert conflict_put.status_code == 409
+        assert conflict_put.json()["code"] == "match_conflict"
+
 
 class TestDeleteSource:
     """DELETE /api/v1/sources/{name}"""
