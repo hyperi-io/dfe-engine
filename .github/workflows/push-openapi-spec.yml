@@ -5,7 +5,8 @@
 # Creates a PR with openapi.json to: https://github.com/hyperi-io/dfe-ui
 # Target path: packages/dfe-engine-types/openapi-spec/openapi.json
 #
-# Required secret: DFE_UI_TOKEN - PAT with repo PR read/write access
+# Required secret: DFE_UI_TOKEN - PAT with PR open/close + push; must delete
+#   remote branches when superseding prior sync PRs (--delete-branch on close)
 # Optional var: DFE_UI_REPO - repo as owner/name (default: hyperi-io/dfe-ui)
 # Note: Git clone URLs require owner/name; numeric repo IDs are not supported.
 
@@ -57,6 +58,16 @@ jobs:
             echo "OpenAPI spec unchanged, no PR needed"
             exit 0
           fi
+
+          # Close any prior auto-sync PRs so only one OpenAPI sync PR is open at a time
+          export GH_TOKEN="${DFE_UI_TOKEN}"
+          while IFS= read -r pr_num; do
+            [ -z "$pr_num" ] && continue
+            gh pr close "$pr_num" --repo "${DFE_UI_REPO}" --delete-branch \
+              --comment "Superseded by newer OpenAPI sync from ${{ github.repository }}@${{ github.sha }}."
+          # Pipe to system jq — do not use "gh ... --jq -r ..." (-r is parsed as gh flags, not jq -r)
+          done < <(gh pr list --repo "${DFE_UI_REPO}" --state open --limit 100 --json number,headRefName \
+            | jq -r '.[] | select(.headRefName | startswith("sync-openapi-spec-")) | .number')
           
           BRANCH_NAME="sync-openapi-spec-$(echo ${{ github.sha }} | cut -c1-7)"
           git checkout -b "$BRANCH_NAME"
@@ -64,7 +75,7 @@ jobs:
 
           Auto-generated from ${{ github.repository }}@${{ github.sha }}"
           git push origin "$BRANCH_NAME"
-          GH_TOKEN="${DFE_UI_TOKEN}" gh pr create \
+          gh pr create \
             --repo "${DFE_UI_REPO}" \
             --head "$BRANCH_NAME" \
             --title "chore(dfe-engine-types): sync OpenAPI spec from dfe-engine" \
