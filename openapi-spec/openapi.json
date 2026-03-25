@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.6.9.dev1"
+    "version": "1.6.9.dev4"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -270,16 +270,14 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a source definition dict.",
+        "description": "Create a new source from a source definition.",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/Source-Input"
               }
             }
           }
@@ -338,7 +336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Source"
+                  "$ref": "#/components/schemas/Source-Output"
                 }
               }
             }
@@ -383,9 +381,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true,
-                "title": "Body"
+                "$ref": "#/components/schemas/Source-Input"
               }
             }
           }
@@ -3738,7 +3734,112 @@
         ],
         "title": "SizeResponse"
       },
-      "Source": {
+      "Source-Input": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label \u2014 immutable identifier"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active",
+            "default": true
+          },
+          "header": {
+            "$ref": "#/components/schemas/SourceHeader",
+            "description": "Common schema header configuration"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "Schema configuration"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage (optional)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SaaS API fetcher (optional)"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSigma"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sigma field mappings (optional)"
+          },
+          "mapping_standards": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mapping Standards",
+            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "Source",
+        "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
+      },
+      "Source-Output": {
         "properties": {
           "source": {
             "type": "string",

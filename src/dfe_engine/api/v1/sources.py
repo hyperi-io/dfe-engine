@@ -110,12 +110,13 @@ async def list_sources(
     dependencies=[Depends(require_action("source:write"))],
 )
 async def create_source(
-    body: dict[str, Any],
+    body: Source,
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Create a new source from a source definition dict."""
-    name = body.get("source")
+    """Create a new source from a source definition."""
+    name = body.source
+
     if not name:
         raise HTTPException(
             status_code=422,
@@ -167,7 +168,7 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
 )
 async def update_source(
     name: str,
-    body: dict[str, Any],
+    body: Source,
     user: CurrentUser,
     registry: SourceReg,
 ):
@@ -181,8 +182,7 @@ async def update_source(
             },
         )
 
-    body["source"] = name  # Ensure name matches path
-    source = registry.save_source(body, created_by=user.user_id)
+    source = registry.save_source(body.model_copy(update={"source": name}), created_by=user.user_id)
     return SourceResponse(source=source.source, message="updated")
 
 
