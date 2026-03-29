@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from hyperi_pylib.health import HealthManager, create_health_router
 from hyperi_pylib.logger import logger
 
 from dfe_engine.settings import DFESettings, load_settings
@@ -27,12 +28,16 @@ from dfe_engine.settings import DFESettings, load_settings
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
     settings: DFESettings = app.state.settings
+    health: HealthManager = app.state.health_manager
 
     from dfe_engine.api.deps import bootstrap_registries, shutdown_registries
 
     bootstrap_registries(settings)
+    health.set_started()
+    health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
+    health.set_ready(False)
     shutdown_registries()
     logger.info("DFE Engine API stopped")
 
@@ -62,6 +67,8 @@ def create_app(
     )
 
     app.state.settings = settings
+    health_manager = HealthManager()
+    app.state.health_manager = health_manager
 
     # CORS
     origins = cors_origins or settings.api.cors_origins
@@ -83,10 +90,8 @@ def create_app(
 
     app.include_router(v1_router, prefix="/api")
 
-    # Health check (unauthenticated, outside /api/v1)
-    @app.get("/health", tags=["System"], include_in_schema=False)
-    async def health():
-        return {"status": "healthy", "version": _get_version()}
+    # K8s health probes — /health/live, /health/ready, /health/startup
+    app.include_router(create_health_router(health_manager))
 
     # Custom OpenAPI schema with Bearer auth
     def custom_openapi():
