@@ -1,15 +1,15 @@
 [project]
 name = "dfe-engine"
-version = "1.6.9-dev.4"
+version = "1.7.0"
 description = "DFE Engine - Core library for Data Fusion Engine"
-authors = [{ name = "HyperSec", email = "engineering@hypersec.io" }]
-license = { text = "LicenseRef-HyperSec-EULA" }
+authors = [{ name = "HYPERI PTY LIMITED", email = "engineering@hyperi.com.au" }]
+license = { text = "FSL-1.1-ALv2" }
 requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
     # hyperi-pylib for logging and common utilities
-    "hyperi-pylib[expression,http]>=2.24.3",
+    "hyperi-pylib[expression,http]>=2.25.0",
     # Data processing
     "pyarrow>=23.0.1",
     "pandas>=3.0.1",
@@ -27,7 +27,7 @@ dependencies = [
     "croniter>=6.0.0",
     # HTTP clients
     "httpx>=0.28.1",
-    "requests>=2.32.5",
+    "requests>=2.33.0",
     "urllib3>=2.6.3",
     # Templating
     "Jinja2>=3.1.6",
@@ -49,11 +49,13 @@ dependencies = [
     "fastapi>=0.135.1",
     "uvicorn[standard]>=0.41.0",
     "python-jose[cryptography]>=3.5.0",
-    "cryptography>=46.0.5",  # CVE fix: subgroup attack on SECT curves (>=46.0.5)
+    "cryptography>=46.0.6",  # CVE-2026-34073 fix: subgroup attack on SECT curves
     "sse-starlette>=3.3.2",
+    # Transitive: ecdsa pulled in by python-jose
+    "ecdsa>=0.19.2",  # CVE-2024-23342, CVE-2026-33936 fix
     # Transitive override: diskcache pulled in by pySigma.
-    # CVE-2025-69872 (unsafe pickle) acknowledged — no upstream patch available.
-    # Acceptable: cache files are not writable by untrusted parties in our deployment.
+    # CVE-2025-69872 (unsafe pickle): no upstream patch as of Mar 2026.
+    # Mitigated by deployment architecture (cache dir not writable by untrusted users).
     "diskcache>=5.6.3",
 ]
 
@@ -162,7 +164,6 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
-"ci/*" = ["S", "F841"]  # CI submodule (legacy, being removed)
 
 
 [project.scripts]
