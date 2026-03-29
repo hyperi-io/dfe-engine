@@ -3,8 +3,8 @@
 #  Purpose:      Consolidated YAML operations using ruamel.yaml
 #  Language:     Python
 #
-#  License:      LicenseRef-HyperSec-EULA
-#  Copyright:    (c) 2025 HyperI
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
 """
 YAML utilities using ruamel.yaml.

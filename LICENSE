@@ -1,13 +1,71 @@
-HyperSec End User License Agreement (EULA)
+# Functional Source License, Version 1.1, ALv2 Future License
 
-Copyright (c) 2025 HyperSec. All rights reserved.
+Copyright 2026 HYPERI PTY LIMITED (ABN 31 622 581 748)
 
-This software and associated documentation files (the "Software") are
-proprietary to HyperSec and are protected by copyright law and
-international treaties.
+## License
 
-NOTICE: This is proprietary software. Unauthorized copying, modification,
-distribution, or use of this Software, via any medium, is strictly prohibited.
+This software is licensed under the Functional Source License, Version 1.1,
+ALv2 Future License (FSL-1.1-ALv2).
 
-For licensing inquiries: legal@hypersec.io
-Full terms: https://hypersec.io/eula/
+You may obtain a copy of the License at:
+
+https://fsl.software/FSL-1.1-ALv2.template.md
+
+SPDX License Identifier: FSL-1.1-ALv2
+
+## Summary
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+### Permitted Uses
+
+- Internal use within your organisation
+- Non-commercial education and research
+- Professional services for licensees using this software
+
+### Competing Use Requires Commercial Licence
+
+Making this software available to others in a commercial product or service
+that substitutes for or competes with this software requires a commercial
+licence from HyperI. See [COMMERCIAL.md](COMMERCIAL.md) for details.
+
+### Apache 2.0 Conversion
+
+Each version of this software becomes available under the Apache License,
+Version 2.0 on the second anniversary of its release date. Release dates are
+recorded in the GitHub release history.
+
+You may obtain a copy of the Apache License at:
+
+https://www.apache.org/licenses/LICENSE-2.0
+
+## AI / Machine Learning Restriction
+
+No part of this software, its source code, documentation, or associated
+materials may be used as training data for, or as input to, any machine
+learning model, artificial intelligence system, large language model, or
+similar technology — whether for commercial or non-commercial purposes —
+without the prior written consent of HYPERI PTY LIMITED.
+
+This restriction applies regardless of the format in which the materials are
+accessed (including but not limited to source code, compiled binaries,
+documentation, and metadata) and survives the Apache 2.0 conversion described
+above only to the extent permitted by the Apache License, Version 2.0.
+
+## Australian Law Notice
+
+For users in Australia: To the extent this License is governed by Australian
+law, the laws of the Australian Capital Territory apply. Nothing in this
+License excludes, restricts or modifies any consumer guarantee, right or remedy
+conferred by the Competition and Consumer Act 2010 (Cth) or any other
+applicable Australian law that cannot be excluded, restricted or modified by
+agreement.
+
+Where the Australian Consumer Law (Schedule 2 of the Competition and Consumer
+Act 2010 (Cth)) implies guarantees that cannot be excluded, our liability for
+breach of such guarantees is limited, to the extent permitted by law, to the
+re-supply of the software or the payment of the cost of having the software
+re-supplied.

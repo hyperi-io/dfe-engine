@@ -1,10 +1,24 @@
 import json
 import os
+import re
 from datetime import datetime
 from enum import Enum
 from typing import Any
 
 from hyperi_pylib.logger import logger
+
+_SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(name: str, label: str = "identifier") -> str:
+    """Validate a ClickHouse identifier against an allowlist pattern.
+
+    ClickHouse does not support parameterised identifiers (database/table names),
+    so we validate them before interpolation to prevent SQL injection.
+    """
+    if not _SAFE_IDENTIFIER.match(name):
+        raise ValueError(f"Invalid {label}: {name!r}")
+    return name
 
 
 class Status(Enum):
@@ -31,8 +45,12 @@ class HuntCheckpointManager:
             table_name (Optional[str]): Custom table name.
             database_name (Optional[str]): Custom database name.
         """
-        self.database_name: str = f"{database_name or self._AUDIT_DATABASE_NAME}"
-        self.table_name: str = f"{table_name or self._DETECTION_CHECKPOINT_TABLE_NAME}"
+        self.database_name: str = _validate_identifier(
+            database_name or self._AUDIT_DATABASE_NAME, "database"
+        )
+        self.table_name: str = _validate_identifier(
+            table_name or self._DETECTION_CHECKPOINT_TABLE_NAME, "table"
+        )
 
     def database_exists(self, ch_client, database_name: str) -> bool:
         """
@@ -48,12 +66,15 @@ class HuntCheckpointManager:
 
         try:
             result = ch_client.execute(
-                f"SELECT 1 FROM system.databases WHERE name = '{database_name}'"
+                "SELECT 1 FROM system.databases WHERE name = %(db_name)s",
+                parameters={"db_name": database_name},
             )
             return bool(result)
         except Exception as e:
             logger.error(
-                f"Hunt Checkpoint: An error occurred while checking if the database exists: {e}",
+                "Hunt Checkpoint: error checking if database exists",
+                database_name=database_name,
+                error=str(e),
                 exc_info=True,
             )
             return False
@@ -64,16 +85,19 @@ class HuntCheckpointManager:
 
         Args:
             ch_client: ClickHouse client instance.
-            unique_number (int): The unique number used for the suffix.
+            database_name (str): Name of the database to drop.
+            table_name (str): Name of the table to drop.
         """
+        db = _validate_identifier(database_name, "database")
+        tbl = _validate_identifier(table_name, "table")
         try:
-            if self.table_exists(ch_client, database_name, table_name):
-                ch_client.execute(f"DROP TABLE IF EXISTS {database_name}.{table_name};")
-                logger.info(f"Table [{database_name}.{table_name}] dropped successfully.")
+            if self.table_exists(ch_client, db, tbl):
+                ch_client.execute(f"DROP TABLE IF EXISTS {db}.{tbl}")
+                logger.info(f"Table [{db}.{tbl}] dropped successfully.")
 
-            if self.database_exists(ch_client, database_name):
-                ch_client.execute(f"DROP DATABASE IF EXISTS {database_name};")
-                logger.info(f"Database [{database_name}] dropped successfully.")
+            if self.database_exists(ch_client, db):
+                ch_client.execute(f"DROP DATABASE IF EXISTS {db}")
+                logger.info(f"Database [{db}] dropped successfully.")
         except Exception as e:
             logger.error(f"Failed to drop database or table: {e}", exc_info=True)
 
@@ -92,7 +116,8 @@ class HuntCheckpointManager:
 
         try:
             result = ch_client.execute(
-                f"SELECT 1 FROM system.tables WHERE database = '{database_name}' AND name = '{table_name}'"
+                "SELECT 1 FROM system.tables WHERE database = %(db_name)s AND name = %(tbl_name)s",
+                parameters={"db_name": database_name, "tbl_name": table_name},
             )
             return bool(result)
         except Exception as e:
@@ -213,18 +238,17 @@ class HuntCheckpointManager:
         A method to fetch the last successful run's timestamp based on the destination type.
 
         Args:
-            checkpoint_destination (str): The destination type for the checkpoint (FILE or CLICKHOUSE).
-            ch_client (optional): ClickHouse client, needed if checkpoint destination is CLICKHOUSE.
-            hunt_name (str, optional): Hunt name.
-            rule_name (str, optional): Rule name.
-            file_path (str, optional): File path, needed if checkpoint destination is FILE.
-            logger (logging.Logger, optional): Logger.
+            checkpoint_destination: FILE or CLICKHOUSE.
+            ch_client: ClickHouse client (if CLICKHOUSE).
+            hunt_name: Hunt name.
+            rule_name: Rule name.
+            file_path: File path (if FILE).
 
         Returns:
-            Optional[datetime]: The timestamp of the last successful run, if any.
+            Timestamp of the last successful run, if any.
         """
         if checkpoint_destination == self.FILE:
-            logger.info(f"Checkpoints will be read from file [{file_path}]")
+            logger.info("Checkpoints will be read from file", path=file_path)
             return self.get_last_successful_run_file(
                 customer=customer,
                 hunt_name=hunt_name,
@@ -233,9 +257,8 @@ class HuntCheckpointManager:
             )
         else:  # CLICKHOUSE
             self.ensure_table_exists(ch_client)
-            logger.debug(
-                f"Checkpoints will be read from ClickHouse table [{self.database_name}.{self.table_name}]"
-            )
+            tbl = f"{self.database_name}.{self.table_name}"
+            logger.debug("Checkpoints will be read from ClickHouse", table=tbl)
             return self.get_last_successful_run_clickhouse(
                 customer=customer,
                 ch_client=ch_client,
@@ -264,19 +287,24 @@ class HuntCheckpointManager:
             Optional[datetime]: The timestamp of the last successful run, if any.
         """
 
-        query = f"""
-            SELECT 
-                max(query_checkpoint_time) AS last_success_time
-            FROM {self.database_name}.{self.table_name}
-            WHERE rule_name = '{rule_name}' AND  hunt_name = '{hunt_name}' AND customer_name = '{customer}'
-            ORDER BY last_success_time DESC
-            LIMIT 1;
-        """
+        query = (
+            f"SELECT max(query_checkpoint_time) AS last_success_time "
+            f"FROM {self.database_name}.{self.table_name} "
+            "WHERE rule_name = %(rule_name)s "
+            "AND hunt_name = %(hunt_name)s "
+            "AND customer_name = %(customer)s "
+            "ORDER BY last_success_time DESC LIMIT 1"
+        )
+        params = {
+            "rule_name": rule_name,
+            "hunt_name": hunt_name,
+            "customer": customer,
+        }
 
-        logger.debug(f"CheckPoint Query: {query}")
+        logger.debug("Checkpoint query", query=query, params=params)
 
         try:
-            result = ch_client.execute(query)
+            result = ch_client.execute(query, parameters=params)
             if result and result != [(datetime(1970, 1, 1, 0, 0),)]:
                 last_success_time = result[0][0]
                 logger.debug(f"Last Successful Checkpoint Time: {last_success_time}")
@@ -360,9 +388,9 @@ class HuntCheckpointManager:
         A method to create or update a checkpoint based on the destination type.
 
         Args:
-            checkpoint_destination (str): The destination type for the checkpoint (FILE or CLICKHOUSE).
-            ch_client (optional): ClickHouse client, needed if checkpoint destination is CLICKHOUSE.
-            customer (str, optional): Customer name.
+            checkpoint_destination: FILE or CLICKHOUSE.
+            ch_client: ClickHouse client (if CLICKHOUSE).
+            customer: Customer name.
             rule (str, optional): Rule name.
             hunt_name (str, optional): Hunt name.
             query_id (str, optional): Query ID.
@@ -446,38 +474,31 @@ class HuntCheckpointManager:
         """
 
         try:
-            insert_sql = f"""
-                INSERT INTO {self.database_name}.{self.table_name} (
-                    customer_name, 
-                    rule_name, 
-                    thread_id, 
-                    log_buffer, 
-                    query_schedule_time, 
-                    execution_time, 
-                    end_time, 
-                    previous_successful_checkpoint, 
-                    query_checkpoint_time, 
-                    execution_time_ms, 
-                    hunt_name, 
-                    query_id
-                    ) 
-                VALUES (
-                    '{customer}', 
-                    '{rule}',
-                    '{thread_id}',
-                    '{log_buffer}', 
-                    '{query_schedule_time_str}', 
-                    '{execution_time_str}',
-                    '{end_time_str}',
-                    '{previous_successful_checkpoint_str}', 
-                    '{query_checkpoint_time_str}', 
-                    {execution_time_ms}, 
-                    '{hunt_name}', 
-                    '{query_id}'
-                    )
-            """
-            logger.debug(insert_sql)
-            ch_client.execute(insert_sql)
+            insert_sql = (
+                f"INSERT INTO {self.database_name}.{self.table_name} "
+                "(customer_name, rule_name, thread_id, log_buffer, "
+                "query_schedule_time, execution_time, end_time, "
+                "previous_successful_checkpoint, query_checkpoint_time, "
+                "execution_time_ms, hunt_name, query_id) VALUES"
+            )
+            data = [
+                (
+                    customer,
+                    rule,
+                    thread_id,
+                    int(log_buffer),
+                    query_schedule_time_str,
+                    execution_time_str,
+                    end_time_str,
+                    previous_successful_checkpoint_str,
+                    query_checkpoint_time_str,
+                    execution_time_ms,
+                    hunt_name,
+                    query_id,
+                )
+            ]
+            logger.debug("Checkpoint insert", table=f"{self.database_name}.{self.table_name}")
+            ch_client.execute(insert_sql, data)
         except Exception as e:
             logger.error(f"Failed to create checkpoint: {e}", exc_info=True)
 
@@ -614,9 +635,8 @@ class HuntCheckpointManager:
                 """,
                 data,
             )
-            logger.debug(
-                f"Batch checkpoint created successfully in Clickhouse table [{self.database_name}.{self.table_name}]."
-            )
+            tbl = f"{self.database_name}.{self.table_name}"
+            logger.debug("Batch checkpoint created", table=tbl)
         except Exception as e:
             logger.error(f"Failed to create batch checkpoints: {e}", exc_info=True)
 

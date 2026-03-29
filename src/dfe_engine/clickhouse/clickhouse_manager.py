@@ -3,8 +3,8 @@
 #  Purpose:      ClickHouse connection management using clickhouse-connect
 #  Language:     Python
 #
-#  License:      LicenseRef-HyperSec-EULA
-#  Copyright:    (c) 2025 HyperI
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
 """
 ClickHouse connection management using clickhouse-connect.
@@ -182,7 +182,12 @@ class ClickHouseManager:
             is_password_set = password is not None
 
             logger.info(
-                f"Initializing ClickHouse client for user=[{user}] on host=[{host}] port=[{port}] secure=[{secure}] password_set=[{is_password_set}]"
+                "Initializing ClickHouse client",
+                user=user,
+                host=host,
+                port=port,
+                secure=secure,
+                password_set=is_password_set,
             )
 
             # Create a custom pool manager for connection pooling
