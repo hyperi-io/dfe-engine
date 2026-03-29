@@ -1,3 +1,22 @@
+## [1.6.9](https://github.com/hyperi-io/dfe-engine/compare/v1.6.8...v1.6.9) (2026-03-29)
+
+
+### Bug Fixes
+
+* add build.type app to CI config ([630fbcc](https://github.com/hyperi-io/dfe-engine/commit/630fbcc20b5689533d8e92f6abde59f127f45947))
+* add ruff I,UP,N,PT,RUF,PIE,T20 rules, pydocstyle config ([097bf1f](https://github.com/hyperi-io/dfe-engine/commit/097bf1fd2435510a7ea7fde6db2f0d5a0884bec8))
+* lower coverage threshold to 70% (current: 75%, target: 80%) ([5edc45e](https://github.com/hyperi-io/dfe-engine/commit/5edc45ec90649c5ca0d3f4325a58ea7950b4874d))
+* migrate to single-branch CI and bump pylib to 2.25 ([782f439](https://github.com/hyperi-io/dfe-engine/commit/782f439b23e0f828cf57cd27ba82e0caa61e325c))
+* remove TEMP test ignores, handled by hyperi-ci two-tier quality ([80dd2a1](https://github.com/hyperi-io/dfe-engine/commit/80dd2a1da1099fdbcfa504abd6620bd4d856ff66))
+* resolve ruff violations for full-repo CI check ([16774e1](https://github.com/hyperi-io/dfe-engine/commit/16774e1897b79c42762195c1ea7f9037963cb14c))
+* restore test rule ignores pending hyperi-ci two-tier release ([c982ab1](https://github.com/hyperi-io/dfe-engine/commit/c982ab1fc27cab2b6843681a5dcb657cf6283b91))
+* restructure tests per testing standards ([b65517b](https://github.com/hyperi-io/dfe-engine/commit/b65517b04d80bef76f5f4f97626a05c4c365bb3f))
+* set min_coverage to 70% in CI config (overrides hyperi-ci 80% default) ([6f26b8d](https://github.com/hyperi-io/dfe-engine/commit/6f26b8de1ff94eb41db557e5512fb683401ac71e))
+* shrink ruff ignore list, test rules handled by hyperi-ci ([37f3506](https://github.com/hyperi-io/dfe-engine/commit/37f3506125c0da306529201cc5a9b50efa278079))
+* trigger CI on push to release branch ([e5a978d](https://github.com/hyperi-io/dfe-engine/commit/e5a978dfff9c0bcac14c183113b148e3c5ac1e2e))
+* update hyperi-ai submodule and lock file ([850ed0b](https://github.com/hyperi-io/dfe-engine/commit/850ed0be150f9b4e48f14c6182442da5b673c2fd))
+* update license to FSL-1.1-ALv2 and harden clickhouse queries ([9d1365d](https://github.com/hyperi-io/dfe-engine/commit/9d1365d46c33fa73f4f0eb1a0078f547d8390cc0))
+
 ## [1.6.9-dev.4](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.3...v1.6.9-dev.4) (2026-03-24)
 
 
