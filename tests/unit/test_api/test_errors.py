@@ -83,8 +83,9 @@ class TestExceptionHandlers:
         assert "message" in data
 
     def test_health_no_auth(self, client: TestClient):
-        """Health endpoint should work without auth."""
-        resp = client.get("/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "healthy"
+        """Health endpoints should work without auth."""
+        for path in ("/health/live", "/health/ready", "/health/startup"):
+            resp = client.get(path)
+            assert resp.status_code == 200, f"{path} returned {resp.status_code}"
+            data = resp.json()
+            assert "status" in data
