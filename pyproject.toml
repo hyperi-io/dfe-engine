@@ -53,6 +53,8 @@ dependencies = [
     "sse-starlette>=3.3.2",
     # Transitive: ecdsa pulled in by python-jose
     "ecdsa>=0.19.2",  # CVE-2024-23342, CVE-2026-33936 fix
+    # Transitive: pyasn1 pulled in by python-jose → rsa
+    "pyasn1>=0.6.3",  # CVE-2026-30922 fix
     # Transitive override: diskcache pulled in by pySigma.
     # CVE-2025-69872 (unsafe pickle): no upstream patch as of Mar 2026.
     # Mitigated by deployment architecture (cache dir not writable by untrusted users).
