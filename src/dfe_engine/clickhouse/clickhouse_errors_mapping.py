@@ -1,5 +1,6 @@
 import re
 
+from hyperi_pylib.logger import logger
 from pydantic import StrictInt, validate_call
 
 
@@ -12,97 +13,205 @@ class ClickHouseErrorHandler:
     ERROR_MAPPINGS = {
         36: {
             "type": "unknown_table",
-            "message": "Unknown table referenced in the query. Verify: 1) Table name is spelled correctly, 2) Table exists in the current database, 3) Correct database is selected (USE database_name), or 4) Table permissions allow access.",
+            "message": (
+                "Unknown table referenced in the query."
+                "Verify: 1) Table name is spelled correctly,"
+                "2) Table exists in the current database,"
+                "3) Correct database is selected (USE database_name),"
+                "or 4) Table permissions allow access."
+            ),
             "category": "syntax",
         },
         43: {
             "type": "function_not_found",
-            "message": "Function not found in the query. Check: 1) Function name spelling, 2) Function exists in ClickHouse (check documentation), 3) Required parameters are provided, or 4) Custom functions are properly installed.",
+            "message": (
+                "Function not found in the query."
+                "Check: 1) Function name spelling,"
+                "2) Function exists in ClickHouse (check documentation),"
+                "3) Required parameters are provided,"
+                "or 4) Custom functions are properly installed."
+            ),
             "category": "syntax",
         },
         53: {
             "type": "type_mismatch",
-            "message": "Data type mismatch in the query. Verify: 1) Column data types match the values being inserted/compared, 2) CAST functions are used for type conversions, 3) Schema definitions are correct, or 4) Date/time formats match expected patterns.",
+            "message": (
+                "Data type mismatch in the query."
+                "Verify: 1) Column data types match the values being inserted/compared,"
+                "2) CAST functions are used for type conversions,"
+                "3) Schema definitions are correct,"
+                "or 4) Date/time formats match expected patterns."
+            ),
             "category": "data",
         },
         57: {
             "type": "table_already_exists",
-            "message": "Table already exists in the database. If you want to recreate it, first drop the existing table with: DROP TABLE table_name. If you want to modify the schema, use ALTER TABLE instead.",
+            "message": (
+                "Table already exists in the database."
+                "If you want to recreate it,"
+                "first drop the existing table with: DROP TABLE table_name."
+                "If you want to modify the schema, use ALTER TABLE instead."
+            ),
             "category": "exists",
         },
         60: {
             "type": "memory_limit",
-            "message": "Memory limit exceeded while processing the request. This typically occurs when working with large datasets. Try: 1) Add LIMIT clauses to reduce result size, 2) Use sampling (SAMPLE clause) for analysis, 3) Increase max_memory_usage setting, or 4) Optimize query with better filtering.",
+            "message": (
+                "Memory limit exceeded while processing the request."
+                "This typically occurs when working with large datasets."
+                "Try: 1) Add LIMIT clauses to reduce result size,"
+                "2) Use sampling (SAMPLE clause) for analysis,"
+                "3) Increase max_memory_usage setting,"
+                "or 4) Optimize query with better filtering."
+            ),
             "category": "resource_limit",
         },
         62: {
             "type": "query_size_limit",
-            "message": "Query size limit exceeded. The SQL statement is too large to process. Try: 1) Break complex queries into smaller operations, 2) Use temporary tables for intermediate results, 3) Increase max_query_size setting, or 4) Simplify the query structure.",
+            "message": (
+                "Query size limit exceeded. The SQL statement is too large to process."
+                "Try: 1) Break complex queries into smaller operations,"
+                "2) Use temporary tables for intermediate results,"
+                "3) Increase max_query_size setting, or 4) Simplify the query structure."
+            ),
             "category": "query_limit",
         },
         81: {
             "type": "database_not_found",
-            "message": "Database does not exist. Deploy schemas first using build-schemas and apply-schemas commands before running updates. Check: 1) Database name spelling, 2) Schema deployment completed successfully, or 3) Correct connection string.",
+            "message": (
+                "Database does not exist."
+                "Deploy schemas first using build-schemas and apply-schemas commands before "
+                "running updates."
+                "Check: 1) Database name spelling, 2) Schema deployment completed successfully,"
+                "or 3) Correct connection string."
+            ),
             "category": "not_found",
         },
         107: {
             "type": "table_already_exists",
-            "message": "Table already exists in the database. If you want to recreate it, first drop the existing table with: DROP TABLE table_name. If you want to modify the schema, use ALTER TABLE instead.",
+            "message": (
+                "Table already exists in the database."
+                "If you want to recreate it,"
+                "first drop the existing table with: DROP TABLE table_name."
+                "If you want to modify the schema, use ALTER TABLE instead."
+            ),
             "category": "exists",
         },
         158: {
             "type": "too_many_parameters",
-            "message": "Too many parameters in the query. This usually happens with large IN clauses or prepared statements. Try: 1) Use temporary tables for large parameter lists, 2) Break queries into smaller operations, 3) Increase max_query_parameters setting, or 4) Use JOINs instead of large IN clauses.",
+            "message": (
+                "Too many parameters in the query."
+                "This usually happens with large IN clauses or prepared statements."
+                "Try: 1) Use temporary tables for large parameter lists,"
+                "2) Break queries into smaller operations,"
+                "3) Increase max_query_parameters setting,"
+                "or 4) Use JOINs instead of large IN clauses."
+            ),
             "category": "resource_limit",
         },
         159: {
             "type": "timeout",
-            "message": "Query execution timed out. The operation took too long to complete. Try: 1) Add indexes on frequently filtered columns, 2) Use OPTIMIZE TABLE for better performance, 3) Increase timeout settings (max_execution_time), or 4) Break the query into smaller chunks.",
+            "message": (
+                "Query execution timed out. The operation took too long to complete."
+                "Try: 1) Add indexes on frequently filtered columns,"
+                "2) Use OPTIMIZE TABLE for better performance,"
+                "3) Increase timeout settings (max_execution_time),"
+                "or 4) Break the query into smaller chunks."
+            ),
             "category": "timeout",
         },
         164: {
             "type": "unknown_setting",
-            "message": "Unknown or invalid setting specified. Check: 1) Setting name spelling, 2) Setting exists in ClickHouse (check documentation), 3) Setting is available in your ClickHouse version, or 4) Correct syntax for setting values.",
+            "message": (
+                "Unknown or invalid setting specified."
+                "Check: 1) Setting name spelling,"
+                "2) Setting exists in ClickHouse (check documentation),"
+                "3) Setting is available in your ClickHouse version,"
+                "or 4) Correct syntax for setting values."
+            ),
             "category": "configuration",
         },
         173: {
             "type": "too_many_queries",
-            "message": "Too many simultaneous queries running. The server is overloaded. Try: 1) Wait a few minutes and retry, 2) Reduce concurrent operations, 3) Check for long-running queries blocking others, or 4) Increase max_concurrent_queries setting.",
+            "message": (
+                "Too many simultaneous queries running. The server is overloaded."
+                "Try: 1) Wait a few minutes and retry, 2) Reduce concurrent operations,"
+                "3) Check for long-running queries blocking others,"
+                "or 4) Increase max_concurrent_queries setting."
+            ),
             "category": "concurrency",
         },
         192: {
             "type": "access_denied",
-            "message": "Access denied due to insufficient permissions. Check: 1) User has required privileges (GRANT statements), 2) Correct user credentials, 3) Database/table permissions, or 4) RBAC roles are properly assigned.",
+            "message": (
+                "Access denied due to insufficient permissions."
+                "Check: 1) User has required privileges (GRANT statements),"
+                "2) Correct user credentials, 3) Database/table permissions,"
+                "or 4) RBAC roles are properly assigned."
+            ),
             "category": "permission",
         },
         193: {
             "type": "authentication_failed",
-            "message": "Authentication failed. Verify: 1) Username and password are correct, 2) User account exists and is not locked, 3) Connection uses proper authentication method, or 4) SSL/TLS certificates are valid (if required).",
+            "message": (
+                "Authentication failed."
+                "Verify: 1) Username and password are correct,"
+                "2) User account exists and is not locked,"
+                "3) Connection uses proper authentication method,"
+                "or 4) SSL/TLS certificates are valid (if required)."
+            ),
             "category": "authentication",
         },
         209: {
             "type": "connection_timeout",
-            "message": "Connection attempt timed out. Check: 1) ClickHouse server is running and accessible, 2) Network connectivity to the host/port, 3) Firewall rules allow connections, 4) Increase connection_timeout setting if needed.",
+            "message": (
+                "Connection attempt timed out."
+                "Check: 1) ClickHouse server is running and accessible,"
+                "2) Network connectivity to the host/port, 3) Firewall rules allow connections,"
+                "4) Increase connection_timeout setting if needed."
+            ),
             "category": "connection",
         },
         210: {
             "type": "connection_lost",
-            "message": "Connection to database was lost during operation. This can happen due to: 1) Network instability, 2) Server restart, 3) Connection timeout, or 4) Firewall blocking. Try reconnecting and ensure network stability.",
+            "message": (
+                "Connection to database was lost during operation."
+                "This can happen due to: 1) Network instability, 2) Server restart,"
+                "3) Connection timeout, or 4) Firewall blocking."
+                "Try reconnecting and ensure network stability."
+            ),
             "category": "connection",
         },
         241: {
             "type": "memory_limit_query",
-            "message": "Memory limit exceeded for this specific query. Try: 1) Simplify the query with fewer JOINs or aggregations, 2) Use GROUP BY with LIMIT for large result sets, 3) Increase max_memory_usage_for_user setting, or 4) Consider using external aggregation for very large datasets.",
+            "message": (
+                "Memory limit exceeded for this specific query."
+                "Try: 1) Simplify the query with fewer JOINs or aggregations,"
+                "2) Use GROUP BY with LIMIT for large result sets,"
+                "3) Increase max_memory_usage_for_user setting,"
+                "or 4) Consider using external aggregation for very large datasets."
+            ),
             "category": "resource_limit",
         },
         253: {
             "type": "replica_readonly",
-            "message": "Replica is in readonly mode and cannot accept write operations. This is normal for: 1) Read replicas in distributed setups, 2) During maintenance windows, or 3) When replication lag is too high. Direct writes to the primary/master node instead.",
+            "message": (
+                "Replica is in readonly mode and cannot accept write operations."
+                "This is normal for: 1) Read replicas in distributed setups,"
+                "2) During maintenance windows, or 3) When replication lag is too high."
+                "Direct writes to the primary/master node instead."
+            ),
             "category": "replication",
         },
         390: {
             "type": "table_not_found",
-            "message": "Table does not exist in the database. Ensure schemas are deployed first: run build-schemas then apply-schemas before attempting updates or queries. Check: 1) Table name spelling and case sensitivity, 2) Correct database selection, or 3) Schema deployment completed successfully.",
+            "message": (
+                "Table does not exist in the database."
+                "Ensure schemas are deployed first: run build-schemas then apply-schemas before "
+                "attempting updates or queries."
+                "Check: 1) Table name spelling and case sensitivity,"
+                "2) Correct database selection, or 3) Schema deployment completed successfully."
+            ),
             "category": "not_found",
         },
     }
@@ -137,7 +246,13 @@ class ClickHouseErrorHandler:
                 "type": "database_not_found",
                 "category": "not_found",
                 "message": error_str,
-                "user_message": "Database does not exist. Deploy schemas first using build-schemas and apply-schemas commands before running updates. Check: 1) Database name spelling, 2) Schema deployment completed successfully, or 3) Correct connection string.",
+                "user_message": (
+                    "Database does not exist."
+                    "Deploy schemas first using build-schemas and apply-schemas commands before "
+                    "running updates."
+                    "Check: 1) Database name spelling, 2) Schema deployment completed successfully,"
+                    "or 3) Correct connection string."
+                ),
                 "is_actionable": True,
             }
 
@@ -146,7 +261,11 @@ class ClickHouseErrorHandler:
             "type": "unknown_error",
             "category": "unknown",
             "message": error_str,
-            "user_message": "Database operation failed. Ensure schemas are deployed first using apply-schemas command before running updates. Check server logs for technical details if the issue persists.",
+            "user_message": (
+                "Database operation failed."
+                "Ensure schemas are deployed first using apply-schemas command before running "
+                "updates. Check server logs for technical details if the issue persists."
+            ),
             "is_actionable": False,
         }
 
@@ -172,7 +291,7 @@ class ClickHouseErrorHandler:
         :param error_code: ClickHouse error code
         :return: Error type or 'unknown_error' if code not found
         """
-        print(error_code)
+        logger.debug("Retrieving error type", error_code=error_code)
         if error_code in cls.ERROR_MAPPINGS:
             return cls.ERROR_MAPPINGS[error_code]["type"]
         return "unknown_error"
