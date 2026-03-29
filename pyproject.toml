@@ -1,6 +1,6 @@
 [project]
 name = "dfe-engine"
-version = "1.6.9"
+version = "1.7.1"
 description = "DFE Engine - Core library for Data Fusion Engine"
 authors = [{ name = "HYPERI PTY LIMITED", email = "engineering@hyperi.com.au" }]
 license = { text = "FSL-1.1-ALv2" }

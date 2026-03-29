@@ -1,3 +1,10 @@
+## [1.7.1](https://github.com/hyperi-io/dfe-engine/compare/v1.7.0...v1.7.1) (2026-03-29)
+
+
+### Bug Fixes
+
+* patch pyasn1 CVE and set pip-audit to warn for unfixable CVEs ([0d39106](https://github.com/hyperi-io/dfe-engine/commit/0d39106bcc0e26fce321983b18166916aeb6ad74))
+
 ## [1.6.9](https://github.com/hyperi-io/dfe-engine/compare/v1.6.8...v1.6.9) (2026-03-29)
 
 
