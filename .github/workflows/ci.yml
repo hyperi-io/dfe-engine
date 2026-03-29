@@ -2,17 +2,16 @@
 # File:      .github/workflows/ci.yml
 # Purpose:   CI pipeline — quality, test, build, release, publish
 #
-# License:   LicenseRef-HyperSec-EULA
+# License:   FSL-1.1-ALv2
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 
 name: CI
 
-on:
+"on":
   push:
-    branches: [main, release]
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE*', '.gitignore']
+    branches: ["**"]
   pull_request:
-    paths-ignore: ['**.md', 'docs/**', 'LICENSE*', '.gitignore']
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -20,6 +19,4 @@ jobs:
     uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
     with:
       publish-target: internal
-    secrets:
-      JFROG_TOKEN: ${{ secrets.JFROG_TOKEN }}
-      JFROG_USERNAME: ${{ secrets.JFROG_USERNAME }}
+    secrets: inherit

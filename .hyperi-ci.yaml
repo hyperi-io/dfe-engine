@@ -1,13 +1,19 @@
-# DFE Engine — HyperI CI Configuration
+# Project:   DFE Engine
+# File:      .hyperi-ci.yaml
+# Purpose:   HyperI CI configuration
 #
-# Only set values that differ from defaults.
-# Publish target: internal (JFrog hyperi-pypi-local)
+# License:   FSL-1.1-ALv2
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+#
+# Override defaults with HYPERCI_* env vars.
 
 build:
   type: app
 
 publish:
+  enabled: true
   target: internal
+  channel: release
 
 test:
   min_coverage: 70  # Current: 75%. Target: 80%. Ratchet up as coverage improves.

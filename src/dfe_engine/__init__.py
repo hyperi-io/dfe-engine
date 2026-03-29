@@ -3,8 +3,8 @@
 #  Purpose:      Package initialization and version
 #  Language:     Python
 #
-#  License:      LicenseRef-HyperSec-EULA
-#  Copyright:    (c) 2025 HyperI
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """DFE Engine - Core library for Data Fusion Engine.
 

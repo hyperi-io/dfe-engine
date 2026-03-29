@@ -3,8 +3,8 @@
 #  Purpose:      Centralized configuration management with Pydantic
 #  Language:     Python
 #
-#  License:      LicenseRef-HyperSec-EULA
-#  Copyright:    (c) 2025 HyperI
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """
 DFE Engine Settings Module
@@ -124,7 +124,10 @@ class HuntsSettings(BaseModel):
     )
     min_interval_seconds: int = Field(
         default=0,
-        description="Min seconds between completion and next start (adaptive mode). 0 = derive from cron frequency",
+        description=(
+            "Min seconds between completion and next start"
+            " (adaptive mode). 0 = derive from cron frequency"
+        ),
     )
     explain_queries: bool = Field(
         default=False,
@@ -152,7 +155,10 @@ class HuntsSettings(BaseModel):
     )
     alert_destinations: dict[str, str] = Field(
         default_factory=dict,
-        description="Named alert destinations: {name: apprise_url}. Inline bootstrap; prefer alert_destinations_dir.",
+        description=(
+            "Named alert destinations: {name: apprise_url}."
+            " Inline bootstrap; prefer alert_destinations_dir."
+        ),
     )
     alert_destinations_dir: str = Field(
         default="",
