@@ -24,3 +24,7 @@ quality:
     vulture: warn
     ty: warn
     bandit_exclude_tests: true
+    # pip-audit: warn until diskcache CVE-2025-69872 (no upstream fix) and
+    # pygments CVE-2026-4539 (no upstream fix) are resolved.
+    # All fixable CVEs are patched (cryptography, requests, ecdsa, pyasn1).
+    pip_audit: warn
