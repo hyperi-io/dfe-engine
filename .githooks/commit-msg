@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+# Project:   DFE Engine
+# File:      .githooks/commit-msg
+# Purpose:   Conventional commit validation hook
+#
+# License:   FSL-1.1-ALv2
+# Copyright: (c) 2026 HYPERI PTY LIMITED
+#
+# Install: git config core.hooksPath .githooks
+
+set -euo pipefail
+
+if command -v hyperi-ci >/dev/null 2>&1; then
+    hyperi-ci check-commit "$1"
+elif command -v uvx >/dev/null 2>&1; then
+    uvx hyperi-ci check-commit "$1"
+else
+    echo "Warning: hyperi-ci not found — skipping commit validation" >&2
+    exit 0
+fi
