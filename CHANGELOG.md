@@ -1,3 +1,11 @@
+## [1.7.3](https://github.com/hyperi-io/dfe-engine/compare/v1.7.2...v1.7.3) (2026-03-30)
+
+
+### Bug Fixes
+
+* drop unused deps and vendor deep_merge to remove deepmerge ([12d2446](https://github.com/hyperi-io/dfe-engine/commit/12d24467095f4468c529bfb0b825698ba1538884))
+* replace python-jose with PyJWT to eliminate ecdsa CVE exposure ([597edf4](https://github.com/hyperi-io/dfe-engine/commit/597edf4789e6fcc182df488410aa6a9f5a35de86)), closes [#4](https://github.com/hyperi-io/dfe-engine/issues/4)
+
 ## [1.7.2](https://github.com/hyperi-io/dfe-engine/compare/v1.7.1...v1.7.2) (2026-03-30)
 
 
