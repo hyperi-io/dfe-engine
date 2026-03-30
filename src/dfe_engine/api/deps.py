@@ -98,7 +98,8 @@ def get_service_config_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "ServiceConfigRegistry not initialized — set DFE_SERVICES_CONFIG_YAML_DIR",
+                "message": "ServiceConfigRegistry not initialized"
+                " — set DFE_SERVICES_CONFIG_YAML_DIR",
             },
         )
     return reg
@@ -126,7 +127,8 @@ def get_alert_destinations_store():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "Alert destinations not initialized — set DFE_HUNTS_ALERT_DESTINATIONS_DIR or alert_destinations_dir",
+                "message": "Alert destinations not initialized"
+                " — set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
             },
         )
     return store
@@ -140,7 +142,8 @@ def get_deployment_config_registry():
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "DeploymentConfigRegistry not initialized — set DFE_DEPLOYMENT_CONFIG_DIR",
+                "message": "DeploymentConfigRegistry not initialized"
+                " — set DFE_DEPLOYMENT_CONFIG_DIR",
             },
         )
     return reg
@@ -183,7 +186,8 @@ async def get_current_user(request: Request) -> AuthContext:
 
     token = auth_header[7:]
 
-    from jose import JWTError, jwt
+    import jwt
+    from jwt.exceptions import InvalidTokenError
 
     try:
         payload = jwt.decode(
@@ -191,7 +195,7 @@ async def get_current_user(request: Request) -> AuthContext:
             settings.api.jwt_secret,
             algorithms=[settings.api.jwt_algorithm],
         )
-    except JWTError as e:
+    except InvalidTokenError as e:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail={"code": "unauthorized", "message": f"Invalid token: {e}"},
@@ -246,7 +250,7 @@ def create_access_token(
     expires_delta: timedelta | None = None,
 ) -> str:
     """Create a signed JWT access token."""
-    from jose import jwt
+    import jwt
 
     to_encode = data.copy()
     expire = datetime.now(UTC) + (
