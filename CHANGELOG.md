@@ -1,3 +1,10 @@
+## [1.7.2](https://github.com/hyperi-io/dfe-engine/compare/v1.7.1...v1.7.2) (2026-03-30)
+
+
+### Bug Fixes
+
+* adopt hyperi_pylib health probes for K8s ([5c8a02f](https://github.com/hyperi-io/dfe-engine/commit/5c8a02fd351cebeac1ba2cc59add094fbd8c6d52))
+
 ## [1.7.1](https://github.com/hyperi-io/dfe-engine/compare/v1.7.0...v1.7.1) (2026-03-29)
 
 
