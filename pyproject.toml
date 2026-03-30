@@ -23,7 +23,6 @@ dependencies = [
     "boto3>=1.42.60",
     # Scheduling
     "apscheduler>=3.11.2",
-    "aiocron>=2.1",
     "croniter>=6.0.0",
     # HTTP clients
     "httpx>=0.28.1",
@@ -33,14 +32,12 @@ dependencies = [
     "Jinja2>=3.1.6",
     # Sigma rules
     "pysigma>=1.2.0",
-    "valhallaapi>=0.6.2",
     # Utilities
     "python-dateutil>=2.9.0",
     "tabulate>=0.9.0",
     "pyparsing>=3.3.2",
     "platformdirs>=4.9.2",
     "psutil>=7.2.2",
-    "deepmerge>=2.0",
     # Authentication
     "bcrypt>=5.0.0",
     # Alerting / notifications
@@ -50,9 +47,11 @@ dependencies = [
     "uvicorn[standard]>=0.41.0",
     "PyJWT[crypto]>=2.12.0",
     "sse-starlette>=3.3.2",
-    # Transitive override: diskcache pulled in by pySigma.
-    # CVE-2025-69872 (unsafe pickle): no upstream patch as of Mar 2026.
-    # Mitigated by deployment architecture (cache dir not writable by untrusted users).
+    # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
+    # CVE-2025-69872 (unsafe pickle, CVSS 9.8): no upstream fix — maintainer unresponsive
+    # since Aug 2023, community PR #359 unreviewed. The irony: a security tool's dependency
+    # chain introduces a critical CVE. Accepted risk — dfe-engine never imports diskcache
+    # directly, cache dir has 0700 perms, and K8s pods provide filesystem isolation.
     "diskcache>=5.6.3",
 ]
 
