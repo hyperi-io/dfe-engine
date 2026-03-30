@@ -9,9 +9,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-from deepmerge import always_merger
-
 from dfe_engine.services.plugins import get_plugin, valid_services
+from dfe_engine.yaml_utils import deep_merge
 
 
 def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
@@ -51,7 +50,7 @@ def generate_template(service: str, profile: str = "default") -> dict[str, Any]:
     overrides = plugin.config_template_overrides.get(profile, {})
     if overrides:
         merged = copy.deepcopy(base)
-        always_merger.merge(merged, overrides)
+        deep_merge(merged, overrides)
         return merged
 
     return base

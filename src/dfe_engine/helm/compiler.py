@@ -236,7 +236,7 @@ class HelmValuesCompiler:
         """
         import copy
 
-        from deepmerge import always_merger
+        from dfe_engine.yaml_utils import deep_merge
 
         results: dict[str, dict[str, Any]] = {}
         for inst_name, values_path in component.instances.items():
@@ -249,7 +249,7 @@ class HelmValuesCompiler:
             overrides = component.values_overrides.get(inst_name, {})
             if overrides:
                 merged = copy.deepcopy(base)
-                always_merger.merge(merged, overrides)
+                deep_merge(merged, overrides)
             else:
                 merged = base
 
@@ -349,11 +349,11 @@ class HelmValuesCompiler:
         """
         import copy
 
-        from deepmerge import always_merger
+        from dfe_engine.yaml_utils import deep_merge
 
         base = values.model_dump(mode="json")
         merged = copy.deepcopy(base)
-        always_merger.merge(merged, overrides)
+        deep_merge(merged, overrides)
         return HelmServiceValues.model_validate(merged)
 
     def write_all(self, result: CompilationResult, output_dir: Path) -> list[Path]:

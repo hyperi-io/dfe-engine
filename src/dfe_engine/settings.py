@@ -693,10 +693,10 @@ def _deep_merge(base: dict, override: dict) -> dict:
     """Deep merge two dicts. Override wins on conflicts."""
     import copy
 
-    from deepmerge import always_merger
+    from dfe_engine.yaml_utils import deep_merge
 
     result = copy.deepcopy(base)
-    always_merger.merge(result, override)
+    deep_merge(result, override)
     return result
 
 
