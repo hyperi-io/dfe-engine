@@ -15,7 +15,7 @@ dependencies = [
     "pandas>=3.0.1",
     "numpy>=2.4.2",
     # Database connections
-    "clickhouse-connect>=0.13.0",
+    "clickhouse-connect>=0.15.0",
     # Configuration and parsing
     "ruamel-yaml>=0.19.1",
     "pydantic>=2.12.5",
@@ -32,7 +32,7 @@ dependencies = [
     # Templating
     "Jinja2>=3.1.6",
     # Sigma rules
-    "pysigma>=1.1.1",
+    "pysigma>=1.2.0",
     "valhallaapi>=0.6.2",
     # Utilities
     "python-dateutil>=2.9.0",
