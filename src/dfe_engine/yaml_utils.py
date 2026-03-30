@@ -7,21 +7,16 @@
 #  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
 """
-YAML utilities using ruamel.yaml.
+YAML and data utilities for dfe-engine.
 
-This module provides a consistent interface for YAML operations across dfe-engine,
-using ruamel.yaml which supports YAML 1.2 and preserves comments/formatting.
+Provides YAML operations via ruamel.yaml (YAML 1.2, preserves comments)
+and a recursive deep-merge for dict/list/set composition.
 
 Usage:
-    from dfe_engine.yaml_utils import yaml_load, yaml_dump, YAMLError
+    from dfe_engine.yaml_utils import yaml_load, yaml_dump, deep_merge
 
-    # Load YAML
     data = yaml_load(file_path)
-    data = yaml_load_string(yaml_string)
-
-    # Dump YAML
-    yaml_dump(data, file_path)
-    yaml_string = yaml_dump_string(data)
+    deep_merge(base, overrides)  # mutates base in-place
 """
 
 from io import StringIO
@@ -105,3 +100,27 @@ def yaml_dump_string(data: Any) -> str:
     stream = StringIO()
     _yaml_rt.dump(data, stream)
     return stream.getvalue()
+
+
+def deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge *override* into *base*, mutating *base* in-place.
+
+    - dicts: merge recursively
+    - lists: append override items
+    - sets:  union
+    - type mismatch or non-container: override wins
+    """
+    for key, nxt in override.items():
+        if key not in base:
+            base[key] = nxt
+            continue
+        prev = base[key]
+        if isinstance(prev, dict) and isinstance(nxt, dict):
+            deep_merge(prev, nxt)
+        elif isinstance(prev, list) and isinstance(nxt, list):
+            prev.extend(nxt)
+        elif isinstance(prev, set) and isinstance(nxt, set):
+            prev |= nxt
+        else:
+            base[key] = nxt
+    return base
