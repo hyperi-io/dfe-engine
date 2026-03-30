@@ -52,7 +52,10 @@ dependencies = [
     "cryptography>=46.0.6",  # CVE-2026-34073 fix: subgroup attack on SECT curves
     "sse-starlette>=3.3.2",
     # Transitive: ecdsa pulled in by python-jose
-    "ecdsa>=0.19.2",  # CVE-2024-23342, CVE-2026-33936 fix
+    # CVE-2026-33936 (DoS via malformed DER): fixed in 0.19.2
+    # CVE-2024-23342 (Minerva timing attack on P-256): no upstream fix — fundamental design issue.
+    # Mitigated: dfe-engine uses HS256 for JWT; ecdsa P-256 paths are not exercised at runtime.
+    "ecdsa>=0.19.2",
     # Transitive: pyasn1 pulled in by python-jose → rsa
     "pyasn1>=0.6.3",  # CVE-2026-30922 fix
     # Transitive override: diskcache pulled in by pySigma.
