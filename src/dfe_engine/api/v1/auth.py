@@ -16,9 +16,7 @@ from dfe_engine.api.deps import (
     Settings,
     create_access_token,
 )
-from dfe_engine.auth import (
-    LocalAuthProvider,
-)
+from dfe_engine.auth.local_provider import LocalAuthProvider
 from dfe_engine.auth.roles import RoleConfig
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -59,7 +57,7 @@ class PermissionsResponse(BaseModel):
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
-    provider = LocalAuthProvider(settings.auth.local)
+    provider: LocalAuthProvider = request.app.state.auth_provider
 
     auth_ctx = provider.authenticate(
         body.username,

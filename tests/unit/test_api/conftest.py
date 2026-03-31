@@ -1,6 +1,7 @@
 """Shared fixtures for API tests.
 
-Uses FastAPI TestClient with tmp_path isolation for SourceRegistry.
+Uses FastAPI TestClient with tmp_path isolation for registries.
+Auth stores are bootstrapped via bootstrap_auth() with test accounts.
 """
 
 from __future__ import annotations
@@ -16,7 +17,6 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
-    LocalAuthSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -29,19 +29,15 @@ def api_settings(tmp_path: Path) -> DFESettings:
     sources_dir.mkdir()
     services_dir = tmp_path / "services"
     services_dir.mkdir()
+    auth_dir = tmp_path / "auth"
+    auth_dir.mkdir()
 
     return DFESettings(
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         auth=AuthSettings(
             enabled=True,
-            local=LocalAuthSettings(
-                enabled=True,
-                admin_password="test-admin-pw",
-                operator_password="test-operator-pw",
-                viewer_password="test-viewer-pw",
-                org_id="test-org",
-            ),
+            auth_dir=str(auth_dir),
         ),
         api=APISettings(
             jwt_secret="test-secret-key-for-unit-tests",
@@ -52,17 +48,54 @@ def api_settings(tmp_path: Path) -> DFESettings:
 
 @pytest.fixture
 def app(api_settings: DFESettings):
-    """Create a FastAPI app with test settings."""
+    """Create a FastAPI app with test settings.
+
+    After creation, bootstrap auth with test accounts so the login
+    endpoint works against store-backed accounts.
+    """
     application = create_app(settings=api_settings)
+
+    # The lifespan will call bootstrap_auth, but we need to also seed
+    # extra test accounts (operator, viewer) that aren't created by
+    # the default bootstrap (which only seeds admin).
+    # We do this inside the TestClient context (after lifespan runs).
     yield application
     # Cleanup registries after test
     _registries.clear()
 
 
 @pytest.fixture
-def client(app) -> TestClient:
+def client(app, api_settings: DFESettings) -> TestClient:
     """TestClient with lifespan events (registries bootstrapped)."""
     with TestClient(app, raise_server_exceptions=False) as c:
+        # After lifespan runs, bootstrap_auth has created admin with
+        # default "changeme" password. Now add operator + viewer accounts
+        # and reset admin password to match test expectations.
+        account_store = app.state.account_store
+        group_store = app.state.group_store
+
+        # Reset admin password to test password
+        account_store.reset_password("admin", "test-admin-pw")
+
+        # Create operator account (data_analyst + infra_admin)
+        if account_store.get("operator") is None:
+            account_store.create(
+                "operator",
+                "test-operator-pw",
+                groups=["dfe-analysts", "dfe-infra"],
+            )
+            group_store.add_member("dfe-analysts", "operator")
+            group_store.add_member("dfe-infra", "operator")
+
+        # Create viewer account (data_viewer)
+        if account_store.get("viewer") is None:
+            account_store.create(
+                "viewer",
+                "test-viewer-pw",
+                groups=["dfe-viewers"],
+            )
+            group_store.add_member("dfe-viewers", "viewer")
+
         yield c
 
 
