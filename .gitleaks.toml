@@ -26,6 +26,8 @@ regexes = [
     '''test-token''',
     '''example\.com''',
     '''llamatron''',
+    # DFE API key format used in documentation examples
+    '''dfe_ak_live_8a3f''',
 ]
 
 # Stopwords - findings containing these are likely false positives
