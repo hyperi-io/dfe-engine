@@ -67,18 +67,36 @@ OIDC headers injected by Envoy Gateway:
 | `X-Oidc-Groups` | Comma-separated OIDC group names |
 | `X-Forwarded-User` | Same as subject (nginx compat) |
 
-### 2.2 OIDC Header Trust Model
+### 2.2 Deployment Modes
 
-**Security precondition:** When OIDC auth is enabled, dfe-engine MUST only be
+Local auth is **always available**. OIDC is additive — it does not replace
+local auth. You can enable/disable OIDC without losing break-glass access.
+
+| Mode | Setting | What's active | Use case |
+|------|---------|--------------|----------|
+| **Dev/test** | `auth.enabled=false` | All requests get root admin context | Local development |
+| **Standalone (Docker)** | `auth.enabled=true` | JWT Bearer + API keys + local accounts | Small deploy, no external IdP |
+| **Production (+ OIDC)** | `auth.enabled=true`, `auth.mode=oidc` | OIDC headers (precedence) + JWT + API keys + local | K8s with Envoy Gateway |
+
+In production with OIDC, the detection order means:
+- Browser users → Envoy handles OIDC → OIDC headers reach dfe-engine
+- API clients → send JWT Bearer or API key directly (bypass Envoy OIDC)
+- Break-glass → local login via `/api/v1/auth/login` → JWT Bearer
+
+Switching from standalone to OIDC = set `auth.mode=oidc` and configure Envoy.
+Switching back = set `auth.mode=jwt`. Local accounts and API keys keep working.
+
+### 2.3 OIDC Header Trust Model
+
+**Security precondition:** When `auth.mode=oidc`, dfe-engine MUST only be
 accessible via Envoy Gateway. Direct pod access MUST be blocked by K8s
 NetworkPolicy (deployed by dfe-infra `network-policies` chart). Without this,
 any client with pod access can forge OIDC headers and impersonate any user.
 
-The auth mode setting (`auth.mode: oidc | jwt | disabled`) determines which
-paths are active. When `auth.mode=oidc`, the OIDC header path is primary
-and JWT Bearer + API key are still accepted for programmatic clients.
+When `auth.mode=oidc`, the OIDC header path is primary and JWT Bearer + API
+key are still accepted for programmatic clients.
 
-### 2.3 Credential Storage Architecture
+### 2.4 Credential Storage Architecture
 
 **Passwords and API keys are NEVER stored in YAML.** YAML contains only
 references (env var names) and non-reversible hashes. Actual secrets live in
@@ -204,7 +222,7 @@ if not hmac.compare_digest(expected_hash, actual_hash):
 - `roles.yaml` — WHAT permissions those roles have
 - Secrets backend (env vars / K8s Secrets / OpenBao) — actual passwords and CH credentials
 
-### 2.4 API Key Format
+### 2.5 API Key Format
 
 Following industry best practice (Stripe, GitHub, Seam pattern):
 
@@ -223,7 +241,7 @@ prefix      short     long token (shown once at creation, stored as SHA-256 hash
 - **Rotation:** 90-day recommended, with 7-day grace period (old + new both valid).
 - **Revocation:** Remove account from `local_accounts.yaml` or delete the key entry.
 
-### 2.5 AuthContext Changes
+### 2.6 AuthContext Changes
 
 ```python
 class AuthContext(BaseModel):
