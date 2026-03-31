@@ -132,6 +132,32 @@ for ClickHouse, sandbox endpoints for notifications).
 
 **Decision:** nginx-ingress community EOL March 2026. Envoy Gateway has native OIDC via SecurityPolicy.
 
+### Auth: Four Authentication Paths (Design — not yet implemented)
+
+**Decision:** Four auth paths, checked in order:
+1. **OIDC headers** — production (Envoy Gateway fronted). Trusts `X-Oidc-Subject` + `X-Oidc-Groups`.
+2. **API key** (`X-API-Key` header) — machine-to-machine (CI/CD, Terraform, automation). Long-lived, bcrypt-hashed in config.
+3. **JWT Bearer** — standalone/Docker users. Issued by `/api/v1/auth/login` (LocalAuthProvider).
+4. **Disabled** — dev/test default, root AuthContext.
+
+All credential storage in env vars / K8s Secrets. Role assignments in YAML (`assignments.yaml`). Account definitions in `local_accounts.yaml`. Zero credentials in YAML files.
+
+### RBAC: YAML-Defined Granular Roles (Design — not yet implemented)
+
+**Decision:** Roles defined in `config/rbac/roles.yaml` as collections of permission strings. Identity→role mapping in `assignments.yaml` (OIDC groups or local users). Default roles: admin, data_analyst, data_analyst_viewer, data_viewer, infra_admin, infra_viewer, customer_viewer (org-scoped).
+
+### Multi-Tenant ClickHouse: ConnectionRegistry (Design — not yet implemented)
+
+**Decision:** dfe-engine manages multiple ClickHouse connections — one per role scope. Static connections for internal roles, auto-generated per-org connections with row-level security for customer isolation. dfe-engine creates CH users + row policies on org CRUD. Same connections pushed to HyperDX.
+
+### HyperDX Integration (Design — not yet implemented)
+
+**Decision:** dfe-engine is single source of truth for CH connections. Syncs to HyperDX via internal API (runtime) and `DEFAULT_CONNECTIONS` env var (bootstrap). One HyperDX team per customer org for isolation. Align with HyperDX patterns where they've made good choices (team API keys, connection model). Do NOT adopt HyperDX anti-patterns (no internal RBAC, no per-user scoping — we solve these at the dfe-engine layer).
+
+### Rust Service Discovery: Schema-Less (Design — not yet implemented)
+
+**Decision:** No typed plugin models for Rust services. Adding a new dfe-* service requires zero Python code. Service config surfaces defined in YAML (`config/service-surfaces/`). Metrics auto-discovered via rustlib `/metrics/manifest` endpoint. RBAC per-service (not per-metric or per-setting).
+
 ### Pylib Usage Policy (STRICT)
 
 - **Logger:** `from hyperi_pylib.logger import logger` — NEVER stdlib `logging`
