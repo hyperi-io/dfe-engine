@@ -14,7 +14,6 @@ def app_with_fieldmaps(tmp_path):
         AuthSettings,
         DFESettings,
         FieldMapSettings,
-        LocalAuthSettings,
         ServicesSettings,
         SourceSettings,
     )
@@ -29,7 +28,6 @@ def app_with_fieldmaps(tmp_path):
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
-            local=LocalAuthSettings(admin_password="admin-pw", org_id="test-org"),
         ),
         api=APISettings(jwt_secret="test-secret"),
     )
