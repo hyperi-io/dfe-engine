@@ -61,6 +61,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # Bootstrap connection registry for multi-tenant ClickHouse
+    from dfe_engine.connections.config import ConnectionConfigLoader
+    from dfe_engine.connections.registry import ConnectionRegistry
+
+    conn_config_path = (
+        Path(settings.config_dir or os.environ.get("DFE_CONFIG_DIR", ""))
+        / "rbac"
+        / "connections.yaml"
+    )
+    if conn_config_path.exists():
+        conn_config = ConnectionConfigLoader.load(conn_config_path)
+        logger.info("Loaded connection config from %s", str(conn_config_path))
+    else:
+        conn_config = ConnectionConfigLoader.load_default()
+    app.state.connection_registry = ConnectionRegistry(conn_config)
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")

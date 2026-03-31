@@ -1,0 +1,23 @@
+connections:
+  default:
+    host: localhost
+    port: 8123
+    database: dfe
+    user: default
+    password_env: CH_DEFAULT_PASSWORD
+
+  tenant_reader:
+    host: localhost
+    port: 8123
+    database: dfe
+    user: dfe_tenant_reader
+    password_env: CH_TENANT_READER_PASSWORD
+
+role_connections:
+  admin: default
+  data_analyst: default
+  data_analyst_viewer: default
+  data_viewer: default
+  infra_admin: default
+  infra_viewer: default
+  customer_viewer: tenant_reader
