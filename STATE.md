@@ -137,7 +137,7 @@ for ClickHouse, sandbox endpoints for notifications).
 - **Logger:** `from hyperi_pylib.logger import logger` — NEVER stdlib `logging`
 - **HTTP:** `HttpClient` / `AsyncHttpClient` from `hyperi_pylib.http` — NEVER raw `httpx`
 - **Config store:** `DirectoryConfigStore` from `hyperi_pylib.config` — for all YAML registries
-- **Deep merge:** `deepmerge.always_merger` (pip package) — pylib's `mergedeep` is file-level only
+- **Deep merge:** `dfe_engine.yaml_utils.deep_merge()` (vendored) — pylib's `mergedeep` is file-level only
 - **YAML:** `ruamel.yaml` via `dfe_engine.yaml_utils` (YAML 1.2) — intentional divergence from pylib's PyYAML 1.1
 - **YAML 1.1 gotcha:** DirectoryConfigStore uses `yaml.safe_load` — `off`/`yes`/`no` become booleans. Don't store identity fields inside YAML; use filename as key.
 
@@ -169,17 +169,16 @@ for ClickHouse, sandbox endpoints for notifications).
 
 ## External Dependencies
 
-- **hyperi-pylib[expression]>=2.24.2** — Logger, config, DirectoryConfigStore, HttpClient, CEL expressions (public PyPI)
-- **clickhouse-connect>=0.13.0** — ClickHouse client
-- **fastapi>=0.115.0** — REST API framework
-- **uvicorn[standard]>=0.34.0** — ASGI server
-- **python-jose[cryptography]>=3.3.0** — JWT encode/decode
+- **hyperi-pylib[expression,http]>=2.25.0** — Logger, config, DirectoryConfigStore, HttpClient, HealthManager, CEL expressions
+- **clickhouse-connect>=0.15.0** — ClickHouse client
+- **fastapi>=0.135.1** — REST API framework
+- **uvicorn[standard]>=0.41.0** — ASGI server
+- **PyJWT[crypto]>=2.12.0** — JWT encode/decode (replaced python-jose)
 - **pydantic>=2.12.5** — Model validation
 - **ruamel-yaml>=0.19.1** — YAML parsing (1.2)
-- **pysigma>=1.1.1** — Sigma rule conversion
-- **deepmerge>=2.0** — Deep dict merging
-- **apprise>=1.9.2** — Multi-channel notification dispatch
-- **sse-starlette>=2.0.0** — Server-sent events for task streaming
+- **pysigma>=1.2.0** — Sigma rule conversion
+- **apprise>=1.9.7** — Multi-channel notification dispatch
+- **sse-starlette>=3.3.2** — Server-sent events for task streaming
 
 ---
 
@@ -191,6 +190,11 @@ for ClickHouse, sandbox endpoints for notifications).
 - [docs/SCHEMA.md](docs/SCHEMA.md) — Schema v2 pipeline
 - [docs/SYNC.md](docs/SYNC.md) — Config sync design
 - [docs/EXPRESSIONS-CEL.md](docs/EXPRESSIONS-CEL.md) — CEL expression standard
+
+**Infrastructure Research (WILL CHANGE — dfe-infra 2.1→2.2 port in progress):**
+
+- [docs/dfe-infra.md](docs/dfe-infra.md) — DFE infrastructure deployment summary (dfe-infra project)
+- [docs/stack-research.md](docs/stack-research.md) — DFE 2.2 stack decisions relevant to dfe-engine
 
 **API:**
 
