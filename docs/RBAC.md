@@ -78,51 +78,131 @@ The auth mode setting (`auth.mode: oidc | jwt | disabled`) determines which
 paths are active. When `auth.mode=oidc`, the OIDC header path is primary
 and JWT Bearer + API key are still accepted for programmatic clients.
 
-### 2.3 Standalone Credential Storage
+### 2.3 Credential Storage Architecture
 
-In standalone mode (Docker, no Envoy), all credentials live in config + secrets:
+**Passwords and API keys are NEVER stored in YAML.** YAML contains only
+references (env var names) and non-reversible hashes. Actual secrets live in
+the deployment's secrets backend.
+
+#### Where Secrets Live (by deployment mode)
+
+| Deployment | Secrets Backend | How dfe-engine reads secrets |
+|------------|----------------|----------------------------|
+| **K8s production** | OpenBao / cloud SM → ESO → K8s Secret | Mounted as env vars in pod spec |
+| **K8s standalone** | K8s Secret (manual or Helm values) | Mounted as env vars in pod spec |
+| **Docker** | `.env` file (gitignored) or compose env vars | `os.environ` |
+| **Dev/test** | `.env` file or shell exports | `os.environ` |
+
+**K8s secrets flow:**
+```
+OpenBao (or AWS SM / GCP SM / Azure KV)
+    → ESO ClusterSecretStore syncs to K8s Secret
+        → Pod spec mounts Secret as env vars
+            → dfe-engine reads os.environ at startup
+```
+
+#### What Goes Where
+
+| Data | Where stored | Format | Safe to commit? |
+|------|-------------|--------|-----------------|
+| Account names | `local_accounts.yaml` | Plaintext | Yes |
+| Password env var names | `local_accounts.yaml` | `password_env: DFE_ADMIN_PASSWORD` | Yes (just a pointer) |
+| Actual passwords | Env var / K8s Secret / OpenBao | Plaintext or bcrypt hash | **NO** |
+| API key short token | `local_accounts.yaml` | Plaintext (8 chars, lookup only) | Yes |
+| API key long token hash | `local_accounts.yaml` | `sha256:e3b0c442...` | Yes (non-reversible) |
+| Full API key | Shown once at creation | `dfe_ak_live_8a3f_7f3b2c...` | **NO** (never stored) |
+| JWT signing secret | Env var (`DFE_API_JWT_SECRET`) | Random 256-bit | **NO** |
+| CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
+
+#### Config Files (safe to commit to git)
 
 ```
 config/rbac/
     roles.yaml              # Role definitions (permissions per role)
     assignments.yaml        # user/group -> role mapping (+ org_ids)
-    local_accounts.yaml     # Account credentials (password + API key hashes)
+    local_accounts.yaml     # Account metadata (env var refs + API key hashes)
 ```
 
-**`local_accounts.yaml`** — defines who can authenticate locally:
+**`local_accounts.yaml`** — defines who can authenticate:
 
 ```yaml
 # Accounts for local auth (standalone) and API key auth (all modes).
-# Passwords are bcrypt hashes or env var references.
-# API keys use SHA-256 hashes (high-entropy, bcrypt unnecessary).
+# NO SECRETS IN THIS FILE. Passwords read from env vars at runtime.
+# API key hashes are SHA-256 (non-reversible, safe to commit).
 # Role assignments come from assignments.yaml, NOT from this file.
 accounts:
-  # Default accounts (bootstrap — change passwords in production)
+  # Password accounts (local auth + standalone JWT login)
   admin:
-    password_env: DFE_AUTH_LOCAL_ADMIN_PASSWORD
+    password_env: DFE_ADMIN_PASSWORD          # env var -> plaintext or bcrypt hash
   operator:
-    password_env: DFE_AUTH_LOCAL_OPERATOR_PASSWORD
+    password_env: DFE_OPERATOR_PASSWORD
   viewer:
-    password_env: DFE_AUTH_LOCAL_VIEWER_PASSWORD
-
-  # Customer-scoped accounts (standalone multi-tenant)
+    password_env: DFE_VIEWER_PASSWORD
   acme_viewer:
     password_env: DFE_ACME_VIEWER_PASSWORD
 
-  # Machine-to-machine API keys (all deployment modes)
+  # API key accounts (all deployment modes including K8s)
   ci_deployer:
-    api_key_short_token: "8a3f2c91"           # Lookup index (plaintext)
-    api_key_hash: "sha256:e3b0c442..."        # SHA-256 of long token
+    api_key_short_token: "8a3f2c91"           # Lookup index (safe to commit)
+    api_key_hash: "sha256:e3b0c442..."        # SHA-256 of long token (safe to commit)
   terraform_svc:
     api_key_short_token: "b7d4e1a3"
     api_key_hash: "sha256:a1b2c3d4..."
 ```
 
+#### Corresponding Secrets (NOT committed)
+
+```bash
+# .env (Docker standalone) or K8s Secret (production)
+DFE_ADMIN_PASSWORD="$2b$12$LJ3..."        # bcrypt hash for production
+DFE_OPERATOR_PASSWORD="changeme"           # plaintext OK for dev only
+DFE_VIEWER_PASSWORD="changeme"
+DFE_ACME_VIEWER_PASSWORD="$2b$12$xyz..."
+DFE_API_JWT_SECRET="random-256-bit-secret"
+CH_ADMIN_PASSWORD="clickhouse-admin-pw"
+CH_ANALYST_PASSWORD="clickhouse-analyst-pw"
+CH_ANALYST_RO_PASSWORD="clickhouse-ro-pw"
+CH_VIEWER_PASSWORD="clickhouse-viewer-pw"
+CH_TENANT_READER_PASSWORD="clickhouse-tenant-pw"
+```
+
+#### Password Verification Flow
+
+```python
+# LocalAuthProvider.authenticate()
+password_env = account["password_env"]           # e.g. "DFE_ADMIN_PASSWORD"
+stored_value = os.environ[password_env]           # e.g. "$2b$12$LJ3..." or "changeme"
+
+if is_bcrypt_hash(stored_value):
+    # Production: env var contains pre-hashed bcrypt
+    bcrypt.checkpw(submitted_password, stored_value)
+else:
+    # Dev: env var contains plaintext, hash on the fly
+    bcrypt.checkpw(submitted_password, bcrypt.hashpw(stored_value))
+```
+
+#### API Key Verification Flow
+
+```python
+# verify_api_key()
+# Input: "dfe_ak_live_8a3f2c91_7f3b2c4d8e9a1b5f..."
+prefix, short_token, long_token = parse_api_key(submitted_key)
+
+# 1. Look up by short_token (fast, indexed)
+account = find_account_by_short_token(short_token)
+
+# 2. SHA-256 verify (no bcrypt — key is high-entropy random)
+expected_hash = account["api_key_hash"]  # "sha256:e3b0c442..."
+actual_hash = "sha256:" + hashlib.sha256(long_token.encode()).hexdigest()
+if not hmac.compare_digest(expected_hash, actual_hash):
+    raise AuthenticationError("Invalid API key")
+```
+
 **Separation of concerns:**
-- `local_accounts.yaml` — WHO can authenticate (account names + credential refs)
-- `assignments.yaml` — WHAT roles they get (account/group -> DFE role mapping)
+- `local_accounts.yaml` — WHO can authenticate (account names + env var refs + hashes)
+- `assignments.yaml` — WHAT roles they get (account/group → DFE role mapping)
 - `roles.yaml` — WHAT permissions those roles have
-- Env vars / K8s Secrets — actual passwords (never in YAML)
+- Secrets backend (env vars / K8s Secrets / OpenBao) — actual passwords and CH credentials
 
 ### 2.4 API Key Format
 
@@ -313,7 +393,8 @@ def permission_matches(permission: str, action: str) -> bool:
     return all(p == "*" or p == a for p, a in zip(perm_parts, action_parts))
 ```
 
-`DEFAULT_ROLE_PERMISSIONS` becomes bootstrap defaults when no `roles.yaml` exists.
+`DEFAULT_ROLE_PERMISSIONS` constant is removed. `roles.yaml` is the sole source
+of truth. Bootstrap defaults are seeded from a built-in YAML resource on first run.
 
 ---
 
@@ -639,24 +720,26 @@ config/
 | `auth/local_provider.py` | Config-driven accounts, role resolution via assignments.yaml |
 | `api/deps.py` | OIDC header + API key auth paths, `require_service_action()` |
 | `services/registry.py` | Deprecate typed plugins, schema-less by default |
-| `settings.py` | RBAC config paths, HyperDX settings; deprecate inline role_permissions |
+| `settings.py` | RBAC config paths, HyperDX settings; remove inline role_permissions/group_role_mapping |
 
 ---
 
 ## 10. Migration Path
 
 ### Phase 1: RBAC Foundation
-- YAML-based role definitions + assignments
-- OIDC header + API key auth paths in `get_current_user()`
+- Replace `DEFAULT_ROLE_PERMISSIONS` with YAML-based role definitions
+- Replace hardcoded `LocalAuthProvider.ACCOUNTS` with config-driven accounts
+- Remove `AuthSettings.role_permissions` and `group_role_mapping` from settings.py
+- Remove `permissions` field from `AuthContext`
+- Add OIDC header + API key auth paths to `get_current_user()`
 - Wildcard permission matching in `authorize()`
-- `LocalAuthProvider` reads accounts + roles from config
 - Audit logging on all auth decisions
 
 ### Phase 2: Connection Registry
-- ConnectionRegistry with custom settings pattern
-- TenantScopedClient for org-scoped queries
-- Startup reconciliation (ensure CH users + row policies)
-- Bootstrap templates from dfe-schemas
+- ConnectionRegistry with custom settings pattern (3-5 CH users, not per-org)
+- TenantScopedClient injects `current_tenant_id` per query
+- Startup reconciliation (ensure CH users + row policies exist)
+- Bootstrap DDL templates from dfe-schemas
 
 ### Phase 3: Org Lifecycle + HyperDX
 - Org CRUD API with HyperDX team/connection sync
@@ -667,7 +750,7 @@ config/
 - Service surface YAML files
 - Metrics manifest caching from rustlib `/metrics/manifest`
 - `/api/v1/service-surfaces/` endpoints with RBAC
-- Deprecate typed plugin system
+- Remove typed plugin system (`plugins.py`, `plugins_builtin/`)
 
 ---
 
@@ -707,7 +790,26 @@ Row policies ONLY created on tables with an `org_id` column (discovered via
 
 ---
 
-## 13. Research References
+## 13. Breaking Changes (for Kay and Kaz)
+
+DFE 2.2 is pre-GA. These are intentional breaking changes, not regressions.
+
+| What Changed | Old (2.1 / pre-2.2) | New (2.2) | Migration |
+|-------------|---------------------|-----------|-----------|
+| **JWT library** | `python-jose[cryptography]` | `PyJWT[crypto]` | Already done (v1.7.3). Import changes only. |
+| **Auth model** | `AuthContext.permissions` field | Removed | Permissions resolved from roles at auth time, not stored |
+| **Role names** | `admin`, `infra_admin`, `operator`, `viewer` | `admin`, `data_analyst`, `data_analyst_viewer`, `data_viewer`, `infra_admin`, `infra_viewer`, `customer_viewer` | Old roles gone. New roles in `roles.yaml`. |
+| **Role storage** | `DEFAULT_ROLE_PERMISSIONS` constant in code | `config/rbac/roles.yaml` | Hardcoded constant removed |
+| **Account storage** | 3 hardcoded accounts in `LocalAuthProvider.ACCOUNTS` | `config/rbac/local_accounts.yaml` | Hardcoded dict removed |
+| **Group mapping** | `AuthSettings.group_role_mapping` in settings.py | `config/rbac/assignments.yaml` | Settings field removed |
+| **Auth paths** | JWT Bearer only | OIDC headers + API key + JWT Bearer | New paths additive, JWT unchanged |
+| **CH connections** | Single global client | `ConnectionRegistry` (multi-client, tenant-scoped) | New module, old `clickhouse/` module refactored |
+| **Service plugins** | Typed Pydantic models per Rust service | Schema-less YAML surfaces | `plugins.py` and `plugins_builtin/` removed |
+| **Deep merge** | `deepmerge` pip package | `dfe_engine.yaml_utils.deep_merge()` (vendored) | Already done (v1.7.3) |
+
+---
+
+## 14. Research References
 
 - [ClickHouse Custom Settings + Row Policy (LaunchDarkly/Highlight)](https://www.highlight.io/blog/row-level-security)
 - [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key)
