@@ -19,6 +19,11 @@ from hyperi_pylib.logger import logger
 
 from dfe_engine.auth import AuthContext, AuthorizationError, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
+from dfe_engine.auth.audit import (
+    audit_login_denied,
+    audit_login_success,
+    audit_permission_denied,
+)
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.settings import DFESettings
 
@@ -219,6 +224,7 @@ async def get_current_user(request: Request) -> AuthContext:
         groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
         roles, org_ids = _resolve_roles_from_groups(groups, group_store)
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
+        audit_login_success(oidc_subject, "oidc", client_ip, roles)
         return AuthContext(
             user_id=oidc_subject,
             roles=roles,
@@ -235,6 +241,12 @@ async def get_current_user(request: Request) -> AuthContext:
         api_key_store: APIKeyStore = request.app.state.api_key_store
         key_meta = api_key_store.verify(api_key_header)
         if key_meta is None:
+            audit_login_denied(
+                api_key_header[:16] + "...",
+                "api_key",
+                client_ip,
+                "invalid_key",
+            )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"code": "unauthorized", "message": "Invalid API key"},
@@ -247,6 +259,7 @@ async def get_current_user(request: Request) -> AuthContext:
             groups=key_meta.groups,
             roles=roles,
         )
+        audit_login_success(f"apikey:{key_meta.name}", "api_key", client_ip, roles)
         return AuthContext(
             user_id=f"apikey:{key_meta.name}",
             roles=roles,
@@ -272,16 +285,20 @@ async def get_current_user(request: Request) -> AuthContext:
                 algorithms=[settings.api.jwt_algorithm],
             )
         except InvalidTokenError as e:
+            audit_login_denied("unknown", "jwt", client_ip, str(e))
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail={"code": "unauthorized", "message": f"Invalid token: {e}"},
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
+        jwt_user_id = payload.get("sub", "")
+        jwt_roles = payload.get("roles", [])
+        audit_login_success(jwt_user_id, "jwt", client_ip, jwt_roles)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
-            user_id=payload.get("sub", ""),
-            roles=payload.get("roles", []),
+            user_id=jwt_user_id,
+            roles=jwt_roles,
             org_ids=payload.get("org_ids", []),
             request_id=request_id,
             client_ip=client_ip,
@@ -292,6 +309,7 @@ async def get_current_user(request: Request) -> AuthContext:
     if not settings.auth.enabled:
         return AuthContext(org_id="default", user_id="dev", roles=["admin"])
 
+    audit_login_denied("anonymous", "none", client_ip, "no_credentials")
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={"code": "unauthorized", "message": "Authentication required"},
@@ -323,6 +341,7 @@ def require_action(action: str):
     ) -> None:
         result = authorize(user, action, enabled=settings.auth.enabled)
         if not result.allowed:
+            audit_permission_denied(user.user_id, action, user.roles, result.reason)
             raise AuthorizationError(f"Action '{action}' denied: {result.reason}")
 
     return _check
