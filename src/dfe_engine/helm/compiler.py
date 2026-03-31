@@ -15,6 +15,7 @@ from typing import Any
 
 from pydantic import SecretStr
 
+from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.deployment.registry import DeploymentConfigRegistry
 from dfe_engine.helm.environment import EnvironmentConfig, ExternalComponent
 from dfe_engine.helm.models import (
@@ -60,14 +61,14 @@ class HelmValuesCompiler:
     def compile_all(
         self,
         group_role_mapping: dict[str, list[str]] | None = None,
-        role_permissions: dict[str, set[str]] | None = None,
+        role_config: RoleConfig | None = None,
         argo_project: str = "dfe",
     ) -> CompilationResult:
         """Compile Helm values for all services that have both deployment and service configs.
 
         Args:
             group_role_mapping: OIDC group → DFE role names (for Argo RBAC generation).
-            role_permissions: Role → permitted actions (defaults to built-in).
+            role_config: Role configuration (defaults to built-in roles.yaml).
             argo_project: Argo CD project name for RBAC scoping.
 
         Returns:
@@ -102,12 +103,12 @@ class HelmValuesCompiler:
 
         result.argo_rbac_csv = generate_rbac_csv(
             group_role_mapping=group_role_mapping,
-            role_permissions=role_permissions,
+            role_config=role_config,
             project=argo_project,
         )
         result.argo_appproject_roles = generate_appproject_roles(
             group_role_mapping=group_role_mapping,
-            role_permissions=role_permissions,
+            role_config=role_config,
             project=argo_project,
         )
 
