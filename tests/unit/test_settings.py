@@ -84,9 +84,3 @@ class TestDefaultSettings:
         settings = load_settings()
         assert isinstance(settings, DFESettings)
         assert settings.clickhouse.host == "localhost"
-
-    def test_auth_local_defaults(self):
-        settings = load_settings()
-        assert settings.auth.local.enabled is True
-        assert settings.auth.local.admin_password == "changeme"
-        assert settings.auth.local.org_id == "default"

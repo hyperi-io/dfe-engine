@@ -11,7 +11,7 @@ def app_with_services(tmp_path):
     """App fixture with ServiceConfigRegistry initialized."""
     from dfe_engine.api.app import create_app
     from dfe_engine.api.deps import _registries
-    from dfe_engine.settings import APISettings, AuthSettings, LocalAuthSettings, SourceSettings
+    from dfe_engine.settings import APISettings, AuthSettings, SourceSettings
 
     services_dir = tmp_path / "services"
     services_dir.mkdir()
@@ -22,10 +22,6 @@ def app_with_services(tmp_path):
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
-            local=LocalAuthSettings(
-                admin_password="admin-pw",
-                org_id="test-org",
-            ),
         ),
         api=APISettings(jwt_secret="test-secret"),
     )
