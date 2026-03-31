@@ -49,8 +49,36 @@ deployment-agnostic. HyperI is ONE deployment of DFE — never hardcode HyperI
 domains, tenant IDs, infrastructure endpoints, or provider-specific assumptions.
 
 - **dfe-engine** = generic product code. Config cascade handles deployment specifics.
-- **`/projects/hyperi-infra`** = HyperI's specific IaC deployment. Test WITH it, never code FOR it.
+- **`/projects/hyperi-infra`** = HyperI's specific DevEx infrastructure. NOT dfe-infra.
+- **`/projects/dfe-infra`** = generic DFE infrastructure IaC. Test WITH it, never code FOR it.
 - OIDC providers, ClickHouse, HyperDX, Envoy — all config-driven, zero hardcoded values.
+
+## Product Principle: Control Plane, Not Critical Path
+
+**dfe-engine is a management layer, NOT a runtime dependency.** If dfe-engine
+is down (restart, crash, upgrade), the entire DFE platform MUST continue
+running normally. Users just can't change anything until it comes back.
+
+**When dfe-engine is down, these MUST keep working:**
+- Envoy Gateway OIDC (SecurityPolicy is a static K8s CRD)
+- ArgoCD sync (RBAC CSV baked into ConfigMap at deploy time)
+- Rust services (config from YAML files / ConfigMaps)
+- ClickHouse (users, row policies, data all persistent)
+- HyperDX (connections persistent in MongoDB)
+- KEDA autoscaling (ScaledObjects are static CRDs)
+
+**When dfe-engine is down, these stop working:**
+- Config changes (service configs, deployment configs, sources)
+- Account/group/API key CRUD
+- OIDC group sync (existing groups still work, new groups don't sync)
+- Org CRUD (existing orgs keep working)
+- HyperDX connection sync (existing connections keep working)
+- Helm values compilation
+- REST API and CLI
+
+**Design implication:** dfe-engine must NEVER be in the runtime request path
+of any other component. It writes config/state that other components read
+independently. No component should call dfe-engine's API at request time.
 
 ---
 
