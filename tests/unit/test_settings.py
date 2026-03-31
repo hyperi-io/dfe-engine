@@ -84,3 +84,201 @@ class TestDefaultSettings:
         settings = load_settings()
         assert isinstance(settings, DFESettings)
         assert settings.clickhouse.host == "localhost"
+
+
+class TestEnvOverrides:
+    """Test env var overrides for the config cascade in load_settings()."""
+
+    def test_clickhouse_host_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch.example.com")
+        settings = load_settings()
+        assert settings.clickhouse.host == "ch.example.com"
+
+    def test_clickhouse_port_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
+        settings = load_settings()
+        assert settings.clickhouse.port == 9000
+
+    def test_clickhouse_username_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_USERNAME", "admin")
+        settings = load_settings()
+        assert settings.clickhouse.username == "admin"
+
+    def test_clickhouse_database_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
+        settings = load_settings()
+        assert settings.clickhouse.database == "analytics"
+
+    def test_clickhouse_secure_true(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_SECURE", "true")
+        settings = load_settings()
+        assert settings.clickhouse.secure is True
+
+    def test_clickhouse_secure_false(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_SECURE", "false")
+        settings = load_settings()
+        assert settings.clickhouse.secure is False
+
+    def test_clickhouse_connections_min(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MIN", "5")
+        settings = load_settings()
+        assert settings.clickhouse.connections_min == 5
+
+    def test_clickhouse_connections_max(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MAX", "20")
+        settings = load_settings()
+        assert settings.clickhouse.connections_max == 20
+
+    def test_api_host_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_HOST", "127.0.0.1")
+        settings = load_settings()
+        assert settings.api.host == "127.0.0.1"
+
+    def test_api_port_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_PORT", "9090")
+        settings = load_settings()
+        assert settings.api.port == 9090
+
+    def test_api_jwt_secret_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret")
+        settings = load_settings()
+        assert settings.api.jwt_secret == "super-secret"
+
+    def test_api_cors_origins_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
+        settings = load_settings()
+        assert "http://a.com" in settings.api.cors_origins
+
+    def test_auth_enabled_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        settings = load_settings()
+        assert settings.auth.enabled is True
+
+    def test_auth_dir_override(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("DFE_AUTH_DIR", str(tmp_path / "auth"))
+        settings = load_settings()
+        assert settings.auth.auth_dir == str(tmp_path / "auth")
+
+    def test_hunt_log_path_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNT_LOG_PATH", "/var/log/hunts")
+        settings = load_settings()
+        assert settings.hunts.log_path == "/var/log/hunts"
+
+    def test_legacy_clickhouse_host_fallback(self, monkeypatch):
+        """Legacy env var (no DFE_ prefix) should also work."""
+        monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
+        settings = load_settings()
+        assert settings.clickhouse.host == "legacy.ch.com"
+
+    def test_dfe_prefix_takes_precedence(self, monkeypatch):
+        """DFE_ prefixed var takes precedence over legacy var."""
+        monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
+        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "new.ch.com")
+        settings = load_settings()
+        assert settings.clickhouse.host == "new.ch.com"
+
+    def test_hyperdx_enabled_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HYPERDX_ENABLED", "true")
+        settings = load_settings()
+        assert settings.hyperdx.enabled is True
+
+    def test_hyperdx_base_url_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HYPERDX_BASE_URL", "http://hdx:8080")
+        settings = load_settings()
+        assert settings.hyperdx.base_url == "http://hdx:8080"
+
+    def test_clickhouse_verify_true(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "1")
+        settings = load_settings()
+        assert settings.clickhouse.verify is True
+
+    def test_clickhouse_password_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_PASSWORD", "secret123")
+        settings = load_settings()
+        assert settings.clickhouse.password == "secret123"
+
+    def test_api_jwt_expire_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_JWT_EXPIRE_MINUTES", "60")
+        settings = load_settings()
+        assert settings.api.jwt_expire_minutes == 60
+
+    def test_hunts_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_DIR", "/custom/hunts")
+        settings = load_settings()
+        assert settings.hunts.hunt_dir == "/custom/hunts"
+
+    def test_hunt_rules_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_RULE_REPO_DIR", "/custom/rules")
+        settings = load_settings()
+        assert settings.hunts.rule_repo_dir == "/custom/rules"
+
+    def test_query_yaml_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_QUERY_YAML_DIR", "/custom/queries")
+        settings = load_settings()
+        assert settings.query.yaml_dir == "/custom/queries"
+
+    def test_helm_output_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HELM_OUTPUT_DIR", "/helm/out")
+        settings = load_settings()
+        assert settings.helm.output_dir == "/helm/out"
+
+    def test_helm_environment_file_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HELM_ENVIRONMENT_FILE", "/env.yaml")
+        settings = load_settings()
+        assert settings.helm.environment_file == "/env.yaml"
+
+    def test_fieldmap_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_FIELDMAPS_DIR", "/custom/fieldmaps")
+        settings = load_settings()
+        assert settings.fieldmap.fieldmaps_dir == "/custom/fieldmaps"
+
+    def test_alert_channels_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_ALERT_CHANNELS", "email,slack")
+        settings = load_settings()
+        assert "email" in settings.hunts.alert_channels
+
+    def test_deployment_config_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_DEPLOYMENT_CONFIG_DIR", "/custom/deploy")
+        settings = load_settings()
+        assert settings.deployment.config_dir == "/custom/deploy"
+
+    def test_services_config_yaml_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_SERVICES_CONFIG_YAML_DIR", "/custom/svc")
+        settings = load_settings()
+        assert settings.services.config_yaml_dir == "/custom/svc"
+
+    def test_sources_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_SOURCES_DIR", "/custom/sources")
+        settings = load_settings()
+        assert settings.source.sources_dir == "/custom/sources"
+
+    def test_hunt_default_cooldown_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN", "600")
+        settings = load_settings()
+        assert settings.hunts.default_alert_cooldown == "600"
+
+    def test_hunt_max_alerts_per_run_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN", "50")
+        settings = load_settings()
+        assert settings.hunts.default_max_alerts_per_run == 50
+
+    def test_hyperdx_api_key_env_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
+        settings = load_settings()
+        assert settings.hyperdx.api_key_env == "MY_KEY_VAR"
+
+    def test_hunt_alert_destinations_json_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
+        settings = load_settings()
+        assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
+
+    def test_multiple_overrides_at_once(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch1.example.com")
+        monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
+        monkeypatch.setenv("DFE_API_PORT", "9090")
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        settings = load_settings()
+        assert settings.clickhouse.host == "ch1.example.com"
+        assert settings.clickhouse.port == 9000
+        assert settings.api.port == 9090
+        assert settings.auth.enabled is True

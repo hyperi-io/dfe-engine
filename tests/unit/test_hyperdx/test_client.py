@@ -147,6 +147,53 @@ class TestGenerateDefaultConnectionsJson:
 # ---------------------------------------------------------------------------
 
 
+class TestDisconnectedShortCircuit:
+    """When _connected=False, all async methods return immediately."""
+
+    @pytest.mark.asyncio
+    async def test_create_team_returns_none_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.create_team("team-1")
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_create_connection_returns_none_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.create_connection(
+            team_id="t1",
+            name="conn",
+            host="h",
+            port=8123,
+            database="db",
+            user="u",
+            password="p",
+        )
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_delete_connection_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.delete_connection(team_id="t1", conn_id="c1")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_sync_no_tenant_reader_returns_empty(self):
+        """sync_connections returns empty result if no tenant_reader connection."""
+        from dfe_engine.orgs.models import Org
+
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        config = ConnectionConfig(connections={}, role_connections={})
+        result = await client.sync_connections(
+            orgs=[Org(name="acme", org_ids=["acme"])],
+            conn_config=config,
+        )
+        assert result.teams_created == []
+        assert result.connections_created == 0
+
+
 class TestCreateTeam:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_create_team_success(self):
