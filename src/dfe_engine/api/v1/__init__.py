@@ -2,7 +2,10 @@
 
 from fastapi import APIRouter
 
+from dfe_engine.api.v1.account_groups import router as account_groups_router
+from dfe_engine.api.v1.accounts import router as accounts_router
 from dfe_engine.api.v1.alerts import router as alerts_router
+from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.auth import router as auth_router
 from dfe_engine.api.v1.deployments import router as deployments_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
@@ -14,6 +17,14 @@ from dfe_engine.api.v1.transforms import router as transforms_router
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router)
+
+# Auth sub-routers mounted under /auth prefix
+_auth_sub = APIRouter(prefix="/auth")
+_auth_sub.include_router(accounts_router)
+_auth_sub.include_router(account_groups_router)
+_auth_sub.include_router(api_keys_router)
+v1_router.include_router(_auth_sub)
+
 v1_router.include_router(sources_router)
 v1_router.include_router(services_router)
 v1_router.include_router(deployments_router)
