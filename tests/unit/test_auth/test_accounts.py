@@ -1,0 +1,284 @@
+#  Project:      dfe-engine
+#  File:         tests/unit/test_auth/test_accounts.py
+#  Purpose:      Tests for YAML-backed AccountStore
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
+from __future__ import annotations
+
+import time
+
+import bcrypt
+import pytest
+
+from dfe_engine.auth.accounts import Account, AccountStore
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def store(tmp_path):
+    """AccountStore backed by a temporary directory."""
+    return AccountStore(tmp_path / "accounts")
+
+
+# ---------------------------------------------------------------------------
+# Account.create
+# ---------------------------------------------------------------------------
+
+
+class TestCreate:
+    def test_create_returns_account(self, store):
+        account = store.create("alice", "password123")
+        assert isinstance(account, Account)
+        assert account.username == "alice"
+
+    def test_create_hashes_password(self, store):
+        store.create("alice", "password123")
+        account = store.get("alice")
+        assert account is not None
+        assert account.password_hash.startswith("$2b$")
+        assert account.password_hash != "password123"
+
+    def test_create_default_enabled(self, store):
+        account = store.create("alice", "password123")
+        assert account.enabled is True
+
+    def test_create_empty_groups_by_default(self, store):
+        account = store.create("alice", "password123")
+        assert account.groups == []
+
+    def test_create_with_groups(self, store):
+        account = store.create("alice", "password123", groups=["admins", "ops"])
+        assert account.groups == ["admins", "ops"]
+
+    def test_create_duplicate_raises(self, store):
+        store.create("alice", "password123")
+        with pytest.raises(ValueError, match="alice"):
+            store.create("alice", "other-password")
+
+    def test_create_sets_timestamps(self, store):
+        account = store.create("alice", "password123")
+        assert account.created_at != ""
+        assert account.updated_at != ""
+
+    def test_create_writes_yaml_file(self, store, tmp_path):
+        store.create("alice", "password123")
+        yaml_file = tmp_path / "accounts" / "alice.yaml"
+        assert yaml_file.exists()
+
+    def test_create_username_not_in_yaml(self, store, tmp_path):
+        """Username is the filename stem — NOT stored inside the YAML."""
+        store.create("alice", "password123")
+        yaml_file = tmp_path / "accounts" / "alice.yaml"
+        content = yaml_file.read_text()
+        assert "username" not in content
+
+    def test_create_creates_dir_if_not_exists(self, tmp_path):
+        nested = tmp_path / "deep" / "nested" / "accounts"
+        store = AccountStore(nested)
+        store.create("bob", "pass")
+        assert (nested / "bob.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.get
+# ---------------------------------------------------------------------------
+
+
+class TestGet:
+    def test_get_existing_returns_account(self, store):
+        store.create("alice", "password123")
+        account = store.get("alice")
+        assert account is not None
+        assert account.username == "alice"
+
+    def test_get_nonexistent_returns_none(self, store):
+        result = store.get("nobody")
+        assert result is None
+
+    def test_get_username_from_filename_not_yaml(self, store):
+        """Username must come from the filename stem, not YAML content."""
+        store.create("alice", "password123")
+        account = store.get("alice")
+        assert account.username == "alice"
+
+    def test_get_preserves_groups(self, store):
+        store.create("alice", "password123", groups=["ops", "dev"])
+        account = store.get("alice")
+        assert account.groups == ["ops", "dev"]
+
+    def test_get_preserves_enabled_state(self, store):
+        store.create("alice", "password123")
+        store.update("alice", enabled=False)
+        account = store.get("alice")
+        assert account.enabled is False
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.list
+# ---------------------------------------------------------------------------
+
+
+class TestList:
+    def test_list_empty_returns_empty(self, store):
+        assert store.list() == []
+
+    def test_list_single_account(self, store):
+        store.create("alice", "password123")
+        accounts = store.list()
+        assert len(accounts) == 1
+        assert accounts[0].username == "alice"
+
+    def test_list_multiple_accounts(self, store):
+        store.create("charlie", "pw3")
+        store.create("alice", "pw1")
+        store.create("bob", "pw2")
+        accounts = store.list()
+        assert len(accounts) == 3
+        usernames = {a.username for a in accounts}
+        assert usernames == {"alice", "bob", "charlie"}
+
+    def test_list_returns_account_objects(self, store):
+        store.create("alice", "pw")
+        for account in store.list():
+            assert isinstance(account, Account)
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.verify_password
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyPassword:
+    def test_correct_password_returns_true(self, store):
+        store.create("alice", "secret123")
+        assert store.verify_password("alice", "secret123") is True
+
+    def test_wrong_password_returns_false(self, store):
+        store.create("alice", "secret123")
+        assert store.verify_password("alice", "wrongpass") is False
+
+    def test_nonexistent_user_returns_false(self, store):
+        result = store.verify_password("nobody", "anypass")
+        assert result is False
+
+    def test_empty_password_wrong_returns_false(self, store):
+        store.create("alice", "secret123")
+        assert store.verify_password("alice", "") is False
+
+    def test_verify_after_reset_uses_new_password(self, store):
+        store.create("alice", "oldpass")
+        store.reset_password("alice", "newpass")
+        assert store.verify_password("alice", "newpass") is True
+        assert store.verify_password("alice", "oldpass") is False
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.update
+# ---------------------------------------------------------------------------
+
+
+class TestUpdate:
+    def test_update_disable_account(self, store):
+        store.create("alice", "password123")
+        account = store.update("alice", enabled=False)
+        assert account.enabled is False
+
+    def test_update_enable_account(self, store):
+        store.create("alice", "password123")
+        store.update("alice", enabled=False)
+        account = store.update("alice", enabled=True)
+        assert account.enabled is True
+
+    def test_update_change_groups(self, store):
+        store.create("alice", "password123", groups=["ops"])
+        account = store.update("alice", groups=["admins", "dev"])
+        assert account.groups == ["admins", "dev"]
+
+    def test_update_returns_updated_account(self, store):
+        store.create("alice", "password123")
+        result = store.update("alice", enabled=False)
+        assert isinstance(result, Account)
+        assert result.enabled is False
+
+    def test_update_persists_to_disk(self, store):
+        store.create("alice", "password123")
+        store.update("alice", enabled=False, groups=["ops"])
+        # Re-read from disk
+        account = store.get("alice")
+        assert account.enabled is False
+        assert account.groups == ["ops"]
+
+    def test_update_nonexistent_raises(self, store):
+        with pytest.raises(KeyError, match="nobody"):
+            store.update("nobody", enabled=False)
+
+    def test_update_updates_timestamp(self, store):
+        store.create("alice", "password123")
+        time.sleep(0.01)  # ensure time advances
+        updated = store.update("alice", enabled=True)
+        # timestamp should be set (not missing)
+        assert updated.updated_at != ""
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.reset_password
+# ---------------------------------------------------------------------------
+
+
+class TestResetPassword:
+    def test_new_password_works(self, store):
+        store.create("alice", "oldpass")
+        store.reset_password("alice", "newpass")
+        assert store.verify_password("alice", "newpass") is True
+
+    def test_old_password_fails_after_reset(self, store):
+        store.create("alice", "oldpass")
+        store.reset_password("alice", "newpass")
+        assert store.verify_password("alice", "oldpass") is False
+
+    def test_reset_persists_to_disk(self, store):
+        store.create("alice", "oldpass")
+        store.reset_password("alice", "newpass")
+        # Re-read account
+        account = store.get("alice")
+        assert bcrypt.checkpw(b"newpass", account.password_hash.encode())
+
+    def test_reset_nonexistent_raises(self, store):
+        with pytest.raises(KeyError, match="nobody"):
+            store.reset_password("nobody", "newpass")
+
+
+# ---------------------------------------------------------------------------
+# AccountStore.delete
+# ---------------------------------------------------------------------------
+
+
+class TestDelete:
+    def test_delete_removes_account(self, store):
+        store.create("alice", "password123")
+        store.delete("alice")
+        assert store.get("alice") is None
+
+    def test_delete_removes_file(self, store, tmp_path):
+        store.create("alice", "password123")
+        yaml_file = tmp_path / "accounts" / "alice.yaml"
+        assert yaml_file.exists()
+        store.delete("alice")
+        assert not yaml_file.exists()
+
+    def test_delete_nonexistent_raises(self, store):
+        with pytest.raises(KeyError, match="nobody"):
+            store.delete("nobody")
+
+    def test_delete_does_not_affect_other_accounts(self, store):
+        store.create("alice", "pw1")
+        store.create("bob", "pw2")
+        store.delete("alice")
+        assert store.get("bob") is not None
+        assert len(store.list()) == 1
