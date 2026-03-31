@@ -21,6 +21,7 @@ def app_with_services(tmp_path):
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         auth=AuthSettings(
             enabled=True,
+            auth_dir=str(tmp_path / "auth"),
             local=LocalAuthSettings(
                 admin_password="admin-pw",
                 org_id="test-org",

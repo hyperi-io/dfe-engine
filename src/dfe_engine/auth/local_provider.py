@@ -1,67 +1,43 @@
-"""Local authentication provider for simple deploy + break-glass admin.
+#  Project:      dfe-engine
+#  File:         auth/local_provider.py
+#  Purpose:      Local authentication provider backed by AccountStore and GroupStore
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-Three fixed accounts (admin, operator, viewer) configured via settings/env vars.
-Passwords support both plaintext (dev) and pre-hashed bcrypt (production).
+"""Local authentication provider backed by YAML stores.
 
-Usage:
-    from dfe_engine.auth import LocalAuthProvider, AuthContext
-    from dfe_engine.settings import load_settings
+Authenticates users against AccountStore (bcrypt passwords) and resolves
+roles via GroupStore memberships.
 
-    settings = load_settings()
-    provider = LocalAuthProvider(settings.auth.local)
+Usage::
 
-    # Returns AuthContext on success, raises AuthenticationError on failure
+    from dfe_engine.auth.local_provider import LocalAuthProvider
+    from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.groups import GroupStore
+
+    provider = LocalAuthProvider(account_store, group_store)
     auth = provider.authenticate("admin", "changeme")
-    # auth.roles == ["admin"], auth.org_id == "default"
 """
 
 from __future__ import annotations
 
-from hyperi_pylib.logger import logger
-
+from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.models import AuthContext, AuthenticationError
-from dfe_engine.settings import LocalAuthSettings
-
-# Bcrypt hash prefixes (covers all common variants)
-_BCRYPT_PREFIXES = ("$2b$", "$2a$", "$2y$")
-
-# Default password that triggers a startup warning
-_DEFAULT_PASSWORD = "changeme"
 
 
 class LocalAuthProvider:
-    """Local auth for simple deploy. Three fixed accounts from settings."""
+    """Local auth backed by AccountStore + GroupStore."""
 
-    ACCOUNTS: dict[str, dict] = {
-        "admin": {"role": "admin"},
-        "operator": {"role": "operator"},
-        "viewer": {"role": "viewer"},
-    }
-
-    def __init__(self, settings: LocalAuthSettings) -> None:
-        import bcrypt as _bcrypt
-
-        self._bcrypt = _bcrypt
-        self._enabled = settings.enabled
-        self._org_id = settings.org_id
-
-        self._hashes: dict[str, bytes] = {
-            "admin": self._resolve_hash(settings.admin_password),
-            "operator": self._resolve_hash(settings.operator_password),
-            "viewer": self._resolve_hash(settings.viewer_password),
-        }
-
-        # Warn about default passwords
-        for username, pw in [
-            ("admin", settings.admin_password),
-            ("operator", settings.operator_password),
-            ("viewer", settings.viewer_password),
-        ]:
-            if pw == _DEFAULT_PASSWORD:
-                logger.warning(
-                    "Local account '%s' uses default password — change in production",
-                    username,
-                )
+    def __init__(
+        self,
+        account_store: AccountStore,
+        group_store: GroupStore,
+    ) -> None:
+        self._accounts = account_store
+        self._groups = group_store
 
     def authenticate(
         self,
@@ -72,77 +48,43 @@ class LocalAuthProvider:
         client_ip: str | None = None,
         user_agent: str | None = None,
     ) -> AuthContext:
-        """Verify credentials and return AuthContext.
+        """Verify credentials and return AuthContext with resolved roles.
 
         Args:
-            username: Account name (admin, operator, viewer).
+            username: Account name.
             password: Plaintext password to verify.
             request_id: Optional request correlation ID.
             client_ip: Optional client IP address.
             user_agent: Optional client user agent string.
 
         Returns:
-            AuthContext with org_id, user_id, and roles populated.
+            AuthContext with roles resolved from group memberships.
 
         Raises:
-            AuthenticationError: If provider is disabled, username unknown,
+            AuthenticationError: If username unknown, account disabled,
                 or password incorrect.
         """
-        if not self._enabled:
-            raise AuthenticationError("Local authentication is disabled")
-
-        stored_hash = self._hashes.get(username)
-        if stored_hash is None:
-            # Timing-safe: still do a bcrypt check against a dummy hash
-            # to prevent timing attacks that reveal valid usernames
-            self._bcrypt.checkpw(b"dummy", self._dummy_hash())
+        account = self._accounts.get(username)
+        if account is None:
+            # Timing-safe: verify_password does a bcrypt check even for
+            # unknown users to prevent timing-based enumeration
+            self._accounts.verify_password(username, password)
             raise AuthenticationError("Invalid username or password")
 
-        if not self._bcrypt.checkpw(password.encode("utf-8"), stored_hash):
+        if not account.enabled:
+            raise AuthenticationError("Account disabled")
+
+        if not self._accounts.verify_password(username, password):
             raise AuthenticationError("Invalid username or password")
 
-        account = self.ACCOUNTS[username]
+        roles = self._groups.resolve_roles_for_member(username)
+
         return AuthContext(
-            org_id=self._org_id,
+            org_id="default",
             user_id=username,
-            roles=[account["role"]],
+            roles=roles,
+            groups=account.groups,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,
         )
-
-    def _resolve_hash(self, value: str) -> bytes:
-        """If value is a bcrypt hash, use as-is. Otherwise hash with bcrypt."""
-        if _is_bcrypt_hash(value):
-            return value.encode("utf-8")
-        return self._bcrypt.hashpw(value.encode("utf-8"), self._bcrypt.gensalt(rounds=12))
-
-    def _dummy_hash(self) -> bytes:
-        """Return a pre-computed bcrypt hash for timing-safe dummy checks."""
-        if not hasattr(self, "_cached_dummy"):
-            self._cached_dummy = self._bcrypt.hashpw(b"dummy", self._bcrypt.gensalt(rounds=12))
-        return self._cached_dummy
-
-    @staticmethod
-    def hash_password(password: str, rounds: int = 12) -> str:
-        """Utility: hash a plaintext password with bcrypt.
-
-        Use this to pre-generate hashes for production env vars.
-
-        Args:
-            password: Plaintext password.
-            rounds: bcrypt cost factor (default 12).
-
-        Returns:
-            Bcrypt hash string (e.g. '$2b$12$...').
-        """
-        import bcrypt
-
-        return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt(rounds=rounds)).decode(
-            "utf-8"
-        )
-
-
-def _is_bcrypt_hash(value: str) -> bool:
-    """Detect bcrypt hash by prefix."""
-    return any(value.startswith(prefix) for prefix in _BCRYPT_PREFIXES)

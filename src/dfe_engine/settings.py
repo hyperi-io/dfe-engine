@@ -383,19 +383,16 @@ class AuthSettings(BaseModel):
 
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
+    - DFE_AUTH_DIR -> auth.auth_dir
     """
 
     enabled: bool = Field(
         default=False,
         description="Enable authorization (default off for dev/test)",
     )
-    role_permissions: dict[str, list[str]] = Field(
-        default_factory=dict,
-        description="Role → permitted actions mapping. Empty = built-in defaults.",
-    )
-    group_role_mapping: dict[str, list[str]] = Field(
-        default_factory=dict,
-        description="OIDC group → roles mapping (Entra ID GUIDs, Okta names, etc.)",
+    auth_dir: str = Field(
+        default="",
+        description="Auth config directory (accounts, groups, api-keys)",
     )
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
@@ -641,6 +638,8 @@ def _get_env_overrides() -> dict:
     # Auth settings
     if val := _get_env("DFE_AUTH_ENABLED"):
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_AUTH_DIR"):
+        overrides["auth"]["auth_dir"] = val
 
     # Local auth settings (nested under auth.local)
     if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):

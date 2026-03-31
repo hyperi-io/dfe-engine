@@ -27,12 +27,40 @@ from dfe_engine.settings import DFESettings, load_settings
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: bootstrap registries on startup, cleanup on shutdown."""
+    import os
+    from pathlib import Path
+
     settings: DFESettings = app.state.settings
     health: HealthManager = app.state.health_manager
 
     from dfe_engine.api.deps import bootstrap_registries, shutdown_registries
 
     bootstrap_registries(settings)
+
+    # Bootstrap auth stores
+    from dfe_engine.auth.bootstrap import bootstrap_auth
+    from dfe_engine.auth.local_provider import LocalAuthProvider
+
+    auth_dir_str = settings.auth.auth_dir
+    if not auth_dir_str:
+        config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
+        if config_dir:
+            auth_dir_str = str(Path(config_dir) / "auth")
+        else:
+            # Fallback to a temp-safe default under cwd
+            auth_dir_str = str(Path("config") / "auth")
+
+    auth_dir = Path(auth_dir_str)
+    default_admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
+    account_store, group_store, api_key_store, role_config = bootstrap_auth(
+        auth_dir, default_admin_password=default_admin_pw
+    )
+    app.state.account_store = account_store
+    app.state.group_store = group_store
+    app.state.api_key_store = api_key_store
+    app.state.role_config = role_config
+    app.state.auth_provider = LocalAuthProvider(account_store, group_store)
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
