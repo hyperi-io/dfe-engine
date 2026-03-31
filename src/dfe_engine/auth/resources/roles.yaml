@@ -1,0 +1,57 @@
+roles:
+  admin:
+    description: "Full access to all resources and all orgs"
+    permissions:
+      - "*"
+  data_analyst:
+    description: "Hunt, query, source, fieldmap CRUD"
+    permissions:
+      - "hunt:*"
+      - "query:*"
+      - "source:*"
+      - "fieldmap:*"
+      - "alert:*"
+      - "schema:read"
+      - "transforms:*"
+  data_analyst_viewer:
+    description: "Same scope as data_analyst, read-only"
+    permissions:
+      - "hunt:read"
+      - "query:read"
+      - "query:execute"
+      - "source:read"
+      - "fieldmap:read"
+      - "alert:read"
+      - "schema:read"
+  data_viewer:
+    description: "HyperDX dashboards and query execution"
+    permissions:
+      - "query:execute"
+      - "source:read"
+      - "dashboard:read"
+  infra_admin:
+    description: "Service configs, deployments, helm, Argo CD"
+    permissions:
+      - "config:*"
+      - "service:*:config:*"
+      - "service:*:metrics:read"
+      - "helm:*"
+      - "deployment:*"
+      - "argo:*"
+  infra_viewer:
+    description: "Infrastructure read-only"
+    permissions:
+      - "config:read"
+      - "service:*:config:read"
+      - "service:*:metrics:read"
+      - "helm:compile"
+      - "deployment:read"
+      - "argo:applications:get"
+      - "argo:projects:get"
+  customer_viewer:
+    description: "Org-restricted data viewer"
+    permissions:
+      - "query:execute"
+      - "source:read"
+      - "dashboard:read"
+    scoped: true
