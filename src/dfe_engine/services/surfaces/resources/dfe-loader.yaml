@@ -1,0 +1,68 @@
+service: dfe-loader
+description: "Kafka-to-ClickHouse batch loader"
+config_surface:
+  config.kafka.bootstrap_servers:
+    type: string
+    description: "Kafka bootstrap servers"
+  config.kafka.group_id:
+    type: string
+    description: "Kafka consumer group ID"
+    default: "dfe-loader"
+  config.clickhouse.host:
+    type: string
+    description: "ClickHouse host"
+    default: "localhost"
+  config.clickhouse.port:
+    type: integer
+    description: "ClickHouse native port"
+    default: 9000
+  config.clickhouse.database:
+    type: string
+    description: "Target ClickHouse database"
+    default: "default"
+  config.buffer.max_bytes:
+    type: integer
+    description: "Per-table buffer size limit in bytes"
+    default: 67108864
+  config.buffer.max_age_seconds:
+    type: integer
+    description: "Maximum buffer age before flush"
+    default: 10
+metrics_surface:
+  - name: dfe_loader_rows_inserted_total
+    type: counter
+    group: sink
+    description: "Total rows inserted into ClickHouse"
+  - name: dfe_loader_batches_flushed_total
+    type: counter
+    group: buffer
+    description: "Total buffer flush operations"
+  - name: dfe_loader_insert_duration_seconds
+    type: histogram
+    group: sink
+    description: "ClickHouse insert latency per table"
+    labels:
+      - table
+  - name: dfe_loader_buffer_rows_by_table
+    type: gauge
+    group: buffer
+    description: "Current buffered row count per table"
+    labels:
+      - table
+  - name: dfe_loader_buffer_bytes_by_table
+    type: gauge
+    group: buffer
+    description: "Current buffer bytes per table"
+    labels:
+      - table
+  - name: dfe_loader_salvage_attempts_total
+    type: counter
+    group: sink
+    description: "Schema mismatch salvage attempts"
+    labels:
+      - table
+  - name: dfe_loader_route_default_total
+    type: counter
+    group: app
+    description: "Messages routed to default table"
+manifest_url: "http://dfe-loader.dfe-prod.svc.cluster.local:9090/metrics/manifest"
