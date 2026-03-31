@@ -77,6 +77,38 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         conn_config = ConnectionConfigLoader.load_default()
     app.state.connection_registry = ConnectionRegistry(conn_config)
 
+    # Bootstrap org registry
+    from dfe_engine.orgs.registry import OrgRegistry
+
+    orgs_dir_str = ""
+    config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
+    if config_dir:
+        orgs_dir_str = str(Path(config_dir) / "orgs")
+    else:
+        orgs_dir_str = str(Path("config") / "orgs")
+    app.state.org_registry = OrgRegistry(Path(orgs_dir_str))
+
+    # Bootstrap service surface registry (schema-less Rust service discovery)
+    from dfe_engine.services.surfaces.registry import SurfaceRegistry
+
+    surfaces_config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
+    if surfaces_config_dir:
+        surfaces_dir = Path(surfaces_config_dir) / "service-surfaces"
+    else:
+        surfaces_dir = Path("config") / "service-surfaces"
+    app.state.surface_registry = SurfaceRegistry(surfaces_dir)
+
+    # Bootstrap HyperDX client (optional)
+    if settings.hyperdx.enabled and settings.hyperdx.base_url:
+        from dfe_engine.hyperdx.client import HyperDXClient
+
+        api_key = os.environ.get(settings.hyperdx.api_key_env, "")
+        app.state.hyperdx_client = HyperDXClient(
+            base_url=settings.hyperdx.base_url,
+            api_key=api_key,
+        )
+        logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
