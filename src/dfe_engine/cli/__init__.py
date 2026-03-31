@@ -8,6 +8,8 @@
 
 """Auth management CLI subcommands for ``dfe-api``.
 
+Uses hyperi-pylib CLI framework (Typer + Rich output helpers).
+
 Registered via :meth:`DfeApiApp.register_commands` and exposed as::
 
     dfe-api accounts <subcommand>
@@ -23,7 +25,14 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from tabulate import tabulate
+from hyperi_pylib.cli import Typer
+from hyperi_pylib.cli.output import (
+    print_error,
+    print_info,
+    print_success,
+    print_table,
+    print_warning,
+)
 
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.api_keys import APIKeyStore
@@ -32,12 +41,7 @@ from dfe_engine.auth.groups import GroupStore
 
 
 def _get_stores() -> tuple[AccountStore, GroupStore, APIKeyStore]:
-    """Initialise auth stores from the configured directory.
-
-    Reads ``DFE_AUTH_DIR`` (preferred) or derives it from ``DFE_CONFIG_DIR``
-    (defaults to ``./config``).  Always returns working stores — empty
-    directories are fine.
-    """
+    """Initialise auth stores from the configured directory."""
     config_dir = os.environ.get("DFE_CONFIG_DIR", "./config")
     auth_dir = os.environ.get("DFE_AUTH_DIR", str(Path(config_dir) / "auth"))
     admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
@@ -51,7 +55,7 @@ def _get_stores() -> tuple[AccountStore, GroupStore, APIKeyStore]:
 # accounts subcommands
 # ---------------------------------------------------------------------------
 
-accounts_app = typer.Typer(help="Manage local accounts.")
+accounts_app = Typer(help="Manage local accounts.")
 
 
 @accounts_app.command("create")
@@ -74,22 +78,21 @@ def accounts_create(
     try:
         account_store.create(username, password, groups=group_list)
     except ValueError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
 
-    # Add the user to each group's member list as well
     for group_name in group_list:
         try:
             group_store.add_member(group_name, username)
         except KeyError:
-            typer.echo(f"Warning: group '{group_name}' not found — skipped", err=True)
+            print_warning(f"Group '{group_name}' not found — skipped")
 
     if generate_password:
-        typer.echo(f"Account '{username}' created.")
-        typer.echo(f"Generated password: {password}")
-        typer.echo("Store this password securely — it cannot be retrieved again.")
+        print_success(f"Account '{username}' created")
+        print_info(f"Generated password: {password}")
+        print_warning("Store this password securely — it cannot be retrieved again")
     else:
-        typer.echo(f"Account '{username}' created.")
+        print_success(f"Account '{username}' created")
 
 
 @accounts_app.command("list")
@@ -98,21 +101,19 @@ def accounts_list() -> None:
     account_store, _, _ = _get_stores()
     accounts = account_store.list()
     if not accounts:
-        typer.echo("No accounts found.")
+        print_info("No accounts found")
         return
 
-    rows = [
-        [
-            a.username,
-            "yes" if a.enabled else "no",
-            ", ".join(a.groups) or "—",
-            a.created_at[:19] if a.created_at else "—",
-        ]
+    data = [
+        {
+            "Username": a.username,
+            "Enabled": "yes" if a.enabled else "no",
+            "Groups": ", ".join(a.groups) or "-",
+            "Created": a.created_at[:19] if a.created_at else "-",
+        }
         for a in accounts
     ]
-    typer.echo(
-        tabulate(rows, headers=["Username", "Enabled", "Groups", "Created At"], tablefmt="plain")
-    )
+    print_table(data, title="Accounts")
 
 
 @accounts_app.command("show")
@@ -121,17 +122,17 @@ def accounts_show(username: str) -> None:
     account_store, _, _ = _get_stores()
     account = account_store.get(username)
     if account is None:
-        typer.echo(f"Error: account '{username}' not found.", err=True)
+        print_error(f"Account '{username}' not found")
         raise typer.Exit(1)
 
-    rows = [
-        ["Username", account.username],
-        ["Enabled", "yes" if account.enabled else "no"],
-        ["Groups", ", ".join(account.groups) or "—"],
-        ["Created At", account.created_at or "—"],
-        ["Updated At", account.updated_at or "—"],
+    data = [
+        {"Field": "Username", "Value": account.username},
+        {"Field": "Enabled", "Value": "yes" if account.enabled else "no"},
+        {"Field": "Groups", "Value": ", ".join(account.groups) or "-"},
+        {"Field": "Created", "Value": account.created_at or "-"},
+        {"Field": "Updated", "Value": account.updated_at or "-"},
     ]
-    typer.echo(tabulate(rows, tablefmt="plain"))
+    print_table(data, title=f"Account: {username}")
 
 
 @accounts_app.command("enable")
@@ -141,9 +142,9 @@ def accounts_enable(username: str) -> None:
     try:
         account_store.update(username, enabled=True)
     except KeyError:
-        typer.echo(f"Error: account '{username}' not found.", err=True)
+        print_error(f"Account '{username}' not found")
         raise typer.Exit(1)
-    typer.echo(f"Account '{username}' enabled.")
+    print_success(f"Account '{username}' enabled")
 
 
 @accounts_app.command("disable")
@@ -153,9 +154,9 @@ def accounts_disable(username: str) -> None:
     try:
         account_store.update(username, enabled=False)
     except KeyError:
-        typer.echo(f"Error: account '{username}' not found.", err=True)
+        print_error(f"Account '{username}' not found")
         raise typer.Exit(1)
-    typer.echo(f"Account '{username}' disabled.")
+    print_success(f"Account '{username}' disabled")
 
 
 @accounts_app.command("reset-password")
@@ -166,9 +167,9 @@ def accounts_reset_password(username: str) -> None:
     try:
         account_store.reset_password(username, new_password)
     except KeyError:
-        typer.echo(f"Error: account '{username}' not found.", err=True)
+        print_error(f"Account '{username}' not found")
         raise typer.Exit(1)
-    typer.echo(f"Password reset for account '{username}'.")
+    print_success(f"Password reset for account '{username}'")
 
 
 @accounts_app.command("delete")
@@ -184,16 +185,16 @@ def accounts_delete(
     try:
         account_store.delete(username)
     except KeyError:
-        typer.echo(f"Error: account '{username}' not found.", err=True)
+        print_error(f"Account '{username}' not found")
         raise typer.Exit(1)
-    typer.echo(f"Account '{username}' deleted.")
+    print_success(f"Account '{username}' deleted")
 
 
 # ---------------------------------------------------------------------------
 # groups subcommands
 # ---------------------------------------------------------------------------
 
-groups_app = typer.Typer(help="Manage groups.")
+groups_app = Typer(help="Manage groups.")
 
 
 @groups_app.command("create")
@@ -208,9 +209,9 @@ def groups_create(
     try:
         group_store.create(name, roles=role_list, description=description)
     except ValueError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"Group '{name}' created.")
+    print_success(f"Group '{name}' created")
 
 
 @groups_app.command("list")
@@ -219,21 +220,19 @@ def groups_list() -> None:
     _, group_store, _ = _get_stores()
     groups = group_store.list()
     if not groups:
-        typer.echo("No groups found.")
+        print_info("No groups found")
         return
 
-    rows = [
-        [
-            g.name,
-            ", ".join(g.roles) or "—",
-            ", ".join(g.members) or "—",
-            g.description or "—",
-        ]
+    data = [
+        {
+            "Name": g.name,
+            "Roles": ", ".join(g.roles) or "-",
+            "Members": ", ".join(g.members) or "-",
+            "Description": g.description or "-",
+        }
         for g in groups
     ]
-    typer.echo(
-        tabulate(rows, headers=["Name", "Roles", "Members", "Description"], tablefmt="plain")
-    )
+    print_table(data, title="Groups")
 
 
 @groups_app.command("show")
@@ -242,16 +241,16 @@ def groups_show(name: str) -> None:
     _, group_store, _ = _get_stores()
     group = group_store.get(name)
     if group is None:
-        typer.echo(f"Error: group '{name}' not found.", err=True)
+        print_error(f"Group '{name}' not found")
         raise typer.Exit(1)
 
-    rows = [
-        ["Name", group.name],
-        ["Description", group.description or "—"],
-        ["Roles", ", ".join(group.roles) or "—"],
-        ["Members", ", ".join(group.members) or "—"],
+    data = [
+        {"Field": "Name", "Value": group.name},
+        {"Field": "Description", "Value": group.description or "-"},
+        {"Field": "Roles", "Value": ", ".join(group.roles) or "-"},
+        {"Field": "Members", "Value": ", ".join(group.members) or "-"},
     ]
-    typer.echo(tabulate(rows, tablefmt="plain"))
+    print_table(data, title=f"Group: {name}")
 
 
 @groups_app.command("add-member")
@@ -261,9 +260,9 @@ def groups_add_member(group: str, username: str) -> None:
     try:
         group_store.add_member(group, username)
     except KeyError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"Added '{username}' to group '{group}'.")
+    print_success(f"Added '{username}' to group '{group}'")
 
 
 @groups_app.command("remove-member")
@@ -273,9 +272,9 @@ def groups_remove_member(group: str, username: str) -> None:
     try:
         group_store.remove_member(group, username)
     except KeyError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"Removed '{username}' from group '{group}'.")
+    print_success(f"Removed '{username}' from group '{group}'")
 
 
 @groups_app.command("set-roles")
@@ -289,9 +288,9 @@ def groups_set_roles(
     try:
         group_store.update(name, roles=role_list)
     except KeyError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"Roles for group '{name}' updated.")
+    print_success(f"Roles for group '{name}' updated")
 
 
 @groups_app.command("delete")
@@ -307,16 +306,16 @@ def groups_delete(
     try:
         group_store.delete(name)
     except KeyError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"Group '{name}' deleted.")
+    print_success(f"Group '{name}' deleted")
 
 
 # ---------------------------------------------------------------------------
 # api-keys subcommands
 # ---------------------------------------------------------------------------
 
-api_keys_app = typer.Typer(help="Manage API keys.")
+api_keys_app = Typer(help="Manage API keys.")
 
 
 @api_keys_app.command("create")
@@ -331,11 +330,12 @@ def api_keys_create(
     try:
         _key_meta, full_key = api_key_store.create(name, groups=group_list, description=description)
     except ValueError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
 
-    typer.echo(f"API Key: {full_key}")
-    typer.echo("Store this key securely — it cannot be retrieved again.")
+    print_success(f"API key '{name}' created")
+    print_info(f"API Key: {full_key}")
+    print_warning("Store this key securely — it cannot be retrieved again")
 
 
 @api_keys_app.command("list")
@@ -344,26 +344,20 @@ def api_keys_list() -> None:
     _, _, api_key_store = _get_stores()
     keys = api_key_store.list()
     if not keys:
-        typer.echo("No API keys found.")
+        print_info("No API keys found")
         return
 
-    rows = [
-        [
-            k.name,
-            k.short_token,
-            "yes" if k.enabled else "no",
-            ", ".join(k.groups) or "—",
-            k.created_at[:19] if k.created_at else "—",
-        ]
+    data = [
+        {
+            "Name": k.name,
+            "Short Token": k.short_token,
+            "Enabled": "yes" if k.enabled else "no",
+            "Groups": ", ".join(k.groups) or "-",
+            "Created": k.created_at[:19] if k.created_at else "-",
+        }
         for k in keys
     ]
-    typer.echo(
-        tabulate(
-            rows,
-            headers=["Name", "Short Token", "Enabled", "Groups", "Created At"],
-            tablefmt="plain",
-        )
-    )
+    print_table(data, title="API Keys")
 
 
 @api_keys_app.command("revoke")
@@ -373,18 +367,18 @@ def api_keys_revoke(
 ) -> None:
     """Revoke an API key by its short token."""
     if not yes:
-        typer.confirm(f"Revoke API key with short token '{short_token}'?", abort=True)
+        typer.confirm(f"Revoke API key '{short_token}'?", abort=True)
 
     _, _, api_key_store = _get_stores()
     try:
         api_key_store.revoke(short_token)
     except KeyError as exc:
-        typer.echo(f"Error: {exc}", err=True)
+        print_error(str(exc))
         raise typer.Exit(1) from exc
-    typer.echo(f"API key '{short_token}' revoked.")
+    print_success(f"API key '{short_token}' revoked")
 
 
-def register_auth_commands(app: typer.Typer) -> None:
+def register_auth_commands(app: Typer) -> None:
     """Register auth subcommand groups on *app*.
 
     Call this from :meth:`DfeApiApp.register_commands`.
