@@ -33,6 +33,7 @@ def api_settings(tmp_path: Path) -> DFESettings:
     auth_dir.mkdir()
 
     return DFESettings(
+        config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         auth=AuthSettings(
