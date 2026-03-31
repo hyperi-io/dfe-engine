@@ -17,12 +17,13 @@ from typing import Any
 
 from hyperi_pylib.logger import logger
 
-from dfe_engine.auth.engine import ARGO_ACTION_PREFIX, DEFAULT_ROLE_PERMISSIONS
+from dfe_engine.auth.engine import ARGO_ACTION_PREFIX
+from dfe_engine.auth.roles import RoleConfig
 
 
 def generate_rbac_csv(
     group_role_mapping: dict[str, list[str]] | None = None,
-    role_permissions: dict[str, set[str]] | None = None,
+    role_config: RoleConfig | None = None,
     project: str = "dfe",
     default_policy: str = "role:dfe-viewer",
 ) -> str:
@@ -30,14 +31,14 @@ def generate_rbac_csv(
 
     Args:
         group_role_mapping: OIDC group → DFE role names.
-        role_permissions: Role → permitted actions. Defaults to built-in.
+        role_config: Role configuration. Defaults to built-in.
         project: Argo CD project name for policy scoping.
         default_policy: Default Argo CD role for unauthenticated users.
 
     Returns:
         Multiline string suitable for ``argocd-rbac-cm`` ``policy.csv``.
     """
-    perms = role_permissions or DEFAULT_ROLE_PERMISSIONS
+    config = role_config or RoleConfig.load_builtin()
     groups = group_role_mapping or {}
 
     lines: list[str] = []
@@ -45,11 +46,11 @@ def generate_rbac_csv(
     lines.append("")
 
     # Role policies
-    for role, actions in sorted(perms.items()):
-        argo_role = f"role:dfe-{role}"
-        role_lines = _role_to_policies(role, actions, project)
+    for role_name, role_def in sorted(config.roles.items()):
+        actions = set(role_def.permissions)
+        role_lines = _role_to_policies(role_name, actions, project)
         if role_lines:
-            lines.append(f"# {role}")
+            lines.append(f"# {role_name}")
             lines.extend(role_lines)
             lines.append("")
 
@@ -67,20 +68,20 @@ def generate_rbac_csv(
 
 def generate_appproject_roles(
     group_role_mapping: dict[str, list[str]] | None = None,
-    role_permissions: dict[str, set[str]] | None = None,
+    role_config: RoleConfig | None = None,
     project: str = "dfe",
 ) -> list[dict[str, Any]]:
     """Generate Argo CD AppProject ``.spec.roles`` structure.
 
     Args:
         group_role_mapping: OIDC group → DFE role names.
-        role_permissions: Role → permitted actions. Defaults to built-in.
+        role_config: Role configuration. Defaults to built-in.
         project: Argo CD project name.
 
     Returns:
         List of role dicts for AppProject ``.spec.roles``.
     """
-    perms = role_permissions or DEFAULT_ROLE_PERMISSIONS
+    config = role_config or RoleConfig.load_builtin()
     groups = group_role_mapping or {}
 
     # Invert group mapping: role → [groups]
@@ -90,16 +91,17 @@ def generate_appproject_roles(
             role_groups.setdefault(role, []).append(group_id)
 
     roles_out: list[dict[str, Any]] = []
-    for role, actions in sorted(perms.items()):
-        policies = _role_to_policies(role, actions, project)
+    for role_name, role_def in sorted(config.roles.items()):
+        actions = set(role_def.permissions)
+        policies = _role_to_policies(role_name, actions, project)
         if not policies:
             continue
         entry: dict[str, Any] = {
-            "name": role,
+            "name": role_name,
             "policies": policies,
         }
-        if role in role_groups:
-            entry["groups"] = sorted(role_groups[role])
+        if role_name in role_groups:
+            entry["groups"] = sorted(role_groups[role_name])
         roles_out.append(entry)
 
     return roles_out
@@ -114,8 +116,13 @@ def _role_to_policies(
     argo_role = f"role:dfe-{role}"
     lines: list[str] = []
 
-    # Wildcard admin
+    # Bare wildcard — full admin
     if "*" in actions:
+        lines.append(f"p, {argo_role}, *, *, {project}/*, allow")
+        return lines
+
+    # Argo-namespace wildcard (e.g. "argo:*") — full argo access
+    if f"{ARGO_ACTION_PREFIX}*" in actions:
         lines.append(f"p, {argo_role}, *, *, {project}/*, allow")
         return lines
 
@@ -123,7 +130,8 @@ def _role_to_policies(
         if not action.startswith(ARGO_ACTION_PREFIX):
             continue
 
-        parts = action[len(ARGO_ACTION_PREFIX) :].split(":", 1)
+        remainder = action[len(ARGO_ACTION_PREFIX) :]
+        parts = remainder.split(":", 1)
         if len(parts) != 2:
             logger.warning(
                 "Skipping malformed argo action '%s' for role '%s' "
