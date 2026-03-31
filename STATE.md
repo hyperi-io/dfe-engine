@@ -216,6 +216,7 @@ All credential storage in env vars / K8s Secrets. Role assignments in YAML (`ass
 - [docs/SCHEMA.md](docs/SCHEMA.md) — Schema v2 pipeline
 - [docs/SYNC.md](docs/SYNC.md) — Config sync design
 - [docs/EXPRESSIONS-CEL.md](docs/EXPRESSIONS-CEL.md) — CEL expression standard
+- [docs/RBAC.md](docs/RBAC.md) — RBAC, multi-tenant ClickHouse, auth, Rust app layer design
 
 **Infrastructure Research (WILL CHANGE — dfe-infra 2.1→2.2 port in progress):**
 
