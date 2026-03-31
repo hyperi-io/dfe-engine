@@ -17,9 +17,9 @@ from dfe_engine.api.deps import (
     create_access_token,
 )
 from dfe_engine.auth import (
-    DEFAULT_ROLE_PERMISSIONS,
     LocalAuthProvider,
 )
+from dfe_engine.auth.roles import RoleConfig
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -109,11 +109,13 @@ async def refresh_token(user: CurrentUser, settings: Settings):
 @router.get("/me", response_model=UserResponse)
 async def get_me(user: CurrentUser):
     """Get the current authenticated user's info."""
+    role_config = RoleConfig.load_builtin()
+    permissions = sorted(role_config.resolve_permissions(user.roles))
     return UserResponse(
         org_id=user.org_id,
         user_id=user.user_id,
         roles=user.roles,
-        permissions=user.permissions,
+        permissions=permissions,
         groups=user.groups,
     )
 
@@ -121,10 +123,8 @@ async def get_me(user: CurrentUser):
 @router.get("/permissions", response_model=PermissionsResponse)
 async def get_permissions(user: CurrentUser):
     """Get resolved permissions for the current user's roles."""
-    all_perms: set[str] = set()
-    for role in user.roles:
-        perms = DEFAULT_ROLE_PERMISSIONS.get(role, set())
-        all_perms.update(perms)
+    role_config = RoleConfig.load_builtin()
+    all_perms = role_config.resolve_permissions(user.roles)
 
     return PermissionsResponse(
         roles=user.roles,

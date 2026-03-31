@@ -77,9 +77,17 @@ def admin_token(api_settings: DFESettings) -> str:
 
 @pytest.fixture
 def viewer_token(api_settings: DFESettings) -> str:
-    """JWT token for viewer user (read-only)."""
+    """JWT token for viewer user (read-only).
+
+    Uses infra_viewer (config:read) + data_analyst_viewer (source:read)
+    to cover all read-only API tests without granting write access.
+    """
     return create_access_token(
-        data={"sub": "viewer", "org_id": "test-org", "roles": ["viewer"]},
+        data={
+            "sub": "viewer",
+            "org_id": "test-org",
+            "roles": ["infra_viewer", "data_analyst_viewer"],
+        },
         settings=api_settings,
     )
 

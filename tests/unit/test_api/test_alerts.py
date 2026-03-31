@@ -183,7 +183,7 @@ class TestAlertDestinationsCRUD:
 
         settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
         token = create_access_token(
-            data={"sub": "viewer", "org_id": "test-org", "roles": ["viewer"]},
+            data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
         )
         viewer_headers = {"Authorization": f"Bearer {token}"}
@@ -197,7 +197,7 @@ class TestAlertDestinationsCRUD:
 
         settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
         token = create_access_token(
-            data={"sub": "viewer", "org_id": "test-org", "roles": ["viewer"]},
+            data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
         )
         viewer_headers = {"Authorization": f"Bearer {token}"}
