@@ -687,10 +687,17 @@ authorization check with full context.
 
 ```
 config/
+    auth/
+        accounts/               # NEW: one YAML per local account (bcrypt hashes)
+            admin.yaml
+            analyst1.yaml
+        groups/                 # NEW: one YAML per group (group -> roles)
+            dfe-admins.yaml
+            soc-analysts.yaml
+        api-keys/               # NEW: one YAML per API key (SHA-256 hashes)
+            ci-deploy.yaml
     rbac/
         roles.yaml              # Role definitions (permissions)
-        assignments.yaml        # Identity -> role mapping
-        local_accounts.yaml     # Account credentials (password + API key refs)
         connections.yaml        # CH connections + role mapping
     services/                   # Existing: Rust service runtime configs
     service-surfaces/           # NEW: auto-discovered service metadata
@@ -703,10 +710,277 @@ config/
 
 ---
 
-## 9. New Modules
+## 9. Account and Group CRUD
+
+### 9.1 Storage Architecture
+
+Accounts, groups, and API keys are stored as individual YAML files via
+`DirectoryConfigStore` (one file per entity, in-memory cache, git-aware writes).
+
+```
+config/auth/
+    accounts/
+        admin.yaml
+        analyst1.yaml
+        acme_viewer.yaml
+    groups/
+        soc-analysts.yaml
+        infra-ops.yaml
+        acme-viewers.yaml
+    api-keys/
+        ci-deploy.yaml
+        terraform-svc.yaml
+```
+
+**Security model:** bcrypt hashes (rounds=12) are stored in the YAML files.
+bcrypt hashes are one-way and designed to be safe even if leaked (equivalent
+to `/etc/shadow`). File permissions enforced at 0600. No application-level
+encryption — bcrypt + file perms is sufficient for the account scale (< 100).
+Plaintext passwords and API key long tokens are NEVER stored anywhere.
+
+### 9.2 File Formats
+
+```yaml
+# config/auth/accounts/analyst1.yaml
+enabled: true
+password_hash: "$2b$12$LJ3m..."
+groups: ["soc-analysts"]
+created_at: "2026-03-31T02:00:00Z"
+updated_at: "2026-03-31T02:00:00Z"
+```
+
+```yaml
+# config/auth/groups/soc-analysts.yaml
+description: "SOC analyst team"
+roles: ["data_analyst"]
+members: ["analyst1", "analyst2"]     # Redundant index (accounts are source of truth)
+```
+
+```yaml
+# config/auth/api-keys/ci-deploy.yaml
+enabled: true
+short_token: "8a3f2c91"
+key_hash: "sha256:e3b0c442..."
+groups: ["infra-ops"]
+created_at: "2026-03-31T02:00:00Z"
+description: "CI/CD pipeline deployer"
+```
+
+Account filename = username (e.g. `analyst1.yaml`). Group filename = group name.
+API key filename = account name. The filename IS the identity — never stored
+inside the YAML (avoids the DirectoryConfigStore YAML 1.1 gotcha with identity
+fields becoming booleans).
+
+### 9.3 Store Modules
+
+```
+src/dfe_engine/auth/
+    accounts.py      # AccountStore: CRUD for local user accounts
+    groups.py        # GroupStore: CRUD for groups (group -> roles)
+    api_keys.py      # APIKeyStore: CRUD for API keys
+    local_provider.py  # Refactored: uses AccountStore + GroupStore
+    engine.py        # Refactored: loads roles from roles.yaml
+    models.py        # AuthContext, AuthzResult, etc.
+```
+
+**AccountStore API:**
+
+```python
+class AccountStore:
+    def __init__(self, config_dir: Path):
+        """Load accounts from config/auth/accounts/ via DirectoryConfigStore."""
+
+    def create(self, username: str, password: str,
+               groups: list[str] | None = None) -> Account:
+        """Create account with bcrypt-hashed password. Raises if exists."""
+
+    def get(self, username: str) -> Account | None:
+        """Get account by username (filename lookup)."""
+
+    def list(self) -> list[Account]:
+        """List all accounts (password hashes excluded from response)."""
+
+    def update(self, username: str, **fields) -> Account:
+        """Update account fields (groups, enabled)."""
+
+    def reset_password(self, username: str, new_password: str) -> None:
+        """Replace password hash."""
+
+    def delete(self, username: str) -> None:
+        """Delete account file."""
+
+    def verify_password(self, username: str, password: str) -> bool:
+        """bcrypt verify submitted password against stored hash."""
+
+    def resolve_roles(self, username: str, group_store: GroupStore) -> list[str]:
+        """Resolve roles: account -> groups -> roles from group definitions."""
+```
+
+**GroupStore API:**
+
+```python
+class GroupStore:
+    def __init__(self, config_dir: Path):
+        """Load groups from config/auth/groups/ via DirectoryConfigStore."""
+
+    def create(self, name: str, roles: list[str],
+               description: str = "") -> Group:
+        """Create group. Raises if exists."""
+
+    def get(self, name: str) -> Group | None
+    def list(self) -> list[Group]
+    def update(self, name: str, **fields) -> Group
+    def delete(self, name: str) -> None
+
+    def add_member(self, group_name: str, username: str) -> None:
+        """Add user to group (updates both group and account files)."""
+
+    def remove_member(self, group_name: str, username: str) -> None:
+        """Remove user from group."""
+```
+
+**APIKeyStore API:**
+
+```python
+class APIKeyStore:
+    def __init__(self, config_dir: Path):
+        """Load API keys from config/auth/api-keys/ via DirectoryConfigStore."""
+
+    def create(self, name: str, groups: list[str] | None = None,
+               description: str = "") -> tuple[APIKey, str]:
+        """Create API key. Returns (metadata, full_key_shown_once)."""
+
+    def verify(self, submitted_key: str) -> APIKey | None:
+        """Parse prefix+short_token, SHA-256 verify long token."""
+
+    def list(self) -> list[APIKey]:
+        """List all keys (hashes excluded, short tokens included)."""
+
+    def revoke(self, short_token: str) -> None:
+        """Delete API key file."""
+```
+
+### 9.4 REST API
+
+```
+POST   /api/v1/auth/accounts                 # Create account
+GET    /api/v1/auth/accounts                 # List accounts (no hashes)
+GET    /api/v1/auth/accounts/{username}      # Get account detail
+PUT    /api/v1/auth/accounts/{username}      # Update (groups, enabled)
+POST   /api/v1/auth/accounts/{username}/reset-password  # Reset password
+DELETE /api/v1/auth/accounts/{username}      # Delete account
+
+POST   /api/v1/auth/groups                   # Create group
+GET    /api/v1/auth/groups                   # List groups
+GET    /api/v1/auth/groups/{name}            # Get group detail + members
+PUT    /api/v1/auth/groups/{name}            # Update (roles, description)
+POST   /api/v1/auth/groups/{name}/members    # Add member
+DELETE /api/v1/auth/groups/{name}/members/{username}  # Remove member
+DELETE /api/v1/auth/groups/{name}            # Delete group
+
+POST   /api/v1/auth/api-keys                # Create key (returns full key ONCE)
+GET    /api/v1/auth/api-keys                 # List keys (short tokens only)
+DELETE /api/v1/auth/api-keys/{short_token}   # Revoke key
+```
+
+All endpoints require `admin` role (or `org:write` for org-scoped operations).
+Password hashes and API key hashes are NEVER returned in API responses.
+
+### 9.5 CLI Commands
+
+The `dfe-api` entry point extends with account/group/key management:
+
+```bash
+# Account management
+dfe-api accounts create analyst1 --groups soc-analysts
+  # Prompts for password (or --generate-password for random)
+  # Writes config/auth/accounts/analyst1.yaml
+
+dfe-api accounts list
+dfe-api accounts show analyst1
+dfe-api accounts disable analyst1
+dfe-api accounts enable analyst1
+dfe-api accounts reset-password analyst1
+  # Prompts for new password
+dfe-api accounts delete analyst1
+
+# Group management
+dfe-api groups create soc-analysts --roles data_analyst
+dfe-api groups list
+dfe-api groups show soc-analysts
+dfe-api groups add-member soc-analysts analyst1
+dfe-api groups remove-member soc-analysts analyst1
+dfe-api groups set-roles soc-analysts data_analyst data_analyst_viewer
+dfe-api groups delete soc-analysts
+
+# API key management
+dfe-api api-keys create ci-deploy --groups infra-ops --description "CI pipeline"
+  # Prints full key ONCE to stdout:
+  # API Key: dfe_ak_live_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f...
+  # Store this key securely — it cannot be retrieved again.
+
+dfe-api api-keys list
+dfe-api api-keys revoke 8a3f2c91
+```
+
+The CLI reads/writes the same YAML files as the API. Both use `AccountStore`,
+`GroupStore`, `APIKeyStore` underneath. CLI is for operators; API is for the UI.
+
+### 9.6 Identity Resolution Chain
+
+```
+Authentication (who are you?)
+    OIDC: X-Oidc-Subject header -> user_id
+    API key: X-API-Key header -> APIKeyStore.verify() -> account name
+    JWT: Bearer token -> decode -> user_id from "sub" claim
+    Login: POST /auth/login -> AccountStore.verify_password() -> JWT issued
+        |
+        v
+Group resolution (what groups?)
+    OIDC: X-Oidc-Groups header -> group names (from IdP)
+    Local: AccountStore.get(username).groups -> group names (from YAML)
+    API key: APIKeyStore.get(name).groups -> group names (from YAML)
+        |
+        v
+Role resolution (what roles?)
+    GroupStore.get(group_name).roles -> DFE role names
+    Union of all roles from all groups
+        |
+        v
+Permission check (can you do this?)
+    roles.yaml: role -> permissions list
+    authorize(auth, action) -> permission_matches() with wildcards
+```
+
+OIDC groups and local groups are unified — an OIDC group name that matches
+a group file in `config/auth/groups/` inherits that group's roles. This means
+the same `groups.yaml` files serve both OIDC and local auth paths.
+
+### 9.7 Bootstrap Defaults
+
+On first startup (empty `config/auth/` directory), dfe-engine seeds:
+
+**Accounts:** `admin` (password from `DFE_ADMIN_PASSWORD` env var or "changeme")
+
+**Groups:**
+- `dfe-admins` -> roles: [admin]
+- `dfe-analysts` -> roles: [data_analyst]
+- `dfe-viewers` -> roles: [data_viewer]
+- `dfe-infra` -> roles: [infra_admin]
+
+**Assignments:** `admin` account added to `dfe-admins` group.
+
+Startup logs a warning if any account uses the default "changeme" password.
+
+---
+
+## 10. New Modules
 
 | Module | Purpose |
 |--------|---------|
+| `auth/accounts.py` | AccountStore: CRUD for local user accounts (bcrypt) |
+| `auth/groups.py` | GroupStore: CRUD for groups (group -> roles mapping) |
+| `auth/api_keys.py` | APIKeyStore: CRUD for API keys (SHA-256 hashes) |
 | `connections/` | ConnectionRegistry, TenantScopedClient, CH reconciliation |
 | `hyperdx/` | HyperDXClient for team/connection/source sync |
 | `orgs/` | OrgRegistry, org CRUD with HyperDX lifecycle hooks |
@@ -715,24 +989,30 @@ config/
 
 | Module | Change |
 |--------|--------|
-| `auth/engine.py` | Load roles from YAML, wildcard permission matching |
+| `auth/engine.py` | Load roles from YAML, wildcard permission matching, remove `DEFAULT_ROLE_PERMISSIONS` |
 | `auth/models.py` | Add `org_ids`, `connection_id`; remove `permissions` |
-| `auth/local_provider.py` | Config-driven accounts, role resolution via assignments.yaml |
+| `auth/local_provider.py` | Rewrite: uses AccountStore + GroupStore for auth |
 | `api/deps.py` | OIDC header + API key auth paths, `require_service_action()` |
-| `services/registry.py` | Deprecate typed plugins, schema-less by default |
-| `settings.py` | RBAC config paths, HyperDX settings; remove inline role_permissions/group_role_mapping |
+| `api/v1/auth.py` | Account/group/API key CRUD endpoints |
+| `api/__init__.py` | CLI: `dfe-api accounts`, `groups`, `api-keys` subcommands |
+| `services/registry.py` | Remove typed plugins, schema-less only |
+| `settings.py` | Auth config paths; remove `role_permissions`, `group_role_mapping` |
 
 ---
 
 ## 10. Migration Path
 
-### Phase 1: RBAC Foundation
-- Replace `DEFAULT_ROLE_PERMISSIONS` with YAML-based role definitions
-- Replace hardcoded `LocalAuthProvider.ACCOUNTS` with config-driven accounts
+### Phase 1: RBAC Foundation + Account CRUD
+- `AccountStore`, `GroupStore`, `APIKeyStore` (YAML-backed via DirectoryConfigStore)
+- REST API for account/group/API key CRUD
+- CLI: `dfe-api accounts`, `groups`, `api-keys` subcommands
+- Rewrite `LocalAuthProvider` to use AccountStore + GroupStore
+- Replace `DEFAULT_ROLE_PERMISSIONS` with `roles.yaml`
 - Remove `AuthSettings.role_permissions` and `group_role_mapping` from settings.py
 - Remove `permissions` field from `AuthContext`
 - Add OIDC header + API key auth paths to `get_current_user()`
 - Wildcard permission matching in `authorize()`
+- Bootstrap defaults seeded on first run
 - Audit logging on all auth decisions
 
 ### Phase 2: Connection Registry
@@ -800,7 +1080,7 @@ DFE 2.2 is pre-GA. These are intentional breaking changes, not regressions.
 | **Auth model** | `AuthContext.permissions` field | Removed | Permissions resolved from roles at auth time, not stored |
 | **Role names** | `admin`, `infra_admin`, `operator`, `viewer` | `admin`, `data_analyst`, `data_analyst_viewer`, `data_viewer`, `infra_admin`, `infra_viewer`, `customer_viewer` | Old roles gone. New roles in `roles.yaml`. |
 | **Role storage** | `DEFAULT_ROLE_PERMISSIONS` constant in code | `config/rbac/roles.yaml` | Hardcoded constant removed |
-| **Account storage** | 3 hardcoded accounts in `LocalAuthProvider.ACCOUNTS` | `config/rbac/local_accounts.yaml` | Hardcoded dict removed |
+| **Account storage** | 3 hardcoded accounts in `LocalAuthProvider.ACCOUNTS` | `config/auth/accounts/*.yaml` (CRUD via API + CLI) | Hardcoded dict removed. AccountStore with full CRUD. |
 | **Group mapping** | `AuthSettings.group_role_mapping` in settings.py | `config/rbac/assignments.yaml` | Settings field removed |
 | **Auth paths** | JWT Bearer only | OIDC headers + API key + JWT Bearer | New paths additive, JWT unchanged |
 | **CH connections** | Single global client | `ConnectionRegistry` (multi-client, tenant-scoped) | New module, old `clickhouse/` module refactored |
