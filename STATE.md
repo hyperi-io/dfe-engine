@@ -42,6 +42,18 @@ for ClickHouse, sandbox endpoints for notifications).
 
 ---
 
+## Product Principle: Generic, Not HyperI-Specific
+
+**dfe-engine is a product, not an internal tool.** All code must be generic and
+deployment-agnostic. HyperI is ONE deployment of DFE — never hardcode HyperI
+domains, tenant IDs, infrastructure endpoints, or provider-specific assumptions.
+
+- **dfe-engine** = generic product code. Config cascade handles deployment specifics.
+- **`/projects/hyperi-infra`** = HyperI's specific IaC deployment. Test WITH it, never code FOR it.
+- OIDC providers, ClickHouse, HyperDX, Envoy — all config-driven, zero hardcoded values.
+
+---
+
 ## Project Overview
 
 ### Architecture
