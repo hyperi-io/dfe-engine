@@ -369,6 +369,23 @@ class AuthSettings(BaseModel):
     )
 
 
+class HyperDXSettings(BaseModel):
+    """HyperDX integration settings.
+
+    Environment variables:
+    - DFE_HYPERDX_BASE_URL -> hyperdx.base_url
+    - DFE_HYPERDX_ENABLED -> hyperdx.enabled
+    - DFE_HYPERDX_API_KEY_ENV -> hyperdx.api_key_env
+    """
+
+    base_url: str = Field(default="", description="HyperDX API base URL")
+    api_key_env: str = Field(
+        default="DFE_HYPERDX_API_KEY",
+        description="Env var for HyperDX API key",
+    )
+    enabled: bool = Field(default=False, description="Enable HyperDX integration")
+
+
 class APISettings(BaseModel):
     """API server settings.
 
@@ -419,6 +436,7 @@ class DFESettings(BaseModel):
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
+    hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
     api: APISettings = Field(default_factory=APISettings)
 
 
@@ -450,6 +468,7 @@ def _get_env_overrides() -> dict:
         "deployment": {},
         "helm": {},
         "auth": {},
+        "hyperdx": {},
         "api": {},
     }
 
@@ -624,6 +643,14 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
+
+    # HyperDX settings
+    if val := _get_env("DFE_HYPERDX_BASE_URL"):
+        overrides["hyperdx"]["base_url"] = val
+    if val := _get_env("DFE_HYPERDX_ENABLED"):
+        overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
+        overrides["hyperdx"]["api_key_env"] = val
 
     # API settings
     if val := _get_env("DFE_API_HOST"):

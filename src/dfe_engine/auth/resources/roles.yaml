@@ -23,6 +23,7 @@ roles:
       - "fieldmap:read"
       - "alert:read"
       - "schema:read"
+      - "org:read"
   data_viewer:
     description: "HyperDX dashboards and query execution"
     permissions:

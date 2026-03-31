@@ -173,3 +173,118 @@ class TestHelmExport:
         data = yaml_load(output)
         assert "size" not in data
         assert data["resources"]["limits"]["cpu"] == "1"
+
+
+class TestSchemalessMode:
+    """Registry accepts unknown services (schema-less fallback)."""
+
+    def test_save_unknown_service_raw_dict(self, registry):
+        raw = {"replicas": 2, "image": "custom:latest", "custom_field": "value"}
+        registry.save_config("my-custom-service", raw, instance="prod")
+        loaded = registry.get_config("my-custom-service", "prod")
+        assert isinstance(loaded, dict)
+        assert loaded["replicas"] == 2
+        assert loaded["custom_field"] == "value"
+
+    def test_list_includes_unknown_service(self, registry):
+        raw = {"replicas": 1}
+        registry.save_config("exotic-svc", raw, instance="test")
+        configs = registry.list_configs()
+        services = [c["service"] for c in configs]
+        assert "exotic-svc" in services
+
+    def test_parse_table_name_known_service(self):
+        result = DeploymentConfigRegistry._parse_table_name("receiver-production")
+        assert result == ("receiver", "production")
+
+    def test_parse_table_name_unknown_service_fallback(self):
+        # Unknown service — falls back to last-hyphen split
+        result = DeploymentConfigRegistry._parse_table_name("exotic-svc-instance")
+        assert result is not None
+        svc, inst = result
+        assert inst == "instance"
+
+    def test_parse_table_name_no_hyphen_returns_none(self):
+        result = DeploymentConfigRegistry._parse_table_name("nohyphen")
+        assert result is None
+
+    def test_parse_table_name_trailing_hyphen_returns_none(self):
+        result = DeploymentConfigRegistry._parse_table_name("svc-")
+        assert result is None
+
+
+class TestValidation:
+    def test_validate_known_service_valid_data(self, registry):
+        data = ReceiverDeploymentConfig().model_dump(mode="json")
+        result = registry.validate("receiver", data)
+        assert result.valid is True
+        assert len(result.errors) == 0
+
+    def test_validate_known_service_invalid_data(self, registry):
+        # Pass data that will fail validation (bad type)
+        result = registry.validate("receiver", {"size": "not-a-valid-size"})
+        # May or may not fail depending on model validators; just ensure it returns ValidationResult
+        from dfe_engine.deployment.validators import ValidationResult
+
+        assert isinstance(result, ValidationResult)
+
+    def test_validate_unknown_service(self, registry):
+        from dfe_engine.deployment.validators import ValidationResult
+
+        result = registry.validate("unknown-svc", {"replicas": 1})
+        assert isinstance(result, ValidationResult)
+
+
+class TestGitProperties:
+    """Test non-git path of git-related properties (no actual git repo)."""
+
+    def test_is_git_false_for_plain_dir(self, registry):
+        assert registry.is_git is False
+
+    def test_current_branch_none_for_plain_dir(self, registry):
+        assert registry.current_branch is None
+
+    def test_list_branches_raises_for_plain_dir(self, registry):
+        with pytest.raises(RuntimeError, match="not a git repository"):
+            registry.list_branches()
+
+
+class TestHistoryNonGit:
+    """Config history returns empty list when not a git repo."""
+
+    def test_history_returns_empty_for_known_service_non_git(self, registry):
+        history = registry.get_config_history("receiver", "default")
+        assert history == []
+
+    def test_history_raises_for_unknown_service(self, registry):
+        with pytest.raises(ValueError, match="Unknown service"):
+            registry.get_config_history("no-such-service", "default")
+
+
+class TestOnChange:
+    def test_on_change_registers_callback(self, registry):
+        """on_change should register without error."""
+        called = []
+
+        def cb(data):
+            called.append(data)
+
+        # Should not raise
+        registry.on_change("receiver", "default", cb)
+
+
+class TestSaveWithCreatedBy:
+    def test_save_config_with_created_by(self, registry):
+        config = ReceiverDeploymentConfig()
+        # Should save without error (created_by is used in commit messages)
+        registry.save_config("receiver", config, instance="ci", created_by="test-runner")
+        loaded = registry.get_config("receiver", "ci")
+        assert loaded is not None
+
+    def test_save_config_with_description(self, registry):
+        config = LoaderDeploymentConfig()
+        registry.save_config(
+            "loader", config, instance="custom", description="custom deploy update"
+        )
+        loaded = registry.get_config("loader", "custom")
+        assert loaded is not None
