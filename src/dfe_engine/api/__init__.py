@@ -39,6 +39,11 @@ class _DfeApiApp:
                     v = "dev"
                 return VersionInfo(self.name, v)
 
+            def register_commands(self, app) -> None:
+                from dfe_engine.cli import register_auth_commands
+
+                register_auth_commands(app)
+
             def run_service(self, config) -> None:
                 # Delegate to async
                 pass
