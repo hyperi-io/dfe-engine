@@ -29,10 +29,13 @@ class AuthContext(BaseModel):
     and cannot be overridden by clients.
     """
 
-    org_id: str = Field(..., description="Tenant organization ID")
+    org_id: str = Field(default="default", description="Primary tenant org ID")
     user_id: str = Field(..., description="User ID")
     roles: list[str] = Field(default_factory=list)
-    permissions: list[str] = Field(default_factory=list)
+    org_ids: list[str] = Field(
+        default_factory=list, description="Org IDs for customer-scoped roles"
+    )
+    connection_id: str = Field(default="", description="Resolved CH connection name")
     groups: list[str] = Field(default_factory=list, description="OIDC groups (Entra ID, Okta)")
     request_id: str | None = None
     client_ip: str | None = None

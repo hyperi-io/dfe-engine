@@ -1,28 +1,30 @@
+#  Project:      dfe-engine
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
 """DFE authorization module.
 
-Bespoke role→permission RBAC. Zero external dependencies.
+Bespoke role->permission RBAC backed by YAML role definitions.
 
 Usage:
     from dfe_engine.auth import authorize, AuthContext
 
-    # Dev/test (auth disabled) — always allowed:
+    # Dev/test (auth disabled) -- always allowed:
     result = authorize(None, "config:read")
 
     # Production (auth enabled):
-    auth = AuthContext(org_id="acme", user_id="alice", roles=["operator"])
+    auth = AuthContext(org_id="acme", user_id="alice", roles=["data_analyst"])
     result = authorize(auth, "config:write")
     if not result.allowed:
         raise AuthorizationError(result.reason)
 
 The authorize(auth, action, resource) signature maps 1:1 to the
 Cedar/OPAL model. If DFE outgrows bespoke RBAC, swap the engine
-implementation — callers don't change.
+implementation -- callers don't change.
 """
 
 from dfe_engine.auth.engine import (
-    ALL_ACTIONS,
     ARGO_ACTION_PREFIX,
-    DEFAULT_ROLE_PERMISSIONS,
     ENGINE_ACTIONS,
     authorize,
 )
@@ -34,11 +36,10 @@ from dfe_engine.auth.models import (
     AuthzRequest,
     AuthzResult,
 )
+from dfe_engine.auth.roles import RoleConfig, RoleDefinition
 
 __all__ = [
-    "ALL_ACTIONS",
     "ARGO_ACTION_PREFIX",
-    "DEFAULT_ROLE_PERMISSIONS",
     "ENGINE_ACTIONS",
     "AuthContext",
     "AuthenticationError",
@@ -46,5 +47,7 @@ __all__ = [
     "AuthzRequest",
     "AuthzResult",
     "LocalAuthProvider",
+    "RoleConfig",
+    "RoleDefinition",
     "authorize",
 ]
