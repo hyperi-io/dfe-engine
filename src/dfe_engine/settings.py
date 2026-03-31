@@ -349,33 +349,6 @@ class HelmSettings(BaseModel):
     environment_file: str = Field(default="", description="Path to environment config YAML")
 
 
-class LocalAuthSettings(BaseModel):
-    """Local authentication for simple deploy + break-glass admin.
-
-    Three fixed accounts (admin, operator, viewer) configured via env vars.
-    Passwords support both plaintext (dev) and pre-hashed bcrypt (production).
-
-    Environment variables:
-    - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
-    - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
-    - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
-    - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
-    - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
-    """
-
-    enabled: bool = Field(default=True, description="Enable local authentication")
-    admin_password: str = Field(
-        default="changeme", description="Admin account password or bcrypt hash"
-    )
-    operator_password: str = Field(
-        default="changeme", description="Operator account password or bcrypt hash"
-    )
-    viewer_password: str = Field(
-        default="changeme", description="Viewer account password or bcrypt hash"
-    )
-    org_id: str = Field(default="default", description="Organisation ID for local accounts")
-
-
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -394,7 +367,6 @@ class AuthSettings(BaseModel):
         default="",
         description="Auth config directory (accounts, groups, api-keys)",
     )
-    local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
 
 class APISettings(BaseModel):
