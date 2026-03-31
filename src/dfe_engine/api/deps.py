@@ -1,8 +1,12 @@
 """Shared FastAPI dependencies for DFE Engine API.
 
 Registry singletons are initialized in the lifespan handler and resolved
-per-request via ``Depends()``.  Authentication extracts a JWT Bearer token
-and returns ``AuthContext`` — the engine's canonical identity model.
+per-request via ``Depends()``.  Authentication checks four paths in order:
+
+1. OIDC headers (X-Oidc-Subject) — production, Envoy Gateway fronted
+2. API key (X-API-Key) — machine-to-machine
+3. JWT Bearer — standalone/Docker users
+4. Auth disabled — dev/test default, root context
 """
 
 from __future__ import annotations
@@ -11,8 +15,11 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
+from hyperi_pylib.logger import logger
 
 from dfe_engine.auth import AuthContext, AuthorizationError, authorize
+from dfe_engine.auth.api_keys import APIKeyStore
+from dfe_engine.auth.groups import GroupStore
 from dfe_engine.settings import DFESettings
 
 # ── Settings ──────────────────────────────────────────────────
@@ -166,49 +173,129 @@ def _get_client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+def _resolve_roles_from_groups(
+    groups: list[str],
+    group_store: GroupStore,
+) -> tuple[list[str], list[str]]:
+    """Resolve roles and org_ids from a list of group names.
+
+    Looks up each group in the GroupStore and collects its roles.
+    Unknown groups are silently skipped (no error — the user just gets
+    fewer roles).
+
+    Returns:
+        Tuple of (sorted unique roles, org_ids).  org_ids is currently
+        always empty — reserved for future multi-tenant scoping.
+    """
+    roles: set[str] = set()
+    for group_name in groups:
+        group = group_store.get(group_name)
+        if group is not None:
+            roles.update(group.roles)
+    return sorted(roles), []
+
+
 async def get_current_user(request: Request) -> AuthContext:
-    """Extract and validate JWT Bearer token, returning AuthContext.
+    """Authenticate the request via one of four paths (checked in order).
+
+    1. OIDC headers (X-Oidc-Subject) — set by Envoy Gateway
+    2. API key (X-API-Key) — machine-to-machine
+    3. JWT Bearer token — standalone/Docker users
+    4. Auth disabled — dev/test root context
 
     When ``auth.enabled=False`` (dev/test default), returns a root AuthContext
-    that bypasses authorization.
+    that bypasses authorization if no credentials are provided.
     """
     settings: DFESettings = request.app.state.settings
+    request_id = request.headers.get("X-Request-ID")
+    client_ip = _get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
 
+    # ── Path 1: OIDC headers (Envoy Gateway) ────────────────────
+    oidc_subject = request.headers.get("X-Oidc-Subject")
+    if oidc_subject:
+        group_store: GroupStore = request.app.state.group_store
+        raw_groups = request.headers.get("X-Oidc-Groups", "")
+        groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
+        roles, org_ids = _resolve_roles_from_groups(groups, group_store)
+        logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
+        return AuthContext(
+            user_id=oidc_subject,
+            roles=roles,
+            groups=groups,
+            org_ids=org_ids,
+            request_id=request_id,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+
+    # ── Path 2: API key ─────────────────────────────────────────
+    api_key_header = request.headers.get("X-API-Key")
+    if api_key_header:
+        api_key_store: APIKeyStore = request.app.state.api_key_store
+        key_meta = api_key_store.verify(api_key_header)
+        if key_meta is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "unauthorized", "message": "Invalid API key"},
+            )
+        group_store = request.app.state.group_store
+        roles, org_ids = _resolve_roles_from_groups(key_meta.groups, group_store)
+        logger.debug(
+            "API key auth",
+            key_name=key_meta.name,
+            groups=key_meta.groups,
+            roles=roles,
+        )
+        return AuthContext(
+            user_id=f"apikey:{key_meta.name}",
+            roles=roles,
+            groups=key_meta.groups,
+            org_ids=org_ids,
+            request_id=request_id,
+            client_ip=client_ip,
+            user_agent=user_agent,
+        )
+
+    # ── Path 3: JWT Bearer token ────────────────────────────────
     auth_header = request.headers.get("Authorization")
-    if not auth_header or not auth_header.startswith("Bearer "):
-        if not settings.auth.enabled:
-            return AuthContext(org_id="default", user_id="dev", roles=["admin"])
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": "Authorization header required"},
-            headers={"WWW-Authenticate": "Bearer"},
+    if auth_header and auth_header.startswith("Bearer "):
+        token = auth_header[7:]
+
+        import jwt
+        from jwt.exceptions import InvalidTokenError
+
+        try:
+            payload = jwt.decode(
+                token,
+                settings.api.jwt_secret,
+                algorithms=[settings.api.jwt_algorithm],
+            )
+        except InvalidTokenError as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "unauthorized", "message": f"Invalid token: {e}"},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        return AuthContext(
+            org_id=payload.get("org_id", "default"),
+            user_id=payload.get("sub", ""),
+            roles=payload.get("roles", []),
+            org_ids=payload.get("org_ids", []),
+            request_id=request_id,
+            client_ip=client_ip,
+            user_agent=user_agent,
         )
 
-    token = auth_header[7:]
+    # ── Path 4: Auth disabled (dev/test) ────────────────────────
+    if not settings.auth.enabled:
+        return AuthContext(org_id="default", user_id="dev", roles=["admin"])
 
-    import jwt
-    from jwt.exceptions import InvalidTokenError
-
-    try:
-        payload = jwt.decode(
-            token,
-            settings.api.jwt_secret,
-            algorithms=[settings.api.jwt_algorithm],
-        )
-    except InvalidTokenError as e:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"code": "unauthorized", "message": f"Invalid token: {e}"},
-            headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    return AuthContext(
-        org_id=payload.get("org_id", "default"),
-        user_id=payload.get("sub", ""),
-        roles=payload.get("roles", []),
-        request_id=request.headers.get("X-Request-ID"),
-        client_ip=_get_client_ip(request),
-        user_agent=request.headers.get("User-Agent"),
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"code": "unauthorized", "message": "Authentication required"},
+        headers={"WWW-Authenticate": "Bearer"},
     )
 
 
