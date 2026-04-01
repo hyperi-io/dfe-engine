@@ -53,6 +53,9 @@ dependencies = [
     # chain introduces a critical CVE. Accepted risk — dfe-engine never imports diskcache
     # directly, cache dir has 0700 perms, and K8s pods provide filesystem isolation.
     "diskcache>=5.6.3",
+    "msal>=1.32.0",
+    "google-auth>=2.38.0",
+    "google-api-python-client>=2.170.0",
 ]
 
 [project.urls]
