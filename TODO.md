@@ -6,9 +6,36 @@ This is the **single source of truth** for all tasks and progress.
 
 ## Active Tasks
 
-- [ ] Phase 3: Operational API routers `[PENDING]`
+### RBAC Phase 1-4 (PR #16 — feat/rbac-phase1)
+
+- [x] Phase 1: RBAC Foundation + Account CRUD (RoleConfig, stores, 4 auth paths, audit)
+- [x] Phase 2: Connection Registry (multi-tenant CH, custom settings pattern)
+- [x] Phase 3: Org Lifecycle + HyperDX (OrgRegistry, HyperDXClient)
+- [x] Phase 4: Schema-Less Service Discovery (SurfaceRegistry)
+- [x] Coverage push to 80.01% (2625 tests)
+
+### OIDC Provider Registry (Phase 1.5 — feat/rbac-phase1) `[IN PROGRESS]`
+
+- [x] Models: OIDCProvider, GroupInfo, GroupResolutionConfig
+- [x] OIDCProviderRegistry (YAML-backed CRUD)
+- [x] OIDCGroupAdapter ABC + GenericAdapter
+- [x] source_provider field on Group model
+- [ ] Entra ID adapter (Graph API) — URGENT, tenant available ~1 month
+  - Next: implement EntraAdapter with MSAL client credentials
+- [ ] Google adapter (Admin SDK)
+- [ ] Okta adapter (stub)
+- [ ] Group sync runner
+- [ ] REST API + CLI for provider CRUD
+- [ ] Control plane independence tests (CRITICAL)
+- [ ] Final integration + push
+
+### Pending
+
+- [ ] CLI-API alignment: decide whether CLI calls stores directly or HTTP API
+  - Current: CLI calls stores directly (works offline)
+  - Future: CLI as HTTP client for remote operations
+- [ ] Phase 3: Operational API routers (hunts, queries, tasks, pipeline)
 - [ ] CI/CD: verify container + helm publish pipeline triggers correctly on next release
-- [ ] Standardise test infrastructure: dual-mode (remote devex + docker-local via dfe-docker infra profile). See `~/DFE-TEST-INFRA-PROMPT.md`
 
 ---
 
@@ -46,7 +73,7 @@ This is the **single source of truth** for all tasks and progress.
 - [ ] **No-mock remediation** — migrate test suite from `unittest.mock` to real dependencies (testcontainers for ClickHouse, sandbox endpoints for apprise). See `STATE.md` for affected files. Do not add new mocks.
 - [ ] Alert grouping integration tests — verify against real ClickHouse (DevEx cluster)
 - [ ] `dfe-loader` transforms — replace hardcoded condition evaluation with rustlib CEL
-- [ ] Config repo decision: mono-repo vs separate repo for infra (TF/Helm/Argo)
+- [ ] Standardise test infrastructure: dual-mode (remote devex + docker-local via dfe-docker infra profile). See `~/DFE-TEST-INFRA-PROMPT.md`
 
 ### Medium Priority
 
@@ -61,7 +88,6 @@ This is the **single source of truth** for all tasks and progress.
 
 - [ ] **WASM transform module versioning** — registry, S3 storage, deploy/rollback API. Moved from dfe-transform-wasm Phase 7.4. See `docs/superpowers/specs/2026-03-19-wasm-module-versioning-wbs.md` for full WBS.
 - [ ] Deploy HyperDX (ClickStack) as observability UI
-- [ ] Implement HyperDX OIDC middleware (docs/oauth2/HYPERDX-MIDDLEWARE.md)
 - [ ] Deploy Envoy Gateway with native OIDC (replaces nginx-ingress + oauth2-proxy)
 - [ ] OTEL metrics in Rust services (replace Prometheus)
 - [ ] Integration tests using DevEx cluster (k8s-{1,2,3}.devex.hyperi.io)
@@ -69,6 +95,14 @@ This is the **single source of truth** for all tasks and progress.
 - [ ] Increase test coverage to 90%+
 
 ---
+
+## Design Docs
+
+- `docs/RBAC.md` — RBAC, multi-tenant CH, auth, service discovery
+- `docs/OIDC-PROVIDERS.md` — OIDC provider registry spec
+- `docs/OIDC-INFRA-REQUIREMENTS.md` — what dfe-infra must provide for OIDC
+- `docs/dfe-infra.md` — infrastructure research summary
+- `docs/stack-research.md` — DFE 2.2 stack decisions
 
 ## Notes for AI Assistants
 
@@ -82,4 +116,4 @@ This file is the **single source of truth** for tasks and progress.
 - Never add tasks to STATE.md or CLAUDE.md
 
 **Project context:** See `STATE.md` for architecture and key decisions.
-**Test run:** `python -m pytest -q` — uses `~/.venv` (Python 3.12, managed by `uv`)
+**Test run:** `uv run pytest` — uses project `.venv` (Python 3.12, managed by `uv`)
