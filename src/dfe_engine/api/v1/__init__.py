@@ -9,6 +9,7 @@ from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.auth import router as auth_router
 from dfe_engine.api.v1.deployments import router as deployments_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
+from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
@@ -25,6 +26,7 @@ _auth_sub = APIRouter(prefix="/auth")
 _auth_sub.include_router(accounts_router)
 _auth_sub.include_router(account_groups_router)
 _auth_sub.include_router(api_keys_router)
+_auth_sub.include_router(oidc_providers_router)
 v1_router.include_router(_auth_sub)
 
 v1_router.include_router(orgs_router)
