@@ -61,6 +61,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # Bootstrap OIDC provider registry
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    oidc_dir = auth_dir / "oidc-providers"
+    oidc_dir.mkdir(parents=True, exist_ok=True)
+    app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
+
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader
     from dfe_engine.connections.registry import ConnectionRegistry

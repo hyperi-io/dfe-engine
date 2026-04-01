@@ -378,6 +378,242 @@ def api_keys_revoke(
     print_success(f"API key '{short_token}' revoked")
 
 
+# ---------------------------------------------------------------------------
+# oidc-providers subcommands
+# ---------------------------------------------------------------------------
+
+oidc_providers_app = Typer(help="Manage OIDC providers.")
+
+
+def _get_oidc_registry():
+    """Initialise OIDC provider registry from the configured directory."""
+    from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+
+    config_dir = os.environ.get("DFE_CONFIG_DIR", "./config")
+    auth_dir = os.environ.get("DFE_AUTH_DIR", str(Path(config_dir) / "auth"))
+    oidc_dir = Path(auth_dir) / "oidc-providers"
+    oidc_dir.mkdir(parents=True, exist_ok=True)
+    return OIDCProviderRegistry(oidc_dir)
+
+
+@oidc_providers_app.command("create")
+def oidc_create(
+    name: str,
+    provider_type: Annotated[
+        str, typer.Option("--type", help="Provider type: generic, google, entra_id, okta.")
+    ] = "generic",
+    display_name: Annotated[str, typer.Option("--display-name", help="Human-readable label.")] = "",
+    issuer: Annotated[str, typer.Option("--issuer", help="OIDC issuer URL.")] = "",
+    client_id_env: Annotated[
+        str, typer.Option("--client-id-env", help="Env var name for OIDC client ID.")
+    ] = "",
+    mode: Annotated[
+        str, typer.Option("--mode", help="Group resolution mode: manual, token_claim, api.")
+    ] = "manual",
+) -> None:
+    """Create a new OIDC provider configuration."""
+    from datetime import UTC, datetime
+
+    from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
+
+    registry = _get_oidc_registry()
+    provider = OIDCProvider(
+        type=provider_type,
+        enabled=True,
+        display_name=display_name,
+        issuer=issuer,
+        client_id_env=client_id_env,
+        groups=GroupResolutionConfig(mode=mode),
+        created_at=datetime.now(UTC).isoformat(),
+    )
+    try:
+        registry.create(name, provider)
+    except ValueError as exc:
+        print_error(str(exc))
+        raise typer.Exit(1) from exc
+    print_success(f"OIDC provider '{name}' created")
+
+
+@oidc_providers_app.command("list")
+def oidc_list() -> None:
+    """List all OIDC providers."""
+    registry = _get_oidc_registry()
+    providers = registry.list()
+    if not providers:
+        print_info("No OIDC providers found")
+        return
+
+    data = [
+        {
+            "Name": name,
+            "Type": p.type,
+            "Enabled": "yes" if p.enabled else "no",
+            "Mode": p.groups.mode,
+            "Issuer": p.issuer or "-",
+            "Last Sync": p.last_sync_at[:19] if p.last_sync_at else "-",
+        }
+        for name, p in providers
+    ]
+    print_table(data, title="OIDC Providers")
+
+
+@oidc_providers_app.command("show")
+def oidc_show(name: str) -> None:
+    """Show details for an OIDC provider."""
+    registry = _get_oidc_registry()
+    provider = registry.get(name)
+    if provider is None:
+        print_error(f"OIDC provider '{name}' not found")
+        raise typer.Exit(1)
+
+    data = [
+        {"Field": "Type", "Value": provider.type},
+        {"Field": "Enabled", "Value": "yes" if provider.enabled else "no"},
+        {"Field": "Display Name", "Value": provider.display_name or "-"},
+        {"Field": "Issuer", "Value": provider.issuer or "-"},
+        {"Field": "Client ID Env", "Value": provider.client_id_env or "-"},
+        {"Field": "Group Mode", "Value": provider.groups.mode},
+        {"Field": "Sync Interval", "Value": str(provider.groups.sync_interval)},
+        {"Field": "Created", "Value": provider.created_at or "-"},
+        {"Field": "Last Sync", "Value": provider.last_sync_at or "-"},
+        {"Field": "Sync Status", "Value": provider.last_sync_status or "-"},
+    ]
+    if provider.sync_error:
+        data.append({"Field": "Sync Error", "Value": provider.sync_error})
+    print_table(data, title=f"OIDC Provider: {name}")
+
+
+@oidc_providers_app.command("test")
+def oidc_test(name: str) -> None:
+    """Test connectivity to an OIDC provider."""
+    import asyncio
+
+    from dfe_engine.auth.oidc.adapters import get_adapter
+
+    registry = _get_oidc_registry()
+    provider = registry.get(name)
+    if provider is None:
+        print_error(f"OIDC provider '{name}' not found")
+        raise typer.Exit(1)
+
+    adapter = get_adapter(provider)
+    success, message = asyncio.get_event_loop().run_until_complete(adapter.test_connection())
+    if success:
+        print_success(f"Connection test passed: {message}")
+    else:
+        print_error(f"Connection test failed: {message}")
+        raise typer.Exit(1)
+
+
+@oidc_providers_app.command("sync")
+def oidc_sync(name: str) -> None:
+    """Force group sync for an OIDC provider."""
+    import asyncio
+
+    from dfe_engine.auth.oidc.sync import sync_provider
+
+    registry = _get_oidc_registry()
+    if registry.get(name) is None:
+        print_error(f"OIDC provider '{name}' not found")
+        raise typer.Exit(1)
+
+    _, group_store, _ = _get_stores()
+    result = asyncio.get_event_loop().run_until_complete(sync_provider(name, registry, group_store))
+
+    if result.get("error"):
+        print_error(f"Sync failed: {result['error']}")
+        raise typer.Exit(1)
+    if result.get("skipped"):
+        print_warning(f"Sync skipped: {result['skipped']}")
+        return
+    print_success(
+        f"Sync complete: {result['created']} created, "
+        f"{result['updated']} updated, {result['total']} total"
+    )
+
+
+@oidc_providers_app.command("update")
+def oidc_update(
+    name: str,
+    enabled: Annotated[str | None, typer.Option("--enabled", help="true or false.")] = None,
+    mode: Annotated[str | None, typer.Option("--mode", help="Group resolution mode.")] = None,
+    sync_interval: Annotated[
+        int | None, typer.Option("--sync-interval", help="Seconds between syncs.")
+    ] = None,
+    display_name: Annotated[
+        str | None, typer.Option("--display-name", help="Human-readable label.")
+    ] = None,
+) -> None:
+    """Update an OIDC provider configuration."""
+    from dfe_engine.auth.oidc.models import GroupResolutionConfig
+
+    registry = _get_oidc_registry()
+    provider = registry.get(name)
+    if provider is None:
+        print_error(f"OIDC provider '{name}' not found")
+        raise typer.Exit(1)
+
+    update_fields: dict[str, object] = {}
+    if enabled is not None:
+        update_fields["enabled"] = enabled.lower() in ("true", "1", "yes")
+    if display_name is not None:
+        update_fields["display_name"] = display_name
+
+    # Update groups config if mode or sync_interval changed
+    if mode is not None or sync_interval is not None:
+        groups_data = provider.groups.model_dump()
+        if mode is not None:
+            groups_data["mode"] = mode
+        if sync_interval is not None:
+            groups_data["sync_interval"] = sync_interval
+        update_fields["groups"] = GroupResolutionConfig(**groups_data)
+
+    try:
+        registry.update(name, **update_fields)
+    except KeyError as exc:
+        print_error(str(exc))
+        raise typer.Exit(1) from exc
+    print_success(f"OIDC provider '{name}' updated")
+
+
+@oidc_providers_app.command("delete")
+def oidc_delete(
+    name: str,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation.")] = False,
+) -> None:
+    """Delete an OIDC provider and warn about orphaned groups."""
+    registry = _get_oidc_registry()
+    if registry.get(name) is None:
+        print_error(f"OIDC provider '{name}' not found")
+        raise typer.Exit(1)
+
+    # Check for orphaned groups
+    _, group_store, _ = _get_stores()
+    orphaned = [g for g in group_store.list() if g.source_provider == name]
+
+    if orphaned:
+        print_warning(f"The following {len(orphaned)} group(s) will be orphaned:")
+        data = [
+            {
+                "Name": g.name,
+                "Roles": ", ".join(g.roles) or "-",
+                "Members": str(len(g.members)),
+            }
+            for g in orphaned
+        ]
+        print_table(data, title="Orphaned Groups")
+
+    if not yes:
+        typer.confirm(f"Delete OIDC provider '{name}'?", abort=True)
+
+    try:
+        registry.delete(name)
+    except KeyError as exc:
+        print_error(str(exc))
+        raise typer.Exit(1) from exc
+    print_success(f"OIDC provider '{name}' deleted")
+
+
 def register_auth_commands(app: Typer) -> None:
     """Register auth subcommand groups on *app*.
 
@@ -386,3 +622,4 @@ def register_auth_commands(app: Typer) -> None:
     app.add_typer(accounts_app, name="accounts")
     app.add_typer(groups_app, name="groups")
     app.add_typer(api_keys_app, name="api-keys")
+    app.add_typer(oidc_providers_app, name="oidc-providers")
