@@ -213,7 +213,7 @@ All credential storage in env vars / K8s Secrets. Role assignments in YAML (`ass
 
 | Module | Status | Notes |
 | --- | --- | --- |
-| `api/` | Active | 29 OpenAPI paths, 104 API tests. Phase 3 (hunts, queries, tasks) remaining |
+| `api/` | Active | REST API with auth, CRUD, OIDC providers. Phase 3 (hunts, queries, tasks) remaining |
 | `source/` | Ready | TypeRegistry, Source, SourceRegistry, ExpressionValidator |
 | `schema/` | Ready | v2 YAML→DDL pipeline, DDLFileWriter, ViewGenerator |
 | `fieldmap/` | Ready | FieldMap model, registry, resolver, ViewGenerator |
@@ -227,9 +227,13 @@ All credential storage in env vars / K8s Secrets. Role assignments in YAML (`ass
 | `auth/` | Ready | Engine RBAC, open-ended argo: namespace, LocalAuthProvider |
 | `helm/` | Ready | Values compiler, ExternalComponent, Argo CD app/project CRDs, RBAC, OTEL |
 | `deployment/` | Ready | Pydantic models for K8s/KEDA, schema-less mode |
-| `settings.py` | Ready | Pydantic config cascade + deepmerge + APISettings + FieldMapSettings |
+| `settings.py` | Ready | Pydantic config cascade + APISettings + AuthSettings + OIDCSettings + HyperDXSettings |
 | `yaml_utils.py` | Ready | Consolidated YAML operations |
 | `storage/` | Ready | Local/HTTP/S3 storage backends (pylib HttpClient) |
+| `connections/` | Ready | ConnectionRegistry, TenantScopedClient, multi-tenant CH custom settings |
+| `orgs/` | Ready | OrgRegistry, org CRUD with HyperDX lifecycle hooks |
+| `hyperdx/` | Ready | HyperDXClient for team/connection sync (non-fatal) |
+| `auth/oidc/` | Ready | OIDCProviderRegistry, adapters (Generic, Entra, Google, Okta), group sync |
 
 ---
 
