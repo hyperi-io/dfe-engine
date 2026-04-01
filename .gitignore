@@ -79,3 +79,6 @@ docker-compose.yml
 
 # AI agent working files (not committed)
 docs/superpowers/
+
+# Runtime config directory (created by bootstrap)
+config/
