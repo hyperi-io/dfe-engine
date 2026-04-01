@@ -25,7 +25,6 @@ import pytest
 from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 from dfe_engine.auth.oidc.models import GroupResolutionConfig, OIDCProvider
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -35,7 +34,7 @@ def _make_provider(
     *,
     client_id_env: str = "ENTRA_CLIENT_ID",
     tenant_id_env: str = "ENTRA_TENANT_ID",
-    client_secret_env: str = "ENTRA_CLIENT_SECRET",
+    client_secret_env: str = "ENTRA_CLIENT_SECRET",  # noqa: S107 — env var name, not a secret
 ) -> OIDCProvider:
     """Return an Entra OIDCProvider with the given env var names."""
     return OIDCProvider(
