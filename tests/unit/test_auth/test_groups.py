@@ -270,3 +270,59 @@ class TestGroupStoreResolveRoles:
     def test_empty_store_returns_empty_list(self, tmp_path):
         store = GroupStore(tmp_path / "groups")
         assert store.resolve_roles_for_member("alice") == []
+
+
+class TestGroupSourceProvider:
+    def test_group_defaults_source_provider_empty(self):
+        g = Group(name="test")
+        assert g.source_provider == ""
+        assert g.source_id == ""
+
+    def test_group_with_source_provider(self):
+        g = Group(
+            name="engineering", source_provider="google-workspace", source_id="eng@example.com"
+        )
+        assert g.source_provider == "google-workspace"
+        assert g.source_id == "eng@example.com"
+
+    def test_source_provider_persists_through_create_get_cycle(self, tmp_path):
+        """source_provider and source_id survive a create/get round-trip."""
+        store = GroupStore(tmp_path / "groups")
+        store.create("engineering", roles=["operator"])
+        store.update("engineering", source_provider="google-workspace", source_id="grp-abc123")
+        group = store.get("engineering")
+        assert group is not None
+        assert group.source_provider == "google-workspace"
+        assert group.source_id == "grp-abc123"
+
+    def test_source_provider_persists_through_fresh_store_instance(self, tmp_path):
+        """source_provider survives across separate GroupStore instances (written to YAML)."""
+        groups_dir = tmp_path / "groups"
+        store1 = GroupStore(groups_dir)
+        store1.create("ops", roles=[])
+        store1.update("ops", source_provider="entra-id", source_id="obj-xyz")
+
+        store2 = GroupStore(groups_dir)
+        group = store2.get("ops")
+        assert group is not None
+        assert group.source_provider == "entra-id"
+        assert group.source_id == "obj-xyz"
+
+    def test_existing_groups_without_source_provider_still_load(self, tmp_path):
+        """Old YAML files without source_provider/source_id load with defaults."""
+        from dfe_engine.yaml_utils import yaml_dump
+
+        groups_dir = tmp_path / "groups"
+        groups_dir.mkdir()
+        # Write a YAML file that doesn't have source_provider (old format)
+        yaml_dump(
+            {"description": "legacy group", "roles": ["viewer"], "members": []},
+            groups_dir / "legacy.yaml",
+        )
+
+        store = GroupStore(groups_dir)
+        group = store.get("legacy")
+        assert group is not None
+        assert group.source_provider == ""
+        assert group.source_id == ""
+        assert group.roles == ["viewer"]

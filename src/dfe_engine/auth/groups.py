@@ -22,6 +22,10 @@ class Group(BaseModel):
     description: str = ""
     roles: list[str] = Field(default_factory=list)
     members: list[str] = Field(default_factory=list)
+    source_provider: str = ""
+    """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
+    source_id: str = ""
+    """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
 
 
 class GroupStore:
