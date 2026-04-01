@@ -14,19 +14,18 @@ This is the **single source of truth** for all tasks and progress.
 - [x] Phase 4: Schema-Less Service Discovery (SurfaceRegistry)
 - [x] Coverage push to 80.01% (2625 tests)
 
-### OIDC Provider Registry (Phase 1.5 — feat/rbac-phase1) `[IN PROGRESS]`
+### OIDC Provider Registry (Phase 1.5 — feat/rbac-phase1)
 
 - [x] Models: OIDCProvider, GroupInfo, GroupResolutionConfig
 - [x] OIDCProviderRegistry (YAML-backed CRUD)
 - [x] OIDCGroupAdapter ABC + GenericAdapter
 - [x] source_provider field on Group model
-- [ ] Entra ID adapter (Graph API) — URGENT, tenant available ~1 month
-  - Next: implement EntraAdapter with MSAL client credentials
-- [ ] Google adapter (Admin SDK)
-- [ ] Okta adapter (stub)
-- [ ] Group sync runner
-- [ ] REST API + CLI for provider CRUD
-- [ ] Control plane independence tests (CRITICAL)
+- [x] Entra ID adapter (Graph API, MSAL client credentials)
+- [x] Google adapter (Admin SDK, domain-wide delegation)
+- [x] Okta adapter (stub — Okta uses token_claim mode)
+- [x] Group sync runner (sync.py, async, upsert with role preservation)
+- [x] REST API for provider CRUD (7 endpoints, 162 tests passing)
+- [x] Control plane independence tests (529 lines)
 - [ ] Final integration + push
 
 ### Pending
