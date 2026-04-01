@@ -47,22 +47,16 @@ def get_adapter(provider: OIDCProvider) -> OIDCGroupAdapter:
 
             return GenericAdapter(provider)
         case "google":
-            from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
+            from dfe_engine.auth.oidc.adapters.google import GoogleAdapter
 
-            # Google adapter not yet implemented — fall back to generic
-            # TODO: implement GoogleAdapter when google-auth extras are added
-            return GenericAdapter(provider)
+            return GoogleAdapter(provider)
         case "entra_id":
-            from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
+            from dfe_engine.auth.oidc.adapters.entra import EntraAdapter
 
-            # Entra ID adapter not yet implemented — fall back to generic
-            # TODO: implement EntraIDAdapter when msal extras are added
-            return GenericAdapter(provider)
+            return EntraAdapter(provider)
         case "okta":
-            from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
+            from dfe_engine.auth.oidc.adapters.okta import OktaAdapter
 
-            # Okta adapter not yet implemented — fall back to generic
-            # TODO: implement OktaAdapter when okta extras are added
-            return GenericAdapter(provider)
+            return OktaAdapter(provider)
         case _:
             raise ValueError(f"Unsupported OIDC provider type: {provider.type!r}")
