@@ -349,6 +349,20 @@ class HelmSettings(BaseModel):
     environment_file: str = Field(default="", description="Path to environment config YAML")
 
 
+class OIDCSettings(BaseModel):
+    """OIDC provider settings.
+
+    Environment variables:
+    - DFE_AUTH_OIDC_PROVIDERS_DIR -> auth.oidc.providers_dir
+    - DFE_AUTH_OIDC_SYNC_ENABLED -> auth.oidc.sync_enabled
+    - DFE_AUTH_OIDC_SYNC_ON_STARTUP -> auth.oidc.sync_on_startup
+    """
+
+    providers_dir: str = Field(default="", description="OIDC provider config directory")
+    sync_enabled: bool = Field(default=True, description="Enable background group sync")
+    sync_on_startup: bool = Field(default=True, description="Sync on startup")
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -367,6 +381,7 @@ class AuthSettings(BaseModel):
         default="",
         description="Auth config directory (accounts, groups, api-keys)",
     )
+    oidc: OIDCSettings = Field(default_factory=OIDCSettings)
 
 
 class HyperDXSettings(BaseModel):
