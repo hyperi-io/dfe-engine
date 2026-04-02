@@ -33,7 +33,7 @@ This is the **single source of truth** for all tasks and progress.
 - [ ] CLI-API alignment: decide whether CLI calls stores directly or HTTP API
   - Current: CLI calls stores directly (works offline)
   - Future: CLI as HTTP client for remote operations
-- [ ] Phase 3: Operational API routers (hunts, queries, tasks, pipeline)
+- [x] Phase 3: Operational API routers (hunts, queries, tasks, pipeline)
 - [ ] CI/CD: verify container + helm publish pipeline triggers correctly on next release
 
 ---
@@ -44,12 +44,12 @@ This is the **single source of truth** for all tasks and progress.
 
 **Goal:** Complete REST API surface to replace dfe-control-plane
 
-#### Phase 3: Operational Routers
+#### Phase 3: Operational Routers ✓
 
-1. [ ] Hunts router (`v1/hunts.py`) — HuntEngine lifecycle, async execution (202 + polling)
-2. [ ] Queries router (`v1/queries.py`) — ViewExecutor, absorb `query/endpoint.py`
-3. [ ] Task manager (`api/task_manager.py`) — in-memory task store, polling + SSE
-4. [ ] Pipeline router (`v1/pipeline.py`) — Vector pipeline generation
+1. [x] Task manager (`api/task_manager.py`) — in-memory task store, polling + SSE
+2. [x] Queries router (`v1/queries.py`) — ViewExecutor, absorb `query/endpoint.py`
+3. [x] Hunts router (`v1/hunts.py`) — HuntEngine lifecycle, async execution (202 + polling)
+4. [x] Pipeline router (`v1/pipeline.py`) — Vector pipeline generation
 
 #### Phase 4: Discovery + Analytics
 
