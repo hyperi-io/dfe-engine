@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
@@ -133,6 +134,7 @@ async def save_service_config(
         instance=instance,
         created_by=user.user_id,
     )
+    audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}
 
 
@@ -162,6 +164,7 @@ async def delete_service_config(
             },
         )
     registry.delete_config(service, instance)
+    audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "deleted")
 
 
 @router.post(
@@ -216,4 +219,5 @@ async def get_service_config_history(
 async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg):
     """Seed built-in default service configs. Non-destructive."""
     count = registry.seed_defaults(overwrite=False)
+    audit_resource_change(user.user_id, "service_config", "all", "seeded")
     return SeedResponse(seeded=count)

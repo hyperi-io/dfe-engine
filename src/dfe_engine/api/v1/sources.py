@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
 
@@ -173,6 +174,7 @@ async def create_source(
         source = registry.save_source(body, created_by=user.user_id)
     except SourceValidationError as e:
         _raise_save_validation_http(e)
+    audit_resource_change(user.user_id, "source", source.source, "created")
     return SourceResponse(source=source.source, message="created")
 
 
@@ -231,6 +233,7 @@ async def update_source(
         )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
+    audit_resource_change(user.user_id, "source", source.source, "updated")
     return SourceResponse(source=source.source, message="updated")
 
 
@@ -250,6 +253,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
             },
         )
     registry.delete_source(name)
+    audit_resource_change(user.user_id, "source", name, "deleted")
 
 
 @router.post(
@@ -287,7 +291,10 @@ async def bulk_action(
         except Exception as e:
             failed.append({"source": name, "error": str(e)})
 
-    return BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
+    result = BulkActionResponse(action=body.action, succeeded=succeeded, failed=failed)
+    if succeeded:
+        audit_resource_change(user.user_id, "source", ",".join(succeeded), body.action)
+    return result
 
 
 @router.post(
@@ -298,6 +305,7 @@ async def bulk_action(
 async def seed_sources(user: CurrentUser, registry: SourceReg):
     """Seed built-in default source definitions. Non-destructive (skips existing)."""
     count = registry.seed_builtin_sources(overwrite=False)
+    audit_resource_change(user.user_id, "source", "all", "seeded")
     return SeedResponse(seeded=count)
 
 
