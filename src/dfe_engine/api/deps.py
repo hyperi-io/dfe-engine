@@ -225,6 +225,15 @@ async def get_current_user(request: Request) -> AuthContext:
         roles, org_ids = _resolve_roles_from_groups(groups, group_store)
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
         audit_login_success(oidc_subject, "oidc", client_ip, roles)
+
+        # JIT provisioning — create shadow account on first OIDC login
+        jit = getattr(request.app.state, "jit_provisioner", None)
+        if jit:
+            try:
+                jit.ensure_account(oidc_subject, groups, "oidc")
+            except Exception:
+                logger.exception("JIT provisioning failed", user_id=oidc_subject)
+
         return AuthContext(
             user_id=oidc_subject,
             roles=roles,
