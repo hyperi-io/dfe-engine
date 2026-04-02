@@ -58,6 +58,16 @@ class ValidationResult(BaseModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class DeploymentConfigDetail(BaseModel):
+    """Full deployment config. Inner config is dynamic (schema-less mode)."""
+
+    service: str = Field(description="Service type")
+    instance: str = Field(description="Instance name")
+    config: dict[str, Any] = Field(
+        description="Deployment-specific configuration (resources, KEDA, etc.)"
+    )
+
+
 class DeploymentHistoryEntry(BaseModel):
     commit: str
     message: str
@@ -103,6 +113,7 @@ async def list_deployments(
 
 @router.get(
     "/{service}/{instance}",
+    response_model=DeploymentConfigDetail,
     dependencies=[Depends(require_action("config:read"))],
 )
 async def get_deployment(
@@ -110,7 +121,7 @@ async def get_deployment(
     instance: str,
     user: CurrentUser,
     registry: DeploymentConfigReg,
-):
+) -> DeploymentConfigDetail:
     """Get a full deployment config by service + instance."""
     from dfe_engine.deployment.registry import DeploymentConfigNotFoundError
 
@@ -124,9 +135,8 @@ async def get_deployment(
                 "message": f"Deployment config '{service}/{instance}' not found",
             },
         )
-    if isinstance(config, dict):
-        return config
-    return config.model_dump(mode="json")
+    config_dict = config if isinstance(config, dict) else config.model_dump(mode="json")
+    return DeploymentConfigDetail(service=service, instance=instance, config=config_dict)
 
 
 @router.put(
