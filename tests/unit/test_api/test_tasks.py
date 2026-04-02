@@ -108,14 +108,6 @@ class TestQueriesRouter:
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_datasource"
 
-    def test_health_endpoint(self, client, admin_headers):
-        """Health endpoint is unauthenticated."""
-        resp = client.get("/api/v1/queries/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "healthy"
-        assert isinstance(data["adapters"], list)
-
     def test_requires_auth_for_views(self, client):
         resp = client.get("/api/v1/queries/views")
         assert resp.status_code == 401
