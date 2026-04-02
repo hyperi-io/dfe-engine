@@ -1,349 +1,269 @@
-# RBAC, Multi-Tenant ClickHouse, and Rust App Layer
+# RBAC, Multi-Tenant ClickHouse, and Auth Architecture
 
-**Status:** Design (not yet implemented)
-**Scope:** Auth overhaul, granular RBAC, multi-tenant CH with row-level security, schema-less Rust service discovery, HyperDX integration
-
----
-
-## 1. Problem Statement
-
-DFE 2.2 needs:
-
-1. **Production auth via Envoy Gateway OIDC** with standalone JWT fallback and API keys for M2M
-2. **Granular RBAC** — roles built from fine-grained permissions, assigned via OIDC groups or local users
-3. **Multi-tenant ClickHouse** — row-level security via custom settings pattern, per-role connections
-4. **Zero-code Rust service management** — adding a new dfe-* service requires zero Python code
-5. **HyperDX connection sync** — dfe-engine as single source of truth for all CH connections
-
-Current state: 4 hardcoded roles, single CH connection, typed plugin models per Rust service, no OIDC header support, no HyperDX integration.
+**Scope:** Auth, granular RBAC, multi-tenant CH with row-level security, OIDC group sync, HyperDX integration, Argo CD RBAC export
 
 ---
 
-## 2. Auth Flow
+## Implementation Status
 
-### 2.1 Four Authentication Paths
+| Phase | Scope | Status |
+|-------|-------|--------|
+| **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
+| **Phase 2** | ConnectionRegistry, TenantScopedClient, multi-tenant CH | Done |
+| **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
+| **Phase 4** | Schema-less service discovery, service surfaces | Not started |
 
-```
-Request arrives at dfe-engine
-    |
-    +-- Has X-Oidc-Subject header? (Envoy Gateway fronted)
-    |   -> Extract user_id from X-Oidc-Subject
-    |   -> Extract groups from X-Oidc-Groups (comma-separated)
-    |   -> Look up group->role assignments from rbac/assignments.yaml
-    |   -> Resolve org_ids for customer-scoped roles
-    |   -> Build AuthContext(user_id, roles, groups, org_ids)
-    |
-    +-- Has X-API-Key header? (machine-to-machine)
-    |   -> Extract short token from key prefix, look up in accounts
-    |   -> SHA-256 verify long token against stored hash
-    |   -> Resolve account name -> roles from assignments.yaml
-    |   -> Build AuthContext(user_id=account_name, roles, org_ids)
-    |
-    +-- Has Authorization: Bearer token? (standalone users)
-    |   -> Decode JWT (PyJWT)
-    |   -> Extract user_id from "sub" claim
-    |   -> Extract roles, org_ids from claims
-    |   -> Build AuthContext
-    |
-    +-- None of the above, auth.enabled=False? (dev/test)
-    |   -> Return root AuthContext(roles=["admin"], org_ids=["*"])
-    |
-    +-- None of the above, auth.enabled=True?
-        -> 401 Unauthorized
+---
+
+## 1. Auth Flow
+
+### 1.1 Four Authentication Paths
+
+```mermaid
+flowchart TD
+    REQ[Incoming Request] --> OIDC{X-Oidc-Subject<br/>header?}
+    OIDC -->|Yes| EXTRACT_OIDC[Extract user_id + groups<br/>from OIDC headers]
+    EXTRACT_OIDC --> RESOLVE_OIDC[GroupStore resolves<br/>groups → roles]
+    RESOLVE_OIDC --> CTX[Build AuthContext]
+
+    OIDC -->|No| APIKEY{X-API-Key<br/>header?}
+    APIKEY -->|Yes| VERIFY_KEY[APIKeyStore.verify<br/>Parse short+long token<br/>SHA-256 compare]
+    VERIFY_KEY --> RESOLVE_KEY[GroupStore resolves<br/>key groups → roles]
+    RESOLVE_KEY --> CTX
+
+    APIKEY -->|No| JWT{Authorization:<br/>Bearer?}
+    JWT -->|Yes| DECODE[Decode JWT<br/>Extract sub, roles,<br/>org_id, org_ids]
+    DECODE --> CTX
+
+    JWT -->|No| DISABLED{auth.enabled<br/>= false?}
+    DISABLED -->|Yes| ROOT[Root context<br/>roles=admin<br/>user_id=dev]
+    ROOT --> CTX
+
+    DISABLED -->|No| REJECT[401 Unauthorized]
+
+    CTX --> AUTH_DONE[AuthContext ready]
+
+    style REJECT fill:#f44,color:#fff
+    style AUTH_DONE fill:#4a4,color:#fff
+    style ROOT fill:#fa0,color:#fff
 ```
 
 | Path | Use case | Credential storage | Token lifetime |
 |------|----------|-------------------|----------------|
-| OIDC headers | Production (Envoy fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
-| API key | CI/CD, Terraform, scripts | `local_accounts.yaml` (SHA-256 hash) | Long-lived (no expiry, revoke by removing) |
+| OIDC headers | Production (Envoy Gateway fronted) | IdP (Entra, Google, etc.) | Session cookie (Envoy managed) |
+| API key | CI/CD, Terraform, scripts | `config/auth/api-keys/*.yaml` (SHA-256 hash) | Long-lived (revoke by deleting file) |
 | JWT Bearer | Standalone UI, dev | Issued by `/api/v1/auth/login` | `jwt_expire_minutes` (default 30) |
 | Disabled | Dev/test | N/A | N/A |
 
-OIDC headers injected by Envoy Gateway:
+OIDC headers injected by Envoy Gateway SecurityPolicy:
 
 | Header | Content |
 |--------|---------|
 | `X-Oidc-Subject` | User email or unique ID |
 | `X-Oidc-Groups` | Comma-separated OIDC group names |
-| `X-Forwarded-User` | Same as subject (nginx compat) |
 
-### 2.2 Deployment Modes
+### 1.2 Deployment Modes
 
-Local auth is **always available**. OIDC is additive — it does not replace
-local auth. You can enable/disable OIDC without losing break-glass access.
+Local auth is **always available**. OIDC is additive — headers are checked
+first when present, but JWT and API key paths remain active. No explicit
+mode toggle; OIDC detection is automatic based on header presence.
 
 | Mode | Setting | What's active | Use case |
 |------|---------|--------------|----------|
 | **Dev/test** | `auth.enabled=false` | All requests get root admin context | Local development |
-| **Standalone (Docker)** | `auth.enabled=true` | JWT Bearer + API keys + local accounts | Small deploy, no external IdP |
-| **Production (+ OIDC)** | `auth.enabled=true`, `auth.mode=oidc` | OIDC headers (precedence) + JWT + API keys + local | K8s with Envoy Gateway |
+| **Standalone** | `auth.enabled=true` | JWT Bearer + API keys + local accounts | Docker, no external IdP |
+| **Production** | `auth.enabled=true` + Envoy | OIDC headers (precedence) + JWT + API keys | K8s with Envoy Gateway |
 
-In production with OIDC, the detection order means:
-- Browser users → Envoy handles OIDC → OIDC headers reach dfe-engine
-- API clients → send JWT Bearer or API key directly (bypass Envoy OIDC)
-- Break-glass → local login via `/api/v1/auth/login` → JWT Bearer
+### 1.3 OIDC Header Trust Model
 
-Switching from standalone to OIDC = set `auth.mode=oidc` and configure Envoy.
-Switching back = set `auth.mode=jwt`. Local accounts and API keys keep working.
+**Security precondition:** When deploying behind Envoy Gateway OIDC,
+dfe-engine MUST only be accessible via Envoy. Direct pod access MUST be
+blocked by K8s NetworkPolicy. Without this, any client with pod access can
+forge OIDC headers and impersonate any user.
 
-### 2.3 OIDC Header Trust Model
+### 1.4 Credential Storage Architecture
 
-**Security precondition:** When `auth.mode=oidc`, dfe-engine MUST only be
-accessible via Envoy Gateway. Direct pod access MUST be blocked by K8s
-NetworkPolicy (deployed by dfe-infra `network-policies` chart). Without this,
-any client with pod access can forge OIDC headers and impersonate any user.
+```mermaid
+flowchart LR
+    subgraph "YAML Config (safe to commit)"
+        ACC["accounts/*.yaml<br/>username, bcrypt hash,<br/>group memberships"]
+        GRP["groups/*.yaml<br/>group name, roles,<br/>member list"]
+        KEY["api-keys/*.yaml<br/>short token, SHA-256 hash,<br/>group memberships"]
+        ROLES["roles.yaml<br/>role definitions,<br/>permission patterns"]
+    end
 
-When `auth.mode=oidc`, the OIDC header path is primary and JWT Bearer + API
-key are still accepted for programmatic clients.
+    subgraph "Secrets Backend (never committed)"
+        ENV[".env / K8s Secret /<br/>OpenBao / Cloud SM"]
+    end
 
-### 2.4 Credential Storage Architecture
+    subgraph "Runtime"
+        API["dfe-engine API"]
+    end
 
-**Passwords and API keys are NEVER stored in YAML.** YAML contains only
-references (env var names) and non-reversible hashes. Actual secrets live in
-the deployment's secrets backend.
-
-#### Where Secrets Live (by deployment mode)
-
-| Deployment | Secrets Backend | How dfe-engine reads secrets |
-|------------|----------------|----------------------------|
-| **K8s production** | OpenBao / cloud SM → ESO → K8s Secret | Mounted as env vars in pod spec |
-| **K8s standalone** | K8s Secret (manual or Helm values) | Mounted as env vars in pod spec |
-| **Docker** | `.env` file (gitignored) or compose env vars | `os.environ` |
-| **Dev/test** | `.env` file or shell exports | `os.environ` |
-
-**K8s secrets flow:**
-```
-OpenBao (or AWS SM / GCP SM / Azure KV)
-    → ESO ClusterSecretStore syncs to K8s Secret
-        → Pod spec mounts Secret as env vars
-            → dfe-engine reads os.environ at startup
+    ACC -->|bcrypt verify| API
+    GRP -->|role lookup| API
+    KEY -->|SHA-256 verify| API
+    ROLES -->|permission check| API
+    ENV -->|JWT secret,<br/>CH passwords| API
 ```
 
 #### What Goes Where
 
 | Data | Where stored | Format | Safe to commit? |
 |------|-------------|--------|-----------------|
-| Account names | `local_accounts.yaml` | Plaintext | Yes |
-| Password env var names | `local_accounts.yaml` | `password_env: DFE_ADMIN_PASSWORD` | Yes (just a pointer) |
-| Actual passwords | Env var / K8s Secret / OpenBao | Plaintext or bcrypt hash | **NO** |
-| API key short token | `local_accounts.yaml` | Plaintext (8 chars, lookup only) | Yes |
-| API key long token hash | `local_accounts.yaml` | `sha256:e3b0c442...` | Yes (non-reversible) |
-| Full API key | Shown once at creation | `dfe_ak_live_8a3f_7f3b2c...` | **NO** (never stored) |
+| Account names | `accounts/{name}.yaml` | Filename stem | Yes |
+| Password hashes | `accounts/{name}.yaml` | `$2b$12$...` (bcrypt) | Yes (one-way) |
+| API key short token | `api-keys/{name}.yaml` | Plaintext (8 hex chars) | Yes (lookup index) |
+| API key long hash | `api-keys/{name}.yaml` | `sha256:{hex}` | Yes (one-way) |
+| Full API key | Shown once at creation | `dfe_ak_{short}_{long}` | **NO** (never stored) |
 | JWT signing secret | Env var (`DFE_API_JWT_SECRET`) | Random 256-bit | **NO** |
 | CH connection passwords | Env var / K8s Secret | Plaintext | **NO** |
+| Role definitions | `auth/resources/roles.yaml` | Permission patterns | Yes |
+| Group→role mapping | `groups/{name}.yaml` | Role list | Yes |
 
-#### Config Files (safe to commit to git)
+#### Config Directory Layout
 
 ```
-config/rbac/
-    roles.yaml              # Role definitions (permissions per role)
-    assignments.yaml        # user/group -> role mapping (+ org_ids)
-    local_accounts.yaml     # Account metadata (env var refs + API key hashes)
+config/auth/
+    accounts/           # One YAML per local user account
+        admin.yaml
+        analyst1.yaml
+    groups/              # One YAML per group (group → roles)
+        dfe-admins.yaml
+        soc-analysts.yaml
+    api-keys/            # One YAML per API key
+        ci-deploy.yaml
 ```
 
-**`local_accounts.yaml`** — defines who can authenticate:
+Account filename = username. Group filename = group name. API key filename =
+key name. The filename IS the identity — never stored inside the YAML body
+(avoids DirectoryConfigStore YAML 1.1 boolean coercion on values like `off`,
+`yes`, `no`).
 
-```yaml
-# Accounts for local auth (standalone) and API key auth (all modes).
-# NO SECRETS IN THIS FILE. Passwords read from env vars at runtime.
-# API key hashes are SHA-256 (non-reversible, safe to commit).
-# Role assignments come from assignments.yaml, NOT from this file.
-accounts:
-  # Password accounts (local auth + standalone JWT login)
-  admin:
-    password_env: DFE_ADMIN_PASSWORD          # env var -> plaintext or bcrypt hash
-  operator:
-    password_env: DFE_OPERATOR_PASSWORD
-  viewer:
-    password_env: DFE_VIEWER_PASSWORD
-  acme_viewer:
-    password_env: DFE_ACME_VIEWER_PASSWORD
-
-  # API key accounts (all deployment modes including K8s)
-  ci_deployer:
-    api_key_short_token: "8a3f2c91"           # Lookup index (safe to commit)
-    api_key_hash: "sha256:e3b0c442..."        # SHA-256 of long token (safe to commit)
-  terraform_svc:
-    api_key_short_token: "b7d4e1a3"
-    api_key_hash: "sha256:a1b2c3d4..."
-```
-
-#### Corresponding Secrets (NOT committed)
-
-```bash
-# .env (Docker standalone) or K8s Secret (production)
-DFE_ADMIN_PASSWORD="$2b$12$LJ3..."        # bcrypt hash for production
-DFE_OPERATOR_PASSWORD="changeme"           # plaintext OK for dev only
-DFE_VIEWER_PASSWORD="changeme"
-DFE_ACME_VIEWER_PASSWORD="$2b$12$xyz..."
-DFE_API_JWT_SECRET="random-256-bit-secret"
-CH_ADMIN_PASSWORD="clickhouse-admin-pw"
-CH_ANALYST_PASSWORD="clickhouse-analyst-pw"
-CH_ANALYST_RO_PASSWORD="clickhouse-ro-pw"
-CH_VIEWER_PASSWORD="clickhouse-viewer-pw"
-CH_TENANT_READER_PASSWORD="clickhouse-tenant-pw"
-```
-
-#### Password Verification Flow
+### 1.5 Password Verification Flow
 
 ```python
-# LocalAuthProvider.authenticate()
-password_env = account["password_env"]           # e.g. "DFE_ADMIN_PASSWORD"
-stored_value = os.environ[password_env]           # e.g. "$2b$12$LJ3..." or "changeme"
-
-if is_bcrypt_hash(stored_value):
-    # Production: env var contains pre-hashed bcrypt
-    bcrypt.checkpw(submitted_password, stored_value)
-else:
-    # Dev: env var contains plaintext, hash on the fly
-    bcrypt.checkpw(submitted_password, bcrypt.hashpw(stored_value))
+# AccountStore.verify_password()
+account = self.get(username)
+if account is None:
+    bcrypt.checkpw(password.encode(), _DUMMY_HASH)  # Timing-safe rejection
+    return False
+return bcrypt.checkpw(password.encode(), account.password_hash.encode())
 ```
 
-#### API Key Verification Flow
+Constant-time rejection for unknown usernames prevents enumeration attacks.
+
+### 1.6 API Key Format
+
+```
+dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f
+|      |         |
+prefix short     long token (shown once, stored as SHA-256 hash)
+       token
+       (lookup index, shown in UI)
+```
+
+- **Prefix** (`dfe_ak_`): enables secret scanning by GitHub, GitGuardian
+- **Short token** (8 hex chars): plaintext in YAML, used for lookup and display
+- **Long token** (32 hex chars): SHA-256 hashed. Not bcrypt — keys are
+  high-entropy random, bcrypt's slowness adds no security value
+- Full key shown **once** at creation, never retrievable again
+- **Revocation:** Delete the key's YAML file or call the revoke API
+
+### 1.7 API Key Verification Flow
 
 ```python
-# verify_api_key()
-# Input: "dfe_ak_live_8a3f2c91_7f3b2c4d8e9a1b5f..."
+# APIKeyStore.verify()
+# Input: "dfe_ak_8a3f2c91_7f3b2c4d8e9a1b5f..."
 prefix, short_token, long_token = parse_api_key(submitted_key)
 
-# 1. Look up by short_token (fast, indexed)
-account = find_account_by_short_token(short_token)
+# 1. Scan for matching short_token across key files
+key_meta = find_by_short_token(short_token)
 
-# 2. SHA-256 verify (no bcrypt — key is high-entropy random)
-expected_hash = account["api_key_hash"]  # "sha256:e3b0c442..."
+# 2. SHA-256 verify (timing-safe)
 actual_hash = "sha256:" + hashlib.sha256(long_token.encode()).hexdigest()
-if not hmac.compare_digest(expected_hash, actual_hash):
+if not hmac.compare_digest(key_meta.key_hash, actual_hash):
     raise AuthenticationError("Invalid API key")
 ```
 
-**Separation of concerns:**
-- `local_accounts.yaml` — WHO can authenticate (account names + env var refs + hashes)
-- `assignments.yaml` — WHAT roles they get (account/group → DFE role mapping)
-- `roles.yaml` — WHAT permissions those roles have
-- Secrets backend (env vars / K8s Secrets / OpenBao) — actual passwords and CH credentials
-
-### 2.5 API Key Format
-
-Following industry best practice (Stripe, GitHub, Seam pattern):
-
-```
-dfe_ak_live_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f0a1b2c3d4e5f6a7b8c9d0e1f
-|           |         |
-prefix      short     long token (shown once at creation, stored as SHA-256 hash)
-            token
-            (lookup index, shown in UI)
-```
-
-- **Prefix** (`dfe_ak_live_` / `dfe_ak_test_` / `dfe_sk_live_`): enables secret scanning by GitHub, GitGuardian, etc.
-- **Short token** (8 chars): plaintext in DB, used for lookup and display in UI
-- **Long token** (32+ chars): SHA-256 hashed in DB. SHA-256 not bcrypt because API keys are high-entropy random strings — bcrypt's slowness is unnecessary overhead.
-- Full key shown **once** at creation, never again.
-- **Rotation:** 90-day recommended, with 7-day grace period (old + new both valid).
-- **Revocation:** Remove account from `local_accounts.yaml` or delete the key entry.
-
-### 2.6 AuthContext Changes
-
-```python
-class AuthContext(BaseModel):
-    org_id: str = "default"  # Primary tenant: first org_id or "default" for non-scoped
-    user_id: str
-    roles: list[str]         # Resolved DFE roles
-    groups: list[str]        # Raw OIDC groups
-    org_ids: list[str] = []  # For customer-scoped roles
-    connection_id: str = ""  # Resolved CH connection name
-    request_id: str | None = None
-    client_ip: str | None = None
-    user_agent: str | None = None
-```
-
-**Removed from current model:** `permissions: list[str]` — permissions are
-resolved at authorization time from roles, never stored on the context.
-
-**`org_id` resolution rule:**
-- Customer-scoped roles: `org_id = org_ids[0]` (primary org from the list)
-- Non-scoped roles (admin, analyst, etc.): `org_id = "default"`
-- OIDC token with `org_id` claim: use the claim value directly
-
 ---
 
-## 3. RBAC Data Model
+## 2. RBAC Data Model
 
-All RBAC config lives in the config cascade under `config/rbac/`.
+### 2.1 Identity Resolution Chain
 
-### 3.1 Role Definitions (roles.yaml)
+```mermaid
+flowchart TD
+    subgraph "Authentication (who are you?)"
+        OIDC_AUTH["OIDC: X-Oidc-Subject → user_id"]
+        KEY_AUTH["API Key: X-API-Key → APIKeyStore.verify() → key name"]
+        JWT_AUTH["JWT: Bearer → decode → sub claim"]
+        LOCAL_AUTH["Login: POST /auth/login → AccountStore.verify_password()"]
+    end
 
-Roles are collections of granular permission strings. Permission format:
-`{domain}:{action}` or `{domain}:{resource}:{action}` for scoped access.
+    subgraph "Group Resolution (what groups?)"
+        OIDC_GRP["OIDC: X-Oidc-Groups header"]
+        LOCAL_GRP["Local: account.groups field"]
+        KEY_GRP["API Key: key.groups field"]
+    end
 
-```yaml
-roles:
-  admin:
-    description: "Full access to all resources and all orgs"
-    permissions: ["*"]
+    subgraph "Role Resolution (what roles?)"
+        ROLE_RES["GroupStore.resolve_roles_for_member()<br/>Union of all roles from all groups"]
+    end
 
-  data_analyst:
-    description: "Hunt, query, source, fieldmap CRUD — all orgs"
-    permissions:
-      - "hunt:*"
-      - "query:*"
-      - "source:*"
-      - "fieldmap:*"
-      - "alert:*"
-      - "schema:read"
-      - "transforms:*"
+    subgraph "Permission Check (can you do this?)"
+        PERM["authorize(auth, action)<br/>permission_matches() with wildcards"]
+    end
 
-  data_analyst_viewer:
-    description: "Same scope as data_analyst, read-only"
-    permissions:
-      - "hunt:read"
-      - "query:read"
-      - "query:execute"
-      - "source:read"
-      - "fieldmap:read"
-      - "alert:read"
-      - "schema:read"
+    OIDC_AUTH --> OIDC_GRP
+    KEY_AUTH --> KEY_GRP
+    JWT_AUTH -.->|roles in claims| PERM
+    LOCAL_AUTH --> LOCAL_GRP
 
-  data_viewer:
-    description: "HyperDX dashboards and query execution — all orgs"
-    permissions:
-      - "query:execute"
-      - "source:read"
-      - "dashboard:read"
+    OIDC_GRP --> ROLE_RES
+    LOCAL_GRP --> ROLE_RES
+    KEY_GRP --> ROLE_RES
 
-  infra_admin:
-    description: "Service configs, deployments, helm, Argo CD — full CRUD"
-    permissions:
-      - "config:*"
-      - "service:*:config:*"
-      - "service:*:metrics:read"
-      - "helm:*"
-      - "deployment:*"
-      - "argo:*"
+    ROLE_RES --> PERM
 
-  infra_viewer:
-    description: "Infrastructure read-only"
-    permissions:
-      - "config:read"
-      - "service:*:config:read"
-      - "service:*:metrics:read"
-      - "helm:compile"
-      - "deployment:read"
-      - "argo:applications:get"
-      - "argo:projects:get"
+    PERM -->|allowed| ALLOW[AuthzResult: allowed=true]
+    PERM -->|denied| DENY[AuthzResult: allowed=false]
 
-  customer_viewer:
-    description: "Org-restricted data viewer (dynamic, instantiated per customer)"
-    permissions:
-      - "query:execute"
-      - "source:read"
-      - "dashboard:read"
-    scoped: true  # Indicates this role requires org_ids
+    style ALLOW fill:#4a4,color:#fff
+    style DENY fill:#f44,color:#fff
 ```
 
-**Role hierarchy:** Flat (no inheritance). The 7-role set does not justify
-inheritance complexity. Revisit if role count exceeds ~20.
+OIDC groups and local groups are unified — an OIDC group name that matches a
+group file in `config/auth/groups/` inherits that group's roles.
 
-### 3.2 Permission Taxonomy
+### 2.2 Role Definitions
+
+Roles are defined in `src/dfe_engine/auth/resources/roles.yaml` (built-in,
+shipped with the package). Custom roles can be loaded from a separate YAML
+file via `RoleConfig.load(path)`.
+
+7 built-in roles, flat hierarchy (no inheritance):
+
+```mermaid
+graph LR
+    subgraph "Global Roles"
+        ADMIN["admin<br/>permissions: *"]
+        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert,<br/>schema:read, transforms"]
+        DAV["data_analyst_viewer<br/>read-only subset of<br/>data_analyst"]
+        DV["data_viewer<br/>query:execute,<br/>source:read,<br/>dashboard:read"]
+        IA["infra_admin<br/>config, service,<br/>helm, deployment,<br/>argo"]
+        IV["infra_viewer<br/>read-only subset of<br/>infra_admin"]
+    end
+
+    subgraph "Scoped Roles"
+        CV["customer_viewer<br/>org-restricted<br/>data viewer<br/>(scoped: true)"]
+    end
+
+    style ADMIN fill:#c33,color:#fff
+    style CV fill:#36c,color:#fff
+```
+
+### 2.3 Permission Taxonomy
 
 | Domain | Actions | Scoped by service? |
 |--------|---------|---------------------|
@@ -362,401 +282,105 @@ inheritance complexity. Revisit if role count exceeds ~20.
 | `org` | `read`, `write`, `*` | No |
 | `argo` | `{resource}:{action}` (open-ended) | No |
 
-Wildcard rules:
-- `"*"` grants everything (admin only)
-- `"service:*:config:read"` grants config read on all services
-- `"service:dfe-loader:config:write"` grants write on one service
-- `"argo:*"` grants all Argo CD actions
-
-### 3.3 Role Assignments (assignments.yaml)
-
-```yaml
-# OIDC group -> DFE role binding
-groups:
-  "platform-admins@hypersec.io": [admin]
-  "soc-team@hypersec.io": [data_analyst]
-  "soc-readonly@hypersec.io": [data_analyst_viewer]
-  "infra-team@hypersec.io": [infra_admin]
-  "infra-readonly@hypersec.io": [infra_viewer]
-
-  # Customer-scoped: includes org_ids restriction
-  "acme-soc@acme.com":
-    roles: [customer_viewer]
-    org_ids: ["acme", "acme-subsidiary"]
-
-# Local user -> DFE role binding (break-glass / standalone)
-users:
-  admin: [admin]
-  operator: [data_analyst, infra_admin]
-  viewer: [data_viewer]
-  ci_deployer: [infra_admin]
-  terraform_svc: [infra_admin]
-```
-
-### 3.4 Authorization Engine
-
-The existing `authorize()` function evolves to load roles from YAML and
-support wildcard permission matching:
+### 2.4 Wildcard Permission Matching
 
 ```python
 def permission_matches(permission: str, action: str) -> bool:
-    if permission == "*":
-        return True
-    if "*" not in permission:
-        return permission == action
-    perm_parts = permission.split(":")
-    action_parts = action.split(":")
-    if len(perm_parts) != len(action_parts):
-        return False
-    return all(p == "*" or p == a for p, a in zip(perm_parts, action_parts))
 ```
 
-`DEFAULT_ROLE_PERMISSIONS` constant is removed. `roles.yaml` is the sole source
-of truth. Bootstrap defaults are seeded from a built-in YAML resource on first run.
+| Pattern | Matches | Does NOT match |
+|---------|---------|----------------|
+| `*` | Everything | — |
+| `config:*` | `config:read`, `config:write`, `config:read:sub` | `hunt:read` |
+| `service:*:config:*` | `service:loader:config:read` | `service:loader:metrics:read` |
+| `service:*:config:read` | `service:loader:config:read` | `service:loader:config:write` |
 
----
+- `*` alone matches ANY action regardless of segment count
+- Trailing `*` matches any remaining segments
+- Mid-position `*` matches exactly one segment
 
-## 4. ClickHouse Multi-Tenant Connection Registry
-
-### 4.1 Custom Settings Pattern (not per-org users)
-
-Instead of creating a CH user per customer org (which creates N users * T
-tables of row policy objects), use the ClickHouse custom settings pattern:
-
-```sql
--- ONE row policy per tenant-scoped table, referencing a custom setting
-CREATE ROW POLICY tenant_filter ON dfe.events
-    FOR SELECT USING org_id = getSetting('current_tenant_id')
-    TO dfe_reader;
-
--- Application injects tenant per query via connection setting
-SET current_tenant_id = 'acme';
-SELECT * FROM dfe.events;  -- automatically filtered to acme rows
-```
-
-**Benefits over per-org users:**
-- 3-5 CH users total (by privilege level), not N per org
-- One row policy per tenant-scoped table (not per org)
-- Scales to thousands of orgs without CH user sprawl
-- dfe-engine injects `current_tenant_id` per query based on user's `org_ids`
-- If the setting is omitted, the query fails (fail-closed)
-
-**Which tables get row policies:** Only tables with an `org_id` column.
-The reconciler discovers these via:
-```sql
-SELECT table FROM system.columns
-WHERE database = 'dfe' AND name = 'org_id'
-```
-
-System, metadata, and audit tables are excluded.
-
-### 4.2 Connection Model
+### 2.5 Authorization Engine
 
 ```python
-class ClickHouseConnection(BaseModel):
-    name: str
-    host: str
-    port: int = 8123
-    database: str = "dfe"
-    user: str
-    password_env: str          # ENV var name holding the password
-    tenant_setting: str = ""   # If set, inject as current_tenant_id per query
+# engine.py
+def authorize(
+    auth: AuthContext | None,
+    action: str,
+    resource: str = "",
+    enabled: bool = True,
+    role_config: RoleConfig | None = None,
+) -> AuthzResult:
 ```
 
-### 4.3 Connections Config (connections.yaml)
+Decision order:
+1. `enabled=False` → allow (dev/test)
+2. `auth=None` → root mode, allow
+3. Check `role_config.check_roles(auth.roles, action)` → first granting role
+4. Return `AuthzResult(allowed, reason)`
 
-```yaml
-connections:
-  # Admin: unrestricted, no tenant filter
-  default:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_admin
-    password_env: CH_ADMIN_PASSWORD
-
-  # Analyst: read-write, no tenant filter
-  analyst:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_analyst
-    password_env: CH_ANALYST_PASSWORD
-
-  # Read-only: no tenant filter
-  analyst_ro:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_analyst_ro
-    password_env: CH_ANALYST_RO_PASSWORD
-
-  # Viewer: read-only, no tenant filter
-  viewer:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_viewer
-    password_env: CH_VIEWER_PASSWORD
-
-  # Tenant-scoped reader: queries inject current_tenant_id
-  tenant_reader:
-    host: clickhouse.clickhouse.svc.cluster.local
-    port: 8123
-    database: dfe
-    user: dfe_tenant_reader
-    password_env: CH_TENANT_READER_PASSWORD
-
-# Role -> connection mapping
-role_connections:
-  admin: default
-  data_analyst: analyst
-  data_analyst_viewer: analyst_ro
-  data_viewer: viewer
-  infra_admin: default
-  infra_viewer: analyst_ro
-  customer_viewer: tenant_reader   # tenant_id injected per query from org_ids
-```
-
-### 4.4 Connection Resolution
+### 2.6 RBAC Enforcement in API
 
 ```python
-class ConnectionRegistry:
-    def get_connection(self, auth: AuthContext) -> ClickHouseClient:
-        """Resolve correct CH connection for this user's role + org scope."""
-        # Multi-role precedence: highest-privilege connection wins
-        # Order: default > analyst > analyst_ro > viewer > tenant_reader
-        conn_name = self._resolve_best_connection(auth.roles)
-        conn = self._connections[conn_name]
-
-        client = self._get_or_create_client(conn)
-
-        # For tenant-scoped connections, wrap client to inject setting
-        if conn_name == "tenant_reader" and auth.org_ids:
-            return TenantScopedClient(client, org_ids=auth.org_ids)
-
-        return client
+# api/deps.py
+@router.post("/sources")
+async def create_source(
+    user: CurrentUser,
+    _auth: None = Depends(require_action("source:write")),
+): ...
 ```
 
-`TenantScopedClient` wraps the CH client to prepend
-`SET current_tenant_id = '{org_id}'` to every query. For users with multiple
-`org_ids`, it uses `org_id IN (...)` in the setting.
-
-### 4.5 Startup Reconciliation
-
-On startup, dfe-engine ensures CH state matches config:
-
-1. Ensure static CH users exist (`dfe_admin`, `dfe_analyst`, `dfe_analyst_ro`, `dfe_viewer`, `dfe_tenant_reader`)
-2. Ensure row policies exist on all tenant-scoped tables
-3. Ensure grants match expected levels
-4. Bootstrap DDL templates come from dfe-schemas repo
-
-If ClickHouse is unreachable at startup, dfe-engine starts in degraded mode
-(API serves requests using cached connections.yaml, `/health/ready` returns
-503, reconciliation retried every 60s).
-
-### 4.6 Org Lifecycle
-
-```
-POST /api/v1/orgs { org_id: "acme", org_ids: ["acme", "acme-sub"] }
-    -> OrgRegistry.create()
-    -> No CH user creation needed (custom settings pattern)
-    -> HyperDXClient.create_team("customer-acme")
-    -> HyperDXClient.create_connection(team_id, tenant_reader + setting)
-```
-
-With the custom settings pattern, adding an org does NOT require creating a CH
-user or row policy. The existing `tenant_reader` user + existing row policies
-handle it. dfe-engine just needs to know the org_ids to inject per query.
-
-### 4.7 Secrets Rotation
-
-**Static connections:** Dual-user pattern for zero downtime. Maintain two CH
-users per role (e.g., `dfe_admin_a`, `dfe_admin_b`), rotate one at a time.
-Use Vault/OpenBao database secrets engine or K8s CronJob + ESO.
-
-**Tenant reader connection:** Single shared user, rotated on schedule.
-Stakater Reloader triggers pod restart when K8s Secret updates.
+`require_action(action)` calls `authorize()` and raises `AuthorizationError` on denial,
+which the error handler converts to HTTP 403.
 
 ---
 
-## 5. Rust App Layer (Schema-Less Service Discovery)
+## 3. Account, Group, and API Key Stores
 
-### 5.1 Principle
+### 3.1 Store Architecture
 
-Adding a new `dfe-transform-elastic` requires:
-1. Deploy the Rust service (Helm chart in dfe-infra)
-2. That's it. Zero Python code changes.
+```mermaid
+classDiagram
+    class AccountStore {
+        +create(username, password, groups) Account
+        +get(username) Account | None
+        +list() list~Account~
+        +update(username, **fields) Account
+        +reset_password(username, new_password)
+        +delete(username)
+        +verify_password(username, password) bool
+    }
 
-dfe-engine discovers the service, its configurable settings, and its metrics
-automatically. The list of services is itself a config cascade item.
+    class GroupStore {
+        +create(name, roles, description) Group
+        +get(name) Group | None
+        +list() list~Group~
+        +update(name, **fields) Group
+        +delete(name)
+        +add_member(group_name, username)
+        +remove_member(group_name, username)
+        +resolve_roles_for_member(username) list~str~
+    }
 
-### 5.2 Service Surface Registry
+    class APIKeyStore {
+        +create(name, groups, description) tuple~APIKey, str~
+        +get(name) APIKey | None
+        +list() list~APIKey~
+        +verify(submitted_key) APIKey | None
+        +revoke(short_token)
+    }
 
-Replaces the typed plugin system. All service metadata is YAML.
+    class LocalAuthProvider {
+        +authenticate(username, password, ...) AuthContext
+    }
 
-```
-config/service-surfaces/
-    dfe-receiver.yaml
-    dfe-loader.yaml
-    ...
-    dfe-transform-elastic.yaml   # Added by deploying the service
-```
-
-Each surface file describes what the service exposes:
-
-```yaml
-# dfe-loader.yaml
-service: dfe-loader
-description: "Kafka consumer -> ClickHouse writer"
-
-config_surface:
-  config.kafka.bootstrap_servers:
-    type: string
-    description: "Kafka bootstrap servers"
-  config.buffer.max_bytes:
-    type: integer
-    description: "Buffer size limit in bytes"
-
-metrics_surface:
-  manifest_url: "http://dfe-loader.dfe-prod.svc.cluster.local:8080/metrics/manifest"
-  metrics:   # Cached from /metrics/manifest
-    - name: dfe_loader_records_received_total
-      type: counter
-      group: app
-    - name: dfe_loader_buffer_flush_duration_seconds
-      type: histogram
-      group: buffer
+    LocalAuthProvider --> AccountStore : verify password
+    LocalAuthProvider --> GroupStore : resolve roles
+    AccountStore ..> GroupStore : groups field references
 ```
 
-### 5.3 Service Discovery Modes
+All stores are YAML-backed (one file per entity, filename = identity).
 
-**A) Static (config-driven):** Surface YAML files committed to config dir. Default.
-
-**B) Dynamic (K8s-aware):** Future enhancement. dfe-engine watches for services
-with label `dfe.hyperi.io/managed=true`, fetches `/metrics/manifest`, generates
-surface YAML.
-
-### 5.4 API Endpoints
-
-```
-GET  /api/v1/service-surfaces                         # List all discovered services
-GET  /api/v1/service-surfaces/{name}                  # Service metadata
-GET  /api/v1/service-surfaces/{name}/metrics          # Cached metrics manifest
-POST /api/v1/service-surfaces/{name}/metrics/refresh  # Re-fetch manifest
-```
-
-Existing `/api/v1/services/{service}/{instance}` endpoints remain unchanged.
-
-RBAC via `require_service_action()` dependency factory that constructs
-`service:{name}:{action}` from the path parameter.
-
----
-
-## 6. HyperDX Integration
-
-### 6.1 Strategy
-
-- **Bootstrap:** dfe-engine generates `DEFAULT_CONNECTIONS` JSON env var for HyperDX Helm chart
-- **Runtime:** dfe-engine calls HyperDX internal API for team/connection CRUD
-- **Auth:** Service account using HyperDX team API key (stored in K8s secret)
-- **Failures:** Non-fatal, background retry reconciliation
-
-### 6.2 Team Mapping
-
-| DFE Role Scope | HyperDX Team | CH Connection | Tenant Setting |
-|----------------|-------------|---------------|----------------|
-| admin | `dfe-admin` | `default` | None (unrestricted) |
-| data_analyst | `dfe-analysts` | `analyst` | None |
-| data_viewer | `dfe-viewers` | `viewer` | None |
-| customer_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
-
-### 6.3 Alignment with HyperDX
-
-**Adopt:** Team API keys for M2M auth, connection model, ClickHouse proxy pattern.
-
-**Do NOT adopt:** HyperDX anti-patterns (no internal RBAC, no per-user scoping,
-all team members equal). We solve these at the dfe-engine layer.
-
----
-
-## 7. Audit Logging
-
-Every authorization decision MUST be logged for compliance (SOC 2, GDPR):
-
-| Event | Logged Data |
-|-------|------------|
-| Login (success/failure) | Timestamp, user_id, auth_path, client_ip, user_agent |
-| Permission denied | Timestamp, user_id, action, role, reason |
-| Role assignment change | Timestamp, admin_id, target_user, old_roles, new_roles |
-| Org CRUD | Timestamp, admin_id, org_id, action (create/update/delete) |
-| API key created/revoked | Timestamp, admin_id, key_short_token, account_name |
-| CH connection created | Timestamp, connection_name, trigger (startup/org_crud) |
-
-**Storage:** ClickHouse `dfe_audit.auth_events` (ReplacingMergeTree) + external SIEM.
-**Retention:** Minimum 1 year (SOC 2), 7 years (SOX if applicable).
-
-The `require_action()` dependency is the interception point — log every
-authorization check with full context.
-
----
-
-## 8. Config Directory Layout
-
-```
-config/
-    auth/
-        accounts/               # NEW: one YAML per local account (bcrypt hashes)
-            admin.yaml
-            analyst1.yaml
-        groups/                 # NEW: one YAML per group (group -> roles)
-            dfe-admins.yaml
-            soc-analysts.yaml
-        api-keys/               # NEW: one YAML per API key (SHA-256 hashes)
-            ci-deploy.yaml
-    rbac/
-        roles.yaml              # Role definitions (permissions)
-        connections.yaml        # CH connections + role mapping
-    services/                   # Existing: Rust service runtime configs
-    service-surfaces/           # NEW: auto-discovered service metadata
-    orgs/                       # NEW: org registry
-    deployment/                 # Existing: K8s/KEDA deployment configs
-    sources/                    # Existing: data source definitions
-    fieldmaps/                  # Existing: field map definitions
-    alert-destinations/         # Existing: alert routing
-```
-
----
-
-## 9. Account and Group CRUD
-
-### 9.1 Storage Architecture
-
-Accounts, groups, and API keys are stored as individual YAML files via
-`DirectoryConfigStore` (one file per entity, in-memory cache, git-aware writes).
-
-```
-config/auth/
-    accounts/
-        admin.yaml
-        analyst1.yaml
-        acme_viewer.yaml
-    groups/
-        soc-analysts.yaml
-        infra-ops.yaml
-        acme-viewers.yaml
-    api-keys/
-        ci-deploy.yaml
-        terraform-svc.yaml
-```
-
-**Security model:** bcrypt hashes (rounds=12) are stored in the YAML files.
-bcrypt hashes are one-way and designed to be safe even if leaked (equivalent
-to `/etc/shadow`). File permissions enforced at 0600. No application-level
-encryption — bcrypt + file perms is sufficient for the account scale (< 100).
-Plaintext passwords and API key long tokens are NEVER stored anywhere.
-
-### 9.2 File Formats
+### 3.2 File Formats
 
 ```yaml
 # config/auth/accounts/analyst1.yaml
@@ -771,7 +395,9 @@ updated_at: "2026-03-31T02:00:00Z"
 # config/auth/groups/soc-analysts.yaml
 description: "SOC analyst team"
 roles: ["data_analyst"]
-members: ["analyst1", "analyst2"]     # Redundant index (accounts are source of truth)
+members: ["analyst1", "analyst2"]
+source_provider: ""              # OIDC provider name (if synced)
+source_id: ""                    # Provider-specific group ID
 ```
 
 ```yaml
@@ -780,302 +406,494 @@ enabled: true
 short_token: "8a3f2c91"
 key_hash: "sha256:e3b0c442..."
 groups: ["infra-ops"]
-created_at: "2026-03-31T02:00:00Z"
 description: "CI/CD pipeline deployer"
+created_at: "2026-03-31T02:00:00Z"
 ```
 
-Account filename = username (e.g. `analyst1.yaml`). Group filename = group name.
-API key filename = account name. The filename IS the identity — never stored
-inside the YAML (avoids the DirectoryConfigStore YAML 1.1 gotcha with identity
-fields becoming booleans).
-
-### 9.3 Store Modules
+### 3.3 REST API
 
 ```
-src/dfe_engine/auth/
-    accounts.py      # AccountStore: CRUD for local user accounts
-    groups.py        # GroupStore: CRUD for groups (group -> roles)
-    api_keys.py      # APIKeyStore: CRUD for API keys
-    local_provider.py  # Refactored: uses AccountStore + GroupStore
-    engine.py        # Refactored: loads roles from roles.yaml
-    models.py        # AuthContext, AuthzResult, etc.
+POST   /api/v1/auth/login                           # JWT login
+POST   /api/v1/auth/refresh                          # Refresh JWT
+GET    /api/v1/auth/me                               # Current user info + permissions
+GET    /api/v1/auth/permissions                      # Current user's resolved permissions
 ```
 
-**AccountStore API:**
+Account, group, and API key CRUD endpoints are available via the stores and
+CLI. The auth router currently exposes login/refresh/me/permissions.
 
-```python
-class AccountStore:
-    def __init__(self, config_dir: Path):
-        """Load accounts from config/auth/accounts/ via DirectoryConfigStore."""
+### 3.4 Bootstrap Defaults
 
-    def create(self, username: str, password: str,
-               groups: list[str] | None = None) -> Account:
-        """Create account with bcrypt-hashed password. Raises if exists."""
-
-    def get(self, username: str) -> Account | None:
-        """Get account by username (filename lookup)."""
-
-    def list(self) -> list[Account]:
-        """List all accounts (password hashes excluded from response)."""
-
-    def update(self, username: str, **fields) -> Account:
-        """Update account fields (groups, enabled)."""
-
-    def reset_password(self, username: str, new_password: str) -> None:
-        """Replace password hash."""
-
-    def delete(self, username: str) -> None:
-        """Delete account file."""
-
-    def verify_password(self, username: str, password: str) -> bool:
-        """bcrypt verify submitted password against stored hash."""
-
-    def resolve_roles(self, username: str, group_store: GroupStore) -> list[str]:
-        """Resolve roles: account -> groups -> roles from group definitions."""
-```
-
-**GroupStore API:**
-
-```python
-class GroupStore:
-    def __init__(self, config_dir: Path):
-        """Load groups from config/auth/groups/ via DirectoryConfigStore."""
-
-    def create(self, name: str, roles: list[str],
-               description: str = "") -> Group:
-        """Create group. Raises if exists."""
-
-    def get(self, name: str) -> Group | None
-    def list(self) -> list[Group]
-    def update(self, name: str, **fields) -> Group
-    def delete(self, name: str) -> None
-
-    def add_member(self, group_name: str, username: str) -> None:
-        """Add user to group (updates both group and account files)."""
-
-    def remove_member(self, group_name: str, username: str) -> None:
-        """Remove user from group."""
-```
-
-**APIKeyStore API:**
-
-```python
-class APIKeyStore:
-    def __init__(self, config_dir: Path):
-        """Load API keys from config/auth/api-keys/ via DirectoryConfigStore."""
-
-    def create(self, name: str, groups: list[str] | None = None,
-               description: str = "") -> tuple[APIKey, str]:
-        """Create API key. Returns (metadata, full_key_shown_once)."""
-
-    def verify(self, submitted_key: str) -> APIKey | None:
-        """Parse prefix+short_token, SHA-256 verify long token."""
-
-    def list(self) -> list[APIKey]:
-        """List all keys (hashes excluded, short tokens included)."""
-
-    def revoke(self, short_token: str) -> None:
-        """Delete API key file."""
-```
-
-### 9.4 REST API
-
-```
-POST   /api/v1/auth/accounts                 # Create account
-GET    /api/v1/auth/accounts                 # List accounts (no hashes)
-GET    /api/v1/auth/accounts/{username}      # Get account detail
-PUT    /api/v1/auth/accounts/{username}      # Update (groups, enabled)
-POST   /api/v1/auth/accounts/{username}/reset-password  # Reset password
-DELETE /api/v1/auth/accounts/{username}      # Delete account
-
-POST   /api/v1/auth/groups                   # Create group
-GET    /api/v1/auth/groups                   # List groups
-GET    /api/v1/auth/groups/{name}            # Get group detail + members
-PUT    /api/v1/auth/groups/{name}            # Update (roles, description)
-POST   /api/v1/auth/groups/{name}/members    # Add member
-DELETE /api/v1/auth/groups/{name}/members/{username}  # Remove member
-DELETE /api/v1/auth/groups/{name}            # Delete group
-
-POST   /api/v1/auth/api-keys                # Create key (returns full key ONCE)
-GET    /api/v1/auth/api-keys                 # List keys (short tokens only)
-DELETE /api/v1/auth/api-keys/{short_token}   # Revoke key
-```
-
-All endpoints require `admin` role (or `org:write` for org-scoped operations).
-Password hashes and API key hashes are NEVER returned in API responses.
-
-### 9.5 CLI Commands
-
-The `dfe-api` entry point extends with account/group/key management:
-
-```bash
-# Account management
-dfe-api accounts create analyst1 --groups soc-analysts
-  # Prompts for password (or --generate-password for random)
-  # Writes config/auth/accounts/analyst1.yaml
-
-dfe-api accounts list
-dfe-api accounts show analyst1
-dfe-api accounts disable analyst1
-dfe-api accounts enable analyst1
-dfe-api accounts reset-password analyst1
-  # Prompts for new password
-dfe-api accounts delete analyst1
-
-# Group management
-dfe-api groups create soc-analysts --roles data_analyst
-dfe-api groups list
-dfe-api groups show soc-analysts
-dfe-api groups add-member soc-analysts analyst1
-dfe-api groups remove-member soc-analysts analyst1
-dfe-api groups set-roles soc-analysts data_analyst data_analyst_viewer
-dfe-api groups delete soc-analysts
-
-# API key management
-dfe-api api-keys create ci-deploy --groups infra-ops --description "CI pipeline"
-  # Prints full key ONCE to stdout:
-  # API Key: dfe_ak_live_8a3f2c91_7f3b2c4d8e9a1b5f6c7d8e9f...
-  # Store this key securely — it cannot be retrieved again.
-
-dfe-api api-keys list
-dfe-api api-keys revoke 8a3f2c91
-```
-
-The CLI reads/writes the same YAML files as the API. Both use `AccountStore`,
-`GroupStore`, `APIKeyStore` underneath. CLI is for operators; API is for the UI.
-
-### 9.6 Identity Resolution Chain
-
-```
-Authentication (who are you?)
-    OIDC: X-Oidc-Subject header -> user_id
-    API key: X-API-Key header -> APIKeyStore.verify() -> account name
-    JWT: Bearer token -> decode -> user_id from "sub" claim
-    Login: POST /auth/login -> AccountStore.verify_password() -> JWT issued
-        |
-        v
-Group resolution (what groups?)
-    OIDC: X-Oidc-Groups header -> group names (from IdP)
-    Local: AccountStore.get(username).groups -> group names (from YAML)
-    API key: APIKeyStore.get(name).groups -> group names (from YAML)
-        |
-        v
-Role resolution (what roles?)
-    GroupStore.get(group_name).roles -> DFE role names
-    Union of all roles from all groups
-        |
-        v
-Permission check (can you do this?)
-    roles.yaml: role -> permissions list
-    authorize(auth, action) -> permission_matches() with wildcards
-```
-
-OIDC groups and local groups are unified — an OIDC group name that matches
-a group file in `config/auth/groups/` inherits that group's roles. This means
-the same `groups.yaml` files serve both OIDC and local auth paths.
-
-### 9.7 Bootstrap Defaults
-
-On first startup (empty `config/auth/` directory), dfe-engine seeds:
-
-**Accounts:** `admin` (password from `DFE_ADMIN_PASSWORD` env var or "changeme")
+On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 
 **Groups:**
-- `dfe-admins` -> roles: [admin]
-- `dfe-analysts` -> roles: [data_analyst]
-- `dfe-viewers` -> roles: [data_viewer]
-- `dfe-infra` -> roles: [infra_admin]
+- `dfe-admins` → roles: `[admin]`
+- `dfe-analysts` → roles: `[data_analyst]`
+- `dfe-viewers` → roles: `[data_viewer]`
+- `dfe-infra` → roles: `[infra_admin]`
 
-**Assignments:** `admin` account added to `dfe-admins` group.
+**Account:** `admin` (password: `changeme`, group: `dfe-admins`)
 
-Startup logs a warning if any account uses the default "changeme" password.
-
----
-
-## 10. New Modules
-
-| Module | Purpose |
-|--------|---------|
-| `auth/accounts.py` | AccountStore: CRUD for local user accounts (bcrypt) |
-| `auth/groups.py` | GroupStore: CRUD for groups (group -> roles mapping) |
-| `auth/api_keys.py` | APIKeyStore: CRUD for API keys (SHA-256 hashes) |
-| `connections/` | ConnectionRegistry, TenantScopedClient, CH reconciliation |
-| `hyperdx/` | HyperDXClient for team/connection/source sync |
-| `orgs/` | OrgRegistry, org CRUD with HyperDX lifecycle hooks |
-
-### Modified Modules
-
-| Module | Change |
-|--------|--------|
-| `auth/engine.py` | Load roles from YAML, wildcard permission matching, remove `DEFAULT_ROLE_PERMISSIONS` |
-| `auth/models.py` | Add `org_ids`, `connection_id`; remove `permissions` |
-| `auth/local_provider.py` | Rewrite: uses AccountStore + GroupStore for auth |
-| `api/deps.py` | OIDC header + API key auth paths, `require_service_action()` |
-| `api/v1/auth.py` | Account/group/API key CRUD endpoints |
-| `api/__init__.py` | CLI: `dfe-api accounts`, `groups`, `api-keys` subcommands |
-| `services/registry.py` | Remove typed plugins, schema-less only |
-| `settings.py` | Auth config paths; remove `role_permissions`, `group_role_mapping` |
+Startup logs a warning if the default password is still in use.
 
 ---
 
-## 10. Migration Path
+## 4. OIDC Provider Integration
 
-### Phase 1: RBAC Foundation + Account CRUD
-- `AccountStore`, `GroupStore`, `APIKeyStore` (YAML-backed via DirectoryConfigStore)
-- REST API for account/group/API key CRUD
-- CLI: `dfe-api accounts`, `groups`, `api-keys` subcommands
-- Rewrite `LocalAuthProvider` to use AccountStore + GroupStore
-- Replace `DEFAULT_ROLE_PERMISSIONS` with `roles.yaml`
-- Remove `AuthSettings.role_permissions` and `group_role_mapping` from settings.py
-- Remove `permissions` field from `AuthContext`
-- Add OIDC header + API key auth paths to `get_current_user()`
-- Wildcard permission matching in `authorize()`
-- Bootstrap defaults seeded on first run
-- Audit logging on all auth decisions
+### 4.1 Architecture
 
-### Phase 2: Connection Registry
-- ConnectionRegistry with custom settings pattern (3-5 CH users, not per-org)
-- TenantScopedClient injects `current_tenant_id` per query
-- Startup reconciliation (ensure CH users + row policies exist)
-- Bootstrap DDL templates from dfe-schemas
+```mermaid
+flowchart TD
+    subgraph "OIDC Providers"
+        GOOGLE["Google Workspace<br/>Admin SDK groups.list"]
+        ENTRA["Microsoft Entra ID<br/>Graph API /groups"]
+        OKTA["Okta<br/>(stub — use token_claim)"]
+        GENERIC["Generic OIDC<br/>(no admin API)"]
+    end
 
-### Phase 3: Org Lifecycle + HyperDX
-- Org CRUD API with HyperDX team/connection sync
-- HyperDXClient module
-- `DEFAULT_CONNECTIONS` generation for Helm bootstrap
+    subgraph "dfe-engine"
+        REG["OIDCProviderRegistry<br/>(YAML-backed CRUD)"]
+        SYNC["sync_provider()<br/>Async group enumeration"]
+        ADAPT["Adapter Factory<br/>get_adapter(provider)"]
+        GS["GroupStore<br/>Create/update groups<br/>with source_provider metadata"]
+    end
 
-### Phase 4: Schema-Less Service Discovery
-- Service surface YAML files
-- Metrics manifest caching from rustlib `/metrics/manifest`
-- `/api/v1/service-surfaces/` endpoints with RBAC
-- Remove typed plugin system (`plugins.py`, `plugins_builtin/`)
+    REG --> ADAPT
+    ADAPT --> GOOGLE
+    ADAPT --> ENTRA
+    ADAPT --> OKTA
+    ADAPT --> GENERIC
+    SYNC --> ADAPT
+    SYNC --> GS
+    SYNC --> REG
+
+    subgraph "Group Resolution Modes"
+        MANUAL["manual<br/>Membership managed<br/>in dfe-engine only"]
+        CLAIM["token_claim<br/>Groups from OIDC<br/>token claim at login"]
+        API["api<br/>Groups fetched from<br/>provider API on schedule"]
+    end
+```
+
+### 4.2 Provider Configuration
+
+```yaml
+# config/auth/oidc-providers/{name}.yaml
+type: "google"           # generic | google | entra_id | okta
+enabled: true
+display_name: "Google Workspace"
+issuer: "https://accounts.google.com"
+client_id_env: "GOOGLE_CLIENT_ID"
+groups:
+  mode: "api"            # manual | token_claim | api
+  sync_interval: 3600
+  # Google-specific
+  service_account_json_env: "GOOGLE_SA_JSON"
+  admin_email: "admin@example.com"
+  domain: "example.com"
+```
+
+Credential env var *names* are stored in config (not values) — secrets stay
+in the deployment's secrets backend.
+
+### 4.3 Adapter Implementations
+
+| Adapter | Status | Admin API | Group sync |
+|---------|--------|-----------|------------|
+| Generic | Done | None | No (use `token_claim` mode) |
+| Google | Done | Admin SDK `groups().list()` | Yes — full pagination |
+| Entra ID | Done | Graph API `/groups` | Yes — `$top=999` pagination |
+| Okta | Stub | Not implemented | No (Okta natively includes groups in ID token) |
+
+All adapters are failsafe — credential or API failures return empty results
+rather than raising exceptions, so auth continues working even if group
+resolution degrades.
+
+### 4.4 Group Sync Process
+
+```mermaid
+sequenceDiagram
+    participant Sync as sync_provider()
+    participant Reg as OIDCProviderRegistry
+    participant Adapter as OIDC Adapter
+    participant GS as GroupStore
+
+    Sync->>Reg: get(provider_name)
+    Reg-->>Sync: OIDCProvider config
+    Note over Sync: Skip if disabled or mode != api
+
+    Sync->>Adapter: list_all_groups()
+    Adapter-->>Sync: list[GroupInfo]
+
+    loop Each remote group
+        Sync->>GS: get(group_name)
+        alt Group exists
+            Sync->>GS: update(metadata only,<br/>preserve existing roles)
+        else New group
+            Sync->>GS: create(empty roles,<br/>set source_provider)
+        end
+    end
+
+    Sync->>Reg: update(last_sync_at,<br/>last_sync_status)
+```
+
+Key behaviour: existing groups keep their roles. Sync only updates
+description and source metadata. Admins assign roles to synced groups
+manually.
 
 ---
 
-## 11. Edge Cases and Error Handling
+## 5. ClickHouse Multi-Tenant Connection Registry
 
-### Connection Resolution for Multi-Role Users
+### 5.1 Custom Settings Pattern
 
-Precedence (highest first): `default` > `analyst` > `analyst_ro` / `viewer` > `tenant_reader`.
-For customer-scoped roles, `tenant_reader` is used with tenant ID injection.
+Instead of creating a CH user per customer org, use the ClickHouse custom
+settings pattern with a small fixed set of users:
 
-### HyperDX Unavailable
+```sql
+-- ONE row policy per tenant-scoped table
+CREATE ROW POLICY tenant_filter ON dfe.events
+    FOR SELECT USING org_id = getSetting('current_tenant_id')
+    TO dfe_reader;
 
-Non-fatal. Org CRUD succeeds. Failed HyperDX sync queued for background retry.
+-- dfe-engine injects tenant per query via connection setting
+SET current_tenant_id = 'acme';
+SELECT * FROM dfe.events;  -- automatically filtered to acme rows
+```
 
-### ClickHouse Unavailable at Startup
+**Benefits:**
+- 3-5 CH users total (by privilege level), not N per org
+- One row policy per tenant-scoped table, not per org
+- Scales to thousands of orgs without CH user sprawl
+- If the setting is omitted, the query fails (fail-closed)
 
-Degraded mode: API serves requests with cached state, `/health/ready` returns 503,
-reconciliation retried every 60s. `/health/live` returns 200.
+### 5.2 Connection Architecture
 
-### CH Row Policy on Tables Without org_id
+```mermaid
+flowchart TD
+    subgraph "AuthContext"
+        ROLES["roles: [data_analyst]"]
+    end
 
-Row policies ONLY created on tables with an `org_id` column (discovered via
-`system.columns`). System, metadata, and audit tables are excluded.
+    subgraph "ConnectionRegistry"
+        PREC["Privilege Precedence<br/>admin → infra_admin → data_analyst<br/>→ data_analyst_viewer → data_viewer<br/>→ infra_viewer → customer_viewer"]
+        CACHE["Client Cache<br/>(lazy-loaded)"]
+    end
+
+    subgraph "ClickHouse Users"
+        ADMIN_CH["dfe_admin<br/>(unrestricted)"]
+        ANALYST_CH["dfe_analyst<br/>(read-write)"]
+        RO_CH["dfe_analyst_ro<br/>(read-only)"]
+        VIEWER_CH["dfe_viewer<br/>(read-only)"]
+        TENANT_CH["dfe_tenant_reader<br/>(row-filtered)"]
+    end
+
+    ROLES --> PREC
+    PREC -->|resolve best| CACHE
+    CACHE --> ADMIN_CH
+    CACHE --> ANALYST_CH
+    CACHE --> RO_CH
+    CACHE --> VIEWER_CH
+    CACHE -->|wrap in TenantScopedClient| TENANT_CH
+```
+
+### 5.3 Connection Config (connections.yaml)
+
+```yaml
+connections:
+  default:
+    host: clickhouse.clickhouse.svc.cluster.local
+    port: 8123
+    database: dfe
+    user: dfe_admin
+    password_env: CH_ADMIN_PASSWORD
+
+  analyst:
+    user: dfe_analyst
+    password_env: CH_ANALYST_PASSWORD
+
+  analyst_ro:
+    user: dfe_analyst_ro
+    password_env: CH_ANALYST_RO_PASSWORD
+
+  viewer:
+    user: dfe_viewer
+    password_env: CH_VIEWER_PASSWORD
+
+  tenant_reader:
+    user: dfe_tenant_reader
+    password_env: CH_TENANT_READER_PASSWORD
+
+role_connections:
+  admin: default
+  data_analyst: analyst
+  data_analyst_viewer: analyst_ro
+  data_viewer: viewer
+  infra_admin: default
+  infra_viewer: analyst_ro
+  customer_viewer: tenant_reader
+```
+
+### 5.4 TenantScopedClient
+
+Wraps the clickhouse-connect client to inject `current_tenant_id` into every
+query's settings. For users with multiple `org_ids`, all queries are scoped
+to their permitted orgs.
+
+```python
+class TenantScopedClient:
+    def query(self, sql, ...):
+        settings = {"current_tenant_id": self.tenant_id}
+        return self._client.query(sql, settings=settings, ...)
+```
+
+### 5.5 Row Policies
+
+Only tables with an `org_id` column get row policies. Discovery:
+```sql
+SELECT table FROM system.columns
+WHERE database = 'dfe' AND name = 'org_id'
+```
+
+System, metadata, and audit tables are excluded.
 
 ---
 
-## 12. Non-Goals
+## 6. Org Lifecycle
+
+### 6.1 Org Registry
+
+YAML-backed CRUD via `OrgRegistry`. One file per org in `config/orgs/`.
+
+### 6.2 Org Creation Flow
+
+```mermaid
+sequenceDiagram
+    participant API as REST API
+    participant OR as OrgRegistry
+    participant HDX as HyperDXClient
+
+    API->>OR: create(name, org_ids, display_name)
+    OR-->>API: Org YAML created
+
+    Note over API: No CH user creation needed<br/>(custom settings pattern)
+
+    API->>HDX: create_team("customer-{name}")
+    HDX-->>API: team_id (or None on failure)
+
+    alt Team created
+        API->>HDX: create_connection(team_id,<br/>tenant_reader + setting)
+    end
+
+    Note over HDX: HyperDX failures are non-fatal<br/>Background retry reconciliation
+```
+
+With the custom settings pattern, adding an org does NOT require creating a
+CH user or row policy. The existing `tenant_reader` user + existing row
+policies handle it. dfe-engine just needs to know the org_ids to inject.
+
+---
+
+## 7. HyperDX Integration
+
+### 7.1 Strategy
+
+- **Bootstrap:** `generate_default_connections_json()` produces `DEFAULT_CONNECTIONS` env var for HyperDX Helm chart
+- **Runtime:** `HyperDXClient` calls HyperDX internal API for team/connection CRUD
+- **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
+
+### 7.2 Team Mapping
+
+| DFE Role Scope | HyperDX Team | CH Connection | Tenant Setting |
+|----------------|-------------|---------------|----------------|
+| admin | `dfe-admin` | `default` | None (unrestricted) |
+| data_analyst | `dfe-analysts` | `analyst` | None |
+| data_viewer | `dfe-viewers` | `viewer` | None |
+| customer_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
+
+---
+
+## 8. Argo CD RBAC Export
+
+```mermaid
+flowchart LR
+    ROLES["roles.yaml<br/>argo:* permissions"] --> GEN["generate_rbac_csv()"]
+    GROUPS["GroupStore<br/>group→role mapping"] --> GEN
+    GEN --> CSV["argocd-rbac-cm<br/>policy.csv"]
+    GEN --> PROJ["AppProject<br/>.spec.roles"]
+```
+
+`helm/argo_rbac.py` maps DFE roles with `argo:{resource}:{action}`
+permissions to Argo CD Casbin policy lines. Handles wildcards and OIDC group
+bindings. Unknown argo actions logged as warnings (not errors).
+
+---
+
+## 9. Audit Logging
+
+Every authorisation decision is logged for compliance (SOC 2, GDPR) via
+structured OTel log events (`hyperi_pylib.logger`).
+
+| Event | Log key | Level |
+|-------|---------|-------|
+| Login success | `auth.login.success` | info |
+| Login denied | `auth.login.denied` | warning |
+| Permission denied | `auth.permission.denied` | warning |
+| Account change | `auth.account.{change}` | info |
+| Group change | `auth.group.{change}` | info |
+| API key change | `auth.api_key.{change}` | info |
+
+Events flow through the OTel pipeline → JSON → ClickHouse → HyperDX.
+No custom ClickHouse audit table — standard OTel log ingestion is used.
+
+---
+
+## 10. AuthContext Model
+
+```python
+class AuthContext(BaseModel):
+    org_id: str = "default"      # Primary tenant
+    user_id: str                 # Required unique identifier
+    roles: list[str]             # Resolved DFE roles
+    groups: list[str] = []       # OIDC or local groups
+    org_ids: list[str] = []      # For customer-scoped roles
+    connection_id: str = ""      # Resolved CH connection name
+    request_id: str | None = None
+    client_ip: str | None = None
+    user_agent: str | None = None
+```
+
+Permissions are resolved at authorisation time from roles — never stored on
+the context.
+
+---
+
+## 11. Settings
+
+```python
+class AuthSettings(BaseModel):
+    enabled: bool = False         # Off by default (dev/test)
+    auth_dir: str = ""            # Path to config/auth/ directory
+
+    oidc: OIDCSettings            # Nested OIDC config
+
+class OIDCSettings(BaseModel):
+    providers_dir: str = ""       # Path to OIDC provider config dir
+    sync_enabled: bool = True     # Enable background group sync
+    sync_on_startup: bool = True  # Sync providers at startup
+```
+
+Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
+`DFE_AUTH_OIDC_PROVIDERS_DIR`, `DFE_AUTH_OIDC_SYNC_ENABLED`,
+`DFE_AUTH_OIDC_SYNC_ON_STARTUP`.
+
+---
+
+## 12. Module Map
+
+```mermaid
+graph TD
+    subgraph "auth/"
+        ENGINE["engine.py<br/>authorize()"]
+        MODELS["models.py<br/>AuthContext, AuthzResult"]
+        ROLES_MOD["roles.py<br/>RoleConfig, permission_matches()"]
+        ACCOUNTS["accounts.py<br/>AccountStore"]
+        GROUPS["groups.py<br/>GroupStore"]
+        APIKEYS["api_keys.py<br/>APIKeyStore"]
+        LOCAL["local_provider.py<br/>LocalAuthProvider"]
+        BOOT["bootstrap.py<br/>bootstrap_auth()"]
+        AUDIT["audit.py<br/>audit_*() functions"]
+
+        subgraph "oidc/"
+            OIDC_REG["registry.py<br/>OIDCProviderRegistry"]
+            OIDC_SYNC["sync.py<br/>sync_provider()"]
+            OIDC_MODELS["models.py<br/>OIDCProvider, GroupInfo"]
+            subgraph "adapters/"
+                GENERIC_A["generic.py"]
+                GOOGLE_A["google.py"]
+                ENTRA_A["entra.py"]
+                OKTA_A["okta.py (stub)"]
+            end
+        end
+
+        subgraph "resources/"
+            ROLES_YAML["roles.yaml<br/>7 built-in roles"]
+        end
+    end
+
+    subgraph "api/"
+        DEPS["deps.py<br/>get_current_user()<br/>require_action()"]
+        AUTH_ROUTER["v1/auth.py<br/>login, refresh, me"]
+        APP["app.py<br/>lifespan bootstrap"]
+    end
+
+    subgraph "connections/"
+        CONN_REG["registry.py<br/>ConnectionRegistry"]
+        TENANT["tenant.py<br/>TenantScopedClient"]
+    end
+
+    subgraph "orgs/"
+        ORG_REG["registry.py<br/>OrgRegistry"]
+    end
+
+    subgraph "hyperdx/"
+        HDX["client.py<br/>HyperDXClient"]
+    end
+
+    subgraph "helm/"
+        ARGO["argo_rbac.py<br/>RBAC CSV + AppProject"]
+    end
+
+    DEPS --> ENGINE
+    DEPS --> ACCOUNTS
+    DEPS --> GROUPS
+    DEPS --> APIKEYS
+    AUTH_ROUTER --> LOCAL
+    LOCAL --> ACCOUNTS
+    LOCAL --> GROUPS
+    ENGINE --> ROLES_MOD
+    ROLES_MOD --> ROLES_YAML
+    BOOT --> ACCOUNTS
+    BOOT --> GROUPS
+    OIDC_SYNC --> OIDC_REG
+    OIDC_SYNC --> GROUPS
+    CONN_REG --> MODELS
+    CONN_REG --> TENANT
+    ARGO --> ROLES_MOD
+    ARGO --> GROUPS
+```
+
+---
+
+## 13. Remaining Work (Phase 4)
+
+### Schema-Less Service Discovery
+
+Adding a new `dfe-transform-elastic` should require zero Python code
+changes. The current typed plugin system (`plugins.py`, `plugins_builtin/`)
+remains in place. Phase 4 replaces it with:
+
+1. **Service surface YAML files** (`config/service-surfaces/{name}.yaml`)
+   describing configurable settings and metrics
+2. **Metrics manifest caching** from rustlib `/metrics/manifest` endpoint
+3. **`/api/v1/service-surfaces/`** API endpoints with RBAC
+4. **Removal of typed plugin system** (`plugins.py`, `plugins_builtin/`)
+
+---
+
+## 14. Edge Cases
+
+| Scenario | Behaviour |
+|----------|-----------|
+| Multi-role user | Highest-privilege connection wins (precedence order) |
+| HyperDX unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
+| ClickHouse unavailable | Degraded mode: API serves cached state, `/health/ready` → 503, retry every 60s |
+| Unknown OIDC group | No matching group file → no roles resolved → default deny |
+| OIDC adapter failure | Failsafe: returns empty results, auth continues with available info |
+| Default password in use | Warning logged at startup |
+
+---
+
+## 15. Non-Goals
 
 - Per-metric RBAC granularity (access is per-service, not per-metric)
 - Per-setting RBAC granularity (access is per-service config, not per-key)
@@ -1084,33 +902,28 @@ Row policies ONLY created on tables with an `org_id` column (discovered via
 - Envoy Gateway SecurityPolicy CRD generation (managed by dfe-infra)
 - ClickHouse cluster provisioning (managed by dfe-infra)
 - Role hierarchy / inheritance (flat roles sufficient for 7-role set)
-- SPIFFE/SPIRE for S2S auth (future; API keys with best practices for now)
 
 ---
 
-## 13. Breaking Changes (for Kay and Kaz)
+## 16. Breaking Changes from Pre-2.2
 
-DFE 2.2 is pre-GA. These are intentional breaking changes, not regressions.
-
-| What Changed | Old (2.1 / pre-2.2) | New (2.2) | Migration |
-|-------------|---------------------|-----------|-----------|
-| **JWT library** | `python-jose[cryptography]` | `PyJWT[crypto]` | Already done (v1.7.3). Import changes only. |
-| **Auth model** | `AuthContext.permissions` field | Removed | Permissions resolved from roles at auth time, not stored |
-| **Role names** | `admin`, `infra_admin`, `operator`, `viewer` | `admin`, `data_analyst`, `data_analyst_viewer`, `data_viewer`, `infra_admin`, `infra_viewer`, `customer_viewer` | Old roles gone. New roles in `roles.yaml`. |
-| **Role storage** | `DEFAULT_ROLE_PERMISSIONS` constant in code | `config/rbac/roles.yaml` | Hardcoded constant removed |
-| **Account storage** | 3 hardcoded accounts in `LocalAuthProvider.ACCOUNTS` | `config/auth/accounts/*.yaml` (CRUD via API + CLI) | Hardcoded dict removed. AccountStore with full CRUD. |
-| **Group mapping** | `AuthSettings.group_role_mapping` in settings.py | `config/rbac/assignments.yaml` | Settings field removed |
-| **Auth paths** | JWT Bearer only | OIDC headers + API key + JWT Bearer | New paths additive, JWT unchanged |
-| **CH connections** | Single global client | `ConnectionRegistry` (multi-client, tenant-scoped) | New module, old `clickhouse/` module refactored |
-| **Service plugins** | Typed Pydantic models per Rust service | Schema-less YAML surfaces | `plugins.py` and `plugins_builtin/` removed |
-| **Deep merge** | `deepmerge` pip package | `dfe_engine.yaml_utils.deep_merge()` (vendored) | Already done (v1.7.3) |
+| What | Old | New |
+|------|-----|-----|
+| JWT library | `python-jose[cryptography]` | `PyJWT[crypto]` |
+| Auth model | `AuthContext.permissions` field | Removed — resolved from roles at auth time |
+| Role names | `admin`, `operator`, `viewer` | 7 granular roles in `roles.yaml` |
+| Role storage | `DEFAULT_ROLE_PERMISSIONS` constant | `auth/resources/roles.yaml` |
+| Account storage | Hardcoded dict in `LocalAuthProvider` | `config/auth/accounts/*.yaml` with full CRUD |
+| Group mapping | `AuthSettings.group_role_mapping` | `config/auth/groups/*.yaml` |
+| Auth paths | JWT Bearer only | OIDC headers + API key + JWT Bearer + disabled |
+| CH connections | Single global client | `ConnectionRegistry` (multi-client, tenant-scoped) |
+| Deep merge | `deepmerge` pip package | `dfe_engine.yaml_utils.deep_merge()` (vendored) |
 
 ---
 
-## 14. Research References
+## 17. References
 
-- [ClickHouse Custom Settings + Row Policy (LaunchDarkly/Highlight)](https://www.highlight.io/blog/row-level-security)
+- [ClickHouse Custom Settings + Row Policy (Highlight)](https://www.highlight.io/blog/row-level-security)
 - [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key)
 - [Multi-Tenant RBAC Design (WorkOS)](https://workos.com/blog/how-to-design-multi-tenant-rbac-saas)
 - [Envoy Gateway OIDC SecurityPolicy](https://gateway.envoyproxy.io/docs/tasks/security/oidc/)
-- [GitHub Actions OIDC Federation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)

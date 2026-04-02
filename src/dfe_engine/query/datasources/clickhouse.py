@@ -1,13 +1,17 @@
-"""
-ClickHouse datasource adapter.
-"""
+#  Project:      dfe-engine
+#  File:         src/dfe_engine/query/datasources/clickhouse.py
+#  Purpose:      ClickHouse datasource adapter
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
+"""ClickHouse datasource adapter using clickhouse-connect."""
 
 from __future__ import annotations
 
 import re
 from typing import Any
-
-import pyarrow as pa
 
 from dfe_engine.query.datasources import DatasourceAdapter, register_adapter
 from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
@@ -15,11 +19,7 @@ from dfe_engine.query.models import ExplainPlan, ExplainStep, ExplainStepType
 
 @register_adapter("clickhouse")
 class ClickHouseAdapter(DatasourceAdapter):
-    """
-    ClickHouse datasource adapter.
-
-    Uses clickhouse-connect for native Arrow support.
-    """
+    """ClickHouse datasource adapter using clickhouse-connect."""
 
     def __init__(self, target: str, config: dict[str, Any] | None = None):
         super().__init__(target, config)
@@ -32,7 +32,6 @@ class ClickHouseAdapter(DatasourceAdapter):
         if self._manager is None:
             from dfe_engine.clickhouse import ClickHouseManager
 
-            # Get manager by target name or use default
             if self.config:
                 self._manager = ClickHouseManager.get_instance(self.config)
             else:
@@ -40,14 +39,7 @@ class ClickHouseAdapter(DatasourceAdapter):
         return self._manager
 
     def get_restricted_client(self) -> Any:
-        """Get a restricted clickhouse-connect client for parameterized view execution.
-
-        Creates a separate connection authenticated as the restricted query user.
-        This client can ONLY SELECT from dfe_v_* views (enforced by ClickHouse RBAC).
-
-        Returns:
-            clickhouse-connect Client instance
-        """
+        """Get a restricted clickhouse-connect client for parameterized view execution."""
         if self._restricted_client is None:
             import clickhouse_connect
 
@@ -78,53 +70,36 @@ class ClickHouseAdapter(DatasourceAdapter):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
-    ) -> pa.Table:
-        """
-        Execute query and return Arrow Table.
-
-        clickhouse-connect natively returns Arrow format.
-        """
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Execute query and return (rows, column_names)."""
         client = self.manager.get_clickhouse_client()
 
-        # clickhouse-connect query_arrow returns PyArrow Table
         settings = {"max_execution_time": timeout_seconds}
+        result = client.query(query, parameters=params or {}, settings=settings)
 
-        result = client.query_arrow(
-            query,
-            parameters=params or {},
-            settings=settings,
-        )
-
-        return result
+        columns = result.column_names
+        rows = [dict(zip(columns, row, strict=True)) for row in result.result_rows]
+        return rows, columns
 
     def explain(
         self,
         query: str,
         params: dict[str, Any] | None = None,
     ) -> ExplainPlan:
-        """
-        Get EXPLAIN plan from ClickHouse.
-
-        Uses EXPLAIN PLAN or EXPLAIN ESTIMATE.
-        """
+        """Get EXPLAIN plan from ClickHouse."""
         client = self.manager.get_clickhouse_client()
 
-        # Get both plan types for comprehensive info
         explain_query = f"EXPLAIN PLAN {query}"
-
         try:
             result = client.query(explain_query, parameters=params or {})
             raw_plan = "\n".join(str(row[0]) for row in result.result_rows)
         except Exception:
-            # Fallback to simpler EXPLAIN
             explain_query = f"EXPLAIN {query}"
             result = client.query(explain_query, parameters=params or {})
             raw_plan = "\n".join(str(row[0]) for row in result.result_rows)
 
-        # Parse the plan into steps
         steps = self._parse_explain_plan(raw_plan)
 
-        # Try to get row estimates
         try:
             estimate_result = client.query(
                 f"EXPLAIN ESTIMATE {query}",
@@ -141,14 +116,11 @@ class ClickHouseAdapter(DatasourceAdapter):
         )
 
     def _parse_explain_plan(self, raw_plan: str) -> list[ExplainStep]:
-        """Parse ClickHouse EXPLAIN output into steps."""
         steps = []
-
         for line in raw_plan.split("\n"):
             line = line.strip()
             if not line:
                 continue
-
             step_type = self._classify_step(line)
             steps.append(
                 ExplainStep(
@@ -157,13 +129,10 @@ class ClickHouseAdapter(DatasourceAdapter):
                     details=self._extract_details(line),
                 )
             )
-
         return steps
 
     def _classify_step(self, line: str) -> ExplainStepType:
-        """Classify EXPLAIN line into step type."""
         line_lower = line.lower()
-
         if any(kw in line_lower for kw in ["readfrom", "mergetree", "read"]):
             return ExplainStepType.READ
         if any(kw in line_lower for kw in ["filter", "where", "prewhere"]):
@@ -180,27 +149,19 @@ class ClickHouseAdapter(DatasourceAdapter):
             return ExplainStepType.LIMIT
         if any(kw in line_lower for kw in ["union"]):
             return ExplainStepType.UNION
-
         return ExplainStepType.UNKNOWN
 
     def _extract_details(self, line: str) -> dict[str, Any] | None:
-        """Extract structured details from EXPLAIN line."""
         details = {}
-
-        # Extract table name
         table_match = re.search(r"ReadFrom(?:MergeTree)?\s*\(([^)]+)\)", line)
         if table_match:
             details["table"] = table_match.group(1)
-
-        # Extract row estimates
         rows_match = re.search(r"(\d+)\s*rows", line, re.IGNORECASE)
         if rows_match:
             details["estimated_rows"] = int(rows_match.group(1))
-
         return details if details else None
 
     def healthcheck(self) -> bool:
-        """Check ClickHouse connectivity."""
         try:
             client = self.manager.get_clickhouse_client()
             result = client.query("SELECT 1")
@@ -209,7 +170,6 @@ class ClickHouseAdapter(DatasourceAdapter):
             return False
 
     def close(self) -> None:
-        """Close ClickHouse connections."""
         if self._restricted_client:
             self._restricted_client.close()
             self._restricted_client = None
