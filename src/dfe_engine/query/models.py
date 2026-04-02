@@ -179,39 +179,9 @@ class ExplainPlan(BaseModel):
         description="Original EXPLAIN output from datasource",
     )
 
-    def to_arrow_metadata(self) -> dict[str, str]:
-        """Convert to Arrow schema metadata for embedding in IPC stream."""
-        return {
-            "dfe:explain:steps": self.model_dump_json(include={"steps"}),
-            "dfe:explain:warnings": ",".join(self.warnings),
-            "dfe:explain:estimated_cost": str(self.total_estimated_cost or ""),
-            "dfe:explain:raw": self.raw_plan or "",
-        }
-
-    @classmethod
-    def from_arrow_metadata(cls, metadata: dict[bytes, bytes]) -> ExplainPlan | None:
-        """Reconstruct ExplainPlan from Arrow schema metadata."""
-        import json
-
-        raw_steps = metadata.get(b"dfe:explain:steps")
-        if not raw_steps:
-            return None
-
-        data = json.loads(raw_steps.decode())
-        warnings_str = metadata.get(b"dfe:explain:warnings", b"").decode()
-
-        # Handle both list format and dict with "steps" key
-        steps_data = data if isinstance(data, list) else data.get("steps", [])
-
-        return cls(
-            steps=[ExplainStep(**s) for s in steps_data],
-            warnings=warnings_str.split(",") if warnings_str else [],
-            raw_plan=metadata.get(b"dfe:explain:raw", b"").decode() or None,
-            total_estimated_cost=float(
-                metadata.get(b"dfe:explain:estimated_cost", b"").decode() or 0
-            )
-            or None,
-        )
+    def to_dict(self) -> dict[str, Any]:
+        """Serialise to dict for JSON responses."""
+        return self.model_dump(mode="json")
 
 
 # =============================================================================

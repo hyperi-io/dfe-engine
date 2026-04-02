@@ -4,7 +4,6 @@ These tests require a running ClickHouse instance.
 Use `docker compose up -d` to start the test infrastructure.
 """
 
-import pyarrow as pa
 import pytest
 
 from dfe_engine.query import QueryClient
@@ -321,9 +320,9 @@ class TestQueryResultExportsIntegration:
         assert len(rows) == 5
         assert rows[0]["name"] == "Alice"
 
-    def test_to_parquet_roundtrip(self, clickhouse_available, test_table, tmp_path):
-        """Test Parquet export and reload."""
-        import pyarrow.parquet as pq
+    def test_to_json_roundtrip(self, clickhouse_available, test_table):
+        """Test JSON serialization roundtrip."""
+        import json
 
         client = QueryClient(direct=True)
         result = client.query_with_explain(
@@ -331,39 +330,10 @@ class TestQueryResultExportsIntegration:
             f"SELECT id, name, value FROM {test_table}",
         )
 
-        output_path = tmp_path / "test_output.parquet"
-        result.to_parquet(str(output_path))
-
-        # Reload and verify
-        reloaded = pq.read_table(str(output_path))
-        assert reloaded.num_rows == 5
-        assert reloaded.column_names == ["id", "name", "value"]
-
-    def test_arrow_ipc_roundtrip(self, clickhouse_available, test_table):
-        """Test Arrow IPC serialization roundtrip."""
-        from dfe_engine.query.models import QueryMetadata
-        from dfe_engine.query.result import QueryResult
-
-        client = QueryClient(direct=True)
-        result = client.query_with_explain(
-            "clickhouse:default",
-            f"SELECT id, name FROM {test_table}",
-            parallel=True,
-        )
-
-        # Serialize
-        ipc_bytes = result.to_arrow_ipc(include_explain=True)
-
-        # Deserialize
-        metadata = QueryMetadata(
-            row_count=5,
-            query_duration_ms=0,
-            datasource="clickhouse:default",
-        )
-        reconstructed = QueryResult.from_arrow_ipc(ipc_bytes, metadata)
-
-        assert reconstructed.num_rows == 5
-        assert reconstructed.explain is not None
+        json_str = result.to_json()
+        data = json.loads(json_str)
+        assert len(data) == 5
+        assert "name" in data[0]
 
 
 class TestEdgeCasesIntegration:

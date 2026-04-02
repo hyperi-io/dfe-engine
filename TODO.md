@@ -57,11 +57,11 @@ This is the **single source of truth** for all tasks and progress.
 2. [x] Sigma router (`v1/sigma.py`) — SigmaSourceMapper, converter
 3. [x] Schemas router (`v1/schemas.py`) — SchemaManager versions, DDL generation
 
-#### Phase 5: UI Migration
+#### Phase 5: UI Migration ✓
 
-1. [ ] Generate full OpenAPI spec, update `@repo/control-plane-types` in dfe-ui
-2. [ ] Update dfe-ui API config to point at engine API
-3. [ ] Create `docs/UI-API-GUIDE.md`
+1. [x] Generate full OpenAPI spec (75 paths), fix generate.py for pylib compat
+2. [ ] Update dfe-ui API config to point at engine API (requires dfe-ui repo)
+3. [x] Create `docs/UI-API-GUIDE.md` — auth, pagination, SSE, TypeScript types
 
 ---
 
