@@ -59,7 +59,7 @@ class TriggerResponse(BaseModel):
     """Response from triggering an ad-hoc hunt."""
 
     task_id: str = Field(description="Task ID for polling via /tasks/{task_id}")
-    hunt_name: str
+    hunt_name: str = Field(description="Name of the triggered hunt")
 
 
 # ── Dependencies ────────────────────────────────────────────
@@ -121,12 +121,12 @@ async def list_hunts(
 
 
 @router.post(
-    "/{hunt_name}/run",
+    "/{name}/run",
     response_model=TriggerResponse,
     status_code=202,
 )
 async def trigger_hunt(
-    hunt_name: str,
+    name: str,
     body: TriggerRequest,
     request: Request,
     user: CurrentUser,
@@ -148,7 +148,7 @@ async def trigger_hunt(
     target_hunt = None
     for cron_job in engine._cron_jobs:
         for hunt in cron_job.hunts:
-            if hunt.name == hunt_name:
+            if hunt.name == name:
                 target_hunt = hunt
                 break
         if target_hunt:
@@ -157,7 +157,7 @@ async def trigger_hunt(
     if target_hunt is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_name}' not found"},
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         )
 
     manager = _get_task_manager(request)
@@ -168,7 +168,7 @@ async def trigger_hunt(
         body.customer,
     )
 
-    return TriggerResponse(task_id=task_info.id, hunt_name=hunt_name)
+    return TriggerResponse(task_id=task_info.id, hunt_name=name)
 
 
 async def _execute_hunt(hunt: Any, customer: str, *, task: Any) -> dict:

@@ -143,7 +143,7 @@ async def generate_all_sigma_views(
     """Generate Sigma view DDL for all sources."""
     mapper = _get_source_mapper(request)
     views = mapper.generate_all_sigma_views(database, enabled_only=enabled_only)
-    return [SigmaViewResult(source_name=name, ddl=ddl) for name, ddl in views.items()]
+    return [SigmaViewResult(source_name=src, ddl=ddl) for src, ddl in views.items()]
 
 
 @router.get("/logsource", response_model=list[LogsourceMatch])

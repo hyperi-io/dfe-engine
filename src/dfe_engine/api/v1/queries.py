@@ -226,17 +226,3 @@ async def execute_raw_query(
         row_count=len(rows),
         query_duration_ms=duration_ms,
     )
-
-
-# ── Health ──────────────────────────────────────────────────
-
-
-@router.get("/health")
-async def query_health() -> dict:
-    """Health check for query engine."""
-    from dfe_engine.query.datasources import list_adapters
-
-    return {
-        "status": "healthy",
-        "adapters": list_adapters(),
-    }
