@@ -47,6 +47,9 @@ class Account(BaseModel):
     password_hash: str
     enabled: bool = True
     groups: list[str] = Field(default_factory=list)
+    external: bool = False
+    source_provider: str = ""
+    last_login_at: str = ""
     created_at: str = ""
     updated_at: str = ""
 
@@ -153,6 +156,12 @@ class AccountStore:
             account = account.model_copy(update={"enabled": fields["enabled"]})
         if "groups" in fields:
             account = account.model_copy(update={"groups": fields["groups"]})
+        if "external" in fields:
+            account = account.model_copy(update={"external": fields["external"]})
+        if "source_provider" in fields:
+            account = account.model_copy(update={"source_provider": fields["source_provider"]})
+        if "last_login_at" in fields:
+            account = account.model_copy(update={"last_login_at": fields["last_login_at"]})
 
         account = account.model_copy(update={"updated_at": _now()})
         self._write(path, account)
