@@ -8,6 +8,7 @@ from dfe_engine.api.v1.alerts import router as alerts_router
 from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.auth import router as auth_router
 from dfe_engine.api.v1.deployments import router as deployments_router
+from dfe_engine.api.v1.discovery import router as discovery_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
 from dfe_engine.api.v1.hunts import router as hunts_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
@@ -15,8 +16,10 @@ from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
 from dfe_engine.api.v1.rules import router as rules_router
+from dfe_engine.api.v1.schemas import router as schemas_router
 from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
 from dfe_engine.api.v1.services import router as services_router
+from dfe_engine.api.v1.sigma import router as sigma_router
 from dfe_engine.api.v1.sources import router as sources_router
 from dfe_engine.api.v1.system import router as system_router
 from dfe_engine.api.v1.tasks import router as tasks_router
@@ -47,5 +50,8 @@ v1_router.include_router(hunts_router)
 v1_router.include_router(queries_router)
 v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
+v1_router.include_router(discovery_router)
+v1_router.include_router(schemas_router)
+v1_router.include_router(sigma_router)
 
 __all__ = ["v1_router"]
