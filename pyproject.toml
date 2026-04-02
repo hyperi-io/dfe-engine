@@ -11,7 +11,6 @@ dependencies = [
     # hyperi-pylib for logging and common utilities
     "hyperi-pylib[expression,http]>=2.25.0",
     # Data processing
-    "pyarrow>=23.0.1",
     "pandas>=3.0.1",
     "numpy>=2.4.2",
     # Database connections
