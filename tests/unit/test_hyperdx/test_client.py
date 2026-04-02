@@ -23,7 +23,6 @@ from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
 from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
 
-
 # ---------------------------------------------------------------------------
 # SyncResult
 # ---------------------------------------------------------------------------

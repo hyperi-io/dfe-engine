@@ -13,7 +13,7 @@ function is called with the correct structured arguments. This is one of the
 explicit exceptions to the no-mocks policy for audit logging.
 """
 
-from unittest.mock import call, patch
+from unittest.mock import patch
 
 import pytest
 
