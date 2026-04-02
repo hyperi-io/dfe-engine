@@ -26,7 +26,7 @@ This is the **single source of truth** for all tasks and progress.
 - [x] Group sync runner (sync.py, async, upsert with role preservation)
 - [x] REST API for provider CRUD (7 endpoints, 162 tests passing)
 - [x] Control plane independence tests (529 lines)
-- [ ] Final integration + push
+- [x] Final integration + push (2792 tests, 80% coverage, pushed 2026-04-02)
 
 ### Pending
 
