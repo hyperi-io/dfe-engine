@@ -1217,7 +1217,7 @@
           "Organisations"
         ],
         "summary": "Create Org",
-        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, fires a background task to\ncreate the HyperDX team.  Failure is non-fatal.",
+        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
         "operationId": "create_org_api_v1_orgs_post",
         "requestBody": {
           "content": {
@@ -5616,6 +5616,12 @@
             "type": "array",
             "title": "Org Ids",
             "description": "Tenant IDs for ClickHouse row-level security"
+          },
+          "dedicated_database": {
+            "type": "boolean",
+            "title": "Dedicated Database",
+            "description": "Whether to provision a dedicated ClickHouse database",
+            "default": false
           }
         },
         "type": "object",
@@ -6547,6 +6553,10 @@
             "type": "boolean",
             "title": "Enabled"
           },
+          "dedicated_database": {
+            "type": "boolean",
+            "title": "Dedicated Database"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -6562,6 +6572,7 @@
           "display_name",
           "org_ids",
           "enabled",
+          "dedicated_database",
           "created_at",
           "updated_at"
         ],
@@ -8991,6 +9002,24 @@
             ],
             "title": "Enabled",
             "description": "Enable or disable the org"
+          },
+          "dedicated_database": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dedicated Database",
+            "description": "Enable or disable a dedicated ClickHouse database"
+          },
+          "confirm_merge": {
+            "type": "boolean",
+            "title": "Confirm Merge",
+            "description": "Required when disabling dedicated_database \u2014 confirms data migration is handled",
+            "default": false
           }
         },
         "type": "object",
