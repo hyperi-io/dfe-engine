@@ -10,10 +10,11 @@
 
 from __future__ import annotations
 
-import pytest
 from pydantic import SecretStr
 
+from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.common import SaslConfig
+from dfe_engine.services.models.fetcher import FetcherConfig, FetcherSourceConfig
 from dfe_engine.services.models.loader import (
     ClickHouseConfig,
     LoaderBufferConfig,
@@ -22,9 +23,10 @@ from dfe_engine.services.models.loader import (
     LoaderRoutingConfig,
 )
 from dfe_engine.services.models.receiver import ReceiverConfig
+from dfe_engine.services.plugins_builtin.archiver import _validate_archiver
+from dfe_engine.services.plugins_builtin.fetcher import _validate_fetcher
 from dfe_engine.services.plugins_builtin.loader import _validate_loader
 from dfe_engine.services.plugins_builtin.receiver import _validate_receiver
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -413,10 +415,6 @@ class TestValidateReceiverGrpc:
 # ---------------------------------------------------------------------------
 
 
-from dfe_engine.services.models.archiver import ArchiverConfig  # noqa: E402
-from dfe_engine.services.plugins_builtin.archiver import _validate_archiver  # noqa: E402
-
-
 def run_archiver_validation(config: ArchiverConfig) -> tuple[list[str], list[str]]:
     errors: list[str] = []
     warnings: list[str] = []
@@ -543,10 +541,6 @@ class TestValidateArchiverRouting:
 # ---------------------------------------------------------------------------
 # _validate_fetcher — validation logic
 # ---------------------------------------------------------------------------
-
-
-from dfe_engine.services.models.fetcher import FetcherConfig, FetcherSourceConfig  # noqa: E402
-from dfe_engine.services.plugins_builtin.fetcher import _validate_fetcher  # noqa: E402
 
 
 def run_fetcher_validation(config: FetcherConfig) -> tuple[list[str], list[str]]:
