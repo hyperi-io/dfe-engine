@@ -10,6 +10,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import os
 import re
 from datetime import UTC, datetime
 
@@ -17,6 +19,7 @@ from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.audit import (
     audit_jit_account_created,
     audit_jit_groups_updated,
+    audit_jit_hdx_invited,
     audit_jit_team_assigned,
 )
 from dfe_engine.auth.groups import GroupStore
@@ -36,10 +39,12 @@ class JitProvisioner:
         account_store: AccountStore,
         group_store: GroupStore,
         hyperdx_client=None,
+        org_registry=None,
     ) -> None:
         self._accounts = account_store
         self._groups = group_store
         self._hdx = hyperdx_client
+        self._orgs = org_registry
 
     @staticmethod
     def sanitise_username(user_id: str) -> str:
@@ -96,6 +101,22 @@ class JitProvisioner:
         if team:
             audit_jit_team_assigned(user_id, team, "broadest-wins")
 
+            # Fire-and-forget invite to HyperDX team on first login.
+            # Only attempted when we have a client and the user_id looks like
+            # an email address (OIDC subjects that are UUIDs won't work as invites).
+            if self._hdx is not None and "@" in user_id:
+                team_api_key = self._resolve_team_api_key(team)
+                if team_api_key:
+                    try:
+                        loop = asyncio.get_event_loop()
+                        # Store reference to prevent garbage collection of the task.
+                        _task = loop.create_task(  # noqa: RUF006
+                            self._invite_to_hdx(user_id, team, team_api_key)
+                        )
+                    except RuntimeError:
+                        # No running event loop (e.g. tests) — skip silently
+                        pass
+
         return self._accounts.get(safe_name)
 
     def resolve_hyperdx_team(self, oidc_groups: list[str]) -> str:
@@ -118,3 +139,36 @@ class JitProvisioner:
             return f"customer-{all_org_ids[0]}"
 
         return ""
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_team_api_key(self, team_name: str) -> str:
+        """Look up the HyperDX team API key for a customer org team.
+
+        Only org-scoped teams (``customer-{org}`` prefix) have a stored API key.
+        Broad role teams (``dfe-admin``, ``dfe-analysts``) use the admin key
+        and are not individually invited.
+
+        Returns:
+            API key string, or empty string if unavailable.
+        """
+        if self._orgs is None or not team_name.startswith("customer-"):
+            return ""
+
+        org_name = team_name[len("customer-") :]
+        org = self._orgs.get(org_name)
+        if org is None or not org.hyperdx_team_api_key_env:
+            return ""
+
+        return os.environ.get(org.hyperdx_team_api_key_env, "")
+
+    async def _invite_to_hdx(self, user_id: str, team_name: str, team_api_key: str) -> None:
+        """Fire-and-forget coroutine to invite a user to a HyperDX team."""
+        try:
+            success = await self._hdx.invite_member(team_api_key, user_id)
+            if success:
+                audit_jit_hdx_invited(user_id, team_name)
+        except Exception:
+            pass  # Non-fatal — already logged inside invite_member

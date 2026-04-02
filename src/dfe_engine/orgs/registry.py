@@ -110,7 +110,7 @@ class OrgRegistry:
 
         Permitted fields: ``display_name``, ``org_ids``, ``enabled``,
         ``dedicated_database``, ``database_name``, ``hyperdx_team_id``,
-        ``ch_password_env``.
+        ``hyperdx_team_api_key_env``, ``ch_password_env``.
 
         Args:
             name: Org to update.
@@ -141,6 +141,8 @@ class OrgRegistry:
             update_dict["database_name"] = fields["database_name"]
         if "hyperdx_team_id" in fields:
             update_dict["hyperdx_team_id"] = fields["hyperdx_team_id"]
+        if "hyperdx_team_api_key_env" in fields:
+            update_dict["hyperdx_team_api_key_env"] = fields["hyperdx_team_api_key_env"]
         if "ch_password_env" in fields:
             update_dict["ch_password_env"] = fields["ch_password_env"]
 
