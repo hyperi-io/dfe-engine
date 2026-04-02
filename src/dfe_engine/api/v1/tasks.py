@@ -17,7 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from dfe_engine.api.deps import CurrentUser
@@ -77,11 +77,11 @@ async def cancel_task(
     return manager.get(task_id)  # type: ignore[return-value]
 
 
-@router.get("/{task_id}/stream")
+@router.get("/{task_id}/stream", response_class=Response, include_in_schema=False)
 async def stream_task(
     request: Request,
     task_id: str,
-) -> EventSourceResponse:
+):
     """SSE stream of task progress updates.
 
     Events:
