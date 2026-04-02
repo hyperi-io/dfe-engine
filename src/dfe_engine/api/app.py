@@ -116,6 +116,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
+    # Bootstrap task manager for async background tasks
+    from dfe_engine.api.task_manager import TaskManager
+
+    app.state.task_manager = TaskManager()
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
