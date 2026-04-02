@@ -126,6 +126,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         hyperdx_client=hdx_client,
     )
 
+    # Bootstrap JIT provisioner
+    from dfe_engine.auth.jit import JitProvisioner
+
+    app.state.jit_provisioner = JitProvisioner(
+        account_store=account_store,
+        group_store=group_store,
+        hyperdx_client=getattr(app.state, "hyperdx_client", None),
+    )
+
     # Bootstrap task manager for async background tasks
     from dfe_engine.api.task_manager import TaskManager
 
