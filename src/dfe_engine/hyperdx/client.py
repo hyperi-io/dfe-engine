@@ -379,6 +379,80 @@ class HyperDXClient:
             )
         return json.dumps(connections)
 
+    async def invite_member(self, team_api_key: str, email: str) -> bool:
+        """Invite a user to a HyperDX team by email.
+
+        Uses the team's own API key (not the admin key) since HyperDX team
+        endpoints are team-scoped.
+
+        Args:
+            team_api_key: API key for the target team.
+            email: Email address to invite.
+
+        Returns:
+            True on success, False on failure (non-fatal).
+        """
+        if not self._connected:
+            logger.warning("HyperDX unreachable, skipping invite_member", email=email)
+            return False
+
+        try:
+            from hyperi_pylib.http import AsyncHttpClient
+
+            async with AsyncHttpClient(base_url=self._base_url) as client:
+                response = await client.post(
+                    "/api/v1/team/invitation",
+                    json={"email": email},
+                    headers={
+                        "Authorization": f"Bearer {team_api_key}",
+                        "Content-Type": "application/json",
+                    },
+                )
+                response.raise_for_status()
+                logger.info("HyperDX member invited", email=email)
+                return True
+        except Exception as exc:
+            logger.warning(
+                "HyperDX invite_member failed (non-fatal)",
+                email=email,
+                error=str(exc),
+            )
+            return False
+
+    async def get_team_api_key(self, team_id: str) -> str | None:
+        """Get the API key for a specific team.
+
+        Uses the admin API key to retrieve team info.
+
+        Args:
+            team_id: HyperDX team ID.
+
+        Returns:
+            Team API key string, or None on failure.
+        """
+        if not self._connected:
+            return None
+
+        try:
+            from hyperi_pylib.http import AsyncHttpClient
+
+            async with AsyncHttpClient(base_url=self._base_url) as client:
+                response = await client.get(
+                    f"/api/v1/teams/{team_id}",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                data = response.json()
+                return data.get("apiKey") or data.get("api_key") or None
+        except Exception as exc:
+            logger.warning(
+                "HyperDX get_team_api_key failed",
+                team_id=team_id,
+                error=str(exc),
+            )
+            self._connected = False
+            return None
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------

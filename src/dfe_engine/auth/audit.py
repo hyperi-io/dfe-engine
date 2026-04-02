@@ -263,6 +263,16 @@ def audit_jit_team_assigned(user_id: str, team_name: str, reason: str) -> None:
     logger.info("auth.jit.team_assigned", user_id=user_id, team_name=team_name, reason=reason)
 
 
+def audit_jit_hdx_invited(user_id: str, team_name: str) -> None:
+    """Emit an audit event when a JIT user is invited to a HyperDX team.
+
+    Args:
+        user_id: Identity of the user being invited.
+        team_name: Name of the HyperDX team.
+    """
+    logger.info("auth.jit.hdx_invited", user_id=user_id, team_name=team_name)
+
+
 def audit_jit_failed(user_id: str, error: str) -> None:
     """Emit an audit event when JIT provisioning fails.
 

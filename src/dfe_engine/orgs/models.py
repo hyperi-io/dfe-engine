@@ -29,6 +29,7 @@ class Org(BaseModel):
         dedicated_database: Whether this org has a dedicated ClickHouse database.
         database_name: ClickHouse database name for this org (empty = shared default).
         hyperdx_team_id: HyperDX team ID for this org's connection sync.
+        hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
         ch_password_env: Environment variable name holding the ClickHouse password.
         created_at: ISO 8601 timestamp of creation.
         updated_at: ISO 8601 timestamp of last update.
@@ -41,6 +42,7 @@ class Org(BaseModel):
     dedicated_database: bool = False
     database_name: str = ""
     hyperdx_team_id: str = ""
+    hyperdx_team_api_key_env: str = ""
     ch_password_env: str = ""
     created_at: str = ""
     updated_at: str = ""
