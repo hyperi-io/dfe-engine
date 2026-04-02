@@ -108,8 +108,10 @@ class TestDeploymentsCRUD:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["replicas"] == 2
-        assert data["keda"]["enabled"] is True
+        assert data["service"] == "receiver"
+        assert data["instance"] == "default"
+        assert data["config"]["replicas"] == 2
+        assert data["config"]["keda"]["enabled"] is True
 
     def test_get_not_found(self, deploy_client, deploy_admin_headers):
         resp = deploy_client.get(
@@ -171,7 +173,9 @@ class TestDeploymentsCRUD:
             headers=deploy_admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["custom_key"] == "custom_value"
+        data = resp.json()
+        assert data["service"] == "my-new-service"
+        assert data["config"]["custom_key"] == "custom_value"
 
     def test_viewer_read_allowed(self, deploy_client, deploy_admin_headers):
         from dfe_engine.api.deps import create_access_token

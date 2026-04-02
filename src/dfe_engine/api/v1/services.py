@@ -36,6 +36,14 @@ class ValidationResult(BaseModel):
     errors: list[str] = Field(default_factory=list)
 
 
+class ServiceConfigDetail(BaseModel):
+    """Full service config. Inner config is dynamic (schema-less mode)."""
+
+    service: str = Field(description="Service type (e.g. receiver, loader)")
+    instance: str = Field(description="Instance name (e.g. production, staging)")
+    config: dict[str, Any] = Field(description="Service-specific configuration")
+
+
 class ConfigHistoryEntry(BaseModel):
     commit: str
     message: str
@@ -81,6 +89,7 @@ async def list_service_configs(
 
 @router.get(
     "/{service}/{instance}",
+    response_model=ServiceConfigDetail,
     dependencies=[Depends(require_action("config:read"))],
 )
 async def get_service_config(
@@ -88,7 +97,7 @@ async def get_service_config(
     instance: str,
     user: CurrentUser,
     registry: ServiceConfigReg,
-):
+) -> ServiceConfigDetail:
     """Get a full service config by service + instance."""
     from dfe_engine.services.registry import ConfigNotFoundError
 
@@ -102,10 +111,8 @@ async def get_service_config(
                 "message": f"Service config '{service}/{instance}' not found",
             },
         )
-    # get_config returns typed model for known services, raw dict for unknown
-    if isinstance(config, dict):
-        return config
-    return config.model_dump(mode="json")
+    config_dict = config if isinstance(config, dict) else config.model_dump(mode="json")
+    return ServiceConfigDetail(service=service, instance=instance, config=config_dict)
 
 
 @router.put(

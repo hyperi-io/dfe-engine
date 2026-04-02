@@ -1995,7 +1995,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceConfigDetail"
+                }
               }
             }
           },
@@ -2464,7 +2466,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentConfigDetail"
+                }
               }
             }
           },
@@ -3920,22 +3924,22 @@
         ]
       }
     },
-    "/api/v1/hunts/{hunt_name}/run": {
+    "/api/v1/hunts/{name}/run": {
       "post": {
         "tags": [
           "hunts"
         ],
         "summary": "Trigger Hunt",
         "description": "Trigger an ad-hoc hunt execution.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``\nor streamed via ``GET /tasks/{task_id}/stream``.",
-        "operationId": "trigger_hunt_api_v1_hunts__hunt_name__run_post",
+        "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {
-            "name": "hunt_name",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Hunt Name"
+              "title": "Name"
             }
           }
         ],
@@ -4211,35 +4215,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/queries/health": {
-      "get": {
-        "tags": [
-          "queries"
-        ],
-        "summary": "Query Health",
-        "description": "Health check for query engine.",
-        "operationId": "query_health_api_v1_queries_health_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": true,
-                  "type": "object",
-                  "title": "Response Query Health Api V1 Queries Health Get"
                 }
               }
             }
@@ -5736,6 +5711,34 @@
         ],
         "title": "DatabaseInfo",
         "description": "Summary of a ClickHouse database."
+      },
+      "DeploymentConfigDetail": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "description": "Service type"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Instance name"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Deployment-specific configuration (resources, KEDA, etc.)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "config"
+        ],
+        "title": "DeploymentConfigDetail",
+        "description": "Full deployment config. Inner config is dynamic (schema-less mode)."
       },
       "DeploymentHistoryEntry": {
         "properties": {
@@ -7676,6 +7679,34 @@
         "title": "SchemaColumn",
         "description": "A column in a schema definition."
       },
+      "ServiceConfigDetail": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service",
+            "description": "Service type (e.g. receiver, loader)"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance",
+            "description": "Instance name (e.g. production, staging)"
+          },
+          "config": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Config",
+            "description": "Service-specific configuration"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "config"
+        ],
+        "title": "ServiceConfigDetail",
+        "description": "Full service config. Inner config is dynamic (schema-less mode)."
+      },
       "ServiceConfigSummary": {
         "properties": {
           "service": {
@@ -8842,7 +8873,8 @@
           },
           "hunt_name": {
             "type": "string",
-            "title": "Hunt Name"
+            "title": "Hunt Name",
+            "description": "Name of the triggered hunt"
           }
         },
         "type": "object",
