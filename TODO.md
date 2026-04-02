@@ -60,7 +60,7 @@ This is the **single source of truth** for all tasks and progress.
 #### Phase 5: UI Migration ✓
 
 1. [x] Generate full OpenAPI spec (74 paths), fix generate.py for pylib compat
-2. [ ] Update dfe-ui API config to point at engine API (requires dfe-ui repo)
+2. [x] Update dfe-ui API config — branch `feat/dereks-stab-at-engine-update` pushed
 3. [x] Create `docs/UI-API-GUIDE.md` — auth, pagination, SSE, TypeScript types
 
 #### Post-Phase: Review Fixes ✓
@@ -90,6 +90,12 @@ This is the **single source of truth** for all tasks and progress.
 - [ ] Blob SHA ETag computation for conflict detection in DirectoryConfigStore writes
 - [ ] Read-before-write pattern in DirectoryConfigStore writes
 - [ ] Migrate Jinja2 templates from `INSERT INTO ... SELECT *` to lean `matched_uuid` pattern
+
+### High Priority (New)
+
+- [ ] **JIT user provisioning + org CH isolation + HyperDX binding** — spec at `docs/superpowers/specs/2026-04-03-jit-provisioning-design.md`
+  - Phase 1: OrgChProvisioner, OrgLifecycleManager, JitProvisioner, Account/Group/Org model changes
+  - Phase 2: Core table/view management — schema deploy from dfe-schemas, idempotent, works with or without dfe-engine (see memory: schema deployment requirements)
 
 ### Low Priority
 
