@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, DeploymentConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/deployments", tags=["Deployments"])
 
@@ -157,6 +158,7 @@ async def save_deployment(
         instance=instance,
         created_by=user.user_id,
     )
+    audit_resource_change(user.user_id, "deployment", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}
 
 
@@ -185,6 +187,7 @@ async def delete_deployment(
             },
         )
     registry.delete_config(service, instance)
+    audit_resource_change(user.user_id, "deployment", f"{service}/{instance}", "deleted")
 
 
 @router.post(
@@ -277,6 +280,7 @@ async def apply_size(
             },
         )
 
+    audit_resource_change(user.user_id, "deployment", f"{service}/{instance}", "updated")
     return SizeResponse(
         service=service,
         instance=instance,
@@ -293,4 +297,5 @@ async def apply_size(
 async def seed_deployments(user: CurrentUser, registry: DeploymentConfigReg):
     """Seed built-in default deployment configs. Non-destructive."""
     count = registry.seed_defaults(overwrite=False)
+    audit_resource_change(user.user_id, "deployment", "all", "seeded")
     return SeedResponse(seeded=count)

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.task_manager import TaskManager
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -114,6 +115,7 @@ async def build_pipeline(
         body.output_path,
         body.build_core,
     )
+    audit_resource_change(user.user_id, "pipeline", "all", "executed")
     return PipelineBuildResponse(task_id=task_info.id)
 
 

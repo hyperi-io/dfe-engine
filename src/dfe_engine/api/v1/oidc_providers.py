@@ -28,6 +28,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -211,6 +212,7 @@ async def create_provider(
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
+    audit_resource_change(user.user_id, "oidc_provider", body.name, "created")
     return _provider_to_response(body.name, provider)
 
 
@@ -290,6 +292,7 @@ async def update_provider(
         )
 
     provider = registry.update(name, **update_fields)
+    audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     return _provider_to_response(name, provider)
 
 
@@ -332,6 +335,7 @@ async def delete_provider(
             )
 
     registry.delete(name)
+    audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
     return DetachResponse(deleted=name, orphaned_groups=orphaned)
 
@@ -358,6 +362,7 @@ async def sync_provider_groups(
 
     group_store = request.app.state.group_store
     result = await sync_provider(name, registry, group_store)
+    audit_resource_change(user.user_id, "oidc_provider", name, "executed")
 
     return SyncResponse(
         created=result["created"],
