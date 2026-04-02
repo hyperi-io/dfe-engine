@@ -283,7 +283,60 @@ No new provisioning endpoints. JIT is automatic.
 
 ---
 
-## 6. Components
+## 6. SOC2 Audit Logging
+
+All provisioning actions emit structured audit events via the existing
+`audit.py` pattern (OTel structured logs → ClickHouse → HyperDX).
+
+### New Audit Events
+
+| Event | Level | When | Key Fields |
+|-------|-------|------|------------|
+| `org.created` | info | Org created | `admin_id`, `org_name`, `dedicated_database` |
+| `org.updated` | info | Org config changed | `admin_id`, `org_name`, `changes` (field list) |
+| `org.deleted` | warning | Org deleted | `admin_id`, `org_name` |
+| `org.dedicated_db.enabled` | info | Dedicated DB toggled on | `admin_id`, `org_name`, `database_name` |
+| `org.dedicated_db.disabled` | warning | Dedicated DB toggled off | `admin_id`, `org_name`, `confirmed` |
+| `org.ch.user_created` | info | CH user provisioned | `org_name`, `ch_user`, `databases` |
+| `org.ch.user_dropped` | info | CH user removed | `org_name`, `ch_user` |
+| `org.ch.provision_failed` | warning | CH provisioning failed | `org_name`, `error` |
+| `org.hyperdx.team_created` | info | HyperDX team provisioned | `org_name`, `team_id` |
+| `org.hyperdx.team_deleted` | info | HyperDX team removed | `org_name`, `team_id` |
+| `org.hyperdx.provision_failed` | warning | HyperDX provisioning failed | `org_name`, `error` |
+| `auth.jit.account_created` | info | Shadow account created on first OIDC login | `user_id`, `source_provider`, `groups`, `org_ids` |
+| `auth.jit.groups_updated` | info | OIDC groups changed on subsequent login | `user_id`, `added_groups`, `removed_groups` |
+| `auth.jit.team_assigned` | info | User assigned to HyperDX team | `user_id`, `team_name`, `reason` (broadest-wins) |
+| `auth.jit.provision_failed` | warning | JIT provisioning failed (non-fatal) | `user_id`, `error` |
+
+### Existing Events (Already Implemented)
+
+These events from `auth/audit.py` continue to fire and complement the
+new events above:
+
+- `auth.login.success` — every successful auth (all 4 paths)
+- `auth.login.denied` — failed auth attempt
+- `auth.permission.denied` — RBAC denial
+- `auth.account.created/updated/deleted` — admin account changes
+- `auth.group.created/updated/deleted` — admin group changes
+- `auth.api_key.created/revoked` — API key lifecycle
+
+### SOC2 Coverage
+
+| SOC2 Control | Covered By |
+|-------------|-----------|
+| CC6.1 — Logical access security | `auth.login.*`, `auth.permission.denied` |
+| CC6.2 — User provisioning | `auth.jit.account_created`, `auth.account.*` |
+| CC6.3 — User deprovisioning | `org.deleted`, `auth.account.deleted` |
+| CC7.2 — System change monitoring | `org.*`, `org.ch.*`, `org.dedicated_db.*` |
+| CC8.1 — Infrastructure changes | `org.ch.user_created/dropped`, `org.hyperdx.*` |
+
+All events include a timestamp (RFC 3339) automatically via `hyperi_pylib.logger`.
+Sensitive data (passwords, secrets) is NEVER logged — only identifiers,
+actions, and outcomes.
+
+---
+
+## 7. Components
 
 ### New
 
@@ -316,7 +369,7 @@ No new provisioning endpoints. JIT is automatic.
 
 ---
 
-## 7. Testing
+## 8. Testing
 
 ### Unit Tests (No External Deps)
 
@@ -344,7 +397,63 @@ verify correct team assignment → disable org → verify account still works.
 
 ---
 
-## 8. Future Work (Add to TODO)
+## 9. SOC2 Audit Gap Remediation (All of dfe-engine)
+
+The existing audit coverage (Section 6, "Existing Events") covers auth
+decisions. The new provisioning events extend coverage to infrastructure
+changes. But several existing dfe-engine operations have NO audit trail.
+
+### Audit Gaps to Remediate
+
+| Operation | Current Audit | Gap |
+|-----------|--------------|-----|
+| Source CRUD (`/sources`) | None | No record of who created/updated/deleted sources |
+| Service config CRUD (`/services`) | None | Config changes untracked |
+| Deployment config CRUD (`/deployments`) | None | Scaling/resource changes untracked |
+| Field map CRUD (`/field-maps`) | None | Mapping changes untracked |
+| Alert destination CRUD (`/alerts`) | None | Notification config changes untracked |
+| Rule creation (`/rules`) | None | Hunt rule changes untracked |
+| OIDC provider CRUD (`/auth/oidc-providers`) | None | Provider config changes untracked |
+| OIDC group sync (`/auth/oidc-providers/{name}/sync`) | None | Sync outcomes untracked |
+| Org CRUD (`/orgs`) | None (added in this spec) | Covered by this spec |
+| Hunt execution (`/hunts/{name}/run`) | None | No record of who triggered hunts |
+| Pipeline build (`/pipeline/build`) | None | No record of who triggered builds |
+| Schema build (`/schemas/{name}/build`) | None | DDL generation untracked |
+| Transform compile/test (`/transforms`) | None | Transform changes untracked |
+
+### Remediation Approach
+
+Add `audit_resource_change()` to `auth/audit.py` — a generic structured
+event emitter for CRUD operations on any resource:
+
+```python
+def audit_resource_change(
+    admin_id: str,
+    resource_type: str,    # "source", "service_config", "deployment", etc.
+    resource_name: str,
+    change: str,           # "created", "updated", "deleted", "executed"
+    details: dict | None,  # Optional context (e.g. fields changed)
+) -> None:
+    logger.info(
+        f"resource.{resource_type}.{change}",
+        admin_id=admin_id,
+        resource_type=resource_type,
+        resource_name=resource_name,
+        change=change,
+        details=details,
+    )
+```
+
+Wire into every mutating API endpoint — the `CurrentUser` dependency
+already provides the `user_id` for `admin_id`. One-line addition per
+endpoint after the mutation succeeds.
+
+**This is Phase 3 of this spec** — after JIT provisioning (Phase 1)
+and core schema deployment (Phase 2).
+
+---
+
+## 10. Future Work (Add to TODO)
 
 - **Core table/view management from dfe-engine** — the schema bootstrap
   code (`SchemaBuilderV2`, `DDLFileWriter`, `DDLManager`) currently targets
@@ -352,3 +461,8 @@ verify correct team assignment → disable org → verify account still works.
   to any database (shared or dedicated org DB). Until this is done,
   `dedicated_database: true` requires manual schema deployment in the
   dedicated DB.
+
+- **SOC2 audit remediation** — wire `audit_resource_change()` into all
+  mutating API endpoints across dfe-engine (sources, services, deployments,
+  field maps, alerts, rules, OIDC providers, hunts, pipeline, schemas,
+  transforms). See Section 9 for full gap analysis.

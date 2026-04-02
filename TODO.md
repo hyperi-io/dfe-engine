@@ -95,7 +95,8 @@ This is the **single source of truth** for all tasks and progress.
 
 - [ ] **JIT user provisioning + org CH isolation + HyperDX binding** — spec at `docs/superpowers/specs/2026-04-03-jit-provisioning-design.md`
   - Phase 1: OrgChProvisioner, OrgLifecycleManager, JitProvisioner, Account/Group/Org model changes
-  - Phase 2: Core table/view management — schema deploy from dfe-schemas, idempotent, works with or without dfe-engine (see memory: schema deployment requirements)
+  - Phase 2: Core table/view management — schema deploy from dfe-schemas, idempotent, works with or without dfe-engine
+  - Phase 3: SOC2 audit remediation — wire `audit_resource_change()` into ALL mutating API endpoints (sources, services, deployments, field maps, alerts, rules, OIDC, hunts, pipeline, schemas, transforms)
 
 ### Low Priority
 
