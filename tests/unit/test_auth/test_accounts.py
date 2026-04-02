@@ -225,6 +225,20 @@ class TestUpdate:
         # timestamp should be set (not missing)
         assert updated.updated_at != ""
 
+    def test_account_external_fields(self, tmp_path):
+        store = AccountStore(tmp_path / "accounts")
+        store.create("external-user", "", groups=["viewers"])
+        store.update(
+            "external-user",
+            external=True,
+            source_provider="entra",
+            last_login_at="2026-04-03T00:00:00Z",
+        )
+        acct = store.get("external-user")
+        assert acct.external is True
+        assert acct.source_provider == "entra"
+        assert acct.last_login_at == "2026-04-03T00:00:00Z"
+
 
 # ---------------------------------------------------------------------------
 # AccountStore.reset_password
