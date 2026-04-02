@@ -257,3 +257,85 @@ class TestDeleteOrg:
         )
         resp = client.delete("/api/v1/orgs/acme", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# dedicated_database / OrgLifecycleManager wiring
+# ---------------------------------------------------------------------------
+
+
+class TestDedicatedDatabase:
+    def test_create_org_with_dedicated_database(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "dd-test", "dedicated_database": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["dedicated_database"] is True
+
+    def test_create_org_dedicated_database_defaults_false(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "dd-test"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["dedicated_database"] is False
+
+    def test_dedicated_db_disable_requires_confirm(self, client, admin_headers):
+        # Create org (dedicated_database defaults to False)
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "confirm-test", "org_ids": ["ct"]},
+            headers=admin_headers,
+        )
+        # Update with dedicated_database=False (same as current state) — no toggle needed, should 200
+        resp = client.put(
+            "/api/v1/orgs/confirm-test",
+            json={"dedicated_database": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+
+    def test_dedicated_db_disable_without_confirm_returns_400(self, client, admin_headers):
+        # Create org with dedicated_database enabled
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "disable-test", "dedicated_database": True},
+            headers=admin_headers,
+        )
+        # Try to disable without confirm_merge — should get 400
+        resp = client.put(
+            "/api/v1/orgs/disable-test",
+            json={"dedicated_database": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "confirmation_required"
+
+    def test_dedicated_db_disable_with_confirm_succeeds(self, client, admin_headers):
+        # Create org with dedicated_database enabled
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "disable-confirm-test", "dedicated_database": True},
+            headers=admin_headers,
+        )
+        # Disable with confirm_merge=True — should succeed
+        resp = client.put(
+            "/api/v1/orgs/disable-confirm-test",
+            json={"dedicated_database": False, "confirm_merge": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["dedicated_database"] is False
+
+    def test_response_includes_dedicated_database_field(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "field-test"},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/orgs/field-test", headers=admin_headers)
+        assert resp.status_code == 200
+        assert "dedicated_database" in resp.json()
