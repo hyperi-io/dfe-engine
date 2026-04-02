@@ -211,6 +211,92 @@ class HyperDXClient:
             )
             return False
 
+    async def delete_team(self, team_id: str) -> bool:
+        """Delete a HyperDX team.
+
+        Args:
+            team_id: HyperDX team ID to delete.
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self._connected:
+            logger.warning(
+                "HyperDX unreachable, skipping delete_team",
+                team_id=team_id,
+            )
+            return False
+
+        try:
+            from hyperi_pylib.http import AsyncHttpClient
+
+            async with AsyncHttpClient(base_url=self._base_url) as client:
+                response = await client.delete(
+                    f"/api/v1/teams/{team_id}",
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                logger.info("HyperDX team deleted", team_id=team_id)
+                return True
+        except Exception as exc:
+            self._connected = False
+            logger.warning(
+                "HyperDX delete_team failed (non-fatal)",
+                team_id=team_id,
+                error=str(exc),
+            )
+            return False
+
+    async def update_connection(
+        self,
+        team_id: str,
+        connection_id: str,
+        **kwargs: object,
+    ) -> bool:
+        """Update a ClickHouse connection on a HyperDX team.
+
+        Args:
+            team_id: HyperDX team ID.
+            connection_id: Connection ID to update.
+            **kwargs: Connection fields to update (e.g. host, port, password).
+
+        Returns:
+            True on success, False on failure.
+        """
+        if not self._connected:
+            logger.warning(
+                "HyperDX unreachable, skipping update_connection",
+                team_id=team_id,
+                connection_id=connection_id,
+            )
+            return False
+
+        try:
+            from hyperi_pylib.http import AsyncHttpClient
+
+            async with AsyncHttpClient(base_url=self._base_url) as client:
+                response = await client.put(
+                    f"/api/v1/teams/{team_id}/connections/{connection_id}",
+                    json=kwargs,
+                    headers=self._headers(),
+                )
+                response.raise_for_status()
+                logger.info(
+                    "HyperDX connection updated",
+                    team_id=team_id,
+                    connection_id=connection_id,
+                )
+                return True
+        except Exception as exc:
+            self._connected = False
+            logger.warning(
+                "HyperDX update_connection failed (non-fatal)",
+                team_id=team_id,
+                connection_id=connection_id,
+                error=str(exc),
+            )
+            return False
+
     async def sync_connections(
         self,
         orgs: list[Org],

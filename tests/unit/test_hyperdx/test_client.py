@@ -179,6 +179,25 @@ class TestDisconnectedShortCircuit:
         assert result is False
 
     @pytest.mark.asyncio
+    async def test_delete_team_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.delete_team(team_id="t1")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_update_connection_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.update_connection(
+            team_id="t1",
+            connection_id="c1",
+            host="newhost",
+            port=8123,
+        )
+        assert result is False
+
+    @pytest.mark.asyncio
     async def test_sync_no_tenant_reader_returns_empty(self):
         """sync_connections returns empty result if no tenant_reader connection."""
         from dfe_engine.orgs.models import Org
@@ -212,6 +231,26 @@ class TestCreateConnection:
 class TestDeleteConnection:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_delete_connection_success(self):
+        pass
+
+
+class TestDeleteTeam:
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_delete_team_success(self):
+        pass
+
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_delete_team_failure_sets_disconnected(self):
+        pass
+
+
+class TestUpdateConnection:
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_update_connection_success(self):
+        pass
+
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_update_connection_failure_sets_disconnected(self):
         pass
 
 
