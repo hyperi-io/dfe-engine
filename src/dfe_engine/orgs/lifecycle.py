@@ -251,7 +251,24 @@ class OrgLifecycleManager:
 
         if team_id:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
-            return self._registry.update(org.name, hyperdx_team_id=team_id)
+            update_kwargs: dict[str, object] = {"hyperdx_team_id": team_id}
+
+            # Retrieve the team's own API key so we can invite members later.
+            # The env var name follows the same convention as ch_password_env.
+            team_api_key = await self._hdx.get_team_api_key(team_id)
+            if team_api_key:
+                env_var = f"HYPERDX_TEAM_API_KEY_{org.name.upper().replace('-', '_')}"
+                import os
+
+                os.environ[env_var] = team_api_key
+                update_kwargs["hyperdx_team_api_key_env"] = env_var
+                logger.info(
+                    "HyperDX team API key stored",
+                    org_name=org.name,
+                    env_var=env_var,
+                )
+
+            return self._registry.update(org.name, **update_kwargs)
 
         audit_org_hyperdx_failed(org_name=org.name, error="create_team returned None")
         return org

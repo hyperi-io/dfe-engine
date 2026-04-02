@@ -212,6 +212,32 @@ class TestDisconnectedShortCircuit:
         assert result.connections_created == 0
 
 
+class TestInviteMember:
+    @pytest.mark.asyncio
+    async def test_invite_member_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.invite_member(team_api_key="team-key", email="user@corp.com")
+        assert result is False
+
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_invite_member_success(self):
+        pass
+
+
+class TestGetTeamApiKey:
+    @pytest.mark.asyncio
+    async def test_get_team_api_key_returns_none_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.get_team_api_key(team_id="t1")
+        assert result is None
+
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_get_team_api_key_success(self):
+        pass
+
+
 class TestCreateTeam:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_create_team_success(self):
