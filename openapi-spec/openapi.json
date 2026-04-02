@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.6.9.dev4"
+    "version": "1.7.3"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -122,6 +122,1273 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/PermissionsResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "List Accounts",
+        "description": "List all accounts (admin only). No password hashes returned.",
+        "operationId": "list_accounts_api_v1_auth_accounts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AccountResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Accounts Api V1 Auth Accounts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Create Account",
+        "description": "Create a new local user account (admin only).",
+        "operationId": "create_account_api_v1_auth_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/{username}": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Account",
+        "description": "Get a single account by username (admin only).",
+        "operationId": "get_account_api_v1_auth_accounts__username__get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Update Account",
+        "description": "Update account groups or enabled status (admin only).",
+        "operationId": "update_account_api_v1_auth_accounts__username__put",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateAccountRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Delete Account",
+        "description": "Delete an account (admin only).",
+        "operationId": "delete_account_api_v1_auth_accounts__username__delete",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/{username}/reset-password": {
+      "post": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Reset Password",
+        "description": "Reset an account's password (admin only).",
+        "operationId": "reset_password_api_v1_auth_accounts__username__reset_password_post",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups": {
+      "get": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "List Groups",
+        "description": "List all groups (admin only).",
+        "operationId": "list_groups_api_v1_auth_groups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/GroupResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Groups Api V1 Auth Groups Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Create Group",
+        "description": "Create a new RBAC group (admin only).",
+        "operationId": "create_group_api_v1_auth_groups_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups/{name}": {
+      "get": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Get Group",
+        "description": "Get a single group by name (admin only).",
+        "operationId": "get_group_api_v1_auth_groups__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Update Group",
+        "description": "Update group roles or description (admin only).",
+        "operationId": "update_group_api_v1_auth_groups__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateGroupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Delete Group",
+        "description": "Delete a group (admin only).",
+        "operationId": "delete_group_api_v1_auth_groups__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups/{name}/members": {
+      "post": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Add Member",
+        "description": "Add a member to a group (admin only, idempotent).",
+        "operationId": "add_member_api_v1_auth_groups__name__members_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddMemberRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups/{name}/members/{username}": {
+      "delete": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Remove Member",
+        "description": "Remove a member from a group (admin only).",
+        "operationId": "remove_member_api_v1_auth_groups__name__members__username__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/api-keys": {
+      "get": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "List Api Keys",
+        "description": "List all API keys (admin only). No key hashes or full keys returned.",
+        "operationId": "list_api_keys_api_v1_auth_api_keys_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/APIKeyResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Api Keys Api V1 Auth Api Keys Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Create Api Key",
+        "description": "Create a new API key (admin only). Returns the full key exactly once.",
+        "operationId": "create_api_key_api_v1_auth_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAPIKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIKeyCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/api-keys/{short_token}": {
+      "delete": {
+        "tags": [
+          "API Keys"
+        ],
+        "summary": "Revoke Api Key",
+        "description": "Revoke (delete) an API key by short token (admin only).",
+        "operationId": "revoke_api_key_api_v1_auth_api_keys__short_token__delete",
+        "parameters": [
+          {
+            "name": "short_token",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Short Token"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/oidc-providers": {
+      "get": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "List Providers",
+        "description": "List all OIDC providers (admin only).",
+        "operationId": "list_providers_api_v1_auth_oidc_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Providers Api V1 Auth Oidc Providers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Create Provider",
+        "description": "Create a new OIDC provider configuration (admin only).",
+        "operationId": "create_provider_api_v1_auth_oidc_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/oidc-providers/{name}": {
+      "get": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Get Provider",
+        "description": "Get a single OIDC provider by name (admin only).",
+        "operationId": "get_provider_api_v1_auth_oidc_providers__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Update Provider",
+        "description": "Update an OIDC provider configuration (admin only).",
+        "operationId": "update_provider_api_v1_auth_oidc_providers__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProviderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Delete Provider",
+        "description": "Detach an OIDC provider and report orphaned groups (admin only).\n\nDoes NOT delete groups \u2014 they become orphaned with their source_provider\nstill set to the deleted provider name.",
+        "operationId": "delete_provider_api_v1_auth_oidc_providers__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DetachResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/oidc-providers/{name}/sync": {
+      "post": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Sync Provider Groups",
+        "description": "Force group sync for an OIDC provider (admin only).",
+        "operationId": "sync_provider_groups_api_v1_auth_oidc_providers__name__sync_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/oidc-providers/{name}/test": {
+      "get": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Test Provider",
+        "description": "Test connectivity to an OIDC provider (admin only).",
+        "operationId": "test_provider_api_v1_auth_oidc_providers__name__test_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__oidc_providers__TestResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/orgs": {
+      "get": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "List Orgs",
+        "description": "List all organisations.",
+        "operationId": "list_orgs_api_v1_orgs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/OrgResponse"
+                  },
+                  "type": "array",
+                  "title": "Response List Orgs Api V1 Orgs Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "Create Org",
+        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, fires a background task to\ncreate the HyperDX team.  Failure is non-fatal.",
+        "operationId": "create_org_api_v1_orgs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/orgs/{name}": {
+      "get": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "Get Org",
+        "description": "Get a single organisation by name.",
+        "operationId": "get_org_api_v1_orgs__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "Update Org",
+        "description": "Update an organisation (admin only).",
+        "operationId": "update_org_api_v1_orgs__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOrgRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Organisations"
+        ],
+        "summary": "Delete Org",
+        "description": "Delete an organisation (admin only).",
+        "operationId": "delete_org_api_v1_orgs__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -2320,6 +3587,133 @@
         ]
       }
     },
+    "/api/v1/service-surfaces": {
+      "get": {
+        "tags": [
+          "Service Surfaces"
+        ],
+        "summary": "List Service Surfaces",
+        "description": "List all known service surfaces.",
+        "operationId": "list_service_surfaces_api_v1_service_surfaces_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/SurfaceSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Service Surfaces Api V1 Service Surfaces Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/service-surfaces/{name}": {
+      "get": {
+        "tags": [
+          "Service Surfaces"
+        ],
+        "summary": "Get Service Surface",
+        "description": "Get the full surface definition for a single service.",
+        "operationId": "get_service_surface_api_v1_service_surfaces__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ServiceSurface"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/service-surfaces/{name}/metrics/refresh": {
+      "post": {
+        "tags": [
+          "Service Surfaces"
+        ],
+        "summary": "Refresh Service Manifest",
+        "description": "Re-fetch the metrics manifest from a running service.\n\nContacts the service's ``manifest_url`` to update its metrics_surface.\nReturns the refresh result.  Does not fail if the service is unreachable\n\u2014 returns ``refreshed=false`` instead.",
+        "operationId": "refresh_service_manifest_api_v1_service_surfaces__name__metrics_refresh_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ManifestRefreshResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/system/version": {
       "get": {
         "tags": [
@@ -2445,7 +3839,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/TestResponse"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__transforms__TestResponse"
                 }
               }
             }
@@ -2467,10 +3861,1392 @@
           }
         ]
       }
+    },
+    "/api/v1/hunts/status": {
+      "get": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Get Engine Status",
+        "description": "Get the current status of the hunt scheduler.",
+        "operationId": "get_engine_status_api_v1_hunts_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuntEngineStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/hunts": {
+      "get": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "List Hunts",
+        "description": "List all configured hunts across all schedulers.",
+        "operationId": "list_hunts_api_v1_hunts_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/HuntSummary"
+                  },
+                  "type": "array",
+                  "title": "Response List Hunts Api V1 Hunts Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/hunts/{hunt_name}/run": {
+      "post": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Trigger Hunt",
+        "description": "Trigger an ad-hoc hunt execution.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``\nor streamed via ``GET /tasks/{task_id}/stream``.",
+        "operationId": "trigger_hunt_api_v1_hunts__hunt_name__run_post",
+        "parameters": [
+          {
+            "name": "hunt_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Hunt Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriggerRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TriggerResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/views": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "List Views",
+        "description": "List available parameterized views.",
+        "operationId": "list_views_api_v1_queries_views_get",
+        "parameters": [
+          {
+            "name": "namespace",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by namespace",
+              "title": "Namespace"
+            },
+            "description": "Filter by namespace"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ViewDefinition"
+                  },
+                  "title": "Response List Views Api V1 Queries Views Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/views/namespaces": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "List Namespaces",
+        "description": "List available view namespaces.",
+        "operationId": "list_namespaces_api_v1_queries_views_namespaces_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Namespaces Api V1 Queries Views Namespaces Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/views/{label}": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "Get View",
+        "description": "Get a specific view definition with parameters and metadata.",
+        "operationId": "get_view_api_v1_queries_views__label__get",
+        "parameters": [
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Label"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ViewDefinition"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/views/{label}/execute": {
+      "post": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "Execute View",
+        "description": "Execute a parameterized view and return Arrow IPC results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context \u2014 it cannot be overridden by the client.\n\nResponse headers:\n- ``X-Row-Count``: Number of rows returned\n- ``X-Query-Duration-Ms``: Execution time in milliseconds\n- ``X-Has-More``: Whether more rows are available\n- ``X-Next-Offset``: Next offset for pagination (if applicable)\n- ``X-Request-ID``: Request correlation ID",
+        "operationId": "execute_view_api_v1_queries_views__label__execute_post",
+        "parameters": [
+          {
+            "name": "label",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Label"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ViewExecuteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Arrow IPC stream with query results",
+            "content": {
+              "application/vnd.apache.arrow.stream": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/raw": {
+      "post": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "Execute Raw Query",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path \u2014 for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.\n\nResponse headers:\n- ``X-Row-Count``: Number of rows returned\n- ``X-Query-Duration-Ms``: Execution time in milliseconds\n- ``X-Truncated``: Whether results were truncated\n- ``X-Cached``: Whether results came from cache",
+        "operationId": "execute_raw_query_api_v1_queries_raw_post",
+        "parameters": [
+          {
+            "name": "accept",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "application/vnd.apache.arrow.stream",
+              "title": "Accept"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RawQueryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Arrow IPC stream with query results",
+            "content": {
+              "application/vnd.apache.arrow.stream": {}
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/queries/health": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "Query Health",
+        "description": "Health check for query engine.",
+        "operationId": "query_health_api_v1_queries_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Query Health Api V1 Queries Health Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pipeline/templates": {
+      "get": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "List Templates",
+        "description": "List available Vector pipeline templates.",
+        "operationId": "list_templates_api_v1_pipeline_templates_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PipelineTemplate"
+                  },
+                  "type": "array",
+                  "title": "Response List Templates Api V1 Pipeline Templates Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/pipeline/build": {
+      "post": {
+        "tags": [
+          "pipeline"
+        ],
+        "summary": "Build Pipeline",
+        "description": "Trigger pipeline manifest generation.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``.",
+        "operationId": "build_pipeline_api_v1_pipeline_build_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineBuildRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PipelineBuildResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "List Tasks",
+        "description": "List all tasks, optionally filtered by kind.",
+        "operationId": "list_tasks_api_v1_tasks_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by task kind",
+              "title": "Kind"
+            },
+            "description": "Filter by task kind"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TaskInfo"
+                  },
+                  "title": "Response List Tasks Api V1 Tasks Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}": {
+      "get": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Get Task",
+        "description": "Get current status of a task.",
+        "operationId": "get_task_api_v1_tasks__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/tasks/{task_id}/cancel": {
+      "post": {
+        "tags": [
+          "tasks"
+        ],
+        "summary": "Cancel Task",
+        "description": "Cancel a running task.",
+        "operationId": "cancel_task_api_v1_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/discovery/databases": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "List Databases",
+        "description": "List all ClickHouse databases.",
+        "operationId": "list_databases_api_v1_discovery_databases_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/DatabaseInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Databases Api V1 Discovery Databases Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/discovery/tables": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "List Tables",
+        "description": "List tables in a ClickHouse database.",
+        "operationId": "list_tables_api_v1_discovery_tables_get",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Database to list tables from",
+              "default": "default",
+              "title": "Database"
+            },
+            "description": "Database to list tables from"
+          },
+          {
+            "name": "engine",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by engine type",
+              "title": "Engine"
+            },
+            "description": "Filter by engine type"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TableInfo"
+                  },
+                  "title": "Response List Tables Api V1 Discovery Tables Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/discovery/tables/{table_name}/columns": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "List Columns",
+        "description": "List columns for a specific table.",
+        "operationId": "list_columns_api_v1_discovery_tables__table_name__columns_get",
+        "parameters": [
+          {
+            "name": "table_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Table Name"
+            }
+          },
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Database containing the table",
+              "default": "default",
+              "title": "Database"
+            },
+            "description": "Database containing the table"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ColumnInfo"
+                  },
+                  "title": "Response List Columns Api V1 Discovery Tables  Table Name  Columns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/{source_name}/columns": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Get Schema Columns",
+        "description": "Get columns for a source's schema.",
+        "operationId": "get_schema_columns_api_v1_schemas__source_name__columns_get",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Schema version (latest if not specified)",
+              "title": "Version"
+            },
+            "description": "Schema version (latest if not specified)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SchemaColumn"
+                  },
+                  "title": "Response Get Schema Columns Api V1 Schemas  Source Name  Columns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/{source_name}/build": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Build Schema",
+        "description": "Build complete schema (DDL) from a source definition.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "operationId": "build_schema_api_v1_schemas__source_name__build_post",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaBuildResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/mappings/{source_name}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Field Mappings",
+        "description": "Get Sigma field mappings for a source.",
+        "operationId": "get_field_mappings_api_v1_sigma_mappings__source_name__get",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceMappingSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/views/{source_name}": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Generate Sigma View",
+        "description": "Generate Sigma view DDL for a source.\n\nReturns the DDL string \u2014 does NOT execute it against ClickHouse.",
+        "operationId": "generate_sigma_view_api_v1_sigma_views__source_name__post",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target database",
+              "default": "default",
+              "title": "Database"
+            },
+            "description": "Target database"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigmaViewResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/views": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Generate All Sigma Views",
+        "description": "Generate Sigma view DDL for all sources.",
+        "operationId": "generate_all_sigma_views_api_v1_sigma_views_post",
+        "parameters": [
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target database",
+              "default": "default",
+              "title": "Database"
+            },
+            "description": "Target database"
+          },
+          {
+            "name": "enabled_only",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Only generate for enabled sources",
+              "default": true,
+              "title": "Enabled Only"
+            },
+            "description": "Only generate for enabled sources"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/SigmaViewResult"
+                  },
+                  "title": "Response Generate All Sigma Views Api V1 Sigma Views Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/logsource": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Find Sources For Logsource",
+        "description": "Find sources matching a Sigma logsource selector.",
+        "operationId": "find_sources_for_logsource_api_v1_sigma_logsource_get",
+        "parameters": [
+          {
+            "name": "product",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Product"
+            }
+          },
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Category"
+            }
+          },
+          {
+            "name": "service",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LogsourceMatch"
+                  },
+                  "title": "Response Find Sources For Logsource Api V1 Sigma Logsource Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Liveness",
+        "description": "Liveness probe \u2014 is the process alive?",
+        "operationId": "liveness_health_live_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/ready": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readiness",
+        "description": "Readiness probe \u2014 can the service handle traffic?",
+        "operationId": "readiness_health_ready_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health/startup": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Startup",
+        "description": "Startup probe \u2014 has initialisation completed?",
+        "operationId": "startup_health_startup_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
     "schemas": {
+      "APIKeyCreatedResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "short_token": {
+            "type": "string",
+            "title": "Short Token"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "full_key": {
+            "type": "string",
+            "title": "Full Key",
+            "description": "Full API key (shown once, cannot be recovered)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "short_token",
+          "enabled",
+          "groups",
+          "description",
+          "created_at",
+          "full_key"
+        ],
+        "title": "APIKeyCreatedResponse",
+        "description": "Returned exactly once at creation \u2014 includes the full key."
+      },
+      "APIKeyResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "short_token": {
+            "type": "string",
+            "title": "Short Token"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "short_token",
+          "enabled",
+          "groups",
+          "description",
+          "created_at"
+        ],
+        "title": "APIKeyResponse",
+        "description": "API key metadata \u2014 key_hash is NEVER included."
+      },
+      "AccountResponse": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "enabled",
+          "groups",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AccountResponse",
+        "description": "Account detail \u2014 password_hash is NEVER included."
+      },
+      "AddMemberRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Account username to add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username"
+        ],
+        "title": "AddMemberRequest"
+      },
       "AlertDestination": {
         "properties": {
           "name": {
@@ -2586,6 +5362,40 @@
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
       },
+      "ColumnInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "default_kind": {
+            "type": "string",
+            "title": "Default Kind",
+            "default": ""
+          },
+          "default_expression": {
+            "type": "string",
+            "title": "Default Expression",
+            "default": ""
+          },
+          "comment": {
+            "type": "string",
+            "title": "Comment",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "ColumnInfo",
+        "description": "A column in a ClickHouse table."
+      },
       "CompileRequest": {
         "properties": {
           "language": {
@@ -2659,6 +5469,26 @@
         ],
         "title": "ConfigHistoryEntry"
       },
+      "ConfigSurfaceEntry": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": "string"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "default": {
+            "title": "Default"
+          }
+        },
+        "type": "object",
+        "title": "ConfigSurfaceEntry",
+        "description": "A single configurable setting for a Rust service."
+      },
       "CostEstimate": {
         "properties": {
           "estimated_rows": {
@@ -2709,6 +5539,207 @@
         },
         "type": "object",
         "title": "CostEstimate"
+      },
+      "CreateAPIKeyRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique human-readable key name"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups",
+            "description": "RBAC group memberships"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Optional description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateAPIKeyRequest"
+      },
+      "CreateAccountRequest": {
+        "properties": {
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Unique account name"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password",
+            "description": "Plaintext password (bcrypt-hashed before storage)"
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups",
+            "description": "Group memberships"
+          }
+        },
+        "type": "object",
+        "required": [
+          "username",
+          "password"
+        ],
+        "title": "CreateAccountRequest"
+      },
+      "CreateGroupRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique group name"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles",
+            "description": "Roles assigned to all group members"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human-readable description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "roles"
+        ],
+        "title": "CreateGroupRequest"
+      },
+      "CreateOrgRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique org name (used as identifier)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable label",
+            "default": ""
+          },
+          "org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Org Ids",
+            "description": "Tenant IDs for ClickHouse row-level security"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "CreateOrgRequest"
+      },
+      "CreateProviderRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique provider name (used as filename stem)"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Provider type: generic, google, entra_id, okta"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable label",
+            "default": ""
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer",
+            "description": "OIDC issuer URL",
+            "default": ""
+          },
+          "client_id_env": {
+            "type": "string",
+            "title": "Client Id Env",
+            "description": "Env var name for OIDC client ID",
+            "default": ""
+          },
+          "groups": {
+            "$ref": "#/components/schemas/GroupResolutionRequest"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "CreateProviderRequest"
+      },
+      "DDLResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name \u2192 DDL"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "create_table"
+        ],
+        "title": "DDLResult",
+        "description": "Generated DDL output."
+      },
+      "DatabaseInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatabaseInfo",
+        "description": "Summary of a ClickHouse database."
       },
       "DeploymentHistoryEntry": {
         "properties": {
@@ -2799,6 +5830,27 @@
           "instance"
         ],
         "title": "DeploymentSummary"
+      },
+      "DetachResponse": {
+        "properties": {
+          "deleted": {
+            "type": "string",
+            "title": "Deleted"
+          },
+          "orphaned_groups": {
+            "items": {
+              "$ref": "#/components/schemas/OrphanedGroupInfo"
+            },
+            "type": "array",
+            "title": "Orphaned Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "deleted",
+          "orphaned_groups"
+        ],
+        "title": "DetachResponse"
       },
       "EmittedRecord": {
         "properties": {
@@ -3042,6 +6094,183 @@
         ],
         "title": "FieldMapSummary"
       },
+      "FieldMapping": {
+        "properties": {
+          "sigma_field": {
+            "type": "string",
+            "title": "Sigma Field"
+          },
+          "column_name": {
+            "type": "string",
+            "title": "Column Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sigma_field",
+          "column_name"
+        ],
+        "title": "FieldMapping",
+        "description": "A single Sigma field \u2192 column mapping."
+      },
+      "GroupResolutionRequest": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode",
+            "description": "Group resolution mode: manual, token_claim, api",
+            "default": "manual"
+          },
+          "claim_name": {
+            "type": "string",
+            "title": "Claim Name",
+            "description": "Token claim name for group IDs",
+            "default": "groups"
+          },
+          "sync_interval": {
+            "type": "integer",
+            "title": "Sync Interval",
+            "description": "Seconds between API sync cycles",
+            "default": 3600
+          },
+          "service_account_json_env": {
+            "type": "string",
+            "title": "Service Account Json Env",
+            "description": "Env var for Google SA JSON",
+            "default": ""
+          },
+          "admin_email": {
+            "type": "string",
+            "title": "Admin Email",
+            "description": "Google Workspace admin email",
+            "default": ""
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "description": "Google Workspace domain",
+            "default": ""
+          },
+          "tenant_id_env": {
+            "type": "string",
+            "title": "Tenant Id Env",
+            "description": "Env var for Entra ID tenant ID",
+            "default": ""
+          },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env",
+            "description": "Env var for Entra ID client secret",
+            "default": ""
+          },
+          "api_token_env": {
+            "type": "string",
+            "title": "Api Token Env",
+            "description": "Env var for Okta API token",
+            "default": ""
+          },
+          "okta_domain": {
+            "type": "string",
+            "title": "Okta Domain",
+            "description": "Okta organisation domain",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "GroupResolutionRequest"
+      },
+      "GroupResolutionResponse": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "title": "Mode"
+          },
+          "claim_name": {
+            "type": "string",
+            "title": "Claim Name"
+          },
+          "sync_interval": {
+            "type": "integer",
+            "title": "Sync Interval"
+          },
+          "service_account_json_env": {
+            "type": "string",
+            "title": "Service Account Json Env"
+          },
+          "admin_email": {
+            "type": "string",
+            "title": "Admin Email"
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain"
+          },
+          "tenant_id_env": {
+            "type": "string",
+            "title": "Tenant Id Env"
+          },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env"
+          },
+          "api_token_env": {
+            "type": "string",
+            "title": "Api Token Env"
+          },
+          "okta_domain": {
+            "type": "string",
+            "title": "Okta Domain"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "claim_name",
+          "sync_interval",
+          "service_account_json_env",
+          "admin_email",
+          "domain",
+          "tenant_id_env",
+          "client_secret_env",
+          "api_token_env",
+          "okta_domain"
+        ],
+        "title": "GroupResolutionResponse"
+      },
+      "GroupResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "roles",
+          "members"
+        ],
+        "title": "GroupResponse"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -3054,6 +6283,75 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HuntEngineStatus": {
+        "properties": {
+          "running": {
+            "type": "boolean",
+            "title": "Running",
+            "description": "Whether the scheduler thread is alive"
+          },
+          "hunt_count": {
+            "type": "integer",
+            "title": "Hunt Count",
+            "description": "Number of loaded hunts across all schedulers",
+            "default": 0
+          },
+          "scheduling_mode": {
+            "type": "string",
+            "title": "Scheduling Mode",
+            "description": "Scheduling mode (cron, adaptive)",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "running"
+        ],
+        "title": "HuntEngineStatus",
+        "description": "Current state of the background hunt scheduler."
+      },
+      "HuntSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "customer": {
+            "type": "string",
+            "title": "Customer"
+          },
+          "cron": {
+            "type": "string",
+            "title": "Cron",
+            "description": "Cron schedule expression"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rules"
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table",
+            "default": ""
+          },
+          "target_table": {
+            "type": "string",
+            "title": "Target Table",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "customer",
+          "cron"
+        ],
+        "title": "HuntSummary",
+        "description": "Summary of a configured hunt."
       },
       "LoginRequest": {
         "properties": {
@@ -3074,6 +6372,54 @@
           "password"
         ],
         "title": "LoginRequest"
+      },
+      "LogsourceMatch": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "source"
+        ],
+        "title": "LogsourceMatch",
+        "description": "A source matching a Sigma logsource selector."
+      },
+      "ManifestRefreshResponse": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "refreshed": {
+            "type": "boolean",
+            "title": "Refreshed"
+          },
+          "discovered_at": {
+            "type": "string",
+            "title": "Discovered At",
+            "default": ""
+          },
+          "metrics_count": {
+            "type": "integer",
+            "title": "Metrics Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "refreshed"
+        ],
+        "title": "ManifestRefreshResponse",
+        "description": "Result of a manifest refresh attempt."
       },
       "MatchConflictContext": {
         "properties": {
@@ -3139,6 +6485,119 @@
         ],
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
+      },
+      "MetricEntry": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "unit": {
+            "type": "string",
+            "title": "Unit",
+            "default": ""
+          },
+          "labels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Labels"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "MetricEntry",
+        "description": "A single metric from the service's manifest."
+      },
+      "OrgResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Org Ids"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "display_name",
+          "org_ids",
+          "enabled",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrgResponse"
+      },
+      "OrphanedGroupInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "source_provider": {
+            "type": "string",
+            "title": "Source Provider"
+          },
+          "roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Roles"
+          },
+          "member_count": {
+            "type": "integer",
+            "title": "Member Count"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "source_provider",
+          "roles",
+          "member_count"
+        ],
+        "title": "OrphanedGroupInfo"
       },
       "PaginatedResponse_AlertDestinationSummary_": {
         "properties": {
@@ -3496,6 +6955,345 @@
         ],
         "title": "PermissionsResponse"
       },
+      "PipelineBuildRequest": {
+        "properties": {
+          "config_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Config Path",
+            "description": "Path to dfe_package.yaml (uses default if not provided)"
+          },
+          "output_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Output Path",
+            "description": "Output directory for rendered manifests"
+          },
+          "build_core": {
+            "type": "boolean",
+            "title": "Build Core",
+            "description": "Build core templates (vs custom only)",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "PipelineBuildRequest",
+        "description": "Request to build pipeline manifests."
+      },
+      "PipelineBuildResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID for polling via /tasks/{task_id}"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id"
+        ],
+        "title": "PipelineBuildResponse",
+        "description": "Response from triggering a pipeline build."
+      },
+      "PipelineTemplate": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Template type (core, custom)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Template filename"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type",
+          "name"
+        ],
+        "title": "PipelineTemplate",
+        "description": "A discovered pipeline template."
+      },
+      "ProviderResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer"
+          },
+          "client_id_env": {
+            "type": "string",
+            "title": "Client Id Env"
+          },
+          "groups": {
+            "$ref": "#/components/schemas/GroupResolutionResponse"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "last_sync_at": {
+            "type": "string",
+            "title": "Last Sync At"
+          },
+          "last_sync_status": {
+            "type": "string",
+            "title": "Last Sync Status"
+          },
+          "sync_error": {
+            "type": "string",
+            "title": "Sync Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "enabled",
+          "display_name",
+          "issuer",
+          "client_id_env",
+          "groups",
+          "created_at",
+          "last_sync_at",
+          "last_sync_status",
+          "sync_error"
+        ],
+        "title": "ProviderResponse",
+        "description": "Provider config \u2014 env var names are shown, never actual secret values."
+      },
+      "QueryOptions": {
+        "properties": {
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100000.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit"
+          },
+          "offset": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Offset"
+          },
+          "cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cursor",
+            "description": "Opaque cursor for cursor-based pagination (from previous response)"
+          },
+          "after_key": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "After Key",
+            "description": "Value to paginate after (requires order_by in query)"
+          },
+          "order_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order By",
+            "description": "Column to order by for keyset pagination"
+          },
+          "order_dir": {
+            "type": "string",
+            "enum": [
+              "asc",
+              "desc"
+            ],
+            "title": "Order Dir",
+            "description": "Sort direction for ordering",
+            "default": "asc"
+          },
+          "time_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time From",
+            "description": "ISO8601 datetime"
+          },
+          "time_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time To",
+            "description": "ISO8601 datetime"
+          },
+          "timeout_seconds": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 300.0,
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timeout Seconds"
+          },
+          "include_explain": {
+            "type": "boolean",
+            "title": "Include Explain",
+            "default": false
+          },
+          "explain_parallel": {
+            "type": "boolean",
+            "title": "Explain Parallel",
+            "default": true
+          },
+          "cache": {
+            "type": "boolean",
+            "title": "Cache",
+            "description": "Allow cached results",
+            "default": true
+          },
+          "store": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Store",
+            "description": "Target store (database/schema/topic) - only if query allows"
+          }
+        },
+        "type": "object",
+        "title": "QueryOptions",
+        "description": "Query execution options.\n\nThese are standard parameters available for all queries.\nServer enforces maximums from query definition and global config.\n\nPagination modes:\n- Offset-based: Use `limit` and `offset` for simple pagination\n- Cursor-based: Use `cursor` for efficient pagination on large datasets\n- Keyset: Use `after_key` with an order column for stable pagination"
+      },
+      "RawQueryRequest": {
+        "properties": {
+          "datasource": {
+            "type": "string",
+            "title": "Datasource",
+            "description": "Datasource URI (e.g. 'clickhouse:default')",
+            "examples": [
+              "clickhouse:default"
+            ]
+          },
+          "query": {
+            "type": "string",
+            "title": "Query",
+            "description": "Query label or identifier"
+          },
+          "params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Params",
+            "description": "Query parameters"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution options (limit, timeout, etc.)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasource",
+          "query"
+        ],
+        "title": "RawQueryRequest",
+        "description": "Request for raw query execution against a datasource adapter."
+      },
+      "ResetPasswordRequest": {
+        "properties": {
+          "new_password": {
+            "type": "string",
+            "title": "New Password",
+            "description": "New plaintext password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest"
+      },
       "RuleCreateRequest": {
         "properties": {
           "name": {
@@ -3741,6 +7539,77 @@
         ],
         "title": "SampleRecord"
       },
+      "SchemaBuildResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version",
+            "default": ""
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaColumn"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "ddl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DDLResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "columns"
+        ],
+        "title": "SchemaBuildResult",
+        "description": "Result of building a schema from a source."
+      },
+      "SchemaColumn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "use_case": {
+            "type": "string",
+            "title": "Use Case",
+            "default": ""
+          },
+          "attribute": {
+            "type": "string",
+            "title": "Attribute",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "SchemaColumn",
+        "description": "A column in a schema definition."
+      },
       "ServiceConfigSummary": {
         "properties": {
           "service": {
@@ -3769,6 +7638,49 @@
           "instance"
         ],
         "title": "ServiceConfigSummary"
+      },
+      "ServiceSurface": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "config_surface": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ConfigSurfaceEntry"
+            },
+            "type": "object",
+            "title": "Config Surface"
+          },
+          "metrics_surface": {
+            "items": {
+              "$ref": "#/components/schemas/MetricEntry"
+            },
+            "type": "array",
+            "title": "Metrics Surface"
+          },
+          "manifest_url": {
+            "type": "string",
+            "title": "Manifest Url",
+            "default": ""
+          },
+          "discovered_at": {
+            "type": "string",
+            "title": "Discovered At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "title": "ServiceSurface",
+        "description": "Complete surface definition for a Rust service.\n\nLoaded from YAML files in the service-surfaces config directory.\nOne file per service (e.g. ``dfe-receiver.yaml``)."
       },
       "SettingsSummary": {
         "properties": {
@@ -3831,6 +7743,33 @@
         ],
         "title": "SettingsSummary",
         "description": "Redacted settings \u2014 no secrets."
+      },
+      "SigmaViewResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "ddl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ddl",
+            "description": "DDL for the view, or null if no mappings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "ddl"
+        ],
+        "title": "SigmaViewResult",
+        "description": "Generated Sigma view DDL for a source."
       },
       "SizeResponse": {
         "properties": {
@@ -4133,6 +8072,33 @@
         "type": "object",
         "title": "SourceHeader",
         "description": "Common schema header configuration."
+      },
+      "SourceMappingSummary": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "field_count": {
+            "type": "integer",
+            "title": "Field Count"
+          },
+          "mappings": {
+            "items": {
+              "$ref": "#/components/schemas/FieldMapping"
+            },
+            "type": "array",
+            "title": "Mappings"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "field_count",
+          "mappings"
+        ],
+        "title": "SourceMappingSummary",
+        "description": "Sigma mapping summary for a source."
       },
       "SourceMatch": {
         "properties": {
@@ -4484,6 +8450,227 @@
         ],
         "title": "SqlValidationResponse"
       },
+      "SurfaceSummary": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "config_count": {
+            "type": "integer",
+            "title": "Config Count",
+            "default": 0
+          },
+          "metrics_count": {
+            "type": "integer",
+            "title": "Metrics Count",
+            "default": 0
+          },
+          "manifest_url": {
+            "type": "string",
+            "title": "Manifest Url",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "service"
+        ],
+        "title": "SurfaceSummary",
+        "description": "Compact summary for list endpoint."
+      },
+      "SyncResponse": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "updated",
+          "total",
+          "error"
+        ],
+        "title": "SyncResponse"
+      },
+      "TableInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database"
+          },
+          "engine": {
+            "type": "string",
+            "title": "Engine",
+            "default": ""
+          },
+          "total_rows": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Rows"
+          },
+          "total_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Bytes"
+          },
+          "comment": {
+            "type": "string",
+            "title": "Comment",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "database"
+        ],
+        "title": "TableInfo",
+        "description": "Summary of a ClickHouse table."
+      },
+      "TaskInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Unique task ID (UUID)"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "Task kind (e.g. 'hunt:execute', 'pipeline:generate')"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "description": "ISO 8601 creation time"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "progress": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 0.0,
+            "title": "Progress",
+            "description": "Progress percentage",
+            "default": 0
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable status message",
+            "default": ""
+          },
+          "result": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Task result (on completion)"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message (on failure)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "kind",
+          "status",
+          "created_at"
+        ],
+        "title": "TaskInfo",
+        "description": "Public view of a task."
+      },
+      "TaskStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed",
+          "cancelled"
+        ],
+        "title": "TaskStatus",
+        "description": "Task lifecycle states."
+      },
       "TestRequest": {
         "properties": {
           "wasm_base64": {
@@ -4525,32 +8712,6 @@
         ],
         "title": "TestRequest"
       },
-      "TestResponse": {
-        "properties": {
-          "emitted": {
-            "items": {
-              "$ref": "#/components/schemas/EmittedRecord"
-            },
-            "type": "array",
-            "title": "Emitted"
-          },
-          "duration_ms": {
-            "type": "number",
-            "title": "Duration Ms"
-          },
-          "wasm_memory_bytes": {
-            "type": "integer",
-            "title": "Wasm Memory Bytes"
-          }
-        },
-        "type": "object",
-        "required": [
-          "emitted",
-          "duration_ms",
-          "wasm_memory_bytes"
-        ],
-        "title": "TestResponse"
-      },
       "TokenResponse": {
         "properties": {
           "access_token": {
@@ -4590,6 +8751,193 @@
           "roles"
         ],
         "title": "TokenResponse"
+      },
+      "TriggerRequest": {
+        "properties": {
+          "customer": {
+            "type": "string",
+            "title": "Customer",
+            "description": "Customer/org ID to run the hunt for"
+          }
+        },
+        "type": "object",
+        "required": [
+          "customer"
+        ],
+        "title": "TriggerRequest",
+        "description": "Request to trigger an ad-hoc hunt execution."
+      },
+      "TriggerResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID for polling via /tasks/{task_id}"
+          },
+          "hunt_name": {
+            "type": "string",
+            "title": "Hunt Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "hunt_name"
+        ],
+        "title": "TriggerResponse",
+        "description": "Response from triggering an ad-hoc hunt."
+      },
+      "UpdateAccountRequest": {
+        "properties": {
+          "groups": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Groups",
+            "description": "Replace group memberships"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Enable or disable the account"
+          }
+        },
+        "type": "object",
+        "title": "UpdateAccountRequest"
+      },
+      "UpdateGroupRequest": {
+        "properties": {
+          "roles": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Roles",
+            "description": "Replace role list"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Replace description"
+          }
+        },
+        "type": "object",
+        "title": "UpdateGroupRequest"
+      },
+      "UpdateOrgRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label"
+          },
+          "org_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Org Ids",
+            "description": "Tenant IDs"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Enable or disable the org"
+          }
+        },
+        "type": "object",
+        "title": "UpdateOrgRequest"
+      },
+      "UpdateProviderRequest": {
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled",
+            "description": "Enable or disable the provider"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label"
+          },
+          "groups": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GroupResolutionRequest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Group resolution config"
+          }
+        },
+        "type": "object",
+        "title": "UpdateProviderRequest"
       },
       "UserResponse": {
         "properties": {
@@ -4691,6 +9039,207 @@
         ],
         "title": "VersionResponse"
       },
+      "ViewDefinition": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Full view name (e.g. dfe_v_analytics_user_activity)"
+          },
+          "label": {
+            "type": "string",
+            "title": "Label",
+            "description": "Derived label for API consumers (e.g. analytics/user_activity)"
+          },
+          "database": {
+            "type": "string",
+            "title": "Database",
+            "description": "ClickHouse database containing the view"
+          },
+          "parameters": {
+            "items": {
+              "$ref": "#/components/schemas/ViewParameter"
+            },
+            "type": "array",
+            "title": "Parameters"
+          },
+          "create_sql": {
+            "type": "string",
+            "title": "Create Sql",
+            "description": "CREATE VIEW statement from system.tables"
+          },
+          "modified_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Modified At",
+            "description": "Last modification timestamp from system.tables"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace",
+            "description": "Namespace derived from view name (e.g. analytics)"
+          },
+          "short_name": {
+            "type": "string",
+            "title": "Short Name",
+            "description": "Short name within namespace (e.g. user_activity)"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "View description"
+          },
+          "tenant_isolated": {
+            "type": "boolean",
+            "title": "Tenant Isolated",
+            "description": "Whether view contains org_id parameter for tenant isolation",
+            "default": true
+          },
+          "required_roles": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Required Roles"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "label",
+          "database",
+          "create_sql",
+          "namespace",
+          "short_name"
+        ],
+        "title": "ViewDefinition",
+        "description": "A parameterized view discovered from ClickHouse system.tables.\n\nViews follow the naming convention: dfe_v_{namespace}_{name}\ne.g. dfe_v_analytics_user_activity \u2192 label: analytics/user_activity"
+      },
+      "ViewExecuteRequest": {
+        "properties": {
+          "params": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Params",
+            "description": "View parameters (validated against view definition)"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/QueryOptions"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Execution options (limit, offset, timeout, etc.)"
+          }
+        },
+        "type": "object",
+        "title": "ViewExecuteRequest",
+        "description": "Request to execute a parameterized view."
+      },
+      "ViewParameter": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Parameter name as declared in the view"
+          },
+          "clickhouse_type": {
+            "type": "string",
+            "title": "Clickhouse Type",
+            "description": "ClickHouse type (String, UInt64, DateTime64(3), Array(UInt64))"
+          },
+          "python_type": {
+            "type": "string",
+            "title": "Python Type",
+            "description": "Python type mapping (string, integer, float, datetime, date, uuid, boolean, array)"
+          },
+          "typescript_type": {
+            "type": "string",
+            "title": "Typescript Type",
+            "description": "TypeScript type mapping (string, number, boolean, string[], number[])",
+            "default": "string"
+          },
+          "input_type": {
+            "type": "string",
+            "title": "Input Type",
+            "description": "HTML input type hint (text, number, datetime-local, date, checkbox, select, multiselect)",
+            "default": "text"
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "Whether the parameter is required (all CH view params are required)",
+            "default": true
+          },
+          "reserved": {
+            "type": "boolean",
+            "title": "Reserved",
+            "description": "If true, parameter is injected server-side (e.g. org_id) and hidden from UI",
+            "default": false
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Human-readable description"
+          },
+          "placeholder": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Placeholder",
+            "description": "Example value for UI input fields"
+          },
+          "enum": {
+            "anyOf": [
+              {
+                "items": {},
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enum",
+            "description": "Allowed values (renders as dropdown in UI)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "clickhouse_type",
+          "python_type"
+        ],
+        "title": "ViewParameter",
+        "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse \u2192 Python \u2192 TypeScript \u2192 HTML)."
+      },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {
           "seeded": {
@@ -4744,6 +9293,24 @@
         ],
         "title": "SeedResponse"
       },
+      "dfe_engine__api__v1__oidc_providers__TestResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "TestResponse"
+      },
       "dfe_engine__api__v1__services__SeedResponse": {
         "properties": {
           "seeded": {
@@ -4791,6 +9358,32 @@
         ],
         "title": "SeedResponse",
         "description": "Result of seeding built-in sources."
+      },
+      "dfe_engine__api__v1__transforms__TestResponse": {
+        "properties": {
+          "emitted": {
+            "items": {
+              "$ref": "#/components/schemas/EmittedRecord"
+            },
+            "type": "array",
+            "title": "Emitted"
+          },
+          "duration_ms": {
+            "type": "number",
+            "title": "Duration Ms"
+          },
+          "wasm_memory_bytes": {
+            "type": "integer",
+            "title": "Wasm Memory Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "emitted",
+          "duration_ms",
+          "wasm_memory_bytes"
+        ],
+        "title": "TestResponse"
       }
     },
     "securitySchemes": {

@@ -51,11 +51,11 @@ This is the **single source of truth** for all tasks and progress.
 3. [x] Hunts router (`v1/hunts.py`) — HuntEngine lifecycle, async execution (202 + polling)
 4. [x] Pipeline router (`v1/pipeline.py`) — Vector pipeline generation
 
-#### Phase 4: Discovery + Analytics
+#### Phase 4: Discovery + Analytics ✓
 
-1. [ ] Discovery router (`v1/discovery.py`) — ClickHouse table/schema exploration
-2. [ ] Sigma router (`v1/sigma.py`) — SigmaSourceMapper, converter
-3. [ ] Schemas router (`v1/schemas.py`) — SchemaManager versions, DDL generation
+1. [x] Discovery router (`v1/discovery.py`) — ClickHouse table/schema exploration
+2. [x] Sigma router (`v1/sigma.py`) — SigmaSourceMapper, converter
+3. [x] Schemas router (`v1/schemas.py`) — SchemaManager versions, DDL generation
 
 #### Phase 5: UI Migration
 
