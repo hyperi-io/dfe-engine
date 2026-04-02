@@ -4124,7 +4124,7 @@
           "queries"
         ],
         "summary": "Execute View",
-        "description": "Execute a parameterized view and return Arrow IPC results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context \u2014 it cannot be overridden by the client.\n\nResponse headers:\n- ``X-Row-Count``: Number of rows returned\n- ``X-Query-Duration-Ms``: Execution time in milliseconds\n- ``X-Has-More``: Whether more rows are available\n- ``X-Next-Offset``: Next offset for pagination (if applicable)\n- ``X-Request-ID``: Request correlation ID",
+        "description": "Execute a parameterized view and return JSON results.\n\nThe ``org_id`` parameter is always injected from the authenticated\nuser's context \u2014 it cannot be overridden by the client.",
         "operationId": "execute_view_api_v1_queries_views__label__execute_post",
         "parameters": [
           {
@@ -4149,9 +4149,13 @@
         },
         "responses": {
           "200": {
-            "description": "Arrow IPC stream with query results",
+            "description": "Successful Response",
             "content": {
-              "application/vnd.apache.arrow.stream": {}
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
             }
           },
           "422": {
@@ -4178,35 +4182,27 @@
           "queries"
         ],
         "summary": "Execute Raw Query",
-        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path \u2014 for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.\n\nResponse headers:\n- ``X-Row-Count``: Number of rows returned\n- ``X-Query-Duration-Ms``: Execution time in milliseconds\n- ``X-Truncated``: Whether results were truncated\n- ``X-Cached``: Whether results came from cache",
+        "description": "Execute a raw query against a registered datasource adapter.\n\nThis is the lower-level query path \u2014 for ad-hoc queries against\ndatasource adapters rather than parameterized views. Requires\n``query:execute`` permission.",
         "operationId": "execute_raw_query_api_v1_queries_raw_post",
-        "parameters": [
-          {
-            "name": "accept",
-            "in": "header",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "default": "application/vnd.apache.arrow.stream",
-              "title": "Accept"
-            }
-          }
-        ],
         "requestBody": {
-          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RawQueryRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
-            "description": "Arrow IPC stream with query results",
+            "description": "Successful Response",
             "content": {
-              "application/vnd.apache.arrow.stream": {}
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/QueryResponse"
+                }
+              }
             }
           },
           "422": {
@@ -7231,6 +7227,76 @@
         "type": "object",
         "title": "QueryOptions",
         "description": "Query execution options.\n\nThese are standard parameters available for all queries.\nServer enforces maximums from query definition and global config.\n\nPagination modes:\n- Offset-based: Use `limit` and `offset` for simple pagination\n- Cursor-based: Use `cursor` for efficient pagination on large datasets\n- Keyset: Use `after_key` with an order column for stable pagination"
+      },
+      "QueryResponse": {
+        "properties": {
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "Result rows"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "Column names"
+          },
+          "row_count": {
+            "type": "integer",
+            "title": "Row Count",
+            "description": "Number of rows returned"
+          },
+          "query_duration_ms": {
+            "type": "integer",
+            "title": "Query Duration Ms",
+            "description": "Execution time in milliseconds"
+          },
+          "has_more": {
+            "type": "boolean",
+            "title": "Has More",
+            "description": "Whether more rows are available",
+            "default": false
+          },
+          "next_offset": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Offset",
+            "description": "Next offset for pagination"
+          },
+          "request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Request Id",
+            "description": "Request correlation ID"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rows",
+          "columns",
+          "row_count",
+          "query_duration_ms"
+        ],
+        "title": "QueryResponse",
+        "description": "JSON response for query execution."
       },
       "RawQueryRequest": {
         "properties": {
