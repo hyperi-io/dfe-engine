@@ -308,6 +308,13 @@ class TestGroupSourceProvider:
         assert group.source_provider == "entra-id"
         assert group.source_id == "obj-xyz"
 
+    def test_group_org_ids(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        store.create("acme-viewers", roles=["customer_viewer"])
+        store.update("acme-viewers", org_ids=["acme"])
+        group = store.get("acme-viewers")
+        assert group.org_ids == ["acme"]
+
     def test_existing_groups_without_source_provider_still_load(self, tmp_path):
         """Old YAML files without source_provider/source_id load with defaults."""
         from dfe_engine.yaml_utils import yaml_dump

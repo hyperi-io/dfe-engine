@@ -26,6 +26,8 @@ class Group(BaseModel):
     """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
     source_id: str = ""
     """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
+    org_ids: list[str] = Field(default_factory=list)
+    """Organisation IDs this group has access to (empty means no org-scoped access)."""
 
 
 class GroupStore:
@@ -100,7 +102,7 @@ class GroupStore:
     def update(self, name: str, **fields: object) -> Group:
         """Update one or more fields on an existing group and persist.
 
-        Accepted keyword arguments: ``roles``, ``description``, ``members``.
+        Accepted keyword arguments: ``roles``, ``description``, ``members``, ``org_ids``.
 
         Raises:
             KeyError: If the group does not exist.
