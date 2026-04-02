@@ -108,7 +108,9 @@ class OrgRegistry:
     def update(self, name: str, **fields: object) -> Org:
         """Update mutable fields on an existing org.
 
-        Permitted fields: ``display_name``, ``org_ids``, ``enabled``.
+        Permitted fields: ``display_name``, ``org_ids``, ``enabled``,
+        ``dedicated_database``, ``database_name``, ``hyperdx_team_id``,
+        ``ch_password_env``.
 
         Args:
             name: Org to update.
@@ -133,6 +135,14 @@ class OrgRegistry:
             update_dict["org_ids"] = fields["org_ids"]
         if "enabled" in fields:
             update_dict["enabled"] = fields["enabled"]
+        if "dedicated_database" in fields:
+            update_dict["dedicated_database"] = fields["dedicated_database"]
+        if "database_name" in fields:
+            update_dict["database_name"] = fields["database_name"]
+        if "hyperdx_team_id" in fields:
+            update_dict["hyperdx_team_id"] = fields["hyperdx_team_id"]
+        if "ch_password_env" in fields:
+            update_dict["ch_password_env"] = fields["ch_password_env"]
 
         update_dict["updated_at"] = _now()
         org = org.model_copy(update=update_dict)
