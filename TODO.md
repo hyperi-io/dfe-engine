@@ -59,9 +59,17 @@ This is the **single source of truth** for all tasks and progress.
 
 #### Phase 5: UI Migration ✓
 
-1. [x] Generate full OpenAPI spec (75 paths), fix generate.py for pylib compat
+1. [x] Generate full OpenAPI spec (74 paths), fix generate.py for pylib compat
 2. [ ] Update dfe-ui API config to point at engine API (requires dfe-ui repo)
 3. [x] Create `docs/UI-API-GUIDE.md` — auth, pagination, SSE, TypeScript types
+
+#### Post-Phase: Review Fixes ✓
+
+1. [x] Remove pyarrow — query module uses native JSON via clickhouse-connect
+2. [x] Add 12 E2E workflow tests (auth, CRUD, task polling, consistency)
+3. [x] Typed wrappers for schema-less GET endpoints (ServiceConfigDetail, DeploymentConfigDetail)
+4. [x] Normalise path params ({hunt_name} → {name})
+5. [x] Remove unauthenticated /queries/health endpoint
 
 ---
 
