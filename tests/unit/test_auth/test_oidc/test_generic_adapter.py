@@ -8,8 +8,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from dfe_engine.auth.oidc.adapters import get_adapter
 from dfe_engine.auth.oidc.adapters.generic import GenericAdapter
 from dfe_engine.auth.oidc.models import OIDCProvider

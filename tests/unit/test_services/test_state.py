@@ -19,7 +19,6 @@ from dfe_engine.services.state import (
     _parse_prometheus_text,
 )
 
-
 # ---------------------------------------------------------------------------
 # _parse_prometheus_text — pure function, fully testable
 # ---------------------------------------------------------------------------
