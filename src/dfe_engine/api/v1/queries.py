@@ -11,7 +11,7 @@
 Absorbs the functionality of ``query/endpoint.py`` and adds:
 - View catalog browsing (namespaces, definitions, parameters)
 - Authenticated view execution with org_id injection
-- Arrow IPC response format with metadata headers
+- JSON response format
 """
 
 from __future__ import annotations
@@ -19,18 +19,16 @@ from __future__ import annotations
 import time
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.query.models import (
-    QueryMetadata,
     QueryOptions,
     ViewDefinition,
     ViewExecuteRequest,
 )
-from dfe_engine.query.result import QueryResult
 
 router = APIRouter(prefix="/queries", tags=["queries"])
 
@@ -55,6 +53,18 @@ class RawQueryRequest(BaseModel):
         default=None,
         description="Execution options (limit, timeout, etc.)",
     )
+
+
+class QueryResponse(BaseModel):
+    """JSON response for query execution."""
+
+    rows: list[dict[str, Any]] = Field(description="Result rows")
+    columns: list[str] = Field(description="Column names")
+    row_count: int = Field(description="Number of rows returned")
+    query_duration_ms: int = Field(description="Execution time in milliseconds")
+    has_more: bool = Field(default=False, description="Whether more rows are available")
+    next_offset: int | None = Field(default=None, description="Next offset for pagination")
+    request_id: str | None = Field(default=None, description="Request correlation ID")
 
 
 # ── Dependencies ────────────────────────────────────────────
@@ -123,34 +133,18 @@ async def get_view(
 # ── View execution ──────────────────────────────────────────
 
 
-@router.post(
-    "/views/{label:path}/execute",
-    response_class=Response,
-    responses={
-        200: {
-            "content": {"application/vnd.apache.arrow.stream": {}},
-            "description": "Arrow IPC stream with query results",
-        },
-    },
-)
+@router.post("/views/{label:path}/execute", response_model=QueryResponse)
 async def execute_view(
     label: str,
     body: ViewExecuteRequest,
     user: CurrentUser,
     executor: ViewExec,
     _auth: None = Depends(require_action("query:execute")),
-) -> Response:
-    """Execute a parameterized view and return Arrow IPC results.
+) -> QueryResponse:
+    """Execute a parameterized view and return JSON results.
 
     The ``org_id`` parameter is always injected from the authenticated
     user's context — it cannot be overridden by the client.
-
-    Response headers:
-    - ``X-Row-Count``: Number of rows returned
-    - ``X-Query-Duration-Ms``: Execution time in milliseconds
-    - ``X-Has-More``: Whether more rows are available
-    - ``X-Next-Offset``: Next offset for pagination (if applicable)
-    - ``X-Request-ID``: Request correlation ID
     """
     from dfe_engine.query.executor import ViewExecutionError
 
@@ -173,56 +167,32 @@ async def execute_view(
             detail={"code": "query_error", "message": str(exc)},
         )
 
-    content = result.to_arrow_ipc()
     meta = result.metadata
-
-    headers = {
-        "X-Row-Count": str(meta.row_count),
-        "X-Query-Duration-Ms": str(meta.query_duration_ms),
-        "X-Has-More": str(meta.has_more).lower(),
-    }
-    if meta.next_offset is not None:
-        headers["X-Next-Offset"] = str(meta.next_offset)
-    if meta.request_id:
-        headers["X-Request-ID"] = meta.request_id
-
-    return Response(
-        content=content,
-        media_type="application/vnd.apache.arrow.stream",
-        headers=headers,
+    return QueryResponse(
+        rows=result.rows,
+        columns=result.columns,
+        row_count=meta.row_count,
+        query_duration_ms=meta.query_duration_ms,
+        has_more=meta.has_more,
+        next_offset=meta.next_offset,
+        request_id=meta.request_id,
     )
 
 
 # ── Raw query execution (absorbs query/endpoint.py) ────────
 
 
-@router.post(
-    "/raw",
-    response_class=Response,
-    responses={
-        200: {
-            "content": {"application/vnd.apache.arrow.stream": {}},
-            "description": "Arrow IPC stream with query results",
-        },
-    },
-)
+@router.post("/raw", response_model=QueryResponse)
 async def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
     _auth: None = Depends(require_action("query:execute")),
-    accept: Annotated[str, Header()] = "application/vnd.apache.arrow.stream",
-) -> Response:
+) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 
     This is the lower-level query path — for ad-hoc queries against
     datasource adapters rather than parameterized views. Requires
     ``query:execute`` permission.
-
-    Response headers:
-    - ``X-Row-Count``: Number of rows returned
-    - ``X-Query-Duration-Ms``: Execution time in milliseconds
-    - ``X-Truncated``: Whether results were truncated
-    - ``X-Cached``: Whether results came from cache
     """
     from dfe_engine.query.datasources import get_adapter
 
@@ -236,21 +206,11 @@ async def execute_raw_query(
 
     options = request.options or QueryOptions()
     timeout = options.timeout_seconds or 30
-    include_explain = options.include_explain
 
     start = time.perf_counter()
 
     try:
-        if include_explain:
-            table, explain = adapter.execute_with_explain(
-                request.query,
-                request.params,
-                timeout,
-                parallel=options.explain_parallel,
-            )
-        else:
-            table = adapter.execute(request.query, request.params, timeout)
-            explain = None
+        rows, columns = adapter.execute(request.query, request.params, timeout)
     except Exception as exc:
         logger.error("Raw query failed", query=request.query[:200], error=str(exc))
         raise HTTPException(
@@ -260,27 +220,11 @@ async def execute_raw_query(
 
     duration_ms = int((time.perf_counter() - start) * 1000)
 
-    metadata = QueryMetadata(
-        row_count=table.num_rows,
+    return QueryResponse(
+        rows=rows,
+        columns=columns,
+        row_count=len(rows),
         query_duration_ms=duration_ms,
-        query_label=request.query,
-        datasource=request.datasource,
-    )
-
-    result = QueryResult(table=table, metadata=metadata, explain=explain)
-    content = result.to_arrow_ipc(include_explain=include_explain)
-
-    headers = {
-        "X-Row-Count": str(table.num_rows),
-        "X-Query-Duration-Ms": str(duration_ms),
-        "X-Truncated": "false",
-        "X-Cached": "false",
-    }
-
-    return Response(
-        content=content,
-        media_type="application/vnd.apache.arrow.stream",
-        headers=headers,
     )
 
 

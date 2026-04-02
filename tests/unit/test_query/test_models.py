@@ -332,8 +332,8 @@ class TestExplainPlan:
         assert plan.total_estimated_cost == 1.5
         assert plan.total_estimated_rows == 10000
 
-    def test_to_arrow_metadata(self):
-        """Test conversion to Arrow schema metadata."""
+    def test_to_dict(self):
+        """Test conversion to dict for JSON responses."""
         plan = ExplainPlan(
             steps=[
                 ExplainStep(
@@ -347,71 +347,10 @@ class TestExplainPlan:
             raw_plan="EXPLAIN output...",
         )
 
-        metadata = plan.to_arrow_metadata()
+        data = plan.to_dict()
 
-        assert "dfe:explain:steps" in metadata
-        assert "dfe:explain:warnings" in metadata
-        assert metadata["dfe:explain:warnings"] == "Full scan"
-        assert metadata["dfe:explain:estimated_cost"] == "2.5"
-        assert metadata["dfe:explain:raw"] == "EXPLAIN output..."
-
-        # Verify steps can be parsed back
-        steps_data = json.loads(metadata["dfe:explain:steps"])
-        assert "steps" in steps_data
-
-    def test_from_arrow_metadata(self):
-        """Test reconstruction from Arrow metadata."""
-        original = ExplainPlan(
-            steps=[
-                ExplainStep(
-                    step_type=ExplainStepType.FILTER,
-                    description="Filter condition",
-                ),
-            ],
-            warnings=["Warning 1", "Warning 2"],
-            raw_plan="Raw plan text",
-        )
-
-        # Convert to Arrow metadata
-        metadata = original.to_arrow_metadata()
-
-        # Convert back (simulating Arrow schema metadata format)
-        arrow_metadata = {k.encode(): v.encode() for k, v in metadata.items()}
-
-        reconstructed = ExplainPlan.from_arrow_metadata(arrow_metadata)
-
-        assert reconstructed is not None
-        assert len(reconstructed.steps) == 1
-        assert reconstructed.steps[0].step_type == ExplainStepType.FILTER
-        assert reconstructed.warnings == ["Warning 1", "Warning 2"]
-        assert reconstructed.raw_plan == "Raw plan text"
-
-    def test_from_arrow_metadata_missing(self):
-        """Test reconstruction with no EXPLAIN metadata."""
-        result = ExplainPlan.from_arrow_metadata({})
-        assert result is None
-
-    def test_from_arrow_metadata_empty_warnings(self):
-        """Test reconstruction with empty warnings."""
-        metadata = {
-            b"dfe:explain:steps": b'{"steps": []}',
-            b"dfe:explain:warnings": b"",
-        }
-
-        plan = ExplainPlan.from_arrow_metadata(metadata)
-
-        assert plan is not None
-        assert plan.warnings == []
-
-    def test_from_arrow_metadata_list_format(self):
-        """Test reconstruction with list format steps (not wrapped in dict)."""
-        metadata = {
-            b"dfe:explain:steps": b'[{"step_type": "read", "description": "Read"}]',
-            b"dfe:explain:warnings": b"",
-        }
-
-        plan = ExplainPlan.from_arrow_metadata(metadata)
-
-        assert plan is not None
-        assert len(plan.steps) == 1
-        assert plan.steps[0].step_type == ExplainStepType.READ
+        assert "steps" in data
+        assert len(data["steps"]) == 1
+        assert data["warnings"] == ["Full scan"]
+        assert data["total_estimated_cost"] == 2.5
+        assert data["raw_plan"] == "EXPLAIN output..."

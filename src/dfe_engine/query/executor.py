@@ -1,5 +1,12 @@
-"""
-ViewExecutor - Executes parameterized views via the restricted ClickHouse connection.
+#  Project:      dfe-engine
+#  File:         src/dfe_engine/query/executor.py
+#  Purpose:      Secure parameterized view executor with RBAC
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
+"""ViewExecutor — executes parameterized views via restricted ClickHouse connection.
 
 Security enforcement:
 - org_id is ALWAYS injected from AuthContext (clients cannot set it)
@@ -31,14 +38,6 @@ class ViewExecutionError(Exception):
 
 class ViewExecutor:
     """Executes parameterized views via a restricted ClickHouse connection.
-
-    The restricted connection can ONLY SELECT from dfe_v_* views,
-    enforced by ClickHouse RBAC. This class adds Python-side security:
-
-    - org_id injection from JWT (always, cannot be overridden)
-    - limit enforcement (capped at max_limit)
-    - Role-based access control
-    - Pagination wrapping (offset-based or keyset-based)
 
     Args:
         restricted_client: clickhouse-connect client authenticated as dfe_query_user
@@ -75,46 +74,22 @@ class ViewExecutor:
         auth: AuthContext,
         options: QueryOptions | None = None,
     ) -> QueryResult:
-        """Execute a parameterized view and return results.
-
-        Args:
-            label: View label (e.g. "analytics/user_activity")
-            params: Client-provided parameters
-            auth: Authentication context from JWT
-            options: Query options (limit, offset, timeout, etc.)
-
-        Returns:
-            QueryResult with Arrow table and metadata
-
-        Raises:
-            KeyError: View not found
-            AuthorizationError: User not authorized
-            ViewExecutionError: Query execution failed
-        """
+        """Execute a parameterized view and return results."""
         view_def = self._catalog.get_view(label)
         options = options or QueryOptions()
 
-        # Authorization check
         self._check_authorization(view_def, auth)
 
-        # Build final parameters
         final_params = self._build_params(view_def, params or {}, auth, options)
-
-        # Resolve limit and offset
         limit = self._resolve_limit(options)
         offset = options.offset or 0
-
-        # Build SQL
         sql = self._build_sql(view_def, final_params, limit, offset, options)
-
-        # Resolve timeout
         timeout = self._resolve_timeout(options)
 
-        # Execute
         start = time.perf_counter()
         try:
             settings = {"max_execution_time": timeout}
-            table = self._client.query_arrow(
+            result = self._client.query(
                 sql,
                 parameters=final_params,
                 settings=settings,
@@ -124,45 +99,32 @@ class ViewExecutor:
 
         duration_ms = int((time.perf_counter() - start) * 1000)
 
-        # Build metadata
-        has_more = table.num_rows >= limit
+        columns = result.column_names
+        rows = [dict(zip(columns, row, strict=True)) for row in result.result_rows]
+
+        has_more = len(rows) >= limit
         metadata = QueryMetadata(
-            row_count=table.num_rows,
+            row_count=len(rows),
             query_duration_ms=duration_ms,
             query_label=label,
             datasource="clickhouse",
             store=self._database,
             request_id=auth.request_id or str(uuid.uuid4()),
             has_more=has_more,
-            next_offset=offset + table.num_rows if has_more else None,
+            next_offset=offset + len(rows) if has_more else None,
         )
 
-        return QueryResult(table=table, metadata=metadata)
+        return QueryResult(rows=rows, columns=columns, metadata=metadata)
 
     def list_views(self, namespace: str | None = None) -> list[ViewDefinition]:
-        """List available views, optionally filtered by namespace.
-
-        Args:
-            namespace: Optional namespace filter
-
-        Returns:
-            List of ViewDefinition
-        """
+        """List available views, optionally filtered by namespace."""
         return self._catalog.list_views(namespace=namespace)
 
     def get_view(self, label: str) -> ViewDefinition:
-        """Get a specific view definition.
-
-        Args:
-            label: View label
-
-        Returns:
-            ViewDefinition
-        """
+        """Get a specific view definition."""
         return self._catalog.get_view(label)
 
     def _check_authorization(self, view_def: ViewDefinition, auth: AuthContext) -> None:
-        """Check if user is authorized to execute this view."""
         from dfe_engine.auth import authorize
         from dfe_engine.settings import get_settings
 
@@ -176,14 +138,12 @@ class ViewExecutor:
         if not result.allowed:
             raise AuthorizationError(f"View '{view_def.label}': access denied ({result.reason})")
 
-        # View-level role gate (separate from global RBAC)
         if view_def.required_roles:
             if not any(role in auth.roles for role in view_def.required_roles):
                 raise AuthorizationError(
                     f"View '{view_def.label}' requires one of roles: {view_def.required_roles}"
                 )
 
-        # Non-tenant-isolated views require admin role
         if not view_def.tenant_isolated and "admin" not in auth.roles:
             raise AuthorizationError(
                 f"View '{view_def.label}' is not tenant-isolated and requires admin role"
@@ -196,26 +156,9 @@ class ViewExecutor:
         auth: AuthContext,
         options: QueryOptions,
     ) -> dict[str, Any]:
-        """Build the final parameter dict for query execution.
-
-        Reserved parameters (org_id) are injected from auth context
-        and cannot be overridden by the client.
-
-        Args:
-            view_def: View definition
-            client_params: Client-supplied parameters
-            auth: Auth context from JWT
-            options: Query options
-
-        Returns:
-            Merged parameter dict
-        """
         final: dict[str, Any] = {}
-
-        # Inject reserved parameters — ALWAYS from auth, never from client
         final["org_id"] = auth.org_id
 
-        # Add client parameters (excluding reserved ones)
         for param_def in view_def.parameters:
             name = param_def.name
             if name in RESERVED_PARAMS:
@@ -223,7 +166,6 @@ class ViewExecutor:
             if name in client_params:
                 final[name] = client_params[name]
 
-        # Inject standard options as parameters if view expects them
         param_names = {p.name for p in view_def.parameters}
         if "limit" in param_names:
             final["limit"] = self._resolve_limit(options)
@@ -242,22 +184,6 @@ class ViewExecutor:
         offset: int,
         options: QueryOptions,
     ) -> str:
-        """Build the SQL statement for view execution.
-
-        Generates: SELECT * FROM db.view_name(param1={param1:Type}, ...)
-        with optional pagination wrapping.
-
-        Args:
-            view_def: View definition
-            params: Final parameter dict
-            limit: Resolved limit
-            offset: Resolved offset
-            options: Query options
-
-        Returns:
-            SQL string with {param:Type} placeholders for server-side binding
-        """
-        # Build parameter call syntax: view_name(param1={param1:Type}, ...)
         param_parts = []
         for p in view_def.parameters:
             param_parts.append(f"{p.name}={{{p.name}:{p.clickhouse_type}}}")
@@ -265,16 +191,12 @@ class ViewExecutor:
         param_str = ", ".join(param_parts)
         view_call = f"{self._database}.{view_def.name}({param_str})"
 
-        # Check if view already has limit parameter — if so, just SELECT from it
         view_has_limit = any(p.name == "limit" for p in view_def.parameters)
 
         if view_has_limit and offset == 0 and not options.after_key:
-            # View handles its own limit, no wrapping needed
             return f"SELECT * FROM {view_call}"
 
-        # Wrap with pagination
         if options.after_key is not None and options.order_by:
-            # Keyset pagination
             order_dir = options.order_dir or "asc"
             op = ">" if order_dir == "asc" else "<"
             return (
@@ -285,20 +207,16 @@ class ViewExecutor:
             )
 
         if offset > 0:
-            # Offset pagination
             return f"SELECT * FROM {view_call} LIMIT {limit} OFFSET {offset}"
 
-        # No pagination wrapping, but add outer limit if view doesn't have one
         return f"SELECT * FROM {view_call} LIMIT {limit}"
 
     def _resolve_limit(self, options: QueryOptions) -> int:
-        """Resolve the effective limit, capped at max_limit."""
         if options.limit is not None:
             return min(options.limit, self._max_limit)
         return self._default_limit
 
     def _resolve_timeout(self, options: QueryOptions) -> int:
-        """Resolve the effective timeout, capped at max_timeout."""
         if options.timeout_seconds is not None:
             return min(options.timeout_seconds, self._max_timeout)
         return self._default_timeout

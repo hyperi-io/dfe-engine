@@ -1,40 +1,34 @@
-"""
-Datasource adapters for Query API.
+#  Project:      dfe-engine
+#  File:         src/dfe_engine/query/datasources/__init__.py
+#  Purpose:      Datasource adapter registry and ABC
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-Adapters convert datasource-specific queries to Arrow format.
+"""Datasource adapters for Query API.
+
+Adapters execute queries and return rows as list[dict].
 """
 
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any
-
-import pyarrow as pa
+from typing import Any
 
 from dfe_engine.query.models import ExplainPlan
-
-if TYPE_CHECKING:
-    from concurrent.futures import Future
 
 # Registry of datasource adapters
 _adapters: dict[str, type[DatasourceAdapter]] = {}
 
 
 class DatasourceAdapter(ABC):
-    """
-    Base class for datasource adapters.
+    """Base class for datasource adapters.
 
     Subclasses implement query execution and EXPLAIN for specific backends.
     """
 
     def __init__(self, target: str, config: dict[str, Any] | None = None):
-        """
-        Initialize adapter.
-
-        Args:
-            target: Target identifier (e.g., 'default', 'analytics')
-            config: Optional configuration override
-        """
         self.target = target
         self.config = config or {}
 
@@ -44,17 +38,11 @@ class DatasourceAdapter(ABC):
         query: str,
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
-    ) -> pa.Table:
-        """
-        Execute query and return Arrow Table.
-
-        Args:
-            query: Query string
-            params: Optional query parameters
-            timeout_seconds: Query timeout
+    ) -> tuple[list[dict[str, Any]], list[str]]:
+        """Execute query and return (rows, column_names).
 
         Returns:
-            PyArrow Table with results
+            Tuple of (list of row dicts, list of column name strings)
         """
 
     @abstractmethod
@@ -63,16 +51,7 @@ class DatasourceAdapter(ABC):
         query: str,
         params: dict[str, Any] | None = None,
     ) -> ExplainPlan:
-        """
-        Get execution plan for query.
-
-        Args:
-            query: Query string
-            params: Optional query parameters
-
-        Returns:
-            ExplainPlan with execution steps
-        """
+        """Get execution plan for query."""
 
     def execute_with_explain(
         self,
@@ -80,70 +59,48 @@ class DatasourceAdapter(ABC):
         params: dict[str, Any] | None = None,
         timeout_seconds: int = 30,
         parallel: bool = False,
-    ) -> tuple[pa.Table, ExplainPlan]:
-        """
-        Execute query and return results with EXPLAIN plan.
-
-        Args:
-            query: Query string
-            params: Optional query parameters
-            timeout_seconds: Query timeout
-            parallel: Execute query and EXPLAIN concurrently
+    ) -> tuple[list[dict[str, Any]], list[str], ExplainPlan]:
+        """Execute query and return results with EXPLAIN plan.
 
         Returns:
-            Tuple of (Arrow Table, ExplainPlan)
+            Tuple of (rows, column_names, ExplainPlan)
         """
         if parallel:
             return self._execute_parallel(query, params, timeout_seconds)
-        else:
-            # Sequential execution
-            table = self.execute(query, params, timeout_seconds)
-            plan = self.explain(query, params)
-            return table, plan
+        rows, columns = self.execute(query, params, timeout_seconds)
+        plan = self.explain(query, params)
+        return rows, columns, plan
 
     def _execute_parallel(
         self,
         query: str,
         params: dict[str, Any] | None,
         timeout_seconds: int,
-    ) -> tuple[pa.Table, ExplainPlan]:
+    ) -> tuple[list[dict[str, Any]], list[str], ExplainPlan]:
         """Execute query and EXPLAIN in parallel using threads."""
-        from concurrent.futures import ThreadPoolExecutor
+        from concurrent.futures import Future, ThreadPoolExecutor
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            query_future: Future[pa.Table] = executor.submit(
+            query_future: Future[tuple[list[dict[str, Any]], list[str]]] = executor.submit(
                 self.execute, query, params, timeout_seconds
             )
             explain_future: Future[ExplainPlan] = executor.submit(self.explain, query, params)
 
-            # Wait for both to complete
-            table = query_future.result(timeout=timeout_seconds + 5)
+            rows, columns = query_future.result(timeout=timeout_seconds + 5)
             plan = explain_future.result(timeout=timeout_seconds + 5)
 
-        return table, plan
+        return rows, columns, plan
 
     @abstractmethod
     def healthcheck(self) -> bool:
-        """
-        Check datasource connectivity.
-
-        Returns:
-            True if healthy, False otherwise
-        """
+        """Check datasource connectivity."""
 
     def close(self) -> None:  # noqa: B027
         """Close any open connections. Override if needed."""
 
 
 def register_adapter(name: str):
-    """
-    Decorator to register a datasource adapter.
-
-    Usage:
-        @register_adapter("clickhouse")
-        class ClickHouseAdapter(DatasourceAdapter):
-            ...
-    """
+    """Decorator to register a datasource adapter."""
 
     def decorator(cls: type[DatasourceAdapter]) -> type[DatasourceAdapter]:
         _adapters[name] = cls
@@ -153,18 +110,7 @@ def register_adapter(name: str):
 
 
 def get_adapter(datasource: str) -> DatasourceAdapter:
-    """
-    Get adapter instance for datasource URI.
-
-    Args:
-        datasource: URI like 'clickhouse:default' or 'postgres:main'
-
-    Returns:
-        Configured DatasourceAdapter instance
-
-    Raises:
-        ValueError: Unknown datasource scheme
-    """
+    """Get adapter instance for datasource URI (e.g. 'clickhouse:default')."""
     scheme, _, target = datasource.partition(":")
     target = target or "default"
 
@@ -185,7 +131,3 @@ from dfe_engine.query.datasources import (
     clickhouse,  # noqa: F401
     storage,  # noqa: F401
 )
-
-# Future: postgres, prometheus
-# from dfe_engine.query.datasources import postgres
-# from dfe_engine.query.datasources import prometheus

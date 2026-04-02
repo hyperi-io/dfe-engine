@@ -1,18 +1,22 @@
-"""
-Query API client for consuming the DFE Query API.
+#  Project:      dfe-engine
+#  File:         src/dfe_engine/query/client.py
+#  Purpose:      Query API client for consuming the DFE Query API
+#  Language:     Python
+#
+#  License:      FSL-1.1-ALv2
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
+"""Query API client.
 
 Clients reference queries by label and pass parameters.
-SQL is never exposed to clients - it's resolved server-side
+SQL is never exposed to clients — it's resolved server-side
 via ClickHouse parameterized views.
 """
 
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterator
-from typing import TYPE_CHECKING, Any
-
-import pyarrow as pa
+from typing import Any
 
 from dfe_engine.query.models import (
     AuthContext,
@@ -21,42 +25,12 @@ from dfe_engine.query.models import (
 )
 from dfe_engine.query.result import QueryResult
 
-if TYPE_CHECKING:
-    import pandas as pd
-
 
 class QueryClient:
-    """
-    Client for DFE Query API.
+    """Client for DFE Query API.
 
     Supports both direct (in-process) and HTTP modes.
-    Clients specify query labels and parameters - never raw SQL.
-
-    Examples:
-        # HTTP mode (for external consumers)
-        client = QueryClient(base_url="http://localhost:8000")
-
-        # Direct mode (in-process, no HTTP)
-        client = QueryClient(direct=True)
-
-        # Execute query by label with parameters
-        result = client.query(
-            "analytics/user_activity",
-            params={"event_types": ["login", "purchase"]},
-            limit=500,
-        )
-
-        # Access data
-        df = result.to_pandas()
-        table = result.to_arrow()
-
-        # With EXPLAIN plan
-        result = client.query(
-            "hunts/active_threats",
-            params={"severities": ["critical"]},
-            include_explain=True,
-        )
-        print(result.explain.steps)
+    Clients specify query labels and parameters — never raw SQL.
     """
 
     def __init__(
@@ -65,14 +39,6 @@ class QueryClient:
         direct: bool = False,
         timeout_seconds: int = 30,
     ):
-        """
-        Initialize QueryClient.
-
-        Args:
-            base_url: API base URL for HTTP mode
-            direct: Use direct in-process execution (no HTTP)
-            timeout_seconds: Default query timeout
-        """
         if not base_url and not direct:
             raise ValueError("Must specify base_url or direct=True")
 
@@ -90,7 +56,7 @@ class QueryClient:
 
             self._http_client = HttpClient(
                 base_url=self.base_url,
-                timeout=self.timeout_seconds + 10,  # Buffer for network
+                timeout=self.timeout_seconds + 10,
                 retries=3,
             )
         return self._http_client
@@ -108,23 +74,7 @@ class QueryClient:
         store: str | None = None,
         cache: bool = True,
     ) -> QueryResult:
-        """
-        Execute query and return result.
-
-        Args:
-            query_label: Query label (e.g., 'analytics/user_activity')
-            params: Query parameters (validated against query schema)
-            limit: Max rows to return
-            offset: Skip first N rows
-            time_from: Start time (ISO8601) for time-bounded queries
-            time_to: End time (ISO8601) for time-bounded queries
-            timeout_seconds: Query timeout
-            store: Target store (only if query allows store: '*')
-            cache: Allow cached results
-
-        Returns:
-            QueryResult with data and metadata
-        """
+        """Execute query and return result."""
         options = QueryOptions(
             limit=limit,
             offset=offset,
@@ -138,28 +88,6 @@ class QueryClient:
 
         return self._execute(query_label, params, options)
 
-    def query_df(
-        self,
-        query_label: str,
-        params: dict[str, Any] | None = None,
-        **kwargs: Any,
-    ) -> pd.DataFrame:
-        """
-        Execute query and return pandas DataFrame.
-
-        Zero-copy conversion from Arrow where possible.
-
-        Args:
-            query_label: Query label
-            params: Query parameters
-            **kwargs: Passed to query()
-
-        Returns:
-            pandas DataFrame
-        """
-        result = self.query(query_label, params, **kwargs)
-        return result.to_pandas()
-
     def query_with_explain(
         self,
         query_label: str,
@@ -168,18 +96,7 @@ class QueryClient:
         parallel: bool = True,
         **kwargs: Any,
     ) -> QueryResult:
-        """
-        Execute query and return results with EXPLAIN plan.
-
-        Args:
-            query_label: Query label
-            params: Query parameters
-            parallel: Execute query and EXPLAIN concurrently
-            **kwargs: Passed to query()
-
-        Returns:
-            QueryResult with table, metadata, and explain plan
-        """
+        """Execute query and return results with EXPLAIN plan."""
         options = QueryOptions(
             limit=kwargs.get("limit"),
             offset=kwargs.get("offset"),
@@ -194,30 +111,6 @@ class QueryClient:
 
         return self._execute(query_label, params, options)
 
-    def query_batches(
-        self,
-        query_label: str,
-        params: dict[str, Any] | None = None,
-        batch_size: int = 10_000,
-        **kwargs: Any,
-    ) -> Iterator[pa.RecordBatch]:
-        """
-        Stream query results in batches.
-
-        Useful for large results that don't fit in memory.
-
-        Args:
-            query_label: Query label
-            params: Query parameters
-            batch_size: Maximum rows per batch
-            **kwargs: Passed to query()
-
-        Yields:
-            Arrow RecordBatch
-        """
-        result = self.query(query_label, params, **kwargs)
-        yield from result.iter_batches(batch_size)
-
     def _execute(
         self,
         query_label: str,
@@ -227,15 +120,10 @@ class QueryClient:
         """Execute query via direct or HTTP mode."""
         if self.direct:
             return self._execute_direct(query_label, params, options)
-        else:
-            return self._execute_http(query_label, params, options)
+        return self._execute_http(query_label, params, options)
 
     def _get_view_executor(self):
-        """Get ViewExecutor, creating it lazily if possible.
-
-        Returns None if the restricted ClickHouse connection cannot be established
-        (e.g. no ClickHouse available, no restricted user configured).
-        """
+        """Get ViewExecutor, creating it lazily if possible."""
         if self._view_executor is None:
             try:
                 from dfe_engine.query.catalog import ViewCatalog
@@ -277,33 +165,7 @@ class QueryClient:
         params: dict[str, Any] | None,
         options: QueryOptions,
     ) -> QueryResult:
-        """Execute query directly (in-process) via ViewExecutor.
-
-        Routes queries through ClickHouse parameterized views.
-        AuthorizationError propagates to the caller.
-        """
-        return self._execute_view(query_label, params, options)
-
-    def _execute_view(
-        self,
-        query_label: str,
-        params: dict[str, Any] | None,
-        options: QueryOptions,
-    ) -> QueryResult:
-        """Execute a parameterized view via ViewExecutor.
-
-        Args:
-            query_label: View label (e.g. "analytics/user_activity")
-            params: Client parameters
-            options: Query options
-
-        Returns:
-            QueryResult
-
-        Raises:
-            RuntimeError: If ViewExecutor cannot be initialized
-            KeyError: If view not found in catalog
-        """
+        """Execute query directly (in-process) via ViewExecutor."""
         executor = self._get_view_executor()
         if executor is None:
             raise RuntimeError(
@@ -311,7 +173,6 @@ class QueryClient:
                 "and restricted user configuration"
             )
 
-        # Direct mode uses synthetic admin auth
         auth = AuthContext(
             org_id="direct",
             user_id="direct",
@@ -327,10 +188,11 @@ class QueryClient:
         params: dict[str, Any] | None,
         options: QueryOptions,
     ) -> QueryResult:
-        """Execute query via HTTP API."""
+        """Execute query via HTTP API (JSON response)."""
         response = self.http_client.post(
-            "/api/v1/query",
+            "/api/v1/queries/raw",
             json={
+                "datasource": "clickhouse:default",
                 "query": query_label,
                 "params": params,
                 "options": options.model_dump(exclude_none=True),
@@ -338,21 +200,17 @@ class QueryClient:
         )
         response.raise_for_status()
 
-        # Parse metadata from headers
+        data = response.json()
         metadata = QueryMetadata(
-            row_count=int(response.headers.get("X-Row-Count", 0)),
+            row_count=int(response.headers.get("X-Row-Count", len(data.get("rows", [])))),
             query_duration_ms=int(response.headers.get("X-Query-Duration-Ms", 0)),
             query_label=query_label,
-            datasource=response.headers.get("X-Datasource", "unknown"),
-            store=response.headers.get("X-Store"),
-            truncated=response.headers.get("X-Truncated", "false").lower() == "true",
-            cached=response.headers.get("X-Cached", "false").lower() == "true",
-            explain_duration_ms=int(response.headers.get("X-Explain-Duration-Ms", 0)) or None,
-            request_id=response.headers.get("X-Request-Id"),
+            datasource=response.headers.get("X-Datasource", "clickhouse"),
         )
 
-        # Parse Arrow IPC response (explain embedded in schema metadata)
-        return QueryResult.from_arrow_ipc(response.content, metadata)
+        rows = data.get("rows", [])
+        columns = data.get("columns", list(rows[0].keys()) if rows else [])
+        return QueryResult(rows=rows, columns=columns, metadata=metadata)
 
     def close(self) -> None:
         """Close HTTP client."""
