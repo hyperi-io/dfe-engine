@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/transforms", tags=["Transforms"])
 
@@ -120,6 +121,7 @@ async def compile_transform(
         )
 
     data = resp.json()
+    audit_resource_change(user.user_id, "transform", request.language, "compiled")
     return CompileResponse(
         wasm_base64=data["wasm_base64"],
         wasm_bytes=data["wasm_bytes"],
@@ -175,6 +177,7 @@ async def test_transform(
         )
 
     data = resp.json()
+    audit_resource_change(user.user_id, "transform", "wasm", "tested")
     return TestResponse(
         emitted=data["emitted"],
         duration_ms=data["duration_ms"],

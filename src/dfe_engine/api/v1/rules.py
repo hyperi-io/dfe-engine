@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/rules", tags=["Rules"])
 
@@ -137,6 +138,7 @@ async def create_rule(
             warnings=getattr(ce, "warnings", []),
         )
 
+    audit_resource_change(user.user_id, "rule", rule_id, "created")
     return RuleCreateResponse(
         rule=RuleResponse(
             rule_id=rule_data.rule_id,
