@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
@@ -74,7 +75,7 @@ async def get_schema_columns(
     _auth: None = Depends(require_action("source:read")),
 ) -> list[SchemaColumn]:
     """Get columns for a source's schema."""
-    from dfe_engine.schema import SchemaLoadError, SchemaLoader
+    from dfe_engine.schema import SchemaLoader, SchemaLoadError
 
     try:
         source = registry.get_source(source_name)
@@ -167,6 +168,7 @@ async def build_schema(
             views={k: v for k, v in (result.view_ddls or {}).items()},
         )
 
+    audit_resource_change(user.user_id, "schema", source_name, "executed")
     return SchemaBuildResult(
         source_name=source_name,
         version=getattr(result, "version", "") or "",

@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import AlertDestStore, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
@@ -102,6 +103,7 @@ async def create_destination(
             },
         )
     _write_destination(store, body)
+    audit_resource_change(user.user_id, "alert_destination", body.name, "created")
     return body
 
 
@@ -138,6 +140,7 @@ async def update_destination(
     """Update an alert destination."""
     body.name = name
     _write_destination(store, body)
+    audit_resource_change(user.user_id, "alert_destination", name, "updated")
     return body
 
 
@@ -157,6 +160,7 @@ async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore
             },
         )
     store.delete(name, _DATA_KEY)
+    audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
 
 # ── Helpers ──────────────────────────────────────────────────

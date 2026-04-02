@@ -23,6 +23,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.task_manager import TaskManager
+from dfe_engine.auth.audit import audit_resource_change
 
 router = APIRouter(prefix="/hunts", tags=["hunts"])
 
@@ -168,6 +169,7 @@ async def trigger_hunt(
         body.customer,
     )
 
+    audit_resource_change(user.user_id, "hunt", name, "executed")
     return TriggerResponse(task_id=task_info.id, hunt_name=name)
 
 

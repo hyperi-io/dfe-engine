@@ -15,6 +15,7 @@ from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.fieldmap.models import FieldMap
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
@@ -95,6 +96,7 @@ async def create_field_map(
                 "message": str(e),
             },
         )
+    audit_resource_change(user.user_id, "field_map", f"{fm.standard}", "created")
     return fm
 
 
@@ -162,6 +164,7 @@ async def delete_source_field_map(
             },
         )
     registry.delete_map(standard, source=source)
+    audit_resource_change(user.user_id, "field_map", f"{standard}/{source}", "deleted")
 
 
 @router.post(
@@ -172,4 +175,5 @@ async def delete_source_field_map(
 async def seed_field_maps(user: CurrentUser, registry: FieldMapReg):
     """Seed built-in default field maps. Non-destructive."""
     count = registry.seed_defaults(overwrite=False)
+    audit_resource_change(user.user_id, "field_map", "all", "seeded")
     return SeedResponse(seeded=count)
