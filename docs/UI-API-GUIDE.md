@@ -100,7 +100,7 @@ const { data, fetchNextPage } = useInfiniteQuery({
 Query parameters: `page` (1-based), `per_page` (1–100, default 25),
 `search` (text filter), `sort_by`, `sort_order` (asc/desc).
 
-## API Surface (75 Endpoints)
+## API Surface (74 Endpoints)
 
 ### Auth & RBAC (`/api/v1/auth/*`)
 
@@ -168,13 +168,13 @@ K8s/KEDA deployment config (replicas, resources, scaling).
 | GET | `/queries/views` | List parameterized views |
 | GET | `/queries/views/namespaces` | List view namespaces |
 | GET | `/queries/views/{label}` | View definition + parameters |
-| POST | `/queries/views/{label}/execute` | Execute view → Arrow IPC |
-| POST | `/queries/raw` | Raw query → Arrow IPC |
+| POST | `/queries/views/{label}/execute` | Execute view → JSON |
+| POST | `/queries/raw` | Raw query → JSON |
 | GET | `/queries/health` | Query engine health |
 
-View execution returns **Arrow IPC** (`application/vnd.apache.arrow.stream`)
-with metadata headers: `X-Row-Count`, `X-Query-Duration-Ms`, `X-Has-More`,
-`X-Next-Offset`, `X-Request-ID`.
+View execution returns **JSON** (`QueryResponse`) with fields:
+`rows`, `columns`, `row_count`, `query_duration_ms`, `has_more`,
+`next_offset`, `request_id`.
 
 ### Discovery (`/api/v1/discovery`)
 
