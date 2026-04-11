@@ -25,7 +25,7 @@ structured results with:
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser
@@ -153,7 +153,7 @@ class CelCheckBatchResponse(BaseModel):
 )
 async def check_cel_expression(
     request: CelCheckRequest,
-    _user: CurrentUser = Depends(),
+    _user: CurrentUser,
 ) -> CelCheckResponse:
     """Validate a single CEL expression."""
     result = check_syntax(request.expression, check_profile=request.check_profile)
@@ -171,7 +171,7 @@ async def check_cel_expression(
 )
 async def check_cel_expressions_batch(
     request: CelCheckBatchRequest,
-    _user: CurrentUser = Depends(),
+    _user: CurrentUser,
 ) -> CelCheckBatchResponse:
     """Validate a list of CEL expressions."""
     results = [
