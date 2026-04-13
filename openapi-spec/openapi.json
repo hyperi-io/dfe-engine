@@ -5014,6 +5014,100 @@
         ]
       }
     },
+    "/api/v1/cel/check": {
+      "post": {
+        "tags": [
+          "cel"
+        ],
+        "summary": "Validate a CEL expression and classify its performance tier",
+        "description": "Returns syntax validity, performance tier, referenced fields, and a human-readable description of what the expression matches. Designed for live UI validation as the user types \u2014 completes in <1ms.",
+        "operationId": "check_cel_expression_api_v1_cel_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CelCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CelCheckResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/cel/check-batch": {
+      "post": {
+        "tags": [
+          "cel"
+        ],
+        "summary": "Validate multiple CEL expressions in one call",
+        "description": "Batch version of /cel/check. Use when the UI needs to validate an entire filter list at once (e.g., on form submit). Max 100 expressions.",
+        "operationId": "check_cel_expressions_batch_api_v1_cel_check_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CelCheckBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CelCheckBatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -5332,6 +5426,187 @@
         ],
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
+      },
+      "CelCheckBatchRequest": {
+        "properties": {
+          "expressions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "maxItems": 100,
+            "title": "Expressions",
+            "description": "List of CEL expressions to validate"
+          },
+          "check_profile": {
+            "type": "boolean",
+            "title": "Check Profile",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "expressions"
+        ],
+        "title": "CelCheckBatchRequest",
+        "description": "Request to validate multiple CEL expressions in one call."
+      },
+      "CelCheckBatchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/CelCheckResponse"
+            },
+            "type": "array",
+            "title": "Results",
+            "description": "One result per input expression, in the same order"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "CelCheckBatchResponse",
+        "description": "Result of a batch CEL expression check."
+      },
+      "CelCheckRequest": {
+        "properties": {
+          "expression": {
+            "type": "string",
+            "title": "Expression",
+            "description": "CEL expression to validate",
+            "examples": [
+              "has(_table)",
+              "severity > 3 && source != \"internal\""
+            ]
+          },
+          "check_profile": {
+            "type": "boolean",
+            "title": "Check Profile",
+            "description": "If true, apply DFE profile restrictions (reject regex/iteration/time). Leave false for transport filters \u2014 Tier 3 is classification only, not rejection.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "expression"
+        ],
+        "title": "CelCheckRequest",
+        "description": "Request to validate a single CEL expression."
+      },
+      "CelCheckResponse": {
+        "properties": {
+          "valid": {
+            "type": "boolean",
+            "title": "Valid",
+            "description": "True if syntax is valid"
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors",
+            "description": "Syntax/profile errors (empty if valid)"
+          },
+          "tier": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FilterTier"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Performance tier (null if invalid)"
+          },
+          "tier_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tier Label",
+            "description": "Human-readable tier label (e.g., 'Tier 1 (SIMD)')"
+          },
+          "fields": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Fields",
+            "description": "Fields referenced by the expression (Tier 2/3)"
+          },
+          "op_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Op Kind",
+            "description": "Recognised Tier 1 operation kind (field_exists, field_equals, etc.)"
+          },
+          "op_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Op Field",
+            "description": "Field name in the Tier 1 operation"
+          },
+          "op_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Op Value",
+            "description": "Comparison value in the Tier 1 operation"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Human-readable description of what the expression matches"
+          },
+          "opt_in_required": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Opt In Required",
+            "description": "Config key that must be enabled for this expression's tier (Tier 2/3)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "valid"
+        ],
+        "title": "CelCheckResponse",
+        "description": "Result of a single CEL expression check."
       },
       "ColumnInfo": {
         "properties": {
@@ -6117,6 +6392,16 @@
         ],
         "title": "FieldMapping",
         "description": "A single Sigma field \u2192 column mapping."
+      },
+      "FilterTier": {
+        "type": "string",
+        "enum": [
+          "tier1",
+          "tier2",
+          "tier3"
+        ],
+        "title": "FilterTier",
+        "description": "Performance tier for a filter expression."
       },
       "GroupResolutionRequest": {
         "properties": {
