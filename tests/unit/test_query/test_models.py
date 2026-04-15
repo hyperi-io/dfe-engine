@@ -1,6 +1,5 @@
 """Unit tests for Query API models."""
 
-import json
 
 import pytest
 
