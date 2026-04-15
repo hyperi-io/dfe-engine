@@ -101,7 +101,7 @@ class TestLoadColumns:
     def test_missing_columns_key(self, tmp_path):
         path = tmp_path / "bad.yaml"
         yaml_dump({"other": "data"}, path)
-        with pytest.raises(SchemaLoadError, match="columns.*versions"):
+        with pytest.raises(SchemaLoadError, match=r"columns.*versions"):
             SchemaLoader.load_columns(path)
 
     def test_invalid_column_data(self, tmp_schema):
@@ -652,7 +652,7 @@ class TestVersionTree:
                 },
             }
         )
-        with pytest.raises(SchemaLoadError, match="Version '9.9.9' not found"):
+        with pytest.raises(SchemaLoadError, match=r"Version '9\.9\.9' not found"):
             SchemaLoader.load_columns(path, version="9.9.9")
 
     def test_version_missing_columns_key_raises(self, tmp_versioned_schema):

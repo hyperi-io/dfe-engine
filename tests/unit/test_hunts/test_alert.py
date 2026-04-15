@@ -347,10 +347,10 @@ class TestEvaluateAndSend:
 
 class TestSend:
     @patch("dfe_engine.hunts.alert.apprise.Apprise")
-    def test_send_success(self, MockApprise):
+    def test_send_success(self, mock_apprise):
         mock_ap = MagicMock()
         mock_ap.notify.return_value = True
-        MockApprise.return_value = mock_ap
+        mock_apprise.return_value = mock_ap
 
         config = AlertConfig(channels=["slack://t"])
         d = AlertDispatcher(config)
@@ -359,20 +359,20 @@ class TestSend:
         mock_ap.notify.assert_called_once_with(title="title", body="body")
 
     @patch("dfe_engine.hunts.alert.apprise.Apprise")
-    def test_send_failure(self, MockApprise):
+    def test_send_failure(self, mock_apprise):
         mock_ap = MagicMock()
         mock_ap.notify.return_value = False
-        MockApprise.return_value = mock_ap
+        mock_apprise.return_value = mock_ap
 
         config = AlertConfig(channels=["slack://t"])
         d = AlertDispatcher(config)
         assert d._send("title", "body") is False
 
     @patch("dfe_engine.hunts.alert.apprise.Apprise")
-    def test_send_exception(self, MockApprise):
+    def test_send_exception(self, mock_apprise):
         mock_ap = MagicMock()
         mock_ap.notify.side_effect = RuntimeError("network error")
-        MockApprise.return_value = mock_ap
+        mock_apprise.return_value = mock_ap
 
         config = AlertConfig(channels=["slack://t"])
         d = AlertDispatcher(config)

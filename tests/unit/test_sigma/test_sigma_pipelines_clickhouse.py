@@ -39,7 +39,7 @@ def base_rule_yaml():
 
 
 @pytest.mark.parametrize(
-    "rule_yaml,expected_query",
+    ("rule_yaml", "expected_query"),
     [
         (
             """

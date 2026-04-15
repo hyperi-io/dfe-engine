@@ -540,9 +540,11 @@ def test_nested_field_mappings(clickhouse_backend: SqlBackend):
     generated_query = clickhouse_backend.convert(SigmaCollection.from_yaml(sigma_yaml))
 
     assert "event.user.name = 'admin'" in generated_query[0]
-    assert "event.source.address" in generated_query[0] and "192.168.1.1" in generated_query[0]
+    assert "event.source.address" in generated_query[0]
+    assert "192.168.1.1" in generated_query[0]
     assert "event.source.port = '22'" in generated_query[0]
-    assert "event.destination.address" in generated_query[0] and "10.0.0.1" in generated_query[0]
+    assert "event.destination.address" in generated_query[0]
+    assert "10.0.0.1" in generated_query[0]
     assert "event.destination.port = '445'" in generated_query[0]
 
 

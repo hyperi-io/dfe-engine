@@ -1,7 +1,5 @@
 """Unit tests for Query API models."""
 
-import json
-
 import pytest
 
 from dfe_engine.query.models import (

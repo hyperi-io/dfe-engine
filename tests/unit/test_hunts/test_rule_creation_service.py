@@ -39,7 +39,7 @@ class TestRuleCreateRequest:
         assert req.source_type == "hyperdx"
 
     def test_requires_sql_or_cel(self):
-        with pytest.raises(ValueError, match="user_sql.*cel_filter"):
+        with pytest.raises(ValueError, match=r"user_sql.*cel_filter"):
             RuleCreateRequest(name="Test")
 
     def test_cel_only(self):

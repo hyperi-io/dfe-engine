@@ -101,9 +101,7 @@ class TestValidation:
     def test_multiple_errors_collected(self) -> None:
         rules = [
             FilterRule(expression="has(_table)", action=FilterAction.DROP),  # ok
-            FilterRule(
-                expression="size(items) > 0", action=FilterAction.DROP
-            ),  # Tier 2 error
+            FilterRule(expression="size(items) > 0", action=FilterAction.DROP),  # Tier 2 error
             FilterRule(
                 expression='field.matches("^p.*")', action=FilterAction.DROP
             ),  # Tier 3 error

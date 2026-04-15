@@ -134,7 +134,7 @@ def template_dir_filters() -> Path:
 
 
 @pytest.mark.parametrize(
-    "rule_name, filter_clause, expected_content, unexpected_content",
+    ("rule_name", "filter_clause", "expected_content", "unexpected_content"),
     [
         # 1. Basic cases
         ("single_line_rule", "field='test'", "(field='test')", "{customer_filters}"),

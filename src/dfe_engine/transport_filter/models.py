@@ -51,9 +51,7 @@ class FilterRule(BaseModel):
     ```
     """
 
-    expression: str = Field(
-        description="CEL expression to evaluate against each message payload"
-    )
+    expression: str = Field(description="CEL expression to evaluate against each message payload")
     action: FilterAction = Field(
         default=FilterAction.DROP,
         description="Action to take when the expression matches",

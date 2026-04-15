@@ -69,12 +69,10 @@ def test_python_classifier_matches_fixture(case: dict) -> None:
     if expected_tier == 1:
         assert result.op is not None, f"Tier 1 result missing op for {expr!r}"
         assert result.op.kind == case["op_kind"], (
-            f"op_kind mismatch for {expr!r}: "
-            f"expected={case['op_kind']} actual={result.op.kind}"
+            f"op_kind mismatch for {expr!r}: expected={case['op_kind']} actual={result.op.kind}"
         )
         assert result.op.field == case["op_field"], (
-            f"op_field mismatch for {expr!r}: "
-            f"expected={case['op_field']} actual={result.op.field}"
+            f"op_field mismatch for {expr!r}: expected={case['op_field']} actual={result.op.field}"
         )
         if "op_value" in case:
             assert result.op.value == case["op_value"], (
@@ -88,8 +86,7 @@ def test_python_classifier_matches_fixture(case: dict) -> None:
         expected_fields = sorted(case.get("fields", []))
         actual_fields = sorted(result.fields or [])
         assert actual_fields == expected_fields, (
-            f"fields mismatch for {expr!r}: "
-            f"expected={expected_fields} actual={actual_fields}"
+            f"fields mismatch for {expr!r}: expected={expected_fields} actual={actual_fields}"
         )
 
 
@@ -100,9 +97,7 @@ def test_fixture_is_in_sync_with_rustlib_copy() -> None:
         cp tests/fixtures/cel_classifier_parity.json \\
            /projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json
     """
-    rustlib_copy = Path(
-        "/projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json"
-    )
+    rustlib_copy = Path("/projects/hyperi-rustlib/tests/fixtures/cel_classifier_parity.json")
     if not rustlib_copy.exists():
         pytest.skip("rustlib checkout not available; skipping cross-repo sync check")
 

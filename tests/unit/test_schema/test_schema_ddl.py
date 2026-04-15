@@ -245,7 +245,7 @@ class TestExpressions:
     def test_no_default(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
         ddl = gen.generate_create_table("t", cols)
-        line = [ln for ln in ddl.split("\n") if "`x`" in ln][0]
+        line = next(ln for ln in ddl.split("\n") if "`x`" in ln)
         assert "DEFAULT" not in line
         assert "MATERIALIZED" not in line
         assert "ALIAS" not in line
@@ -278,7 +278,7 @@ class TestComments:
     def test_no_comment(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
         ddl = gen.generate_create_table("t", cols)
-        line = [ln for ln in ddl.split("\n") if "`x`" in ln][0]
+        line = next(ln for ln in ddl.split("\n") if "`x`" in ln)
         assert "COMMENT" not in line
 
 

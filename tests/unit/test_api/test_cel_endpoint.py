@@ -32,9 +32,7 @@ class TestCelCheckEndpoint:
         resp = client.post("/api/v1/cel/check", json={"expression": "has(_table)"})
         assert resp.status_code == 401
 
-    def test_tier1_has_field(
-        self, client: TestClient, admin_headers: dict[str, str]
-    ) -> None:
+    def test_tier1_has_field(self, client: TestClient, admin_headers: dict[str, str]) -> None:
         resp = client.post(
             "/api/v1/cel/check",
             json={"expression": "has(_table)"},
@@ -49,9 +47,7 @@ class TestCelCheckEndpoint:
         assert data["op_kind"] == "field_exists"
         assert data["op_field"] == "_table"
 
-    def test_tier1_field_equals(
-        self, client: TestClient, admin_headers: dict[str, str]
-    ) -> None:
+    def test_tier1_field_equals(self, client: TestClient, admin_headers: dict[str, str]) -> None:
         resp = client.post(
             "/api/v1/cel/check",
             json={"expression": 'status == "poison"'},
@@ -96,9 +92,7 @@ class TestCelCheckEndpoint:
         assert data["valid"] is True
         assert data["tier"] == "tier3"
         assert data["tier_label"] == "Tier 3 (complex CEL)"
-        assert (
-            data["opt_in_required"] == "expression.allow_complex_filters_in (or _out)"
-        )
+        assert data["opt_in_required"] == "expression.allow_complex_filters_in (or _out)"
 
     def test_invalid_syntax_returns_errors(
         self, client: TestClient, admin_headers: dict[str, str]
@@ -147,9 +141,9 @@ class TestCelCheckEndpoint:
         assert resp.status_code == 200
         data = resp.json()
         assert data["valid"] is False
-        assert any(
-            "exists" in e or "not allowed" in e.lower() for e in data["errors"]
-        ), f"Expected profile error, got: {data['errors']}"
+        assert any("exists" in e or "not allowed" in e.lower() for e in data["errors"]), (
+            f"Expected profile error, got: {data['errors']}"
+        )
 
 
 class TestCelCheckBatchEndpoint:
@@ -168,7 +162,7 @@ class TestCelCheckBatchEndpoint:
             json={
                 "expressions": [
                     "has(_table)",
-                    'severity > 3',
+                    "severity > 3",
                     'host.matches("^prod-.*$")',
                 ]
             },
@@ -181,9 +175,7 @@ class TestCelCheckBatchEndpoint:
         assert data["results"][1]["tier"] == "tier2"
         assert data["results"][2]["tier"] == "tier3"
 
-    def test_batch_preserves_order(
-        self, client: TestClient, admin_headers: dict[str, str]
-    ) -> None:
+    def test_batch_preserves_order(self, client: TestClient, admin_headers: dict[str, str]) -> None:
         expressions = [
             "has(_a)",
             "has(_b)",
@@ -208,7 +200,7 @@ class TestCelCheckBatchEndpoint:
                 "expressions": [
                     "has(_table)",  # Valid Tier 1
                     "field == ",  # Invalid syntax
-                    'severity > 3',  # Valid Tier 2
+                    "severity > 3",  # Valid Tier 2
                 ]
             },
             headers=admin_headers,
