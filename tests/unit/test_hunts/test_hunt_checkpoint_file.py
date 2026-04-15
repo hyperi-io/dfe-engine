@@ -38,7 +38,7 @@ def create_checkpoint_manager():
     return HuntCheckpointManager()
 
 
-@pytest.mark.parametrize("hunt_name, rule_name", [("test_hunt", "pc_posh_test_rule")])
+@pytest.mark.parametrize(("hunt_name", "rule_name"), [("test_hunt", "pc_posh_test_rule")])
 def test_create_update_checkpoint(
     hunt_name,
     rule_name,

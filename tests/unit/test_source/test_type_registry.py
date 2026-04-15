@@ -185,7 +185,7 @@ class TestResolveUseCase:
         assert r.ch_type == "Nullable(String)"
 
     def test_invalid_use_case_rejected(self, registry: TypeRegistry):
-        with pytest.raises(InvalidUseCaseError, match="fulltext.*not valid.*integer"):
+        with pytest.raises(InvalidUseCaseError, match=r"fulltext.*not valid.*integer"):
             registry.resolve("integer", use_case="fulltext")
 
 

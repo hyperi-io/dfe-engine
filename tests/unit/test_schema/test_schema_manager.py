@@ -267,7 +267,7 @@ class TestCloneVersion:
                 {"action": "update", "name": "message", "column": {"type": "string"}},
             ],
         )
-        msg_col = [c for c in result if c.name == "message"][0]
+        msg_col = next(c for c in result if c.name == "message")
         assert msg_col.type == "string"  # Changed from text
 
     def test_modification_remove_nonexistent_raises(self, versioned_schema):

@@ -206,7 +206,7 @@ class TestBuildInsertSelect:
             severity="low",
         )
         # Extract insert column count from the parenthesized list
-        insert_line = [line for line in sql.split("\n") if line.strip().startswith("(")][0]
+        insert_line = next(line for line in sql.split("\n") if line.strip().startswith("("))
         insert_count = insert_line.count(",") + 1
         # Extract select expression count (lines between SELECT and FROM)
         select_lines = []
