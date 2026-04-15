@@ -4,6 +4,7 @@ These tests require a running ClickHouse instance.
 Use `docker compose up -d` to start the test infrastructure.
 """
 
+import pyarrow as pa
 import pytest
 
 from dfe_engine.query import QueryClient
@@ -320,8 +321,8 @@ class TestQueryResultExportsIntegration:
         assert len(rows) == 5
         assert rows[0]["name"] == "Alice"
 
-    def test_to_json_roundtrip(self, clickhouse_available, test_table):
-        """Test JSON serialization roundtrip."""
+    def test_to_json_first_row_has_expected_columns(self, clickhouse_available, test_table):
+        """JSON rows include expected column keys."""
         import json
 
         client = QueryClient(direct=True)

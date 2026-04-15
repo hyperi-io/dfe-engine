@@ -213,9 +213,7 @@ def create_app(
         saved_health: list[tuple[APIRoute, object, object]] = []
         for route in app.routes:
             if isinstance(route, APIRoute) and route.path.startswith("/health/"):
-                saved_health.append(
-                    (route, route.response_model, route.response_field)
-                )
+                saved_health.append((route, route.response_model, route.response_field))
                 route.response_model = None
                 route.response_field = None
         try:

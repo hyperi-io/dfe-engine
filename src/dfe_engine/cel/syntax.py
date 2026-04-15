@@ -137,9 +137,7 @@ def check_syntax(
                 # Filter out profile violations — we want to classify Tier 3
                 # expressions, not reject them.
                 profile_errors = [
-                    e
-                    for e in pylib_errors
-                    if "not allowed in the DFE expression profile" in e
+                    e for e in pylib_errors if "not allowed in the DFE expression profile" in e
                 ]
                 syntax_errors = [e for e in pylib_errors if e not in profile_errors]
                 if syntax_errors:

@@ -53,7 +53,7 @@ class TestValidatorSourceModel:
         data = _base_hunt_data()
         del data["global_source_table_name"]
         # rules have no 'source' field either
-        with pytest.raises(ValueError, match="global_source_table_name.*source"):
+        with pytest.raises(ValueError, match=r"global_source_table_name.*source"):
             HuntValidator.validate_hunt_configuration(data, env, rule_dir, "timestamp_load")
 
     def test_source_validated_against_registry(self, rule_env):
