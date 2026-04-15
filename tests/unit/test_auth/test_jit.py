@@ -119,7 +119,7 @@ class TestResolveTeamApiKey:
         from dfe_engine.orgs.registry import OrgRegistry
 
         org_registry = OrgRegistry(tmp_path / "orgs")
-        org = org_registry.create("acme", org_ids=["acme"])
+        org_registry.create("acme", org_ids=["acme"])
         org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_ACME")
 
         jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)

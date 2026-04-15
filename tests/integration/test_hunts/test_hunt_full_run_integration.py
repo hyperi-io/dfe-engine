@@ -77,7 +77,15 @@ def setup_paths(tmp_path) -> dict:
 
 
 @pytest.mark.parametrize(
-    "rule_name, org_id, target_table_name, source_table_name, checkpoint_timestamp_field, filter_clause, expected_query",
+    (
+        "rule_name",
+        "org_id",
+        "target_table_name",
+        "source_table_name",
+        "checkpoint_timestamp_field",
+        "filter_clause",
+        "expected_query",
+    ),
     [
         (
             "win_account_a_common_activities",

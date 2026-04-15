@@ -108,7 +108,7 @@ class TestRegistrySingleton:
 class TestSeedDefaults:
     def test_seed_creates_files(self, registry, tmp_path):
         count = registry.seed_defaults()
-        assert count == 12  # 6 services × 2 profiles (default + production)
+        assert count == 12  # 6 services x 2 profiles (default + production)
         yaml_files = list(tmp_path.glob("*.yaml"))
         assert len(yaml_files) == 12
 

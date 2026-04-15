@@ -169,6 +169,6 @@ class TestBootstrap:
 
         applied = mgr.bootstrap()
 
-        # 3 RBAC statements + 2 per view (CREATE + GRANT) × 3 views = 9
+        # 3 RBAC statements + 2 per view (CREATE + GRANT) x 3 views = 9
         assert client.command.call_count >= 9
         assert len(applied) >= 3

@@ -83,7 +83,7 @@ def hunt_inputs(request, file_and_folder_paths, template_dir):
 
 
 @pytest.mark.parametrize(
-    "hunt_inputs, org_id, expected_in_query, expected_exception",
+    ("hunt_inputs", "org_id", "expected_in_query", "expected_exception"),
     [
         (
             {
@@ -138,7 +138,7 @@ def test_sql_query_building_without_table_settings(
 
 
 @pytest.mark.parametrize(
-    "hunt_instance, org_id, expected_target_sql_statement, expected_source_sql_statement",
+    ("hunt_instance", "org_id", "expected_target_sql_statement", "expected_source_sql_statement"),
     [
         (
             {
@@ -186,7 +186,7 @@ def test_sql_query_building_with_local_table_settings(
 
 
 @pytest.mark.parametrize(
-    "hunt_instance, org_id, expected_target_sql_statement, expected_source_sql_statement",
+    ("hunt_instance", "org_id", "expected_target_sql_statement", "expected_source_sql_statement"),
     [
         (
             {
@@ -228,7 +228,7 @@ def test_sql_query_building_with_global_table_settings(
 
 
 @pytest.mark.parametrize(
-    "hunt_instance, org_id, expected_target_sql_statement, expected_source_sql_statement",
+    ("hunt_instance", "org_id", "expected_target_sql_statement", "expected_source_sql_statement"),
     [
         (
             {

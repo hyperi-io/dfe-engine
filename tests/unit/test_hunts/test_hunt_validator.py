@@ -24,7 +24,7 @@ def setup_paths(tmp_path) -> dict:
 
 
 @pytest.mark.parametrize(
-    "hunt_config, expected_message",
+    ("hunt_config", "expected_message"),
     [
         (
             {

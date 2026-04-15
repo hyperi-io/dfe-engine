@@ -37,7 +37,7 @@ def ch_client():
 
 
 @pytest.mark.parametrize(
-    "log_prefix, ensure_kwargs, expected_result",
+    ("log_prefix", "ensure_kwargs", "expected_result"),
     [
         (
             "test-checkpoint-hunt-schema",
@@ -94,7 +94,7 @@ def test_ensure_table_exists(
                 pytest.fail("Failed to ensure table exists after maximum retries.")
 
 
-@pytest.mark.parametrize("hunt_name, rule_name", [("test_hunt", "pc_posh_test_rule")])
+@pytest.mark.parametrize(("hunt_name", "rule_name"), [("test_hunt", "pc_posh_test_rule")])
 def test_create_checkpoint(hunt_name, rule_name, ch_client, setup_paths, unique_names):
     database_name, table_name = unique_names
     manager = HuntCheckpointManager(database_name=database_name, table_name=table_name)
