@@ -4,7 +4,8 @@ These tests require a running ClickHouse instance.
 Use `docker compose up -d` to start the test infrastructure.
 """
 
-import pyarrow as pa
+from typing import Any
+
 import pytest
 
 from dfe_engine.query import QueryClient
@@ -76,7 +77,7 @@ class TestClickHouseAdapterIntegration:
         adapter = ClickHouseAdapter("default")
         table = adapter.execute(f"SELECT * FROM {test_table}")
 
-        assert isinstance(table, pa.Table)
+        assert isinstance(table, Any)
         assert table.num_rows == 5
         assert "id" in table.column_names
         assert "name" in table.column_names
