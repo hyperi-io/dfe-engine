@@ -23,38 +23,59 @@ def config_dir(tmp_path):
     return str(tmp_path)
 
 
+def _clear_registry_path_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Strip path overrides so tests/conftest .env cannot shadow DFE_CONFIG_DIR."""
+    for key in (
+        "DFE_SOURCES_DIR",
+        "DFE_DEPLOYMENT_CONFIG_DIR",
+        "DFE_SERVICES_CONFIG_YAML_DIR",
+        "DFE_HUNTS_DIR",
+        "DFE_HUNTS_RULE_REPO_DIR",
+        "DFE_QUERY_YAML_DIR",
+        "DFE_FIELDMAPS_DIR",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 class TestConfigDir:
     def test_config_dir_resolves_services_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.services.config_yaml_dir == os.path.join(config_dir, "services")
 
     def test_config_dir_resolves_sources_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.source.sources_dir == os.path.join(config_dir, "sources")
 
     def test_config_dir_resolves_deployment_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.deployment.config_dir == os.path.join(config_dir, "deployment")
 
     def test_config_dir_resolves_hunts_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.hunts.hunt_dir == os.path.join(config_dir, "hunts")
 
     def test_config_dir_resolves_hunt_rules_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.hunts.rule_repo_dir == os.path.join(config_dir, "hunt-rules")
 
     def test_config_dir_resolves_query_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.query.yaml_dir == os.path.join(config_dir, "queries")
 
     def test_config_dir_stored_on_settings(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.config_dir == config_dir
@@ -62,6 +83,7 @@ class TestConfigDir:
     def test_specific_var_overrides_config_dir(self, config_dir, monkeypatch, tmp_path):
         """Individual env vars take precedence over DFE_CONFIG_DIR subdirectories."""
         custom_sources = str(tmp_path / "custom-sources")
+        _clear_registry_path_env(monkeypatch)
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         monkeypatch.setenv("DFE_SOURCES_DIR", custom_sources)
         settings = load_settings()
@@ -73,6 +95,7 @@ class TestConfigDir:
     def test_no_config_dir_leaves_defaults(self, monkeypatch):
         """Without DFE_CONFIG_DIR, registry dirs use their defaults (empty string)."""
         monkeypatch.delenv("DFE_CONFIG_DIR", raising=False)
+        _clear_registry_path_env(monkeypatch)
         settings = load_settings()
         assert settings.config_dir == ""
         assert settings.source.sources_dir == ""

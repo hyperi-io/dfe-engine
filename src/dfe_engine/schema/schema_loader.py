@@ -84,18 +84,22 @@ def _resolve_profiles_dir() -> Path:
 def _resolve_schemas_root() -> Path | None:
     """Resolve the dfe-schemas root directory (submodule or env var).
 
+    ``DFE_SCHEMAS_DIR`` is only accepted when it looks like a full dfe-schemas
+    checkout (contains ``common-header/``). Partial trees such as
+    ``config/schemas`` must not shadow the ``schemas/`` submodule.
+
     Returns None if only bundled profiles are available.
     """
     env_dir = os.getenv("DFE_SCHEMAS_DIR")
     if env_dir:
         candidate = Path(env_dir)
-        if candidate.is_dir():
+        if candidate.is_dir() and (candidate / "common-header").is_dir():
             return candidate
 
     root = _find_project_root()
     if root:
         candidate = root / _SUBMODULE_ROOT
-        if candidate.is_dir():
+        if candidate.is_dir() and (candidate / "common-header").is_dir():
             return candidate
 
     return None
