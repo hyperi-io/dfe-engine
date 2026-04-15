@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from fastapi.routing import APIRoute
 from hyperi_pylib.health import HealthManager, create_health_router
 from hyperi_pylib.logger import logger
 
@@ -205,12 +206,29 @@ def create_app(
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
-        schema = get_openapi(
-            title=app.title,
-            version=app.version,
-            description=app.description,
-            routes=app.routes,
-        )
+        # hyperi_pylib health router uses `-> JSONResponse` with
+        # `from __future__ import annotations`, which breaks Pydantic OpenAPI
+        # generation (unresolved ForwardRef). Strip response models for
+        # /health/* only while building the schema (see openapi-spec/generate.py).
+        saved_health: list[tuple[APIRoute, object, object]] = []
+        for route in app.routes:
+            if isinstance(route, APIRoute) and route.path.startswith("/health/"):
+                saved_health.append(
+                    (route, route.response_model, route.response_field)
+                )
+                route.response_model = None
+                route.response_field = None
+        try:
+            schema = get_openapi(
+                title=app.title,
+                version=app.version,
+                description=app.description,
+                routes=app.routes,
+            )
+        finally:
+            for route, response_model, response_field in saved_health:
+                route.response_model = response_model
+                route.response_field = response_field
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {
                 "type": "http",
