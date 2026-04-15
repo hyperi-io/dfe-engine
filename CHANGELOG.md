@@ -1,3 +1,60 @@
+# [1.8.0](https://github.com/hyperi-io/dfe-engine/compare/v1.7.3...v1.8.0) (2026-04-15)
+
+
+### Bug Fixes
+
+* address review findings — typed responses, path naming, auth gap ([34366d1](https://github.com/hyperi-io/dfe-engine/commit/34366d1c809b5df6c0f0a5882f5639363dfe9d64))
+* allowlist example API key format in gitleaks config ([ff70edd](https://github.com/hyperi-io/dfe-engine/commit/ff70edd50fe4fa05ea712d5cf489a3c1f27568c9))
+* **cel:** use bare CurrentUser annotation, FastAPI rejects Depends() default ([bd439d3](https://github.com/hyperi-io/dfe-engine/commit/bd439d3bd0c84a24ff14363c0faf3dd15e2b607c))
+* migrate argo_rbac.py to use RoleConfig instead of DEFAULT_ROLE_PERMISSIONS ([2c5d1bc](https://github.com/hyperi-io/dfe-engine/commit/2c5d1bcfa5fe1588875e5197fc046d4c8d843aef))
+* remove deprecated LocalAuthSettings and update remaining references ([4135a4e](https://github.com/hyperi-io/dfe-engine/commit/4135a4ebf32641edf4213c8cd0171837ee016ee8))
+* remove pyarrow dependency — query module uses native JSON ([5ec23e3](https://github.com/hyperi-io/dfe-engine/commit/5ec23e383aae10d50728e4a70a1c9b7c65b34866))
+* resolve ruff lint warnings in test files ([f78dd0e](https://github.com/hyperi-io/dfe-engine/commit/f78dd0e9842eaed99889d5de66f6057f2e2c379e))
+* wire Google and Okta adapters into get_adapter() factory ([b049e41](https://github.com/hyperi-io/dfe-engine/commit/b049e41c7be2065f3ebb1d6efee7352b041e8dd3))
+
+
+### Features
+
+* add account, group, and API key CRUD REST endpoints ([c882c3c](https://github.com/hyperi-io/dfe-engine/commit/c882c3c8cb6e69ed82ae280f4cfb0d7d37bd264d))
+* add AccountStore with YAML-backed account CRUD and bcrypt passwords ([46db7af](https://github.com/hyperi-io/dfe-engine/commit/46db7afd64c15869c9214d975a520a86a0763a7c))
+* add APIKeyStore with SHA-256 hashed API keys and prefix format ([f133e57](https://github.com/hyperi-io/dfe-engine/commit/f133e573ce47c2ede16df0a576b586f8c06cedfb))
+* add CLI subcommands for account, group, and API key management ([013414c](https://github.com/hyperi-io/dfe-engine/commit/013414cddb783d437e570fa6274af3b76e6e9c1c))
+* add CLI subcommands for account, group, and API key management ([302d05c](https://github.com/hyperi-io/dfe-engine/commit/302d05c3b5676f7f92a3cf28d34e2c439230fc38))
+* add ConnectionRegistry with multi-tenant CH custom settings pattern ([3c8baf4](https://github.com/hyperi-io/dfe-engine/commit/3c8baf4d23082eb5627305467843975d68021897))
+* add dedicated_database and internal metadata to Org model ([cab11d8](https://github.com/hyperi-io/dfe-engine/commit/cab11d89f5ea219c3f7c785dd96fde6654ef37b1))
+* add delete_team and update_connection to HyperDXClient ([1951c69](https://github.com/hyperi-io/dfe-engine/commit/1951c69e151de69977c7e612054c682bea635012))
+* add Entra ID adapter for Graph API group resolution ([41fe5f6](https://github.com/hyperi-io/dfe-engine/commit/41fe5f6d375358468f937bacd1cacc46f5521e07))
+* add external, source_provider, last_login_at to Account model ([198e2ce](https://github.com/hyperi-io/dfe-engine/commit/198e2ce543dd7e8704b94430768048a376d24fc2))
+* add Google Workspace adapter for Admin SDK group resolution ([a77b04d](https://github.com/hyperi-io/dfe-engine/commit/a77b04dcd251126f87fef2fd9a205516ead85b99))
+* add GroupStore with YAML-backed group CRUD and role resolution ([6440c47](https://github.com/hyperi-io/dfe-engine/commit/6440c47379889bd8e3120a577dccf49b8aa0edea))
+* add HyperDX user-to-team membership via invite API ([1a525e2](https://github.com/hyperi-io/dfe-engine/commit/1a525e2e2e87ebcc76c6775015df50764658d94b))
+* add JitProvisioner for shadow account creation on first OIDC login ([a319603](https://github.com/hyperi-io/dfe-engine/commit/a3196034f6407b6917c19c52cd8d07ff48f3dae1))
+* add OIDC group sync runner ([7ee0cca](https://github.com/hyperi-io/dfe-engine/commit/7ee0ccae5b1d2f68fe07c814b6cbaa6169220779))
+* add OIDC header and API key auth paths to get_current_user() ([3fe8f66](https://github.com/hyperi-io/dfe-engine/commit/3fe8f6630ce309352243b8752c29b8cb762bb399))
+* add OIDC provider CRUD REST API and CLI subcommands ([9bfb7f4](https://github.com/hyperi-io/dfe-engine/commit/9bfb7f494d56741ecd05c9196d384981a73a575d))
+* add OIDCGroupAdapter ABC and GenericAdapter ([5506d81](https://github.com/hyperi-io/dfe-engine/commit/5506d8128d2567724d0998173f258dd4919d849d))
+* add OIDCProvider and GroupInfo models ([8ba6912](https://github.com/hyperi-io/dfe-engine/commit/8ba6912199254c991f17551601f7897296bfa8bf))
+* add OIDCProviderRegistry with YAML-backed CRUD ([3fe81e3](https://github.com/hyperi-io/dfe-engine/commit/3fe81e31bce8bf54ddf25bef28cc2839f26d1753))
+* add Okta adapter stub ([99f1788](https://github.com/hyperi-io/dfe-engine/commit/99f1788cff21121f63df22b2f7d9439a76b7f990))
+* add org_ids to Group model for org membership mapping ([bb2174f](https://github.com/hyperi-io/dfe-engine/commit/bb2174ffe8c9582316b82939adb81e96871d428b))
+* add OrgChProvisioner for dedicated database provisioning ([9f05a5e](https://github.com/hyperi-io/dfe-engine/commit/9f05a5e841542767cef52a8054ae9225496a427d))
+* add OrgLifecycleManager for org lifecycle orchestration ([dfb8762](https://github.com/hyperi-io/dfe-engine/commit/dfb876217aafdb20298368f60d69c58a4155ae7a))
+* add OrgRegistry, HyperDXClient, and coverage tests for Phase 3-4 ([c15b88d](https://github.com/hyperi-io/dfe-engine/commit/c15b88d069ede531c20b0f4212d930582e707655))
+* add Phase 3 operational routers (tasks, queries, hunts, pipeline) ([a0c3da7](https://github.com/hyperi-io/dfe-engine/commit/a0c3da7f759f60b9c36257d9243daea2a3e753ba))
+* add Phase 4 discovery + analytics routers (discovery, sigma, schemas) ([aa47790](https://github.com/hyperi-io/dfe-engine/commit/aa4779054ecf440a3ea948611490835ad9ce0b39))
+* add RoleConfig with YAML roles and wildcard permission matching ([07bae45](https://github.com/hyperi-io/dfe-engine/commit/07bae456a5f1d7e16ba1d98eb2c8c540841b1773))
+* add schema-less service surface discovery with metrics manifest ([a027697](https://github.com/hyperi-io/dfe-engine/commit/a0276972a77fa3312eef7c895dc29ce3de0910a1))
+* add SOC2 audit events for org provisioning and JIT accounts ([179c534](https://github.com/hyperi-io/dfe-engine/commit/179c534c217657df363564e4a98756a63e85b272))
+* add SOC2 audit logging via OTel structured log events ([c851d2e](https://github.com/hyperi-io/dfe-engine/commit/c851d2e84391099ddd917b7759e6b16f867b8832))
+* add source_provider field to Group model for OIDC sync tracking ([c1577b7](https://github.com/hyperi-io/dfe-engine/commit/c1577b7e0f7bef195f5339e54ed24235435c3710))
+* bootstrap auth stores, rewrite LocalAuthProvider, wire into app lifespan ([92ce0b8](https://github.com/hyperi-io/dfe-engine/commit/92ce0b834d5c49e0080aea6ec3856ca9f137e2e2))
+* **cel,transport_filter:** UI helpers for CEL validation and transport filter config ([a02942b](https://github.com/hyperi-io/dfe-engine/commit/a02942b496926ce0ee531277cd2ea78de9045e8e))
+* Phase 5 — regenerate OpenAPI spec (75 paths) + UI API guide ([33ae25e](https://github.com/hyperi-io/dfe-engine/commit/33ae25e916d5f78bc3b89e379457f08b3d937a75))
+* refactor authorize() to use RoleConfig, migrate auth tests to new role names ([97ba046](https://github.com/hyperi-io/dfe-engine/commit/97ba04672d1198f9d66972ebe15e4bfdf88ba7b6))
+* SOC2 audit remediation — wire audit_resource_change into all mutating endpoints ([3f2b7c8](https://github.com/hyperi-io/dfe-engine/commit/3f2b7c80cd6370d1f0ef76044049b3f26df02ee0))
+* wire JIT provisioning into OIDC auth path ([d526a8e](https://github.com/hyperi-io/dfe-engine/commit/d526a8eb82eb51af72def2c49179729fdf24f675))
+* wire OrgLifecycleManager into orgs API + app lifespan ([7455503](https://github.com/hyperi-io/dfe-engine/commit/7455503a6ab70cbe6cbc013bb07471473c7bc88b))
+
 ## [1.7.3](https://github.com/hyperi-io/dfe-engine/compare/v1.7.2...v1.7.3) (2026-03-30)
 
 
