@@ -45,6 +45,11 @@ _registries: dict[str, Any] = {}
 
 def bootstrap_registries(settings: DFESettings) -> None:
     """Initialize singleton registries on startup. Called from lifespan."""
+    if settings.schemas.schemas_dir:
+        from dfe_engine.schema.registry import SchemaRegistry
+
+        _registries["meta_schema"] = SchemaRegistry(schemas_directory=settings.schemas.schemas_dir)
+
     if settings.source.sources_dir:
         from dfe_engine.source.registry import SourceRegistry
 
@@ -86,6 +91,20 @@ def shutdown_registries() -> None:
         if hasattr(reg, "close"):
             reg.close()
     _registries.clear()
+
+
+def get_schema_registry():
+    """FastAPI dependency: resolve SchemaRegistry singleton (meta schemas)."""
+    reg = _registries.get("meta_schema")
+    if reg is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": "SchemaRegistry not initialized — set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
+            },
+        )
+    return reg
 
 
 def get_source_registry():
@@ -161,6 +180,7 @@ def get_deployment_config_registry():
     return reg
 
 
+SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
