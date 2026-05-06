@@ -15,6 +15,8 @@ routers guard against missing infrastructure cleanly.
 
 from __future__ import annotations
 
+from fastapi.testclient import TestClient
+
 
 class TestDiscoveryRouter:
     """GET /api/v1/discovery endpoints."""
@@ -102,3 +104,84 @@ class TestSchemasRouter:
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/schemas/test/columns")
         assert resp.status_code == 401
+
+
+class TestSchemasMetaListRouter:
+    """GET /api/v1/schemas — meta-schema registry listing."""
+
+    def test_list_meta_not_configured_returns_503(self, client, admin_headers):
+        resp = client.get("/api/v1/schemas", headers=admin_headers)
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "not_configured"
+
+    def test_list_meta_requires_auth(self, client):
+        resp = client.get("/api/v1/schemas")
+        assert resp.status_code == 401
+
+    def test_list_meta_returns_pagination_and_tree(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schemas_root = tmp_path / "schemas"
+        (schemas_root / "aws").mkdir(parents=True)
+        yaml_dump(
+            {
+                "current": "1",
+                "description": "Trail",
+                "versions": {
+                    "1": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "init",
+                        "columns": [
+                            {"name": "e", "type": "string", "expr": "@source: E"},
+                        ],
+                    }
+                },
+            },
+            schemas_root / "aws" / "cloudtrail.yaml",
+        )
+
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        services_dir = tmp_path / "services"
+        services_dir.mkdir()
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(services_dir)),
+            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                resp = tc.get("/api/v1/schemas?page=1&per_page=10", headers=headers)
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body["total"] == 1
+            assert len(body["items"]) == 1
+            assert body["items"][0]["name"] == "aws/cloudtrail"
+            assert body["schema_objects"]["children"]["aws"]["schemas"]
+        finally:
+            _registries.clear()
