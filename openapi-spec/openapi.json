@@ -3,7 +3,7 @@
   "info": {
     "title": "DFE Engine API",
     "description": "Data Fusion Engine \u2014 configuration, scheduling, and query API",
-    "version": "1.7.3"
+    "version": "1.8.0"
   },
   "paths": {
     "/api/v1/auth/login": {
@@ -4630,6 +4630,120 @@
         ]
       }
     },
+    "/api/v1/schemas": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "List Schemas",
+        "description": "List all meta schemas with optional filtering.",
+        "operationId": "list_schemas_api_v1_schemas_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in path/description",
+              "title": "Search"
+            },
+            "description": "Search in path/description"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (path, description)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (path, description)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Page number (1-based)",
+              "default": 1,
+              "title": "Page"
+            },
+            "description": "Page number (1-based)"
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "description": "Items per page",
+              "default": 25,
+              "title": "Per Page"
+            },
+            "description": "Items per page"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedSchemaSummaryResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/{source_name}/columns": {
       "get": {
         "tags": [
@@ -7224,6 +7338,78 @@
         ],
         "title": "PaginatedResponse[SourceSummary]"
       },
+      "PaginatedSchemaSummaryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummaryObject"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "schema_objects": {
+            "$ref": "#/components/schemas/SchemaSummary",
+            "description": "All matching schemas as a path tree (not limited to current page)"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "schema_objects",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedSchemaSummaryResponse",
+        "description": "Schema list: full ``schema_objects`` tree plus paginated ``items``."
+      },
       "PermissionsResponse": {
         "properties": {
           "roles": {
@@ -7974,6 +8160,77 @@
         ],
         "title": "SchemaColumn",
         "description": "A column in a schema definition."
+      },
+      "SchemaSummary": {
+        "properties": {
+          "schemas": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummaryObject"
+            },
+            "type": "array",
+            "title": "Schemas",
+            "description": "Schema entries defined at this path level"
+          },
+          "children": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SchemaSummary"
+            },
+            "type": "object",
+            "title": "Children",
+            "description": "Further nesting keyed by path segment"
+          }
+        },
+        "type": "object",
+        "title": "SchemaSummary",
+        "description": "Tree node grouping schemas by path prefix (directory layout).\n\nWire input may use path segments as sibling keys alongside ``schemas``; those\nmap into ``children`` during validation. Serialized JSON uses explicit\n``schemas`` and ``children`` at every node.\n\nExample (wire input shape)::\n\n    {\n        \"children\": {\n            \"azure\": {\n                \"activity_log\": {\"schemas\": [SchemaSummaryObject, ...]},\n                \"schemas\": [],\n            }\n        },\n        \"schemas\": [...],\n    }"
+      },
+      "SchemaSummaryObject": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the schema"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human description"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version of the schema"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "List of versions"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "description": "Last updated timestamp"
+          },
+          "column_count": {
+            "type": "integer",
+            "title": "Column Count",
+            "description": "Number of columns in the schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "description",
+          "current",
+          "versions",
+          "updated_at",
+          "column_count"
+        ],
+        "title": "SchemaSummaryObject",
+        "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    description: Human description.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
       "ServiceConfigDetail": {
         "properties": {
