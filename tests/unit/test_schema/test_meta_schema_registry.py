@@ -54,7 +54,7 @@ class TestSchemaRegistryCRUD:
 
     def test_save_and_get_nested_path(self, registry):
         ms = _minimal_meta("aws/cloudtrail")
-        registry.save_map(ms)
+        registry.save_schema(ms)
         loaded = registry.get_schema("aws/cloudtrail")
         assert loaded.current == "1"
         assert loaded.description == "test schema"
@@ -62,7 +62,7 @@ class TestSchemaRegistryCRUD:
 
     def test_save_flat_table_key(self, registry):
         ms = _minimal_meta("standalone")
-        registry.save_map(ms)
+        registry.save_schema(ms)
         loaded = registry.get_schema("standalone")
         assert loaded.current == "1"
 
@@ -82,11 +82,11 @@ class TestSchemaRegistryCRUD:
             },
         )
         with pytest.raises(SchemaValidationError, match="path"):
-            registry.save_map(ms)
+            registry.save_schema(ms)
 
     def test_save_dict_without_path_raises(self, registry):
         with pytest.raises(SchemaValidationError):
-            registry.save_map(
+            registry.save_schema(
                 {
                     "current": "1",
                     "versions": {
@@ -101,7 +101,7 @@ class TestSchemaRegistryCRUD:
             )
 
     def test_list_schemas_metadata(self, registry):
-        registry.save_map(_minimal_meta("aws/cloudtrail"))
+        registry.save_schema(_minimal_meta("aws/cloudtrail"))
         rows = registry.list_schemas()
         assert len(rows) == 1
         row = rows[0]
@@ -112,10 +112,39 @@ class TestSchemaRegistryCRUD:
         assert row["description"] == "test schema"
 
     def test_delete_schema(self, registry):
-        registry.save_map(_minimal_meta("tmp/log"))
+        registry.save_schema(_minimal_meta("tmp/log"))
         registry.delete_schema("tmp/log")
         with pytest.raises(SchemaNotFoundError):
             registry.get_schema("tmp/log")
+
+
+class TestSchemaRegistryPathSafety:
+    def test_yaml_path_rejects_dotdot_segment(self, registry):
+        with pytest.raises(SchemaValidationError, match="segment"):
+            registry._yaml_path("aws/../escape")
+
+    def test_yaml_path_rejects_dot_segment(self, registry):
+        with pytest.raises(SchemaValidationError, match="segment"):
+            registry._yaml_path("aws/./cloudtrail")
+
+    def test_yaml_path_rejects_empty_after_normalization(self, registry):
+        with pytest.raises(SchemaValidationError, match="empty"):
+            registry._yaml_path("///")
+
+    def test_yaml_path_accepts_backslash_as_separator(self, registry):
+        p = registry._yaml_path("aws\\cloudtrail")
+        assert p.name == "cloudtrail.yaml"
+        assert p.parent.name == "aws"
+
+    def test_save_two_schemas_same_basename_different_prefix(self, registry):
+        registry.save_schema(_minimal_meta("acme/cloudtrail"))
+        registry.save_schema(_minimal_meta("contoso/cloudtrail"))
+        assert registry.get_schema("acme/cloudtrail").description == "test schema"
+        assert registry.get_schema("contoso/cloudtrail").description == "test schema"
+
+    def test_save_schema_rejects_traversal(self, registry):
+        with pytest.raises(SchemaValidationError, match="segment"):
+            registry.save_schema(_minimal_meta("../../../etc/passwd"))
 
 
 class TestSchemaRegistrySingleton:

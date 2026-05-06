@@ -115,13 +115,29 @@ class SchemaRegistry:
         return f"{path}"
 
     def _yaml_path(self, table: str) -> Path:
-        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` → ``.../aws/cloudtrail.yaml``)."""
-        parts = [p for p in table.split("/") if p]
+        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` → ``.../aws/cloudtrail.yaml``).
+
+        Slashes (and backslashes, normalized to slashes) separate nested directories so keys like
+        ``acme/cloudtrail`` and ``contoso/cloudtrail`` map to different files.
+        """
+        parts = [p for p in table.replace("\\", "/").split("/") if p]
         if not parts:
             raise SchemaValidationError("Invalid empty schema path")
+        for seg in parts:
+            if seg in (".", ".."):
+                raise SchemaValidationError(f"Invalid schema path segment: {seg!r}")
+            if "\x00" in seg:
+                raise SchemaValidationError("Invalid schema path: null byte in segment")
         if len(parts) == 1:
-            return self._directory / f"{parts[0]}.yaml"
-        return self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+            candidate = self._directory / f"{parts[0]}.yaml"
+        else:
+            candidate = self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+
+        base = self._directory.resolve(strict=False)
+        resolved = candidate.resolve(strict=False)
+        if not resolved.is_relative_to(base):
+            raise SchemaValidationError("Schema path escapes schemas directory")
+        return candidate
 
     # -----------------------------------------------------------------
     # CRUD
