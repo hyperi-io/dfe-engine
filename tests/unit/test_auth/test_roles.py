@@ -425,11 +425,15 @@ class TestLoadBuiltin:
         config = RoleConfig.load_builtin()
         assert config.has_permission("data_analyst", "hunt:read") is True
         assert config.has_permission("data_analyst", "hunt:write") is True
+        assert config.has_permission("data_analyst", "schema:write") is True
+        assert config.has_permission("data_analyst", "schema:delete") is False
 
     def test_builtin_data_analyst_viewer_read_only(self):
         config = RoleConfig.load_builtin()
         assert config.has_permission("data_analyst_viewer", "hunt:read") is True
         assert config.has_permission("data_analyst_viewer", "hunt:write") is False
+        assert config.has_permission("data_analyst_viewer", "schema:write") is False
+        assert config.has_permission("data_analyst_viewer", "schema:delete") is False
 
     def test_builtin_data_viewer_limited(self):
         config = RoleConfig.load_builtin()

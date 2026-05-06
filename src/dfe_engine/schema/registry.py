@@ -64,7 +64,9 @@ class SchemaRegistry:
         git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
-        self._directory = Path(schemas_directory)
+        # Resolve so YAML paths and git.relative_to(repo_root) agree (relative
+        # DFE_SCHEMAS_DIR breaks delete_schema when pylib's repo root is absolute).
+        self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
 
         self._store = DirectoryConfigStore(
@@ -115,13 +117,29 @@ class SchemaRegistry:
         return f"{path}"
 
     def _yaml_path(self, table: str) -> Path:
-        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` → ``.../aws/cloudtrail.yaml``)."""
-        parts = [p for p in table.split("/") if p]
+        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` → ``.../aws/cloudtrail.yaml``).
+
+        Slashes (and backslashes, normalized to slashes) separate nested directories so keys like
+        ``acme/cloudtrail`` and ``contoso/cloudtrail`` map to different files.
+        """
+        parts = [p for p in table.replace("\\", "/").split("/") if p]
         if not parts:
             raise SchemaValidationError("Invalid empty schema path")
+        for seg in parts:
+            if seg in (".", ".."):
+                raise SchemaValidationError(f"Invalid schema path segment: {seg!r}")
+            if "\x00" in seg:
+                raise SchemaValidationError("Invalid schema path: null byte in segment")
         if len(parts) == 1:
-            return self._directory / f"{parts[0]}.yaml"
-        return self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+            candidate = self._directory / f"{parts[0]}.yaml"
+        else:
+            candidate = self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+
+        base = self._directory.resolve(strict=False)
+        resolved = candidate.resolve(strict=False)
+        if not resolved.is_relative_to(base):
+            raise SchemaValidationError("Schema path escapes schemas directory")
+        return candidate
 
     # -----------------------------------------------------------------
     # CRUD
@@ -215,10 +233,11 @@ class SchemaRegistry:
             try:
                 from dulwich import porcelain as git
 
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-                yaml_path.unlink()
+                repo_root = Path(self._store._repo.path).resolve(strict=False)
+                yaml_abs = yaml_path.resolve(strict=False)
+                rel_path = str(yaml_abs.relative_to(repo_root))
                 git.rm(self._store._repo, paths=[rel_path])
+                yaml_abs.unlink()
                 git.commit(
                     self._store._repo,
                     message=f"schema: delete {table}".encode(),
@@ -269,10 +288,7 @@ class SchemaRegistry:
                 updated_at = ""
 
             versions_map = schema.versions or {}
-            top_cols = getattr(schema, "columns", None)
-            if top_cols is not None:
-                n_columns = len(top_cols)
-            elif schema.current and (cur_ver := versions_map.get(schema.current)):
+            if schema.current and (cur_ver := versions_map.get(schema.current)):
                 n_columns = len(cur_ver.columns)
             elif versions_map:
                 n_columns = len(next(iter(versions_map.values())).columns)

@@ -14,13 +14,14 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
 from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.schema.models import (
+    MetaSchema,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
 )
@@ -99,6 +100,118 @@ async def list_schemas(
     return PaginatedSchemaSummaryResponse.from_summaries(
         summaries, pagination.page, pagination.per_page
     )
+
+
+@router.get(
+    "/definitions/{schema_path:path}",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:read"))],
+)
+async def get_meta_schema(
+    schema_path: str,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> MetaSchema:
+    """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
+    from dfe_engine.schema.registry import SchemaNotFoundError
+
+    try:
+        meta = registry.get_schema(schema_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+    return meta.model_copy(update={"path": schema_path})
+
+
+@router.post(
+    "/definitions/{schema_path:path}",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:write"))],
+)
+async def upsert_meta_schema(
+    schema_path: str,
+    user: CurrentUser,
+    registry: SchemaReg,
+    body: MetaSchema,
+    description: str | None = Query(
+        None,
+        description="Optional git commit / change summary when the store is git-backed",
+    ),
+) -> MetaSchema:
+    """Create or replace a meta-schema definition at the given registry path."""
+    from dfe_engine.schema.registry import SchemaNotFoundError, SchemaValidationError
+
+    if body.path is not None and body.path != schema_path:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "path_mismatch",
+                "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
+            },
+        )
+    to_save = body.model_copy(update={"path": schema_path})
+    existed = True
+    try:
+        registry.get_schema(schema_path)
+    except SchemaNotFoundError:
+        existed = False
+
+    try:
+        saved = registry.save_schema(
+            to_save,
+            created_by=user.user_id,
+            description=description,
+        )
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    audit_resource_change(
+        user.user_id,
+        "meta_schema",
+        schema_path,
+        "updated" if existed else "created",
+    )
+    return saved.model_copy(update={"path": schema_path})
+
+
+@router.delete(
+    "/definitions/{schema_path:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_action("schema:delete"))],
+)
+async def delete_meta_schema(
+    schema_path: str,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> None:
+    """Delete a meta-schema definition by registry path."""
+    from dfe_engine.schema.registry import SchemaNotFoundError, SchemaValidationError
+
+    try:
+        registry.get_schema(schema_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+    try:
+        registry.delete_schema(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
 
 
 @router.get("/{source_name}/columns", response_model=list[SchemaColumn])
