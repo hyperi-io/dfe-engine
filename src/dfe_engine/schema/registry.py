@@ -236,8 +236,8 @@ class SchemaRegistry:
                 repo_root = Path(self._store._repo.path).resolve(strict=False)
                 yaml_abs = yaml_path.resolve(strict=False)
                 rel_path = str(yaml_abs.relative_to(repo_root))
-                yaml_abs.unlink()
                 git.rm(self._store._repo, paths=[rel_path])
+                yaml_abs.unlink()
                 git.commit(
                     self._store._repo,
                     message=f"schema: delete {table}".encode(),

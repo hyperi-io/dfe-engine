@@ -148,7 +148,7 @@ async def upsert_meta_schema(
 
     if body.path is not None and body.path != schema_path:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "code": "path_mismatch",
                 "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
@@ -169,7 +169,7 @@ async def upsert_meta_schema(
         )
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(
@@ -208,7 +208,7 @@ async def delete_meta_schema(
         registry.delete_schema(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")

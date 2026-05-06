@@ -356,7 +356,7 @@ class TestSchemasMetaWriteRouter:
                     json={**self._minimal_schema_body(), "path": "other/path"},
                     headers=headers,
                 )
-                assert bad.status_code == 400
+                assert bad.status_code == 422
                 assert bad.json()["code"] == "path_mismatch"
 
                 deleted = tc.delete(url, headers=headers)
