@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import pydantic
 import pytest
 
 from dfe_engine.schema.models import (
@@ -53,6 +54,26 @@ class TestMetaSchema:
 
 
 class TestSchemaSummaryTree:
+    def test_coerce_path_segments_none_is_empty_tree(self):
+        summary = SchemaSummary.model_validate(None)
+        assert summary.schemas == []
+        assert summary.children == {}
+
+    def test_coerce_path_segments_non_dict_passthrough_raises(self):
+        with pytest.raises(pydantic.ValidationError):
+            SchemaSummary.model_validate([])
+
+    def test_coerce_path_segments_when_children_not_a_dict(self):
+        """When ``children`` is present but not a mapping, treat path segments as children."""
+        summary = SchemaSummary.model_validate(
+            {
+                "schemas": [],
+                "children": [],
+            }
+        )
+        assert summary.schemas == []
+        assert summary.children == {}
+
     def test_coerce_path_segments_as_wire_shape(self):
         data = {
             "schemas": [],
@@ -115,6 +136,21 @@ class TestSchemaSummaryTree:
         leaf = tree.children["aws"].children["sub"]
         assert leaf.schemas
         assert leaf.schemas[0].name == "aws/sub/logs"
+
+    def test_objects_from_list_skips_empty_relative_name(self):
+        objs = [
+            SchemaSummaryObject(
+                name="///",
+                description="",
+                current="1",
+                versions=["1"],
+                updated_at="",
+                column_count=0,
+            )
+        ]
+        tree = SchemaSummary.objects_from_list(objs)
+        assert tree.schemas == []
+        assert tree.children == {}
 
 
 class TestPaginatedSchemaSummaryResponse:

@@ -94,6 +94,7 @@ class TestDataAnalystRole:
             "alert:read",
             "alert:write",
             "schema:read",
+            "schema:write",
             "transforms:execute",
         ],
     )
@@ -110,6 +111,7 @@ class TestDataAnalystRole:
             "helm:create_topics",
             "argo:applications:delete",
             "deployment:write",
+            "schema:delete",
         ],
     )
     def test_data_analyst_denied_actions(self, action: str):

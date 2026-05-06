@@ -128,7 +128,7 @@ class SchemaSummary(BaseModel):
             return {"schemas": schemas, "children": children}
         return {
             "schemas": schemas,
-            "children": {k: v for k, v in data.items() if k != "schemas"},
+            "children": {k: v for k, v in data.items() if k not in {"schemas", "children"}},
         }
 
     @classmethod
