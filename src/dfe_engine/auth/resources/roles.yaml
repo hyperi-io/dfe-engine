@@ -12,6 +12,7 @@ roles:
       - "fieldmap:*"
       - "alert:*"
       - "schema:read"
+      - "schema:write"
       - "transforms:*"
   data_analyst_viewer:
     description: "Same scope as data_analyst, read-only"

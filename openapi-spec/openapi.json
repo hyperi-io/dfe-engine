@@ -4769,10 +4769,123 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MetaSchema"
+                  "$ref": "#/components/schemas/MetaSchema-Output"
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Upsert Meta Schema",
+        "description": "Create or replace a meta-schema definition at the given registry path.",
+        "operationId": "upsert_meta_schema_api_v1_schemas_definitions__schema_path__post",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          },
+          {
+            "name": "description",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Optional git commit / change summary when the store is git-backed",
+              "title": "Description"
+            },
+            "description": "Optional git commit / change summary when the store is git-backed"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetaSchema-Input"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaSchema-Output"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Delete Meta Schema",
+        "description": "Delete a meta-schema definition by registry path.",
+        "operationId": "delete_meta_schema_api_v1_schemas_definitions__schema_path__delete",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -6938,7 +7051,7 @@
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
       },
-      "MetaSchema": {
+      "MetaSchema-Input": {
         "properties": {
           "current": {
             "type": "string",
@@ -6947,7 +7060,55 @@
           },
           "versions": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/SchemaVersion"
+              "$ref": "#/components/schemas/SchemaVersion-Input"
+            },
+            "type": "object",
+            "title": "Versions",
+            "description": "Dictionary of versions and their metadata"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Human description"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "DirectoryConfigStore table key / relative path (not stored in YAML files)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "current",
+          "versions"
+        ],
+        "title": "MetaSchema",
+        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    description: Human-readable description.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
+      },
+      "MetaSchema-Output": {
+        "properties": {
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version of the schema"
+          },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SchemaVersion-Output"
             },
             "type": "object",
             "title": "Versions",
@@ -8223,6 +8384,59 @@
         "title": "SchemaBuildResult",
         "description": "Result of building a schema from a source."
       },
+      "SchemaColumn-Input": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Name of the column"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Type of the column"
+          },
+          "attribute": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Attribute",
+            "description": "Attributes of the column"
+          },
+          "use_case": {
+            "type": "string",
+            "title": "Use Case",
+            "description": "Use case of the column",
+            "default": ""
+          },
+          "expr": {
+            "type": "string",
+            "title": "Expr",
+            "description": "Expression for the column"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment",
+            "description": "Comment for the column"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type",
+          "expr"
+        ],
+        "title": "SchemaColumn",
+        "description": "A column in the schema."
+      },
       "SchemaSummary": {
         "properties": {
           "schemas": {
@@ -8294,7 +8508,43 @@
         "title": "SchemaSummaryObject",
         "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    description: Human description.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
-      "SchemaVersion": {
+      "SchemaVersion-Input": {
+        "properties": {
+          "date": {
+            "type": "string",
+            "title": "Date",
+            "description": "Date of the version"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "description": "Type of the version"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Summary of the version"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaColumn-Input"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "List of columns in the version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date",
+          "type",
+          "summary",
+          "columns"
+        ],
+        "title": "SchemaVersion",
+        "description": "A version in the schema."
+      },
+      "SchemaVersion-Output": {
         "properties": {
           "date": {
             "type": "string",

@@ -64,7 +64,9 @@ class SchemaRegistry:
         git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
-        self._directory = Path(schemas_directory)
+        # Resolve so YAML paths and git.relative_to(repo_root) agree (relative
+        # DFE_SCHEMAS_DIR breaks delete_schema when pylib's repo root is absolute).
+        self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
 
         self._store = DirectoryConfigStore(
@@ -231,9 +233,10 @@ class SchemaRegistry:
             try:
                 from dulwich import porcelain as git
 
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-                yaml_path.unlink()
+                repo_root = Path(self._store._repo.path).resolve(strict=False)
+                yaml_abs = yaml_path.resolve(strict=False)
+                rel_path = str(yaml_abs.relative_to(repo_root))
+                yaml_abs.unlink()
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,

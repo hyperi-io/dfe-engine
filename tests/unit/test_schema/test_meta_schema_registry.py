@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from dulwich.repo import Repo
 
 from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
 from dfe_engine.schema.registry import (
@@ -116,6 +117,39 @@ class TestSchemaRegistryCRUD:
         registry.delete_schema("tmp/log")
         with pytest.raises(SchemaNotFoundError):
             registry.get_schema("tmp/log")
+
+    def test_relative_schemas_directory_is_resolved(self, tmp_path, monkeypatch):
+        """Regression: relative paths must be resolved so git delete can relativise."""
+        monkeypatch.chdir(tmp_path)
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
+        try:
+            assert reg._directory == schemas.resolve()
+            p = reg._yaml_path("a/b")
+            assert p.is_absolute()
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_delete_schema_git_repo_relative_schemas_dir(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        (tmp_path / "schemas").mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
+        try:
+            reg.save_schema(_minimal_meta("test/test"))
+            yaml_file = tmp_path / "schemas" / "test" / "test.yaml"
+            assert yaml_file.is_file()
+            reg.delete_schema("test/test")
+            assert not yaml_file.exists()
+            with pytest.raises(SchemaNotFoundError):
+                reg.get_schema("test/test")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
 
 
 class TestSchemaRegistryPathSafety:

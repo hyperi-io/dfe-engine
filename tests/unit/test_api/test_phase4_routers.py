@@ -276,3 +276,150 @@ class TestSchemasMetaListRouter:
         )
         assert resp.status_code == 503
         assert resp.json()["code"] == "not_configured"
+
+
+class TestSchemasMetaWriteRouter:
+    """POST/DELETE /api/v1/schemas/definitions/... — meta-schema registry writes."""
+
+    @staticmethod
+    def _minimal_schema_body(description: str = "new"):
+        return {
+            "current": "1",
+            "description": description,
+            "versions": {
+                "1": {
+                    "date": "2026-01-01",
+                    "type": "model",
+                    "summary": "init",
+                    "columns": [{"name": "e", "type": "string", "expr": "@source: E"}],
+                }
+            },
+        }
+
+    def test_upsert_delete_round_trip(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        services_dir = tmp_path / "services"
+        services_dir.mkdir()
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(services_dir)),
+            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        url = "/api/v1/schemas/definitions/gcp/audit_log"
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                post = tc.post(url, json=self._minimal_schema_body(), headers=headers)
+                assert post.status_code == 200
+                assert post.json()["path"] == "gcp/audit_log"
+                assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
+
+                second = tc.post(
+                    url,
+                    json=self._minimal_schema_body(description="updated"),
+                    headers=headers,
+                )
+                assert second.status_code == 200
+                got = tc.get(url, headers=headers)
+                assert got.status_code == 200
+                assert got.json()["description"] == "updated"
+
+                bad = tc.post(
+                    url,
+                    json={**self._minimal_schema_body(), "path": "other/path"},
+                    headers=headers,
+                )
+                assert bad.status_code == 400
+                assert bad.json()["code"] == "path_mismatch"
+
+                deleted = tc.delete(url, headers=headers)
+                assert deleted.status_code == 204
+                gone = tc.get(url, headers=headers)
+                assert gone.status_code == 404
+
+                missing_del = tc.delete(url, headers=headers)
+                assert missing_del.status_code == 404
+        finally:
+            _registries.clear()
+
+    def test_upsert_forbidden_for_readonly_role(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        for d in ("sources", "services", "auth"):
+            (tmp_path / d).mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={
+                "sub": "viewer",
+                "org_id": "test-org",
+                "roles": ["data_analyst_viewer"],
+            },
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                resp = tc.post(
+                    "/api/v1/schemas/definitions/x/y",
+                    json=self._minimal_schema_body(),
+                    headers=headers,
+                )
+                assert resp.status_code == 403
+        finally:
+            _registries.clear()
+
+    def test_write_endpoints_require_auth(self, client):
+        resp = client.post(
+            "/api/v1/schemas/definitions/a/b",
+            json=TestSchemasMetaWriteRouter._minimal_schema_body(),
+        )
+        assert resp.status_code == 401
