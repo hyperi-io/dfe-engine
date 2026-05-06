@@ -30,6 +30,7 @@ out/
 # Test/coverage
 test-results/
 coverage/
+coverage.xml
 
 # =============================================================================
 # Python (from ci/templates/gitignore/python.gitignore)
