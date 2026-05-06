@@ -17,8 +17,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
+from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.schema.models import (
+    PaginatedSchemaSummaryResponse,
+    SchemaSummaryObject,
+)
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
@@ -63,6 +68,37 @@ class SchemaBuildResult(BaseModel):
 
 
 # ── Endpoints ───────────────────────────────────────────────
+@router.get(
+    "",
+    response_model=PaginatedSchemaSummaryResponse,
+    dependencies=[Depends(require_action("schema:read"))],
+)
+async def list_schemas(
+    user: CurrentUser,
+    registry: SchemaReg,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in path/description"),
+    sort_by: str | None = Query(None, description="Sort field (path, description)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
+):
+    """List all meta schemas with optional filtering."""
+    raw = registry.list_schemas()
+    raw = apply_search(raw, search, ["path", "description"])
+    raw = apply_sort(raw, sort_by, sort_order)
+    summaries = [
+        SchemaSummaryObject(
+            name=schema["path"],
+            description=schema["description"],
+            current=schema["current"],
+            versions=schema["versions"],
+            updated_at=schema["updated_at"],
+            column_count=schema["column_count"],
+        )
+        for schema in raw
+    ]
+    return PaginatedSchemaSummaryResponse.from_summaries(
+        summaries, pagination.page, pagination.per_page
+    )
 
 
 @router.get("/{source_name}/columns", response_model=list[SchemaColumn])
