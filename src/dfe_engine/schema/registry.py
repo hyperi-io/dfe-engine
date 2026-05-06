@@ -288,10 +288,7 @@ class SchemaRegistry:
                 updated_at = ""
 
             versions_map = schema.versions or {}
-            top_cols = getattr(schema, "columns", None)
-            if top_cols is not None:
-                n_columns = len(top_cols)
-            elif schema.current and (cur_ver := versions_map.get(schema.current)):
+            if schema.current and (cur_ver := versions_map.get(schema.current)):
                 n_columns = len(cur_ver.columns)
             elif versions_map:
                 n_columns = len(next(iter(versions_map.values())).columns)

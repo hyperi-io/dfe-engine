@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from dulwich import porcelain as dulwich_porcelain
 from dulwich.repo import Repo
 
 from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
@@ -195,3 +198,205 @@ class TestSchemaRegistrySingleton:
         assert a is b
         a.close()
         SchemaRegistry.reset_instance()
+
+
+class TestSchemaRegistryCoverage:
+    """Extra branches for meta-schema registry behaviour."""
+
+    def test_yaml_path_rejects_null_byte(self, registry):
+        with pytest.raises(SchemaValidationError, match="null"):
+            registry._yaml_path("bad\0/name")
+
+    def test_yaml_path_rejects_escape_via_symlink(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (schemas / "evil").symlink_to(outside, target_is_directory=True)
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
+        try:
+            with pytest.raises(SchemaValidationError, match="escapes"):
+                reg._yaml_path("evil/nested")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_save_schema_git_commit_with_author_and_push(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(
+            schemas_directory=schemas,
+            writable=True,
+            refresh_interval=0,
+            git_push=True,
+        )
+        try:
+            ms = _minimal_meta("svc/widget")
+            reg.save_schema(ms, created_by="alice", description="audit")
+            assert reg.get_schema("svc/widget").current == "1"
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_save_schema_rejects_invalid_dict(self, registry):
+        with pytest.raises(SchemaValidationError, match="Invalid schema"):
+            registry.save_schema(
+                {
+                    "path": "bad/doc",
+                    "current": "1",
+                    "versions": "not-a-mapping",
+                }
+            )
+
+    def test_delete_schema_no_file_is_safe(self, registry):
+        registry.delete_schema("missing/file")
+
+    def test_delete_schema_git_rm_failure_still_finishes(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        (tmp_path / "schemas").mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
+        try:
+            reg.save_schema(_minimal_meta("x/y"))
+            monkeypatch.setattr(
+                dulwich_porcelain,
+                "rm",
+                lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rm boom")),
+            )
+            reg.delete_schema("x/y")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_delete_schema_runs_push_when_configured(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        (tmp_path / "schemas").mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(
+            schemas_directory="schemas",
+            writable=True,
+            refresh_interval=0,
+            git_push=True,
+        )
+        try:
+            reg.save_schema(_minimal_meta("del/push"))
+            reg.delete_schema("del/push")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_list_schemas_filters_exact_path(self, registry):
+        registry.save_schema(_minimal_meta("a/one"))
+        registry.save_schema(_minimal_meta("b/two"))
+        rows = registry.list_schemas(path="a/one")
+        assert len(rows) == 1
+        assert rows[0]["path"] == "a/one"
+
+    def test_list_schemas_skips_when_cache_miss(self, registry, schemas_dir):
+        """Unparseable YAML appears in glob but never loads into cache."""
+        bad = schemas_dir / "broken.yaml"
+        bad.write_text(": [this is not valid yaml ::\n", encoding="utf-8")
+        registry._store._refresh_all()
+        registry.save_schema(_minimal_meta("good/ok"))
+        rows = registry.list_schemas()
+        paths = {r["path"] for r in rows}
+        assert "good/ok" in paths
+        assert "broken" not in paths
+
+    def test_list_schemas_skips_invalid_meta_schema(self, registry, schemas_dir):
+        bad = schemas_dir / "invalid_meta.yaml"
+        bad.write_text("current: '1'\n", encoding="utf-8")
+        registry._store._refresh_all()
+        registry.save_schema(_minimal_meta("good/meta"))
+        rows = registry.list_schemas()
+        paths = {r["path"] for r in rows}
+        assert "invalid_meta" not in paths
+        assert "good/meta" in paths
+
+    def test_list_schemas_column_count_fallback_other_version(self, registry):
+        ms = MetaSchema(
+            path="orphan/v",
+            current="missing",
+            versions={
+                "1": SchemaVersion(
+                    date="2026-01-01",
+                    type="model",
+                    summary="init",
+                    columns=[
+                        SchemaColumn(name="a", type="string", expr="@a"),
+                        SchemaColumn(name="b", type="string", expr="@b"),
+                    ],
+                )
+            },
+            description="",
+        )
+        registry.save_schema(ms)
+        rows = registry.list_schemas()
+        row = next(r for r in rows if r["path"] == "orphan/v")
+        assert row["column_count"] == 2
+
+    def test_list_schemas_column_count_zero_empty_versions(self, registry):
+        ms = MetaSchema(
+            path="empty/vers",
+            current="1",
+            versions={},
+            description="",
+        )
+        registry.save_schema(ms)
+        rows = registry.list_schemas()
+        row = next(r for r in rows if r["path"] == "empty/vers")
+        assert row["column_count"] == 0
+
+    def test_list_schemas_updated_at_empty_on_stat_failure(self, registry, monkeypatch):
+        registry.save_schema(_minimal_meta("stat/break"))
+        orig_stat = Path.stat
+        n_seen = {"c": 0}
+
+        def busted_stat(self, *args, **kwargs):
+            if self.name == "break.yaml" and self.parent.name == "stat":
+                n_seen["c"] += 1
+                if n_seen["c"] >= 2:
+                    raise OSError("stat denied")
+            return orig_stat(self, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "stat", busted_stat)
+        rows = registry.list_schemas()
+        row = next(r for r in rows if r["path"] == "stat/break")
+        assert row["updated_at"] == ""
+
+    def test_is_git_and_current_branch_when_repo(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        git_schemas = tmp_path / "git_schemas"
+        git_schemas.mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory=git_schemas, writable=True, refresh_interval=0)
+        try:
+            assert reg.is_git is True
+            assert reg.current_branch in {"main", "master"}
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_on_change_registers_callback(self, registry):
+        def cb(table: str, data: dict) -> None:
+            del table, data
+
+        registry.on_change("some/table", cb)
+        assert registry._store._watchers["some/table"] == [cb]
+
+    def test_close_stops_background_refresh(self, registry):
+        registry.close()
+        assert registry._store._refresh_thread is None
+
+    def test_reset_instance_when_none_is_safe(self):
+        SchemaRegistry.reset_instance()
+        SchemaRegistry.reset_instance()
+        assert SchemaRegistry._instance is None
