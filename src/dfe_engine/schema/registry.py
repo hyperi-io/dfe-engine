@@ -147,7 +147,7 @@ class SchemaRegistry:
 
         return MetaSchema.model_validate(config_data)
 
-    def save_map(
+    def save_schema(
         self,
         meta_schema: MetaSchema | dict[str, Any],
         created_by: str | None = None,
