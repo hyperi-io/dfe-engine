@@ -13,10 +13,16 @@ name: CI
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      tag:
+        type: string
+        required: true
+        description: "Tag to publish (e.g. v1.7.0)"
 
 jobs:
   ci:
     uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
     with:
       publish-target: internal
+      tag: ${{ inputs.tag || '' }}
     secrets: inherit
