@@ -4905,6 +4905,67 @@
         ]
       }
     },
+    "/api/v1/schemas/elastic-converter": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Elastic Converter",
+        "description": "Extract meta-schema columns from an Elasticsearch index template JSON file.\n\nAccepts Beat-style exports with ``template.mappings.properties`` or API-style\n``mappings.properties``. Column layout follows curated YAML conventions\n(snake_case ``name``, ``@source:`` dotted ``expr``).\n\nUpload size is capped by ``api.elastic_converter_max_upload_bytes`` (reject with 413 and\n``upload_too_large`` when exceeded). Override with ``DFE_API_ELASTIC_CONVERTER_*``.",
+        "operationId": "elastic_converter_api_v1_schemas_elastic_converter_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_elastic_converter_api_v1_schemas_elastic_converter_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+                  },
+                  "type": "array",
+                  "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Upload or declared Content-Length exceeds api.elastic_converter_max_upload_bytes (HTTP 413, code upload_too_large). Tune via DFE_API_ELASTIC_CONVERTER_* env vars.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/{source_name}/columns": {
       "get": {
         "tags": [
@@ -5646,6 +5707,20 @@
           "name"
         ],
         "title": "AlertDestinationSummary"
+      },
+      "Body_elastic_converter_api_v1_schemas_elastic_converter_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_elastic_converter_api_v1_schemas_elastic_converter_post"
       },
       "BulkActionRequest": {
         "properties": {
@@ -6431,6 +6506,47 @@
           "value"
         ],
         "title": "EmittedRecord"
+      },
+      "ErrorResponse": {
+        "properties": {
+          "code": {
+            "type": "string",
+            "title": "Code",
+            "description": "Machine-readable error code"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "description": "Human-readable error summary"
+          },
+          "errors": {
+            "items": {
+              "$ref": "#/components/schemas/FieldError"
+            },
+            "type": "array",
+            "title": "Errors"
+          },
+          "context": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Context",
+            "description": "Structured details for specific errors (e.g. match_conflict)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorResponse",
+        "description": "Unified error response.\n\nAll API errors return this shape. The UI can always parse:\n- ``code`` for programmatic branching\n- ``message`` for a human-readable summary\n- ``errors`` for field-level validation details (422 only)\n- ``context`` for optional structured data on specific errors (e.g. conflicts)"
       },
       "FetcherAuth": {
         "properties": {
