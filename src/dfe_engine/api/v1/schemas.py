@@ -14,7 +14,7 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
@@ -24,6 +24,13 @@ from dfe_engine.schema.models import (
     MetaSchema,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
+)
+from dfe_engine.schema.models import (
+    SchemaColumn as MetaSchemaColumn,
+)
+from dfe_engine.services.schema.elastic_schema_service import (
+    ElasticSchemaConversionError,
+    ElasticSchemaService,
 )
 from dfe_engine.source.registry import SourceNotFoundError
 
@@ -212,6 +219,37 @@ async def delete_meta_schema(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
+
+
+@router.post(
+    "/elastic-converter",
+    response_model=list[MetaSchemaColumn],
+    dependencies=[Depends(require_action("schema:read"))],
+)
+async def elastic_converter(
+    user: CurrentUser,
+    file: UploadFile = File(...),
+) -> list[MetaSchemaColumn]:
+    """Extract meta-schema columns from an Elasticsearch index template JSON file.
+
+    Accepts Beat-style exports with ``template.mappings.properties`` or API-style
+    ``mappings.properties``. Column layout follows curated YAML conventions
+    (snake_case ``name``, ``@source:`` dotted ``expr``).
+    """
+    try:
+        raw = await file.read()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "upload_read_error", "message": str(exc)},
+        ) from exc
+    try:
+        return ElasticSchemaService.template_json_to_columns(raw)
+    except ElasticSchemaConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "elastic_convert_error", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/{source_name}/columns", response_model=list[SchemaColumn])
