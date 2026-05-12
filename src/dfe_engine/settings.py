@@ -64,6 +64,12 @@ Storage:
 - DFE_STORAGE_PATH -> storage.path (local path, S3 URI, or HTTP URL)
 - DFE_S3_BUCKET -> storage.s3_bucket
 - DFE_S3_REGION -> storage.s3_region
+
+API (Elasticsearch template elastic-converter upload limits):
+- DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
+- DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
+- DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
+  api.elastic_converter_content_length_slack_bytes
 """
 
 import os
@@ -410,6 +416,10 @@ class APISettings(BaseModel):
     - DFE_API_JWT_SECRET -> api.jwt_secret
     - DFE_API_CORS_ORIGINS -> api.cors_origins (comma-separated)
     - DFE_API_JWT_EXPIRE_MINUTES -> api.jwt_expire_minutes
+    - DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES -> api.elastic_converter_max_upload_bytes
+    - DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE -> api.elastic_converter_read_chunk_size
+    - DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES ->
+      api.elastic_converter_content_length_slack_bytes
     """
 
     host: str = Field(default="0.0.0.0", description="API server bind address")  # noqa: S104
@@ -428,6 +438,24 @@ class APISettings(BaseModel):
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+    elastic_converter_max_upload_bytes: int = Field(
+        default=5 * 1024 * 1024,
+        ge=1,
+        description="Max upload size (bytes) for POST /schemas/elastic-converter JSON template",
+    )
+    elastic_converter_read_chunk_size: int = Field(
+        default=64 * 1024,
+        ge=1024,
+        description="Chunk size when buffering elastic-converter multipart file reads",
+    )
+    elastic_converter_content_length_slack_bytes: int = Field(
+        default=256 * 1024,
+        ge=0,
+        description=(
+            "Multipart bodies exceed raw file size by boundary overhead; allow this many "
+            "extra bytes when comparing Content-Length to elastic_converter_max_upload_bytes"
+        ),
+    )
 
 
 class DFESettings(BaseModel):
@@ -678,6 +706,12 @@ def _get_env_overrides() -> dict:
         overrides["api"]["cors_origins"] = [o.strip() for o in val.split(",") if o.strip()]
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):
         overrides["api"]["jwt_expire_minutes"] = int(val)
+    if val := _get_env("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES"):
+        overrides["api"]["elastic_converter_max_upload_bytes"] = int(val)
+    if val := _get_env("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE"):
+        overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
+    if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
+        overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
 
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.

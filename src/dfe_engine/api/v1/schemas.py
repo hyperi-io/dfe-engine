@@ -14,10 +14,11 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
+from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.schema.models import (
@@ -25,9 +26,65 @@ from dfe_engine.schema.models import (
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
 )
+from dfe_engine.schema.models import (
+    SchemaColumn as MetaSchemaColumn,
+)
+from dfe_engine.services.schema.elastic_schema_service import (
+    ElasticSchemaConversionError,
+    ElasticSchemaService,
+)
+from dfe_engine.settings import get_settings
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
+
+
+def _reject_body_over_limit_via_content_length(
+    request: Request,
+    max_payload_bytes: int,
+    slack_bytes: int,
+) -> None:
+    raw = request.headers.get("content-length")
+    if raw is None:
+        return
+    try:
+        content_length = int(raw)
+    except ValueError:
+        return
+    if content_length > max_payload_bytes + slack_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+            detail={
+                "code": "upload_too_large",
+                "message": (
+                    f"Request body exceeds maximum upload size "
+                    f"({max_payload_bytes} bytes) for this endpoint"
+                ),
+            },
+        )
+
+
+async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_size: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    chunk_cap = min(read_chunk_size, max_bytes + 1)
+    while True:
+        chunk = await upload.read(chunk_cap)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail={
+                    "code": "upload_too_large",
+                    "message": (
+                        f"Upload exceeds maximum size ({max_bytes} bytes) for this endpoint"
+                    ),
+                },
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 # ── Response models ─────────────────────────────────────────
@@ -212,6 +269,57 @@ async def delete_meta_schema(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
+
+
+@router.post(
+    "/elastic-converter",
+    response_model=list[MetaSchemaColumn],
+    responses={
+        413: {
+            "model": ErrorResponse,
+            "description": (
+                "Upload or declared Content-Length exceeds api.elastic_converter_max_upload_bytes "
+                "(HTTP 413, code upload_too_large). Tune via DFE_API_ELASTIC_CONVERTER_* env vars."
+            ),
+        },
+    },
+    dependencies=[Depends(require_action("schema:read"))],
+)
+async def elastic_converter(
+    request: Request,
+    user: CurrentUser,
+    file: UploadFile = File(...),
+) -> list[MetaSchemaColumn]:
+    """Extract meta-schema columns from an Elasticsearch index template JSON file.
+
+    Accepts Beat-style exports with ``template.mappings.properties`` or API-style
+    ``mappings.properties``. Column layout follows curated YAML conventions
+    (snake_case ``name``, ``@source:`` dotted ``expr``).
+
+    Upload size is capped by ``api.elastic_converter_max_upload_bytes`` (reject with 413 and
+    ``upload_too_large`` when exceeded). Override with ``DFE_API_ELASTIC_CONVERTER_*``.
+    """
+    api_s = get_settings().api
+    max_bytes = api_s.elastic_converter_max_upload_bytes
+    slack = api_s.elastic_converter_content_length_slack_bytes
+    chunk_sz = api_s.elastic_converter_read_chunk_size
+    _reject_body_over_limit_via_content_length(request, max_bytes, slack)
+    try:
+        raw = await _read_upload_capped(file, max_bytes=max_bytes, read_chunk_size=chunk_sz)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "upload_read_error", "message": str(exc)},
+        ) from exc
+    try:
+        return ElasticSchemaService.template_json_to_columns(raw)
+    except ElasticSchemaConversionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "elastic_convert_error", "message": str(exc)},
+        ) from exc
 
 
 @router.get("/{source_name}/columns", response_model=list[SchemaColumn])

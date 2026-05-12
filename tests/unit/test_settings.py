@@ -172,6 +172,21 @@ class TestEnvOverrides:
         settings = load_settings()
         assert "http://a.com" in settings.api.cors_origins
 
+    def test_api_elastic_converter_max_upload_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_MAX_UPLOAD_BYTES", "1048576")
+        settings = load_settings()
+        assert settings.api.elastic_converter_max_upload_bytes == 1_048_576
+
+    def test_api_elastic_converter_read_chunk_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_READ_CHUNK_SIZE", "32768")
+        settings = load_settings()
+        assert settings.api.elastic_converter_read_chunk_size == 32_768
+
+    def test_api_elastic_converter_content_length_slack_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES", "65536")
+        settings = load_settings()
+        assert settings.api.elastic_converter_content_length_slack_bytes == 65_536
+
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
         settings = load_settings()
