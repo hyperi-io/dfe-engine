@@ -4905,6 +4905,57 @@
         ]
       }
     },
+    "/api/v1/schemas/elastic-converter": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Elastic Converter",
+        "description": "Extract meta-schema columns from an Elasticsearch index template JSON file.\n\nAccepts Beat-style exports with ``template.mappings.properties`` or API-style\n``mappings.properties``. Column layout follows curated YAML conventions\n(snake_case ``name``, ``@source:`` dotted ``expr``).",
+        "operationId": "elastic_converter_api_v1_schemas_elastic_converter_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_elastic_converter_api_v1_schemas_elastic_converter_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+                  },
+                  "type": "array",
+                  "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/{source_name}/columns": {
       "get": {
         "tags": [
@@ -5646,6 +5697,20 @@
           "name"
         ],
         "title": "AlertDestinationSummary"
+      },
+      "Body_elastic_converter_api_v1_schemas_elastic_converter_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "contentMediaType": "application/octet-stream",
+            "title": "File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file"
+        ],
+        "title": "Body_elastic_converter_api_v1_schemas_elastic_converter_post"
       },
       "BulkActionRequest": {
         "properties": {
