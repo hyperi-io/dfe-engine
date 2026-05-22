@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dfe_engine.api.pagination import PaginatedResponse
 
@@ -23,10 +23,38 @@ class SchemaColumn(BaseModel):
 
     name: str = Field(..., description="Name of the column")
     type: str = Field(..., description="Type of the column")
-    attribute: list[str] = Field(default_factory=list, description="Attributes of the column")
-    use_case: str = Field(default="", description="Use case of the column")
-    expr: str = Field(..., description="Expression for the column")
+    attribute: list[str] | None = Field(default=None, description="Attributes of the column")
+    use_case: str | None = Field(default=None, description="Use case of the column")
+    expr: str | None = Field(default=None, description="Expression for the column")
     comment: str | None = Field(default=None, description="Comment for the column")
+
+    @field_validator("attribute", mode="before")
+    @classmethod
+    def _coerce_attribute(cls, value: Any) -> list[str] | None:
+        if value is None or value == []:
+            return None
+        if isinstance(value, str):
+            return [value] if value else None
+        return list(value)
+
+    @field_validator("use_case", "expr", "comment", mode="before")
+    @classmethod
+    def _empty_str_to_none(cls, value: Any) -> Any:
+        if value == "":
+            return None
+        return value
+
+    def to_yaml_dict(self) -> dict[str, Any]:
+        """Serialize for YAML persistence (omits None and empty strings)."""
+        raw = self.model_dump(mode="python", exclude_none=True)
+        out: dict[str, Any] = {}
+        for key, value in raw.items():
+            if value == "":
+                continue
+            if key == "attribute" and value == []:
+                continue
+            out[key] = value
+        return out
 
 
 class SchemaVersion(BaseModel):
@@ -36,6 +64,15 @@ class SchemaVersion(BaseModel):
     type: str = Field(..., description="Type of the version")
     summary: str = Field(..., description="Summary of the version")
     columns: list[SchemaColumn] = Field(..., description="List of columns in the version")
+
+    def to_yaml_dict(self) -> dict[str, Any]:
+        """Serialize for YAML persistence."""
+        return {
+            "date": self.date,
+            "type": self.type,
+            "summary": self.summary,
+            "columns": [col.to_yaml_dict() for col in self.columns],
+        }
 
 
 class MetaSchema(BaseModel):
@@ -60,7 +97,13 @@ class MetaSchema(BaseModel):
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence (excludes registry-only ``path``)."""
-        return self.model_dump(mode="python", exclude_none=True, exclude={"path"})
+        data: dict[str, Any] = {
+            "current": self.current,
+            "versions": {key: ver.to_yaml_dict() for key, ver in self.versions.items()},
+        }
+        if self.description:
+            data["description"] = self.description
+        return data
 
 
 # ── Response models ──────────────────────────────────────────

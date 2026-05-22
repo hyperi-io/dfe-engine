@@ -219,10 +219,6 @@ async def create_meta_schema(
     user: CurrentUser,
     registry: SchemaReg,
     body: MetaSchema,
-    description: str | None = Query(
-        None,
-        description="Optional git commit / change summary when the store is git-backed",
-    ),
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError
@@ -251,7 +247,6 @@ async def create_meta_schema(
         saved = registry.save_schema(
             to_save,
             created_by=user.user_id,
-            description=description,
         )
     except SchemaValidationError as exc:
         raise HTTPException(
