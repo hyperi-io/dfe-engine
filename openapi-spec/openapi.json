@@ -4652,10 +4652,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Search in path/description",
+              "description": "Search in path",
               "title": "Search"
             },
-            "description": "Search in path/description"
+            "description": "Search in path"
           },
           {
             "name": "sort_by",
@@ -4670,10 +4670,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (path, description)",
+              "description": "Sort field (path, current, updated_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (path, description)"
+            "description": "Sort field (path, current, updated_at)"
           },
           {
             "name": "sort_order",
@@ -7164,18 +7164,6 @@
             "title": "Versions",
             "description": "Dictionary of versions and their metadata"
           },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "Human description"
-          },
           "path": {
             "anyOf": [
               {
@@ -7195,7 +7183,7 @@
           "versions"
         ],
         "title": "MetaSchema",
-        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    description: Human-readable description.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
+        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
       },
       "MetaSchema-Output": {
         "properties": {
@@ -7212,18 +7200,6 @@
             "title": "Versions",
             "description": "Dictionary of versions and their metadata"
           },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "Human description"
-          },
           "path": {
             "anyOf": [
               {
@@ -7243,7 +7219,7 @@
           "versions"
         ],
         "title": "MetaSchema",
-        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    description: Human-readable description.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
+        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
       },
       "MetricEntry": {
         "properties": {
@@ -8584,11 +8560,6 @@
             "title": "Name",
             "description": "Name of the schema"
           },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "description": "Human description"
-          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -8616,14 +8587,13 @@
         "type": "object",
         "required": [
           "name",
-          "description",
           "current",
           "versions",
           "updated_at",
           "column_count"
         ],
         "title": "SchemaSummaryObject",
-        "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    description: Human description.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
+        "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
       "SchemaVersion-Input": {
         "properties": {

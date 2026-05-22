@@ -47,7 +47,6 @@ def _minimal_meta(path: str) -> MetaSchema:
                 ],
             )
         },
-        description="test schema",
     )
 
 
@@ -61,7 +60,6 @@ class TestSchemaRegistryCRUD:
         registry.save_schema(ms)
         loaded = registry.get_schema("aws/cloudtrail")
         assert loaded.current == "1"
-        assert loaded.description == "test schema"
         assert loaded.path is None
 
     def test_save_flat_table_key(self, registry):
@@ -113,7 +111,7 @@ class TestSchemaRegistryCRUD:
         assert row["current"] == "1"
         assert row["versions"] == ["1"]
         assert row["column_count"] == 1
-        assert row["description"] == "test schema"
+        assert "description" not in row
 
     def test_delete_schema(self, registry):
         registry.save_schema(_minimal_meta("tmp/log"))
@@ -190,8 +188,8 @@ class TestSchemaRegistryPathSafety:
     def test_save_two_schemas_same_basename_different_prefix(self, registry):
         registry.save_schema(_minimal_meta("acme/cloudtrail"))
         registry.save_schema(_minimal_meta("contoso/cloudtrail"))
-        assert registry.get_schema("acme/cloudtrail").description == "test schema"
-        assert registry.get_schema("contoso/cloudtrail").description == "test schema"
+        assert registry.get_schema("acme/cloudtrail").current == "1"
+        assert registry.get_schema("contoso/cloudtrail").current == "1"
 
     def test_save_schema_rejects_traversal(self, registry):
         with pytest.raises(SchemaValidationError, match="segment"):
@@ -349,7 +347,6 @@ class TestSchemaRegistryCoverage:
                     ],
                 )
             },
-            description="",
         )
         registry.save_schema(ms)
         rows = registry.list_schemas()
@@ -361,7 +358,6 @@ class TestSchemaRegistryCoverage:
             path="empty/vers",
             current="1",
             versions={},
-            description="",
         )
         registry.save_schema(ms)
         rows = registry.list_schemas()

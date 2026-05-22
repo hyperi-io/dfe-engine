@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dfe_engine.api.pagination import PaginatedResponse
 
@@ -89,15 +89,15 @@ class MetaSchema(BaseModel):
     Attributes:
         current: Current version of the schema.
         versions: Dictionary of versions and their metadata.
-        description: Human-readable description.
         path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk.
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     current: str = Field(..., description="Current version of the schema")
     versions: dict[str, SchemaVersion] = Field(
         ..., description="Dictionary of versions and their metadata"
     )
-    description: str | None = Field(default=None, description="Human description")
     path: str | None = Field(
         default=None,
         description="DirectoryConfigStore table key / relative path (not stored in YAML files)",
@@ -109,8 +109,6 @@ class MetaSchema(BaseModel):
             "current": self.current,
             "versions": {key: ver.to_yaml_dict() for key, ver in self.versions.items()},
         }
-        if self.description:
-            data["description"] = self.description
         return data
 
 
@@ -122,7 +120,6 @@ class SchemaSummaryObject(BaseModel):
 
     Attributes:
         name: Name of the schema.
-        description: Human description.
         current: Current version of the schema.
         versions: List of versions.
         updated_at: Last updated timestamp.
@@ -130,7 +127,6 @@ class SchemaSummaryObject(BaseModel):
     """
 
     name: str = Field(description="Name of the schema")
-    description: str = Field(description="Human description")
     current: str = Field(description="Current version of the schema")
     versions: list[str] = Field(description="List of versions")
     updated_at: str = Field(description="Last updated timestamp")

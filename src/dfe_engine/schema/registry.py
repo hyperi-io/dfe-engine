@@ -329,7 +329,6 @@ class SchemaRegistry:
                     "path": schema_rel,
                     "current": schema.current,
                     "versions": list(versions_map.keys()),
-                    "description": schema.description or "",
                     "column_count": n_columns,
                     "updated_at": updated_at,
                 }

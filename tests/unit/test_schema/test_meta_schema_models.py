@@ -19,7 +19,6 @@ from dfe_engine.schema.models import (
 def cloudtrail_like_yaml() -> dict:
     return {
         "current": "1.0.0",
-        "description": "AWS CloudTrail",
         "versions": {
             "1.0.0": {
                 "date": "2026-03-03",
@@ -42,8 +41,11 @@ class TestMetaSchema:
     def test_validate_shipped_shape(self, cloudtrail_like_yaml: dict):
         ms = MetaSchema.model_validate(cloudtrail_like_yaml)
         assert ms.current == "1.0.0"
-        assert ms.description == "AWS CloudTrail"
         assert len(ms.versions["1.0.0"].columns) == 1
+
+    def test_validate_ignores_legacy_description_key(self, cloudtrail_like_yaml: dict):
+        ms = MetaSchema.model_validate({**cloudtrail_like_yaml, "description": "legacy"})
+        assert "description" not in MetaSchema.model_fields
         assert ms.versions["1.0.0"].columns[0].name == "event_id"
 
     def test_to_yaml_dict_omits_path(self, cloudtrail_like_yaml: dict):
@@ -128,7 +130,6 @@ class TestSchemaSummaryTree:
                 "schemas": [
                     {
                         "name": "aws/cloudtrail",
-                        "description": "trail",
                         "current": "1.0.0",
                         "versions": ["1.0.0"],
                         "updated_at": "2026-01-01T00:00:00Z",
@@ -146,7 +147,6 @@ class TestSchemaSummaryTree:
         objs = [
             SchemaSummaryObject(
                 name="aws/cloudtrail",
-                description="d",
                 current="1",
                 versions=["1"],
                 updated_at="",
@@ -154,7 +154,6 @@ class TestSchemaSummaryTree:
             ),
             SchemaSummaryObject(
                 name="azure/activity_log",
-                description="a",
                 current="2",
                 versions=["2"],
                 updated_at="",
@@ -170,7 +169,6 @@ class TestSchemaSummaryTree:
         objs = [
             SchemaSummaryObject(
                 name="aws/sub/logs",
-                description="",
                 current="1",
                 versions=["1"],
                 updated_at="",
@@ -188,7 +186,6 @@ class TestSchemaSummaryTree:
         objs = [
             SchemaSummaryObject(
                 name="///",
-                description="",
                 current="1",
                 versions=["1"],
                 updated_at="",
@@ -205,7 +202,6 @@ class TestPaginatedSchemaSummaryResponse:
         objs = [
             SchemaSummaryObject(
                 name="a/first",
-                description="",
                 current="1",
                 versions=["1"],
                 updated_at="",
@@ -213,7 +209,6 @@ class TestPaginatedSchemaSummaryResponse:
             ),
             SchemaSummaryObject(
                 name="b/second",
-                description="",
                 current="1",
                 versions=["1"],
                 updated_at="",

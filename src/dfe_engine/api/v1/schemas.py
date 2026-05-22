@@ -135,18 +135,17 @@ async def list_schemas(
     user: CurrentUser,
     registry: SchemaReg,
     pagination: PaginationParams = Depends(),
-    search: str | None = Query(None, description="Search in path/description"),
-    sort_by: str | None = Query(None, description="Sort field (path, description)"),
+    search: str | None = Query(None, description="Search in path"),
+    sort_by: str | None = Query(None, description="Sort field (path, current, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List all meta schemas with optional filtering."""
     raw = registry.list_schemas()
-    raw = apply_search(raw, search, ["path", "description"])
+    raw = apply_search(raw, search, ["path"])
     raw = apply_sort(raw, sort_by, sort_order)
     summaries = [
         SchemaSummaryObject(
             name=schema["path"],
-            description=schema["description"],
             current=schema["current"],
             versions=schema["versions"],
             updated_at=schema["updated_at"],

@@ -136,7 +136,6 @@ class TestSchemasMetaListRouter:
         yaml_dump(
             {
                 "current": "1",
-                "description": "Trail",
                 "versions": {
                     "1": {
                         "date": "2026-01-01",
@@ -204,7 +203,6 @@ class TestSchemasMetaListRouter:
         yaml_dump(
             {
                 "current": "1",
-                "description": "Trail",
                 "versions": {
                     "1": {
                         "date": "2026-01-01",
@@ -252,7 +250,7 @@ class TestSchemasMetaListRouter:
                 body = resp.json()
                 assert body["path"] == "aws/cloudtrail"
                 assert body["current"] == "1"
-                assert body["description"] == "Trail"
+                assert "description" not in body
                 assert "1" in body["versions"]
                 assert body["versions"]["1"]["columns"][0]["name"] == "e"
 
@@ -282,10 +280,9 @@ class TestSchemasMetaWriteRouter:
     """POST/DELETE /api/v1/schemas/definitions/... — meta-schema registry writes."""
 
     @staticmethod
-    def _minimal_schema_body(description: str = "new"):
+    def _minimal_schema_body():
         return {
             "current": "1",
-            "description": description,
             "versions": {
                 "1": {
                     "date": "2026-01-01",
@@ -343,7 +340,7 @@ class TestSchemasMetaWriteRouter:
 
                 duplicate = tc.post(
                     url,
-                    json=self._minimal_schema_body(description="duplicate"),
+                    json=self._minimal_schema_body(),
                     headers=headers,
                 )
                 assert duplicate.status_code == 422
@@ -418,7 +415,7 @@ class TestSchemasMetaWriteRouter:
                 assert get_resp.status_code == 200
 
                 body_with_slashes = {
-                    **self._minimal_schema_body(description="other"),
+                    **self._minimal_schema_body(),
                     "path": "azure\\activity",
                 }
                 create_azure = tc.post(
