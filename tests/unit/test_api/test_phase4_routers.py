@@ -337,7 +337,7 @@ class TestSchemasMetaWriteRouter:
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
                 post = tc.post(url, json=self._minimal_schema_body(), headers=headers)
-                assert post.status_code == 200
+                assert post.status_code == 201
                 assert post.json()["path"] == "gcp/audit_log"
                 assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
 
@@ -364,6 +364,70 @@ class TestSchemasMetaWriteRouter:
 
                 missing_del = tc.delete(url, headers=headers)
                 assert missing_del.status_code == 404
+        finally:
+            _registries.clear()
+
+    def test_create_canonicalizes_schema_path(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        for name in ("sources", "services", "auth"):
+            (tmp_path / name).mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-write"),
+        )
+        app = create_app(settings)
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                messy_url = "/api/v1/schemas/definitions/gcp//audit_log"
+                post = tc.post(
+                    messy_url,
+                    json=self._minimal_schema_body(),
+                    headers=headers,
+                )
+                assert post.status_code == 201
+                assert post.json()["path"] == "gcp/audit_log"
+                assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
+
+                get_resp = tc.get(
+                    "/api/v1/schemas/definitions/gcp/audit_log",
+                    headers=headers,
+                )
+                assert get_resp.status_code == 200
+
+                body_with_slashes = {
+                    **self._minimal_schema_body(description="other"),
+                    "path": "azure\\activity",
+                }
+                create_azure = tc.post(
+                    "/api/v1/schemas/definitions/azure/activity",
+                    json=body_with_slashes,
+                    headers=headers,
+                )
+                assert create_azure.status_code == 201
+                assert create_azure.json()["path"] == "azure/activity"
         finally:
             _registries.clear()
 

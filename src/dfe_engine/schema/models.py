@@ -44,12 +44,20 @@ class SchemaColumn(BaseModel):
             return None
         return value
 
+    @field_validator("name", mode="after")
+    @classmethod
+    def _name_non_empty(cls, value: str) -> str:
+        if not value.strip():
+            raise ValueError("name must be a non-empty string")
+        return value
+
     def to_yaml_dict(self) -> dict[str, Any]:
-        """Serialize for YAML persistence (omits None and empty strings)."""
+        """Serialize for YAML persistence (omits None; omits empty optional strings)."""
         raw = self.model_dump(mode="python", exclude_none=True)
+        optional_empty_omit = frozenset({"use_case", "expr", "comment"})
         out: dict[str, Any] = {}
         for key, value in raw.items():
-            if value == "":
+            if key in optional_empty_omit and value == "":
                 continue
             if key == "attribute" and value == []:
                 continue

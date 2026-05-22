@@ -39,30 +39,6 @@ from dfe_engine.source.registry import SourceNotFoundError
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
 
-def _meta_schema_location(schema_path: str) -> tuple[str, str]:
-    """Split a registry key into parent path and schema name (YAML stem)."""
-    parts = [p for p in schema_path.replace("\\", "/").split("/") if p]
-    if not parts:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={"code": "validation_error", "message": "Invalid empty schema path"},
-        )
-    if len(parts) == 1:
-        return "", parts[0]
-    return "/".join(parts[:-1]), parts[-1]
-
-
-def _existing_schema_at_location(registry: SchemaReg, schema_path: str) -> str | None:
-    """Return registry key if another schema shares the same parent path and name."""
-    parent, name = _meta_schema_location(schema_path)
-    for row in registry.list_schemas():
-        existing = row["path"]
-        ep, en = _meta_schema_location(existing)
-        if ep == parent and en == name:
-            return existing
-    return None
-
-
 def _reject_body_over_limit_via_content_length(
     request: Request,
     max_payload_bytes: int,
@@ -213,6 +189,7 @@ async def get_meta_schema(
     "/definitions/{schema_path:path}",
     response_model=MetaSchema,
     dependencies=[Depends(require_action("schema:write"))],
+    status_code=status.HTTP_201_CREATED,
 )
 async def create_meta_schema(
     schema_path: str,
@@ -221,27 +198,41 @@ async def create_meta_schema(
     body: MetaSchema,
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
-    from dfe_engine.schema.registry import SchemaValidationError
+    from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
 
-    if body.path is not None and body.path != schema_path:
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail={
-                "code": "path_mismatch",
-                "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
-            },
-        )
-    if _existing_schema_at_location(registry, schema_path) is not None:
-        parent, name = _meta_schema_location(schema_path)
-        loc = f"{parent}/{name}" if parent else name
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    if body.path is not None:
+        try:
+            body_path = canonical_schema_path(body.path)
+        except SchemaValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "validation_error", "message": str(exc)},
+            ) from exc
+        if body_path != canonical_path:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "path_mismatch",
+                    "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
+                },
+            )
+    if registry.find_schema_at_location(canonical_path) is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
                 "code": "validation_error",
-                "message": f"A meta-schema already exists at {loc!r}",
+                "message": f"A meta-schema already exists at {canonical_path!r}",
             },
         )
-    to_save = body.model_copy(update={"path": schema_path})
+    to_save = body.model_copy(update={"path": canonical_path})
 
     try:
         saved = registry.save_schema(
@@ -253,8 +244,8 @@ async def create_meta_schema(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    audit_resource_change(user.user_id, "meta_schema", schema_path, "created")
-    return saved.model_copy(update={"path": schema_path})
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
+    return saved.model_copy(update={"path": canonical_path})
 
 
 @router.delete(

@@ -79,6 +79,26 @@ class TestMetaSchema:
         assert "comment" not in col
         assert col["name"] == "event_id"
 
+    def test_schema_column_rejects_empty_name(self):
+        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+            SchemaColumn(name="", type="string")
+
+        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+            SchemaColumn(name="   ", type="string")
+
+    def test_schema_column_rejects_empty_name_in_meta_schema(self, cloudtrail_like_yaml: dict):
+        bad = {
+            **cloudtrail_like_yaml,
+            "versions": {
+                "1.0.0": {
+                    **cloudtrail_like_yaml["versions"]["1.0.0"],
+                    "columns": [{"name": "", "type": "string", "expr": "@source: x"}],
+                }
+            },
+        }
+        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+            MetaSchema.model_validate(bad)
+
 
 class TestSchemaSummaryTree:
     def test_coerce_path_segments_none_is_empty_tree(self):
