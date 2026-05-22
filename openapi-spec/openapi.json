@@ -4795,9 +4795,9 @@
         "tags": [
           "schemas"
         ],
-        "summary": "Upsert Meta Schema",
-        "description": "Create or replace a meta-schema definition at the given registry path.",
-        "operationId": "upsert_meta_schema_api_v1_schemas_definitions__schema_path__post",
+        "summary": "Create Meta Schema",
+        "description": "Create a new meta-schema at the given registry path (parent path + schema name).",
+        "operationId": "create_meta_schema_api_v1_schemas_definitions__schema_path__post",
         "parameters": [
           {
             "name": "schema_path",
@@ -4807,24 +4807,6 @@
               "type": "string",
               "title": "Schema Path"
             }
-          },
-          {
-            "name": "description",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Optional git commit / change summary when the store is git-backed",
-              "title": "Description"
-            },
-            "description": "Optional git commit / change summary when the store is git-backed"
           }
         ],
         "requestBody": {
@@ -4838,7 +4820,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -8513,21 +8495,41 @@
             "description": "Type of the column"
           },
           "attribute": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Attribute",
             "description": "Attributes of the column"
           },
           "use_case": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Use Case",
-            "description": "Use case of the column",
-            "default": ""
+            "description": "Use case of the column"
           },
           "expr": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expr",
             "description": "Expression for the column"
           },
@@ -8547,8 +8549,7 @@
         "type": "object",
         "required": [
           "name",
-          "type",
-          "expr"
+          "type"
         ],
         "title": "SchemaColumn",
         "description": "A column in the schema."
@@ -10565,21 +10566,41 @@
             "description": "Type of the column"
           },
           "attribute": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Attribute",
             "description": "Attributes of the column"
           },
           "use_case": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Use Case",
-            "description": "Use case of the column",
-            "default": ""
+            "description": "Use case of the column"
           },
           "expr": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Expr",
             "description": "Expression for the column"
           },
@@ -10599,8 +10620,7 @@
         "type": "object",
         "required": [
           "name",
-          "type",
-          "expr"
+          "type"
         ],
         "title": "SchemaColumn",
         "description": "A column in the schema."
