@@ -47,6 +47,22 @@ class SchemaValidationError(SchemaError):
     """Schema definition failed validation."""
 
 
+def _schema_location(schema_path: str) -> tuple[str, str]:
+    """Split a registry key into parent path and schema name (YAML stem)."""
+    parts = [p for p in schema_path.replace("\\", "/").split("/") if p]
+    if not parts:
+        raise SchemaValidationError("Invalid empty schema path")
+    if len(parts) == 1:
+        return "", parts[0]
+    return "/".join(parts[:-1]), parts[-1]
+
+
+def canonical_schema_path(schema_path: str) -> str:
+    """Normalize a registry key (forward slashes, no empty segments)."""
+    parent, name = _schema_location(schema_path)
+    return f"{parent}/{name}" if parent else name
+
+
 class SchemaRegistry:
     """Registry for managing schema definitions.
 
@@ -253,6 +269,19 @@ class SchemaRegistry:
             self._store._cache.pop(table, None)
 
         logger.info(f"Deleted schema '{table}'")
+
+    def find_schema_at_location(self, schema_path: str) -> str | None:
+        """Return an existing table key that occupies the same path location, if any.
+
+        Uses DirectoryConfigStore table keys only (no YAML parsing). Registry keys
+        match on-disk layout; ``MetaSchema.path`` is not persisted in YAML files.
+        """
+        parent, name = _schema_location(schema_path)
+        for table in self._store.list_tables():
+            existing_parent, existing_name = _schema_location(table)
+            if existing_parent == parent and existing_name == name:
+                return table
+        return None
 
     def list_schemas(self, path: str | None = None) -> list[dict[str, Any]]:
         """List all schemas, optionally filtered by path.

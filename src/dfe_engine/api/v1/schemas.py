@@ -189,53 +189,63 @@ async def get_meta_schema(
     "/definitions/{schema_path:path}",
     response_model=MetaSchema,
     dependencies=[Depends(require_action("schema:write"))],
+    status_code=status.HTTP_201_CREATED,
 )
-async def upsert_meta_schema(
+async def create_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
     body: MetaSchema,
-    description: str | None = Query(
-        None,
-        description="Optional git commit / change summary when the store is git-backed",
-    ),
 ) -> MetaSchema:
-    """Create or replace a meta-schema definition at the given registry path."""
-    from dfe_engine.schema.registry import SchemaNotFoundError, SchemaValidationError
+    """Create a new meta-schema at the given registry path (parent path + schema name)."""
+    from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
 
-    if body.path is not None and body.path != schema_path:
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    if body.path is not None:
+        try:
+            body_path = canonical_schema_path(body.path)
+        except SchemaValidationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={"code": "validation_error", "message": str(exc)},
+            ) from exc
+        if body_path != canonical_path:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "path_mismatch",
+                    "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
+                },
+            )
+    if registry.find_schema_at_location(canonical_path) is not None:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={
-                "code": "path_mismatch",
-                "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
+                "code": "validation_error",
+                "message": f"A meta-schema already exists at {canonical_path!r}",
             },
         )
-    to_save = body.model_copy(update={"path": schema_path})
-    existed = True
-    try:
-        registry.get_schema(schema_path)
-    except SchemaNotFoundError:
-        existed = False
+    to_save = body.model_copy(update={"path": canonical_path})
 
     try:
         saved = registry.save_schema(
             to_save,
             created_by=user.user_id,
-            description=description,
         )
     except SchemaValidationError as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    audit_resource_change(
-        user.user_id,
-        "meta_schema",
-        schema_path,
-        "updated" if existed else "created",
-    )
-    return saved.model_copy(update={"path": schema_path})
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
+    return saved.model_copy(update={"path": canonical_path})
 
 
 @router.delete(
@@ -304,6 +314,7 @@ async def elastic_converter(
     slack = api_s.elastic_converter_content_length_slack_bytes
     chunk_sz = api_s.elastic_converter_read_chunk_size
     _reject_body_over_limit_via_content_length(request, max_bytes, slack)
+
     try:
         raw = await _read_upload_capped(file, max_bytes=max_bytes, read_chunk_size=chunk_sz)
     except HTTPException:
