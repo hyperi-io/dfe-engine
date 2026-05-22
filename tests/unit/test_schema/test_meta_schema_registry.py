@@ -121,6 +121,20 @@ class TestSchemaRegistryCRUD:
         with pytest.raises(SchemaNotFoundError):
             registry.get_schema("tmp/log")
 
+    def test_find_schema_at_location(self, registry):
+        assert registry.find_schema_at_location("aws/cloudtrail") is None
+        registry.save_schema(_minimal_meta("aws/cloudtrail"))
+        assert registry.find_schema_at_location("aws/cloudtrail") == "aws/cloudtrail"
+        assert registry.find_schema_at_location("aws//cloudtrail") == "aws/cloudtrail"
+
+    def test_canonical_schema_path(self):
+        from dfe_engine.schema.registry import canonical_schema_path
+
+        assert canonical_schema_path("aws/cloudtrail") == "aws/cloudtrail"
+        assert canonical_schema_path("aws//cloudtrail") == "aws/cloudtrail"
+        assert canonical_schema_path("aws\\cloudtrail") == "aws/cloudtrail"
+        assert canonical_schema_path("standalone") == "standalone"
+
     def test_relative_schemas_directory_is_resolved(self, tmp_path, monkeypatch):
         """Regression: relative paths must be resolved so git delete can relativise."""
         monkeypatch.chdir(tmp_path)
