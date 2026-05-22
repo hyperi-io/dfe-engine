@@ -244,9 +244,7 @@ class TestSchemasMetaListRouter:
 
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
-                columns_url = (
-                    "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns"
-                )
+                columns_url = "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns"
                 resp = tc.get(f"{columns_url}?version=1", headers=headers)
                 assert resp.status_code == 200
                 body = resp.json()
@@ -290,9 +288,7 @@ class TestSchemasMetaListRouter:
             _registries.clear()
 
     def test_get_meta_schema_requires_auth(self, client):
-        resp = client.get(
-            "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1"
-        )
+        resp = client.get("/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1")
         assert resp.status_code == 401
 
     def test_get_meta_not_configured_returns_503(self, client, admin_headers):
