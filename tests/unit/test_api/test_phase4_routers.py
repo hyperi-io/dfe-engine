@@ -380,7 +380,8 @@ class TestSchemasMetaWriteRouter:
 
                 deleted = tc.delete(url, headers=headers)
                 assert deleted.status_code == 204
-                gone = tc.get(url, headers=headers)
+                columns_url = f"{url}/versions/columns?version=1"
+                gone = tc.get(columns_url, headers=headers)
                 assert gone.status_code == 404
 
                 missing_del = tc.delete(url, headers=headers)
@@ -433,7 +434,7 @@ class TestSchemasMetaWriteRouter:
                 assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
 
                 get_resp = tc.get(
-                    "/api/v1/schemas/definitions/gcp/audit_log",
+                    "/api/v1/schemas/definitions/gcp/audit_log/versions/columns?version=1",
                     headers=headers,
                 )
                 assert get_resp.status_code == 200
