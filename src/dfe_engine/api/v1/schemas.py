@@ -19,12 +19,15 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
 from dfe_engine.api.errors import ErrorResponse
-from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
+    MetaSchemaGetResponse,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
+    SchemaVersionGet,
 )
 from dfe_engine.schema.models import (
     SchemaColumn as MetaSchemaColumn,
@@ -159,15 +162,31 @@ async def list_schemas(
 
 
 @router.get(
-    "/definitions/{schema_path:path}",
-    response_model=MetaSchema,
+    "/definitions/{schema_path:path}/versions/columns",
+    response_model=MetaSchemaGetResponse,
     dependencies=[Depends(require_action("schema:read"))],
 )
 async def get_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
-) -> MetaSchema:
+    version: str = Query(..., description="Schema version to return (required)"),
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive substring search across all column fields",
+    ),
+    name: str | None = Query(None, description="Filter by name (substring)"),
+    type_filter: str | None = Query(
+        None,
+        alias="type",
+        description="Filter by type (substring)",
+    ),
+    use_case: str | None = Query(None, description="Filter by use_case (substring)"),
+    expr: str | None = Query(None, description="Filter by expr (substring)"),
+    comment: str | None = Query(None, description="Filter by comment (substring)"),
+    attribute: str | None = Query(None, description="Filter by attribute (substring)"),
+) -> MetaSchemaGetResponse:
     """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
     from dfe_engine.schema.registry import SchemaNotFoundError
 
@@ -181,7 +200,43 @@ async def get_meta_schema(
                 "message": f"Schema '{schema_path}' not found",
             },
         )
-    return meta.model_copy(update={"path": schema_path})
+    if version not in meta.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for schema '{schema_path}'",
+            },
+        )
+    ver = meta.versions[version]
+    version_ids = list(meta.versions.keys())
+    filtered = filter_columns(
+        ver.columns,
+        search=search,
+        name=name,
+        type=type_filter,
+        use_case=use_case,
+        expr=expr,
+        comment=comment,
+        attribute=attribute,
+    )
+    columns_page = PaginatedResponse.from_list(
+        filtered,
+        pagination.page,
+        pagination.per_page,
+    )
+    return MetaSchemaGetResponse(
+        current=meta.current,
+        selected=version,
+        version=SchemaVersionGet(
+            date=ver.date,
+            type=ver.type,
+            summary=ver.summary,
+            columns=columns_page,
+        ),
+        path=schema_path,
+        versions=version_ids,
+    )
 
 
 @router.post(

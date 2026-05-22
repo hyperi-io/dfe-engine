@@ -210,6 +210,8 @@ class TestSchemasMetaListRouter:
                         "summary": "init",
                         "columns": [
                             {"name": "e", "type": "string", "expr": "@source: E"},
+                            {"name": "z_col", "type": "integer"},
+                            {"name": "a_col", "type": "string"},
                         ],
                     }
                 },
@@ -242,20 +244,44 @@ class TestSchemasMetaListRouter:
 
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
-                resp = tc.get(
-                    "/api/v1/schemas/definitions/aws/cloudtrail",
-                    headers=headers,
+                columns_url = (
+                    "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns"
                 )
+                resp = tc.get(f"{columns_url}?version=1", headers=headers)
                 assert resp.status_code == 200
                 body = resp.json()
                 assert body["path"] == "aws/cloudtrail"
                 assert body["current"] == "1"
-                assert "description" not in body
-                assert "1" in body["versions"]
-                assert body["versions"]["1"]["columns"][0]["name"] == "e"
+                assert body["versions"] == ["1"]
+                assert body["selected"] == "1"
+                selected = body["version"]
+                assert selected["date"] == "2026-01-01"
+                cols = selected["columns"]
+                assert cols["total"] == 3
+
+                expr_filter = tc.get(
+                    f"{columns_url}?version=1&expr=%40source",
+                    headers=headers,
+                )
+                assert expr_filter.status_code == 200
+                assert expr_filter.json()["version"]["columns"]["total"] == 1
+
+                page2 = tc.get(
+                    f"{columns_url}?version=1&page=2&per_page=1",
+                    headers=headers,
+                )
+                assert page2.status_code == 200
+                assert page2.json()["version"]["columns"]["items"][0]["name"] == "z_col"
+
+                bad_version = tc.get(
+                    f"{columns_url}?version=99",
+                    headers=headers,
+                )
+                assert bad_version.status_code == 404
+                assert bad_version.json()["code"] == "not_found"
 
                 missing = tc.get(
-                    "/api/v1/schemas/definitions/aws/missing",
+                    "/api/v1/schemas/definitions/aws/missing/versions/columns?version=1",
                     headers=headers,
                 )
                 assert missing.status_code == 404
@@ -264,12 +290,14 @@ class TestSchemasMetaListRouter:
             _registries.clear()
 
     def test_get_meta_schema_requires_auth(self, client):
-        resp = client.get("/api/v1/schemas/definitions/aws/cloudtrail")
+        resp = client.get(
+            "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1"
+        )
         assert resp.status_code == 401
 
     def test_get_meta_not_configured_returns_503(self, client, admin_headers):
         resp = client.get(
-            "/api/v1/schemas/definitions/aws/cloudtrail",
+            "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1",
             headers=admin_headers,
         )
         assert resp.status_code == 503

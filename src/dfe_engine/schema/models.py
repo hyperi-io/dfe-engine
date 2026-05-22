@@ -83,6 +83,37 @@ class SchemaVersion(BaseModel):
         }
 
 
+class SchemaVersionGet(BaseModel):
+    """Schema version payload for GET definition (columns paginated)."""
+
+    date: str = Field(..., description="Date of the version")
+    type: str = Field(..., description="Type of the version")
+    summary: str = Field(..., description="Summary of the version")
+    columns: PaginatedResponse[SchemaColumn] = Field(
+        ...,
+        description="Paginated columns for this version",
+    )
+
+
+class MetaSchemaGetResponse(BaseModel):
+    """Meta-schema definition for a single requested version."""
+
+    current: str = Field(..., description="Current version of the schema")
+    selected: str = Field(
+        ...,
+        description="Version id requested via query parameter",
+    )
+    version: SchemaVersionGet = Field(
+        ...,
+        description="Metadata and paginated columns for ``selected``",
+    )
+    path: str = Field(..., description="Registry path (e.g. aws/cloudtrail)")
+    versions: list[str] = Field(
+        ...,
+        description="All version identifiers defined on this schema",
+    )
+
+
 class MetaSchema(BaseModel):
     """A schema for a ClickHouse table.
 
