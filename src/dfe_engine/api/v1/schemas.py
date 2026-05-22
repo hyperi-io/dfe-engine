@@ -39,6 +39,30 @@ from dfe_engine.source.registry import SourceNotFoundError
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
 
+def _meta_schema_location(schema_path: str) -> tuple[str, str]:
+    """Split a registry key into parent path and schema name (YAML stem)."""
+    parts = [p for p in schema_path.replace("\\", "/").split("/") if p]
+    if not parts:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": "Invalid empty schema path"},
+        )
+    if len(parts) == 1:
+        return "", parts[0]
+    return "/".join(parts[:-1]), parts[-1]
+
+
+def _existing_schema_at_location(registry: SchemaReg, schema_path: str) -> str | None:
+    """Return registry key if another schema shares the same parent path and name."""
+    parent, name = _meta_schema_location(schema_path)
+    for row in registry.list_schemas():
+        existing = row["path"]
+        ep, en = _meta_schema_location(existing)
+        if ep == parent and en == name:
+            return existing
+    return None
+
+
 def _reject_body_over_limit_via_content_length(
     request: Request,
     max_payload_bytes: int,
@@ -190,7 +214,7 @@ async def get_meta_schema(
     response_model=MetaSchema,
     dependencies=[Depends(require_action("schema:write"))],
 )
-async def upsert_meta_schema(
+async def create_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
@@ -200,8 +224,8 @@ async def upsert_meta_schema(
         description="Optional git commit / change summary when the store is git-backed",
     ),
 ) -> MetaSchema:
-    """Create or replace a meta-schema definition at the given registry path."""
-    from dfe_engine.schema.registry import SchemaNotFoundError, SchemaValidationError
+    """Create a new meta-schema at the given registry path (parent path + schema name)."""
+    from dfe_engine.schema.registry import SchemaValidationError
 
     if body.path is not None and body.path != schema_path:
         raise HTTPException(
@@ -211,12 +235,17 @@ async def upsert_meta_schema(
                 "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
             },
         )
+    if _existing_schema_at_location(registry, schema_path) is not None:
+        parent, name = _meta_schema_location(schema_path)
+        loc = f"{parent}/{name}" if parent else name
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": f"A meta-schema already exists at {loc!r}",
+            },
+        )
     to_save = body.model_copy(update={"path": schema_path})
-    existed = True
-    try:
-        registry.get_schema(schema_path)
-    except SchemaNotFoundError:
-        existed = False
 
     try:
         saved = registry.save_schema(
@@ -229,12 +258,7 @@ async def upsert_meta_schema(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
-    audit_resource_change(
-        user.user_id,
-        "meta_schema",
-        schema_path,
-        "updated" if existed else "created",
-    )
+    audit_resource_change(user.user_id, "meta_schema", schema_path, "created")
     return saved.model_copy(update={"path": schema_path})
 
 
@@ -304,6 +328,7 @@ async def elastic_converter(
     slack = api_s.elastic_converter_content_length_slack_bytes
     chunk_sz = api_s.elastic_converter_read_chunk_size
     _reject_body_over_limit_via_content_length(request, max_bytes, slack)
+
     try:
         raw = await _read_upload_capped(file, max_bytes=max_bytes, read_chunk_size=chunk_sz)
     except HTTPException:

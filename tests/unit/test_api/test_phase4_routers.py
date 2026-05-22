@@ -296,7 +296,7 @@ class TestSchemasMetaWriteRouter:
             },
         }
 
-    def test_upsert_delete_round_trip(self, tmp_path):
+    def test_create_delete_round_trip(self, tmp_path):
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import _registries, create_access_token
         from dfe_engine.settings import (
@@ -341,15 +341,13 @@ class TestSchemasMetaWriteRouter:
                 assert post.json()["path"] == "gcp/audit_log"
                 assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
 
-                second = tc.post(
+                duplicate = tc.post(
                     url,
-                    json=self._minimal_schema_body(description="updated"),
+                    json=self._minimal_schema_body(description="duplicate"),
                     headers=headers,
                 )
-                assert second.status_code == 200
-                got = tc.get(url, headers=headers)
-                assert got.status_code == 200
-                assert got.json()["description"] == "updated"
+                assert duplicate.status_code == 422
+                assert duplicate.json()["code"] == "validation_error"
 
                 bad = tc.post(
                     url,
@@ -369,7 +367,7 @@ class TestSchemasMetaWriteRouter:
         finally:
             _registries.clear()
 
-    def test_upsert_forbidden_for_readonly_role(self, tmp_path):
+    def test_create_forbidden_for_readonly_role(self, tmp_path):
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import _registries, create_access_token
         from dfe_engine.settings import (
@@ -418,8 +416,6 @@ class TestSchemasMetaWriteRouter:
             _registries.clear()
 
     def test_write_endpoints_require_auth(self, client):
-        resp = client.post(
-            "/api/v1/schemas/definitions/a/b",
-            json=TestSchemasMetaWriteRouter._minimal_schema_body(),
-        )
+        body = TestSchemasMetaWriteRouter._minimal_schema_body()
+        resp = client.post("/api/v1/schemas/definitions/a/b", json=body)
         assert resp.status_code == 401

@@ -4795,9 +4795,9 @@
         "tags": [
           "schemas"
         ],
-        "summary": "Upsert Meta Schema",
-        "description": "Create or replace a meta-schema definition at the given registry path.",
-        "operationId": "upsert_meta_schema_api_v1_schemas_definitions__schema_path__post",
+        "summary": "Create Meta Schema",
+        "description": "Create a new meta-schema at the given registry path (parent path + schema name).",
+        "operationId": "create_meta_schema_api_v1_schemas_definitions__schema_path__post",
         "parameters": [
           {
             "name": "schema_path",
