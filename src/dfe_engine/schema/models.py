@@ -11,7 +11,7 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -141,6 +141,42 @@ class MetaSchema(BaseModel):
             "versions": {key: ver.to_yaml_dict() for key, ver in self.versions.items()},
         }
         return data
+
+
+class MetaSchemaUpdateRequest(BaseModel):
+    """Partial update for meta-schema metadata (current pointer or version summary)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current: str | None = Field(
+        default=None,
+        description="Set the schema's current version pointer",
+    )
+    summary: str | None = Field(
+        default=None,
+        description="Update summary on the version selected via query parameter",
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> MetaSchemaUpdateRequest:
+        if self.current is None and self.summary is None:
+            raise ValueError("At least one of current or summary is required")
+        return self
+
+
+class MetaSchemaAddVersionRequest(BaseModel):
+    """Add a new schema version (semver bump from current)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["model", "addition", "revision"] = Field(
+        ...,
+        description="Change category (semver bump from current)",
+    )
+    columns: list[SchemaColumn] = Field(
+        ...,
+        description="Complete column snapshot for the new version",
+    )
 
 
 # ── Response models ──────────────────────────────────────────

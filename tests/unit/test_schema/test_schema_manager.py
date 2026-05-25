@@ -6,6 +6,7 @@ from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.schema.schema_manager import (
     SchemaManager,
     SchemaVersionError,
+    next_version_for_type,
 )
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -69,6 +70,40 @@ def multi_version_schema(tmp_path):
 
 
 # ── TestAddVersion ─────────────────────────────────────────────────
+
+
+class TestNextVersionForType:
+    def test_model_bump(self):
+        assert next_version_for_type("1.2.3", "model") == "2.0.0"
+
+    def test_addition_bump(self):
+        assert next_version_for_type("1.2.3", "addition") == "1.3.0"
+
+    def test_revision_bump(self):
+        assert next_version_for_type("1.2.3", "revision") == "1.2.4"
+
+    def test_rejects_non_semver_current(self):
+        with pytest.raises(SchemaVersionError, match="x.x.x"):
+            next_version_for_type("1", "addition")
+
+
+class TestSetCurrent:
+    def test_set_current(self, multi_version_schema):
+        SchemaManager.set_current(multi_version_schema, "1.0.0")
+        data = yaml_load(multi_version_schema)
+        assert data["current"] == "1.0.0"
+
+    def test_set_current_unknown_version(self, multi_version_schema):
+        with pytest.raises(SchemaVersionError, match="not found"):
+            SchemaManager.set_current(multi_version_schema, "9.9.9")
+
+
+class TestUpdateVersionSummary:
+    def test_updates_summary_only(self, versioned_schema):
+        SchemaManager.update_version_summary(versioned_schema, "1.0.0", "Revised summary")
+        data = yaml_load(versioned_schema)
+        assert data["versions"]["1.0.0"]["summary"] == "Revised summary"
+        assert data["versions"]["1.0.0"]["type"] == "model"
 
 
 class TestAddVersion:

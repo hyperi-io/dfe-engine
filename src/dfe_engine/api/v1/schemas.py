@@ -24,7 +24,9 @@ from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
+    MetaSchemaAddVersionRequest,
     MetaSchemaGetResponse,
+    MetaSchemaUpdateRequest,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
     SchemaVersionGet,
@@ -240,6 +242,87 @@ async def get_meta_schema(
 
 
 @router.post(
+    "/definitions/{schema_path:path}/versions",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:write"))],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_meta_schema_version(
+    schema_path: str,
+    body: MetaSchemaAddVersionRequest,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> MetaSchema:
+    """Add a new meta-schema version (bumps semver from current and sets it current)."""
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import (
+        SchemaManager,
+        SchemaVersionError,
+        next_version_for_type,
+    )
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+
+    yaml_path = registry._yaml_path(canonical_path)
+    version_type = body.type
+    new_ver = next_version_for_type(meta.current, version_type)
+
+    try:
+        if new_ver in meta.versions:
+            raise SchemaVersionError(f"Version '{new_ver}' already exists")
+        col_dicts = [col.to_yaml_dict() for col in body.columns]
+        SchemaManager.add_version(
+            yaml_path,
+            new_ver,
+            col_dicts,
+            type=version_type,
+            summary=f"{version_type} update",
+            set_current=True,
+        )
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except SchemaLoadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    description = f"schema: {canonical_path} (add version {new_ver})"
+    saved = registry.notify_schema_file_updated(
+        canonical_path,
+        description=description,
+        created_by=user.user_id,
+    )
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+    return saved.model_copy(update={"path": canonical_path})
+
+
+@router.post(
     "/definitions/{schema_path:path}",
     response_model=MetaSchema,
     dependencies=[Depends(require_action("schema:write"))],
@@ -299,6 +382,107 @@ async def create_meta_schema(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
+    return saved.model_copy(update={"path": canonical_path})
+
+
+@router.patch(
+    "/definitions/{schema_path:path}",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:write"))],
+)
+async def update_meta_schema(
+    schema_path: str,
+    body: MetaSchemaUpdateRequest,
+    user: CurrentUser,
+    registry: SchemaReg,
+    version: str | None = Query(
+        None,
+        description="Version to update summary for (required when summary is set)",
+    ),
+) -> MetaSchema:
+    """Update meta-schema metadata: current pointer or a version summary."""
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+
+    if body.summary is not None and not version:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": "Query parameter 'version' is required when updating summary",
+            },
+        )
+    if version and version not in meta.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for schema '{canonical_path}'",
+            },
+        )
+
+    yaml_path = registry._yaml_path(canonical_path)
+    description_parts: list[str] = []
+
+    try:
+        if body.summary is not None:
+            summary_version = version
+            if summary_version is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "code": "validation_error",
+                        "message": "Query parameter 'version' is required when updating summary",
+                    },
+                )
+            SchemaManager.update_version_summary(yaml_path, summary_version, body.summary)
+            description_parts.append(f"update summary for {summary_version}")
+
+        if body.current is not None:
+            SchemaManager.set_current(yaml_path, body.current)
+            description_parts.append(f"set current to {body.current}")
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except SchemaLoadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    description = f"schema: {canonical_path} ({', '.join(description_parts)})"
+    saved = registry.notify_schema_file_updated(
+        canonical_path,
+        description=description,
+        created_by=user.user_id,
+    )
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return saved.model_copy(update={"path": canonical_path})
 
 

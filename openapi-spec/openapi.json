@@ -4956,6 +4956,64 @@
         ]
       }
     },
+    "/api/v1/schemas/definitions/{schema_path}/versions": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Add Meta Schema Version",
+        "description": "Add a new meta-schema version (bumps semver from current and sets it current).",
+        "operationId": "add_meta_schema_version_api_v1_schemas_definitions__schema_path__versions_post",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetaSchemaAddVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaSchema-Output"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/schemas/definitions/{schema_path}": {
       "post": {
         "tags": [
@@ -4987,6 +5045,80 @@
         },
         "responses": {
           "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetaSchema-Output"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Update Meta Schema",
+        "description": "Update meta-schema metadata: current pointer or a version summary.",
+        "operationId": "update_meta_schema_api_v1_schemas_definitions__schema_path__patch",
+        "parameters": [
+          {
+            "name": "schema_path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Schema Path"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Version to update summary for (required when summary is set)",
+              "title": "Version"
+            },
+            "description": "Version to update summary for (required when summary is set)"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MetaSchemaUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
@@ -7387,6 +7519,36 @@
         "title": "MetaSchema",
         "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
       },
+      "MetaSchemaAddVersionRequest": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "model",
+              "addition",
+              "revision"
+            ],
+            "title": "Type",
+            "description": "Change category (semver bump from current)"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaColumn-Input"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "Complete column snapshot for the new version"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "type",
+          "columns"
+        ],
+        "title": "MetaSchemaAddVersionRequest",
+        "description": "Add a new schema version (semver bump from current)."
+      },
       "MetaSchemaGetResponse": {
         "properties": {
           "current": {
@@ -7427,6 +7589,38 @@
         ],
         "title": "MetaSchemaGetResponse",
         "description": "Meta-schema definition for a single requested version."
+      },
+      "MetaSchemaUpdateRequest": {
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current",
+            "description": "Set the schema's current version pointer"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary",
+            "description": "Update summary on the version selected via query parameter"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "title": "MetaSchemaUpdateRequest",
+        "description": "Partial update for meta-schema metadata (current pointer or version summary)."
       },
       "MetricEntry": {
         "properties": {

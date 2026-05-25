@@ -505,3 +505,98 @@ class TestSchemasMetaWriteRouter:
         body = TestSchemasMetaWriteRouter._minimal_schema_body()
         resp = client.post("/api/v1/schemas/definitions/a/b", json=body)
         assert resp.status_code == 401
+
+    def test_patch_meta_schema_current_and_summary(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schemas_root = tmp_path / "schemas"
+        (schemas_root / "aws").mkdir(parents=True)
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "init",
+                        "columns": [{"name": "e", "type": "string"}],
+                    },
+                    "1.1.0": {
+                        "date": "2026-02-01",
+                        "type": "addition",
+                        "summary": "extra",
+                        "columns": [
+                            {"name": "e", "type": "string"},
+                            {"name": "n", "type": "integer"},
+                        ],
+                    },
+                },
+            },
+            schemas_root / "aws" / "cloudtrail.yaml",
+        )
+
+        for name in ("sources", "services", "auth"):
+            (tmp_path / name).mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas-patch"),
+        )
+        app = create_app(settings)
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        base = "/api/v1/schemas/definitions/aws/cloudtrail"
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                set_current = tc.patch(base, json={"current": "1.1.0"}, headers=headers)
+                assert set_current.status_code == 200
+                assert set_current.json()["current"] == "1.1.0"
+
+                summary = tc.patch(
+                    f"{base}?version=1.0.0",
+                    json={"summary": "updated init"},
+                    headers=headers,
+                )
+                assert summary.status_code == 200
+                assert summary.json()["versions"]["1.0.0"]["summary"] == "updated init"
+
+                add = tc.post(
+                    f"{base}/versions",
+                    json={
+                        "type": "revision",
+                        "columns": [
+                            {"name": "e", "type": "string"},
+                            {"name": "n", "type": "integer"},
+                            {"name": "p", "type": "boolean"},
+                        ],
+                    },
+                    headers=headers,
+                )
+                assert add.status_code == 201
+                body = add.json()
+                assert body["current"] == "1.1.1"
+                assert "1.1.1" in body["versions"]
+                assert body["versions"]["1.1.1"]["type"] == "revision"
+                assert body["versions"]["1.1.1"]["summary"] == "revision update"
+                assert len(body["versions"]["1.1.1"]["columns"]) == 3
+                assert "1.0.0" in body["versions"]
+        finally:
+            _registries.clear()
