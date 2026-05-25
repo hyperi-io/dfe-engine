@@ -232,6 +232,31 @@ class SchemaRegistry:
         logger.info(f"Saved schema '{table}' → {yaml_path}")
         return meta_schema
 
+    def notify_schema_file_updated(
+        self,
+        path: str,
+        *,
+        description: str | None = None,
+        created_by: str | None = None,
+    ) -> MetaSchema:
+        """Refresh cache (and git-commit) after a direct on-disk schema YAML write."""
+        table = self._table_name(path)
+        yaml_path = self._yaml_path(path)
+        if not yaml_path.exists():
+            raise SchemaNotFoundError(f"Schema not found: '{path}'")
+
+        if self._store.is_git:
+            commit_msg = description or f"schema: update {table}"
+            if created_by:
+                commit_msg = f"{commit_msg} (by {created_by})"
+            self._store._git_commit(yaml_path, commit_msg, author=created_by)
+            if self._store._git_push:
+                self._store._git_push_remote()
+
+        self._store._refresh_all()
+        logger.info(f"Schema file updated '{table}' → {yaml_path}")
+        return self.get_schema(path)
+
     def delete_schema(self, path: str) -> None:
         """Delete a meta schema.
 
@@ -329,7 +354,6 @@ class SchemaRegistry:
                     "path": schema_rel,
                     "current": schema.current,
                     "versions": list(versions_map.keys()),
-                    "description": schema.description or "",
                     "column_count": n_columns,
                     "updated_at": updated_at,
                 }
