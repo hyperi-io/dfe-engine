@@ -21,7 +21,7 @@ name: CI
 
 jobs:
   ci:
-    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
+    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@fd0e0aacf94ac0276d4d1b436e3ad8403d3b53cd # main
     with:
       publish-target: internal
       tag: ${{ inputs.tag || '' }}
