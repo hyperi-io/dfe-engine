@@ -11,9 +11,9 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from dfe_engine.api.pagination import PaginatedResponse
 
@@ -83,21 +83,52 @@ class SchemaVersion(BaseModel):
         }
 
 
+class SchemaVersionGet(BaseModel):
+    """Schema version payload for GET definition (columns paginated)."""
+
+    date: str = Field(..., description="Date of the version")
+    type: str = Field(..., description="Type of the version")
+    summary: str = Field(..., description="Summary of the version")
+    columns: PaginatedResponse[SchemaColumn] = Field(
+        ...,
+        description="Paginated columns for this version",
+    )
+
+
+class MetaSchemaGetResponse(BaseModel):
+    """Meta-schema definition for a single requested version."""
+
+    current: str = Field(..., description="Current version of the schema")
+    selected: str = Field(
+        ...,
+        description="Version id requested via query parameter",
+    )
+    version: SchemaVersionGet = Field(
+        ...,
+        description="Metadata and paginated columns for ``selected``",
+    )
+    path: str = Field(..., description="Registry path (e.g. aws/cloudtrail)")
+    versions: list[str] = Field(
+        ...,
+        description="All version identifiers defined on this schema",
+    )
+
+
 class MetaSchema(BaseModel):
     """A schema for a ClickHouse table.
 
     Attributes:
         current: Current version of the schema.
         versions: Dictionary of versions and their metadata.
-        description: Human-readable description.
         path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk.
     """
+
+    model_config = ConfigDict(extra="ignore")
 
     current: str = Field(..., description="Current version of the schema")
     versions: dict[str, SchemaVersion] = Field(
         ..., description="Dictionary of versions and their metadata"
     )
-    description: str | None = Field(default=None, description="Human description")
     path: str | None = Field(
         default=None,
         description="DirectoryConfigStore table key / relative path (not stored in YAML files)",
@@ -109,9 +140,43 @@ class MetaSchema(BaseModel):
             "current": self.current,
             "versions": {key: ver.to_yaml_dict() for key, ver in self.versions.items()},
         }
-        if self.description:
-            data["description"] = self.description
         return data
+
+
+class MetaSchemaUpdateRequest(BaseModel):
+    """Partial update for meta-schema metadata (current pointer or version summary)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current: str | None = Field(
+        default=None,
+        description="Set the schema's current version pointer",
+    )
+    summary: str | None = Field(
+        default=None,
+        description="Update summary on the version selected via query parameter",
+    )
+
+    @model_validator(mode="after")
+    def _at_least_one_change(self) -> MetaSchemaUpdateRequest:
+        if self.current is None and self.summary is None:
+            raise ValueError("At least one of current or summary is required")
+        return self
+
+
+class MetaSchemaAddVersionRequest(BaseModel):
+    """Add a new schema version (semver bump from current)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    type: Literal["model", "addition", "revision"] = Field(
+        ...,
+        description="Change category (semver bump from current)",
+    )
+    columns: list[SchemaColumn] = Field(
+        ...,
+        description="Complete column snapshot for the new version",
+    )
 
 
 # ── Response models ──────────────────────────────────────────
@@ -122,7 +187,6 @@ class SchemaSummaryObject(BaseModel):
 
     Attributes:
         name: Name of the schema.
-        description: Human description.
         current: Current version of the schema.
         versions: List of versions.
         updated_at: Last updated timestamp.
@@ -130,7 +194,6 @@ class SchemaSummaryObject(BaseModel):
     """
 
     name: str = Field(description="Name of the schema")
-    description: str = Field(description="Human description")
     current: str = Field(description="Current version of the schema")
     versions: list[str] = Field(description="List of versions")
     updated_at: str = Field(description="Last updated timestamp")

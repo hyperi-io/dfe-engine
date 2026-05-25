@@ -19,12 +19,17 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
 from dfe_engine.api.errors import ErrorResponse
-from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
+    MetaSchemaAddVersionRequest,
+    MetaSchemaGetResponse,
+    MetaSchemaUpdateRequest,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
+    SchemaVersionGet,
 )
 from dfe_engine.schema.models import (
     SchemaColumn as MetaSchemaColumn,
@@ -135,18 +140,17 @@ async def list_schemas(
     user: CurrentUser,
     registry: SchemaReg,
     pagination: PaginationParams = Depends(),
-    search: str | None = Query(None, description="Search in path/description"),
-    sort_by: str | None = Query(None, description="Sort field (path, description)"),
+    search: str | None = Query(None, description="Search in path"),
+    sort_by: str | None = Query(None, description="Sort field (path, current, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List all meta schemas with optional filtering."""
     raw = registry.list_schemas()
-    raw = apply_search(raw, search, ["path", "description"])
+    raw = apply_search(raw, search, ["path"])
     raw = apply_sort(raw, sort_by, sort_order)
     summaries = [
         SchemaSummaryObject(
             name=schema["path"],
-            description=schema["description"],
             current=schema["current"],
             versions=schema["versions"],
             updated_at=schema["updated_at"],
@@ -160,20 +164,48 @@ async def list_schemas(
 
 
 @router.get(
-    "/definitions/{schema_path:path}",
-    response_model=MetaSchema,
+    "/definitions/{schema_path:path}/versions/columns",
+    response_model=MetaSchemaGetResponse,
     dependencies=[Depends(require_action("schema:read"))],
 )
 async def get_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
-) -> MetaSchema:
+    version: str = Query(..., description="Schema version to return (required)"),
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive substring search across all column fields",
+    ),
+    name: str | None = Query(None, description="Filter by name (substring)"),
+    type_filter: str | None = Query(
+        None,
+        alias="type",
+        description="Filter by type (substring)",
+    ),
+    use_case: str | None = Query(None, description="Filter by use_case (substring)"),
+    expr: str | None = Query(None, description="Filter by expr (substring)"),
+    comment: str | None = Query(None, description="Filter by comment (substring)"),
+    attribute: str | None = Query(None, description="Filter by attribute (substring)"),
+) -> MetaSchemaGetResponse:
     """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
-    from dfe_engine.schema.registry import SchemaNotFoundError
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
 
     try:
-        meta = registry.get_schema(schema_path)
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
     except SchemaNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -182,7 +214,124 @@ async def get_meta_schema(
                 "message": f"Schema '{schema_path}' not found",
             },
         )
-    return meta.model_copy(update={"path": schema_path})
+    if version not in meta.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for schema '{canonical_path}'",
+            },
+        )
+    ver = meta.versions[version]
+    version_ids = list(meta.versions.keys())
+    filtered = filter_columns(
+        ver.columns,
+        search=search,
+        name=name,
+        type=type_filter,
+        use_case=use_case,
+        expr=expr,
+        comment=comment,
+        attribute=attribute,
+    )
+    columns_page = PaginatedResponse.from_list(
+        filtered,
+        pagination.page,
+        pagination.per_page,
+    )
+    return MetaSchemaGetResponse(
+        current=meta.current,
+        selected=version,
+        version=SchemaVersionGet(
+            date=ver.date,
+            type=ver.type,
+            summary=ver.summary,
+            columns=columns_page,
+        ),
+        path=canonical_path,
+        versions=version_ids,
+    )
+
+
+@router.post(
+    "/definitions/{schema_path:path}/versions",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:write"))],
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_meta_schema_version(
+    schema_path: str,
+    body: MetaSchemaAddVersionRequest,
+    user: CurrentUser,
+    registry: SchemaReg,
+) -> MetaSchema:
+    """Add a new meta-schema version (bumps semver from current and sets it current)."""
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import (
+        SchemaManager,
+        SchemaVersionError,
+        next_version_for_type,
+    )
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+
+    yaml_path = registry._yaml_path(canonical_path)
+    version_type = body.type
+    new_ver = next_version_for_type(meta.current, version_type)
+
+    try:
+        if new_ver in meta.versions:
+            raise SchemaVersionError(f"Version '{new_ver}' already exists")
+        col_dicts = [col.to_yaml_dict() for col in body.columns]
+        SchemaManager.add_version(
+            yaml_path,
+            new_ver,
+            col_dicts,
+            type=version_type,
+            summary=f"{version_type} update",
+            set_current=True,
+        )
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except SchemaLoadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    description = f"schema: {canonical_path} (add version {new_ver})"
+    saved = registry.notify_schema_file_updated(
+        canonical_path,
+        description=description,
+        created_by=user.user_id,
+    )
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
+    return saved.model_copy(update={"path": canonical_path})
 
 
 @router.post(
@@ -245,6 +394,107 @@ async def create_meta_schema(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
+    return saved.model_copy(update={"path": canonical_path})
+
+
+@router.patch(
+    "/definitions/{schema_path:path}",
+    response_model=MetaSchema,
+    dependencies=[Depends(require_action("schema:write"))],
+)
+async def update_meta_schema(
+    schema_path: str,
+    body: MetaSchemaUpdateRequest,
+    user: CurrentUser,
+    registry: SchemaReg,
+    version: str | None = Query(
+        None,
+        description="Version to update summary for (required when summary is set)",
+    ),
+) -> MetaSchema:
+    """Update meta-schema metadata: current pointer or a version summary."""
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+
+    try:
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Schema '{schema_path}' not found",
+            },
+        )
+
+    if body.summary is not None and not version:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": "Query parameter 'version' is required when updating summary",
+            },
+        )
+    if version and version not in meta.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for schema '{canonical_path}'",
+            },
+        )
+
+    yaml_path = registry._yaml_path(canonical_path)
+    description_parts: list[str] = []
+
+    try:
+        if body.summary is not None:
+            summary_version = version
+            if summary_version is None:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail={
+                        "code": "validation_error",
+                        "message": "Query parameter 'version' is required when updating summary",
+                    },
+                )
+            SchemaManager.update_version_summary(yaml_path, summary_version, body.summary)
+            description_parts.append(f"update summary for {summary_version}")
+
+        if body.current is not None:
+            SchemaManager.set_current(yaml_path, body.current)
+            description_parts.append(f"set current to {body.current}")
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    except SchemaLoadError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    description = f"schema: {canonical_path} ({', '.join(description_parts)})"
+    saved = registry.notify_schema_file_updated(
+        canonical_path,
+        description=description,
+        created_by=user.user_id,
+    )
+    audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return saved.model_copy(update={"path": canonical_path})
 
 

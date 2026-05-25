@@ -54,9 +54,10 @@ Usage:
 from __future__ import annotations
 
 import copy
+import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.source.models import SchemaColumn
@@ -66,6 +67,33 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 class SchemaVersionError(Exception):
     """Error related to schema version operations."""
+
+
+_VERSION_TYPES = frozenset({"model", "addition", "revision"})
+_SEMVER_RE = re.compile(r"^(\d+)\.(\d+)\.(\d+)$")
+SchemaVersionType = Literal["model", "addition", "revision"]
+
+
+def next_version_for_type(current: str, version_type: SchemaVersionType) -> str:
+    """Compute the next ``x.x.x`` semver from ``current`` and a version change type.
+
+    ``model`` → major bump, ``addition`` → minor bump, ``revision`` → patch bump.
+    """
+    if version_type not in _VERSION_TYPES:
+        raise SchemaVersionError(
+            f"Invalid version type {version_type!r}. Valid: model, addition, revision"
+        )
+    match = _SEMVER_RE.match(current.strip())
+    if not match:
+        raise SchemaVersionError(
+            f"Current version {current!r} is not semver (expected x.x.x, e.g. 1.0.0)"
+        )
+    major, minor, patch = (int(match.group(i)) for i in range(1, 4))
+    if version_type == "model":
+        return f"{major + 1}.0.0"
+    if version_type == "addition":
+        return f"{major}.{minor + 1}.0"
+    return f"{major}.{minor}.{patch + 1}"
 
 
 # ── Column normalisation ───────────────────────────────────────────
@@ -160,6 +188,51 @@ def _apply_modifications(
 
 class SchemaManager:
     """Write operations for versioned schema YAML files."""
+
+    @staticmethod
+    def set_current(path: str | Path, current: str) -> None:
+        """Update the ``current`` marker without modifying version entries."""
+        p = Path(path)
+        if not p.exists():
+            raise SchemaLoadError(f"Schema file not found: {p}")
+
+        data = yaml_load(p)
+        if not isinstance(data, dict):
+            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
+
+        versions = data.get("versions", {})
+        if current not in versions:
+            available = ", ".join(sorted(versions.keys())) or "(none)"
+            raise SchemaVersionError(
+                f"Version '{current}' not found in {p}. Available: {available}"
+            )
+
+        data["current"] = current
+        yaml_dump(data, p)
+
+    @staticmethod
+    def update_version_summary(path: str | Path, version: str, summary: str) -> None:
+        """Update only the summary field on an existing version entry."""
+        p = Path(path)
+        if not p.exists():
+            raise SchemaLoadError(f"Schema file not found: {p}")
+
+        data = yaml_load(p)
+        if not isinstance(data, dict):
+            raise SchemaLoadError(f"Schema YAML must be a mapping: {p}")
+
+        versions = data.get("versions", {})
+        if version not in versions:
+            available = ", ".join(sorted(versions.keys())) or "(none)"
+            raise SchemaVersionError(
+                f"Version '{version}' not found in {p}. Available: {available}"
+            )
+
+        entry = versions[version]
+        if not isinstance(entry, dict):
+            raise SchemaLoadError(f"Version entry for '{version}' must be a mapping: {p}")
+        entry["summary"] = summary
+        yaml_dump(data, p)
 
     @staticmethod
     def add_version(
