@@ -439,6 +439,13 @@ class TestSchemasMetaWriteRouter:
                 )
                 assert get_resp.status_code == 200
 
+                messy_get = tc.get(
+                    f"{messy_url}/versions/columns?version=1",
+                    headers=headers,
+                )
+                assert messy_get.status_code == 200
+                assert messy_get.json()["path"] == "gcp/audit_log"
+
                 body_with_slashes = {
                     **self._minimal_schema_body(),
                     "path": "azure\\activity",

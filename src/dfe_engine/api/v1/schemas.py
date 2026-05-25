@@ -190,10 +190,22 @@ async def get_meta_schema(
     attribute: str | None = Query(None, description="Filter by attribute (substring)"),
 ) -> MetaSchemaGetResponse:
     """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
-    from dfe_engine.schema.registry import SchemaNotFoundError
+    from dfe_engine.schema.registry import (
+        SchemaNotFoundError,
+        SchemaValidationError,
+        canonical_schema_path,
+    )
 
     try:
-        meta = registry.get_schema(schema_path)
+        canonical_path = canonical_schema_path(schema_path)
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    try:
+        meta = registry.get_schema(canonical_path)
     except SchemaNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -207,7 +219,7 @@ async def get_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Version '{version}' not found for schema '{schema_path}'",
+                "message": f"Version '{version}' not found for schema '{canonical_path}'",
             },
         )
     ver = meta.versions[version]
@@ -236,7 +248,7 @@ async def get_meta_schema(
             summary=ver.summary,
             columns=columns_page,
         ),
-        path=schema_path,
+        path=canonical_path,
         versions=version_ids,
     )
 
