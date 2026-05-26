@@ -589,6 +589,7 @@ class TestSchemasMetaWriteRouter:
                     f"{base}/versions",
                     json={
                         "type": "revision",
+                        "summary": "added column p",
                         "columns": [
                             {"name": "e", "type": "string"},
                             {"name": "n", "type": "integer"},
@@ -602,7 +603,7 @@ class TestSchemasMetaWriteRouter:
                 assert body["current"] == "1.1.1"
                 assert "1.1.1" in body["versions"]
                 assert body["versions"]["1.1.1"]["type"] == "revision"
-                assert body["versions"]["1.1.1"]["summary"] == "revision update"
+                assert body["versions"]["1.1.1"]["summary"] == "added column p"
                 assert len(body["versions"]["1.1.1"]["columns"]) == 3
                 assert "1.0.0" in body["versions"]
         finally:

@@ -7531,6 +7531,11 @@
             "title": "Type",
             "description": "Change category (semver bump from current)"
           },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "description": "Human-readable summary stored on the new version"
+          },
           "columns": {
             "items": {
               "$ref": "#/components/schemas/SchemaColumn-Input"
@@ -7544,6 +7549,7 @@
         "type": "object",
         "required": [
           "type",
+          "summary",
           "columns"
         ],
         "title": "MetaSchemaAddVersionRequest",
