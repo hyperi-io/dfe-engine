@@ -61,6 +61,17 @@ class TestPaginatedResponse:
         assert data["next_page"] is None
         assert data["prev_page"] is None
 
+    def test_from_list_per_page_minus_one_returns_all(self):
+        items = list(range(50))
+        resp = PaginatedResponse.from_list(items, page=3, per_page=-1)
+        assert resp.items == items
+        assert resp.total == 50
+        assert resp.page == 1
+        assert resp.per_page == -1
+        assert resp.total_pages == 1
+        assert resp.next_page is None
+        assert resp.prev_page is None
+
 
 class TestApplySearch:
     """apply_search() helper."""

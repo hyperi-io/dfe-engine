@@ -20,7 +20,12 @@ class PaginationParams:
     def __init__(
         self,
         page: int = Query(1, ge=1, description="Page number (1-based)"),
-        per_page: int = Query(25, ge=1, le=100, description="Items per page"),
+        per_page: int = Query(
+            25,
+            ge=-1,
+            le=100,
+            description="Items per page; use -1 to return all items (ignores page)",
+        ),
     ):
         self.page = page
         self.per_page = per_page
@@ -50,6 +55,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def total_pages(self) -> int:
+        if self.per_page == -1:
+            return 1 if self.total else 0
         if self.per_page <= 0:
             return 0
         return max(1, -(-self.total // self.per_page))
@@ -57,6 +64,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def next_page(self) -> int | None:
+        if self.per_page == -1:
+            return None
         if self.page < self.total_pages:
             return self.page + 1
         return None
@@ -78,12 +87,22 @@ class PaginatedResponse(BaseModel, Generic[T]):
         """Create paginated response from an in-memory list.
 
         Suitable for YAML-backed registries where data fits in memory.
+
+        When ``per_page`` is ``-1``, returns every item in a single page.
         """
         total = len(all_items)
-        start = (page - 1) * per_page
-        end = start + per_page
+        if per_page == -1:
+            return cls(items=list(all_items), total=total, page=1, per_page=-1)
+        effective_per_page = per_page if per_page > 0 else 25
+        start = (page - 1) * effective_per_page
+        end = start + effective_per_page
         items = all_items[start:end]
-        return cls(items=items, total=total, page=page, per_page=per_page)
+        return cls(
+            items=items,
+            total=total,
+            page=page,
+            per_page=effective_per_page,
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────

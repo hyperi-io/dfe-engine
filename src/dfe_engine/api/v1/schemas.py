@@ -189,7 +189,11 @@ async def get_meta_schema(
     comment: str | None = Query(None, description="Filter by comment (substring)"),
     attribute: str | None = Query(None, description="Filter by attribute (substring)"),
 ) -> MetaSchemaGetResponse:
-    """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
+    """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).
+
+    Columns are paginated under ``version.columns``; use ``per_page=-1`` to return all
+    matching columns (after search/filters) in one page.
+    """
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
         SchemaValidationError,

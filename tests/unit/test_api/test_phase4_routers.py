@@ -90,13 +90,11 @@ class TestSchemasRouter:
 
     def test_columns_with_existing_source(self, client, admin_headers, sample_source):
         """Create a source, then try to get columns (may 404 if no schema path)."""
-        # First create a source
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
             f"/api/v1/schemas/{sample_source['source']}/columns",
             headers=admin_headers,
         )
-        # Source exists but likely has no schema file → 404 (no_schema)
         assert resp.status_code in (200, 404)
         if resp.status_code == 404:
             assert resp.json()["code"] in ("not_found", "no_schema")
@@ -270,6 +268,16 @@ class TestSchemasMetaListRouter:
                 )
                 assert page2.status_code == 200
                 assert page2.json()["version"]["columns"]["items"][0]["name"] == "z_col"
+
+                all_page = tc.get(
+                    f"{columns_url}?version=1&per_page=-1",
+                    headers=headers,
+                )
+                assert all_page.status_code == 200
+                all_cols = all_page.json()["version"]["columns"]
+                assert all_cols["per_page"] == -1
+                assert len(all_cols["items"]) == all_cols["total"] == 3
+                assert all_cols["next_page"] is None
 
                 bad_version = tc.get(
                     f"{columns_url}?version=99",
