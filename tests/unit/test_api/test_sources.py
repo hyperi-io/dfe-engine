@@ -49,6 +49,10 @@ class TestListSources:
         assert data["next_page"] is None
         assert data["prev_page"] == 2
 
+    def test_list_invalid_per_page_returns_422(self, client: TestClient, admin_headers: dict):
+        resp = client.get("/api/v1/sources?page=1&per_page=0", headers=admin_headers)
+        assert resp.status_code == 422
+
     def test_list_search(self, client: TestClient, admin_headers: dict):
         client.post(
             "/api/v1/sources",

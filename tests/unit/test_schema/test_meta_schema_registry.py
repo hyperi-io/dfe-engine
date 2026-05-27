@@ -276,12 +276,38 @@ class TestSchemaRegistryCoverage:
         reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
         try:
             reg.save_schema(_minimal_meta("x/y"))
+            yaml_file = tmp_path / "schemas" / "x" / "y.yaml"
+            assert yaml_file.is_file()
             monkeypatch.setattr(
                 dulwich_porcelain,
                 "rm",
                 lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rm boom")),
             )
             reg.delete_schema("x/y")
+            assert not yaml_file.exists()
+            with pytest.raises(SchemaNotFoundError):
+                reg.get_schema("x/y")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_delete_schema_with_staged_uncommitted_index(self, tmp_path, monkeypatch):
+        """Regression: delete must remove YAML when index has staged add but no commit."""
+        monkeypatch.chdir(tmp_path)
+        Repo.init(str(tmp_path))
+        (tmp_path / "schemas").mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory="schemas", writable=True, refresh_interval=0)
+        try:
+            reg.save_schema(_minimal_meta("test/test"))
+            yaml_file = tmp_path / "schemas" / "test" / "test.yaml"
+            assert yaml_file.is_file()
+            dulwich_porcelain.add(reg._store._repo, paths=["schemas/test/test.yaml"])
+            reg.delete_schema("test/test")
+            assert not yaml_file.exists()
+            with pytest.raises(SchemaNotFoundError):
+                reg.get_schema("test/test")
+            assert "test/test" not in [r["path"] for r in reg.list_schemas()]
         finally:
             reg.close()
             SchemaRegistry.reset_instance()
