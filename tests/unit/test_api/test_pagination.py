@@ -1,6 +1,8 @@
 """Tests for pagination models and helpers."""
 
-from dfe_engine.api.pagination import PaginatedResponse, apply_search, apply_sort
+import pytest
+
+from dfe_engine.api.pagination import PaginatedResponse, apply_search, apply_sort, validate_per_page
 
 
 class TestPaginatedResponse:
@@ -60,6 +62,44 @@ class TestPaginatedResponse:
         assert data["total_pages"] == 1
         assert data["next_page"] is None
         assert data["prev_page"] is None
+
+    def test_from_list_per_page_minus_one_returns_all(self):
+        items = list(range(50))
+        resp = PaginatedResponse.from_list(items, page=3, per_page=-1)
+        assert resp.items == items
+        assert resp.total == 50
+        assert resp.page == 1
+        assert resp.per_page == -1
+        assert resp.total_pages == 1
+        assert resp.next_page is None
+        assert resp.prev_page is None
+
+    def test_from_list_empty_per_page_minus_one(self):
+        resp = PaginatedResponse.from_list([], page=1, per_page=-1)
+        assert resp.items == []
+        assert resp.total == 0
+        assert resp.page == 1
+        assert resp.per_page == -1
+        assert resp.total_pages == 1
+        assert resp.next_page is None
+        assert resp.prev_page is None
+
+    def test_from_list_rejects_invalid_per_page(self):
+        with pytest.raises(ValueError, match="per_page must be -1 or between 1 and 100"):
+            PaginatedResponse.from_list([1], page=1, per_page=0)
+
+
+class TestValidatePerPage:
+    """validate_per_page() bounds."""
+
+    @pytest.mark.parametrize("value", [-1, 1, 25, 100])
+    def test_accepts_valid_values(self, value: int):
+        assert validate_per_page(value) == value
+
+    @pytest.mark.parametrize("value", [0, -2, 101, 1000])
+    def test_rejects_invalid_values(self, value: int):
+        with pytest.raises(ValueError, match="per_page must be -1 or between 1 and 100"):
+            validate_per_page(value)
 
 
 class TestApplySearch:

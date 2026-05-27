@@ -325,6 +325,46 @@ class TestCloneVersion:
         assert all(isinstance(c, SchemaColumn) for c in result)
 
 
+# ── TestValidateMetaSchemaColumns ──────────────────────────────────
+
+
+class TestValidateMetaSchemaColumns:
+    def test_accepts_valid_meta_schema(self):
+        from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
+
+        meta = MetaSchema(
+            current="1",
+            path="test/schema",
+            versions={
+                "1": SchemaVersion(
+                    date="2026-01-01",
+                    type="model",
+                    summary="init",
+                    columns=[SchemaColumn(name="e", type="string", expr="@source: E")],
+                )
+            },
+        )
+        SchemaManager.validate_meta_schema_columns(meta)
+
+    def test_rejects_invalid_column_type(self):
+        from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
+
+        meta = MetaSchema(
+            current="1",
+            path="test/schema",
+            versions={
+                "1": SchemaVersion(
+                    date="2026-01-01",
+                    type="model",
+                    summary="init",
+                    columns=[SchemaColumn(name="bad", type="not_a_type", expr="@source: X")],
+                )
+            },
+        )
+        with pytest.raises(SchemaVersionError, match="Version '1'"):
+            SchemaManager.validate_meta_schema_columns(meta)
+
+
 # ── TestCreateMetaSchema ───────────────────────────────────────────
 
 

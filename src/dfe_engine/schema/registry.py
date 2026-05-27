@@ -277,8 +277,10 @@ class SchemaRegistry:
                 repo_root = Path(self._store._repo.path).resolve(strict=False)
                 yaml_abs = yaml_path.resolve(strict=False)
                 rel_path = str(yaml_abs.relative_to(repo_root))
+                # Remove from disk first so dulwich can stage deletion when the
+                # index has staged-but-uncommitted changes (e.g. failed commit).
+                yaml_abs.unlink(missing_ok=True)
                 git.rm(self._store._repo, paths=[rel_path])
-                yaml_abs.unlink()
                 git.commit(
                     self._store._repo,
                     message=f"schema: delete {table}".encode(),
@@ -287,8 +289,10 @@ class SchemaRegistry:
                     self._store._git_push_remote()
             except Exception as e:
                 logger.error(f"Git delete failed: {e}")
+                if yaml_path.exists():
+                    yaml_path.unlink(missing_ok=True)
         else:
-            yaml_path.unlink()
+            yaml_path.unlink(missing_ok=True)
 
         with self._store._lock:
             self._store._cache.pop(table, None)
