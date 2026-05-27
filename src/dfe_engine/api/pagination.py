@@ -6,24 +6,32 @@ useInfiniteQuery: UI reads ``next_page`` from ``getNextPageParam``.
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, TypeVar
 
-from fastapi import Query
-from pydantic import BaseModel, Field, computed_field
+from pydantic import AfterValidator, BaseModel, Field, computed_field
 
 T = TypeVar("T")
 
 
-class PaginationParams:
+def validate_per_page(value: int) -> int:
+    """Accept -1 (all items) or a page size in [1, 100]."""
+    if value == -1 or 1 <= value <= 100:
+        return value
+    msg = "per_page must be -1 or between 1 and 100"
+    raise ValueError(msg)
+
+
+PerPageParam = Annotated[int, AfterValidator(validate_per_page)]
+
+
+class PaginationParams(BaseModel):
     """FastAPI dependency for pagination query parameters."""
 
-    def __init__(
-        self,
-        page: int = Query(1, ge=1, description="Page number (1-based)"),
-        per_page: int = Query(25, ge=1, le=100, description="Items per page"),
-    ):
-        self.page = page
-        self.per_page = per_page
+    page: int = Field(1, ge=1, description="Page number (1-based)")
+    per_page: PerPageParam = Field(
+        25,
+        description="Items per page; use -1 to return all items (ignores page)",
+    )
 
 
 class SortOrder(str):
@@ -50,6 +58,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def total_pages(self) -> int:
+        if self.per_page == -1:
+            return 1
         if self.per_page <= 0:
             return 0
         return max(1, -(-self.total // self.per_page))
@@ -57,6 +67,8 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def next_page(self) -> int | None:
+        if self.per_page == -1:
+            return None
         if self.page < self.total_pages:
             return self.page + 1
         return None
@@ -78,12 +90,22 @@ class PaginatedResponse(BaseModel, Generic[T]):
         """Create paginated response from an in-memory list.
 
         Suitable for YAML-backed registries where data fits in memory.
+
+        When ``per_page`` is ``-1``, returns every item in a single page.
         """
         total = len(all_items)
+        if per_page == -1:
+            return cls(items=list(all_items), total=total, page=1, per_page=-1)
+        per_page = validate_per_page(per_page)
         start = (page - 1) * per_page
         end = start + per_page
         items = all_items[start:end]
-        return cls(items=items, total=total, page=page, per_page=per_page)
+        return cls(
+            items=items,
+            total=total,
+            page=page,
+            per_page=per_page,
+        )
 
 
 # ── Helpers ──────────────────────────────────────────────────

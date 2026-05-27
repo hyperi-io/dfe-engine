@@ -59,6 +59,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
+from dfe_engine.schema.models import MetaSchema
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
@@ -233,6 +234,16 @@ class SchemaManager:
             raise SchemaLoadError(f"Version entry for '{version}' must be a mapping: {p}")
         entry["summary"] = summary
         yaml_dump(data, p)
+
+    @staticmethod
+    def validate_meta_schema_columns(meta: MetaSchema) -> None:
+        """Validate every version's columns against TypeRegistry."""
+        for version, ver in meta.versions.items():
+            col_dicts = [col.to_yaml_dict() for col in ver.columns]
+            try:
+                _validate_columns(col_dicts)
+            except SchemaVersionError as exc:
+                raise SchemaVersionError(f"Version '{version}': {exc}") from exc
 
     @staticmethod
     def add_version(

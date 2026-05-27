@@ -189,7 +189,11 @@ async def get_meta_schema(
     comment: str | None = Query(None, description="Filter by comment (substring)"),
     attribute: str | None = Query(None, description="Filter by attribute (substring)"),
 ) -> MetaSchemaGetResponse:
-    """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``)."""
+    """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).
+
+    Columns are paginated under ``version.columns``; use ``per_page=-1`` to return all
+    matching columns (after search/filters) in one page.
+    """
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
         SchemaValidationError,
@@ -310,7 +314,7 @@ async def add_meta_schema_version(
             new_ver,
             col_dicts,
             type=version_type,
-            summary=f"{version_type} update",
+            summary=body.summary or "",
             set_current=True,
         )
     except SchemaVersionError as exc:
@@ -348,6 +352,7 @@ async def create_meta_schema(
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
 
     try:
         canonical_path = canonical_schema_path(schema_path)
@@ -382,6 +387,14 @@ async def create_meta_schema(
             },
         )
     to_save = body.model_copy(update={"path": canonical_path})
+
+    try:
+        SchemaManager.validate_meta_schema_columns(to_save)
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
 
     try:
         saved = registry.save_schema(

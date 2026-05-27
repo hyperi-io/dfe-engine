@@ -90,13 +90,11 @@ class TestSchemasRouter:
 
     def test_columns_with_existing_source(self, client, admin_headers, sample_source):
         """Create a source, then try to get columns (may 404 if no schema path)."""
-        # First create a source
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
             f"/api/v1/schemas/{sample_source['source']}/columns",
             headers=admin_headers,
         )
-        # Source exists but likely has no schema file → 404 (no_schema)
         assert resp.status_code in (200, 404)
         if resp.status_code == 404:
             assert resp.json()["code"] in ("not_found", "no_schema")
@@ -271,6 +269,16 @@ class TestSchemasMetaListRouter:
                 assert page2.status_code == 200
                 assert page2.json()["version"]["columns"]["items"][0]["name"] == "z_col"
 
+                all_page = tc.get(
+                    f"{columns_url}?version=1&per_page=-1",
+                    headers=headers,
+                )
+                assert all_page.status_code == 200
+                all_cols = all_page.json()["version"]["columns"]
+                assert all_cols["per_page"] == -1
+                assert len(all_cols["items"]) == all_cols["total"] == 3
+                assert all_cols["next_page"] is None
+
                 bad_version = tc.get(
                     f"{columns_url}?version=99",
                     headers=headers,
@@ -357,6 +365,31 @@ class TestSchemasMetaWriteRouter:
         url = "/api/v1/schemas/definitions/gcp/audit_log"
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
+                invalid_cols = tc.post(
+                    "/api/v1/schemas/definitions/gcp/bad_columns",
+                    json={
+                        **self._minimal_schema_body(),
+                        "versions": {
+                            "1": {
+                                "date": "2026-01-01",
+                                "type": "model",
+                                "summary": "init",
+                                "columns": [
+                                    {
+                                        "name": "bad",
+                                        "type": "not_a_type",
+                                        "expr": "@source: X",
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                    headers=headers,
+                )
+                assert invalid_cols.status_code == 422
+                assert invalid_cols.json()["code"] == "validation_error"
+                assert "Column validation failed" in invalid_cols.json()["message"]
+
                 post = tc.post(url, json=self._minimal_schema_body(), headers=headers)
                 assert post.status_code == 201
                 assert post.json()["path"] == "gcp/audit_log"
@@ -589,6 +622,7 @@ class TestSchemasMetaWriteRouter:
                     f"{base}/versions",
                     json={
                         "type": "revision",
+                        "summary": "added column p",
                         "columns": [
                             {"name": "e", "type": "string"},
                             {"name": "n", "type": "integer"},
@@ -602,7 +636,7 @@ class TestSchemasMetaWriteRouter:
                 assert body["current"] == "1.1.1"
                 assert "1.1.1" in body["versions"]
                 assert body["versions"]["1.1.1"]["type"] == "revision"
-                assert body["versions"]["1.1.1"]["summary"] == "revision update"
+                assert body["versions"]["1.1.1"]["summary"] == "added column p"
                 assert len(body["versions"]["1.1.1"]["columns"]) == 3
                 assert "1.0.0" in body["versions"]
         finally:
