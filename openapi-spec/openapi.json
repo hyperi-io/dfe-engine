@@ -1483,11 +1483,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -1495,13 +1493,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -1912,11 +1906,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -1924,13 +1916,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -2383,11 +2371,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -2395,13 +2381,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -2920,11 +2902,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -2932,13 +2912,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -3353,11 +3329,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -3365,13 +3339,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -4694,11 +4664,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -4706,13 +4674,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": 1,
-              "description": "Items per page",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page"
+            }
           }
         ],
         "responses": {
@@ -4750,7 +4714,7 @@
           "schemas"
         ],
         "summary": "Get Meta Schema",
-        "description": "Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).\n\nColumns are paginated under ``version.columns``; use ``per_page=-1`` to return all matching columns (after search/filters) in one page.",
+        "description": "Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).\n\nColumns are paginated under ``version.columns``; use ``per_page=-1`` to return all\nmatching columns (after search/filters) in one page.",
         "operationId": "get_meta_schema_api_v1_schemas_definitions__schema_path__versions_columns_get",
         "parameters": [
           {
@@ -4906,11 +4870,9 @@
             "schema": {
               "type": "integer",
               "minimum": 1,
-              "description": "Page number (1-based)",
               "default": 1,
               "title": "Page"
-            },
-            "description": "Page number (1-based)"
+            }
           },
           {
             "name": "per_page",
@@ -4918,13 +4880,9 @@
             "required": false,
             "schema": {
               "type": "integer",
-              "maximum": 100,
-              "minimum": -1,
-              "description": "Items per page; use -1 to return all items (ignores page)",
               "default": 25,
               "title": "Per Page"
-            },
-            "description": "Items per page; use -1 to return all items (ignores page)"
+            }
           }
         ],
         "responses": {
@@ -7943,72 +7901,6 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
-      },
-      "PaginatedResponse_dfe_engine__api__v1__schemas__SchemaColumn_": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[dfe_engine.api.v1.schemas.SchemaColumn]"
       },
       "PaginatedResponse_SchemaColumn_": {
         "properties": {

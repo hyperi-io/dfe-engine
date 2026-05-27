@@ -6,29 +6,32 @@ useInfiniteQuery: UI reads ``next_page`` from ``getNextPageParam``.
 
 from __future__ import annotations
 
-from typing import Any, Generic, TypeVar
+from typing import Annotated, Any, Generic, TypeVar
 
-from fastapi import Query
-from pydantic import BaseModel, Field, computed_field
+from pydantic import AfterValidator, BaseModel, Field, computed_field
 
 T = TypeVar("T")
 
 
-class PaginationParams:
+def validate_per_page(value: int) -> int:
+    """Accept -1 (all items) or a page size in [1, 100]."""
+    if value == -1 or 1 <= value <= 100:
+        return value
+    msg = "per_page must be -1 or between 1 and 100"
+    raise ValueError(msg)
+
+
+PerPageParam = Annotated[int, AfterValidator(validate_per_page)]
+
+
+class PaginationParams(BaseModel):
     """FastAPI dependency for pagination query parameters."""
 
-    def __init__(
-        self,
-        page: int = Query(1, ge=1, description="Page number (1-based)"),
-        per_page: int = Query(
-            25,
-            ge=-1,
-            le=100,
-            description="Items per page; use -1 to return all items (ignores page)",
-        ),
-    ):
-        self.page = page
-        self.per_page = per_page
+    page: int = Field(1, ge=1, description="Page number (1-based)")
+    per_page: PerPageParam = Field(
+        25,
+        description="Items per page; use -1 to return all items (ignores page)",
+    )
 
 
 class SortOrder(str):
@@ -56,7 +59,7 @@ class PaginatedResponse(BaseModel, Generic[T]):
     @property
     def total_pages(self) -> int:
         if self.per_page == -1:
-            return 1 if self.total else 0
+            return 1
         if self.per_page <= 0:
             return 0
         return max(1, -(-self.total // self.per_page))
@@ -93,15 +96,15 @@ class PaginatedResponse(BaseModel, Generic[T]):
         total = len(all_items)
         if per_page == -1:
             return cls(items=list(all_items), total=total, page=1, per_page=-1)
-        effective_per_page = per_page if per_page > 0 else 25
-        start = (page - 1) * effective_per_page
-        end = start + effective_per_page
+        per_page = validate_per_page(per_page)
+        start = (page - 1) * per_page
+        end = start + per_page
         items = all_items[start:end]
         return cls(
             items=items,
             total=total,
             page=page,
-            per_page=effective_per_page,
+            per_page=per_page,
         )
 
 
