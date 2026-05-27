@@ -365,6 +365,31 @@ class TestSchemasMetaWriteRouter:
         url = "/api/v1/schemas/definitions/gcp/audit_log"
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
+                invalid_cols = tc.post(
+                    "/api/v1/schemas/definitions/gcp/bad_columns",
+                    json={
+                        **self._minimal_schema_body(),
+                        "versions": {
+                            "1": {
+                                "date": "2026-01-01",
+                                "type": "model",
+                                "summary": "init",
+                                "columns": [
+                                    {
+                                        "name": "bad",
+                                        "type": "not_a_type",
+                                        "expr": "@source: X",
+                                    }
+                                ],
+                            }
+                        },
+                    },
+                    headers=headers,
+                )
+                assert invalid_cols.status_code == 422
+                assert invalid_cols.json()["code"] == "validation_error"
+                assert "Column validation failed" in invalid_cols.json()["message"]
+
                 post = tc.post(url, json=self._minimal_schema_body(), headers=headers)
                 assert post.status_code == 201
                 assert post.json()["path"] == "gcp/audit_log"

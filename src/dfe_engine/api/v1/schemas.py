@@ -352,6 +352,7 @@ async def create_meta_schema(
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
 
     try:
         canonical_path = canonical_schema_path(schema_path)
@@ -386,6 +387,14 @@ async def create_meta_schema(
             },
         )
     to_save = body.model_copy(update={"path": canonical_path})
+
+    try:
+        SchemaManager.validate_meta_schema_columns(to_save)
+    except SchemaVersionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
 
     try:
         saved = registry.save_schema(
