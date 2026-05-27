@@ -314,7 +314,7 @@ async def add_meta_schema_version(
             new_ver,
             col_dicts,
             type=version_type,
-            summary=body.summary,
+            summary=body.summary or "",
             set_current=True,
         )
     except SchemaVersionError as exc:

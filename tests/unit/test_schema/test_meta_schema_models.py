@@ -7,6 +7,7 @@ import pytest
 
 from dfe_engine.schema.models import (
     MetaSchema,
+    MetaSchemaAddVersionRequest,
     PaginatedSchemaSummaryResponse,
     SchemaColumn,
     SchemaSummary,
@@ -219,3 +220,22 @@ class TestPaginatedSchemaSummaryResponse:
         assert resp.total == 2
         assert len(resp.items) == 1
         assert resp.schema_objects.children.keys() >= {"a", "b"}
+
+
+class TestMetaSchemaAddVersionRequest:
+    def test_summary_optional(self):
+        req = MetaSchemaAddVersionRequest.model_validate(
+            {
+                "type": "addition",
+                "columns": [{"name": "x", "type": "string", "expr": "@source: X"}],
+            }
+        )
+        assert req.summary is None
+
+    def test_summary_accepted_when_provided(self):
+        req = MetaSchemaAddVersionRequest(
+            type="revision",
+            summary="Bump columns",
+            columns=[SchemaColumn(name="x", type="string", expr="@source: X")],
+        )
+        assert req.summary == "Bump columns"

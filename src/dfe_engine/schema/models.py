@@ -173,8 +173,8 @@ class MetaSchemaAddVersionRequest(BaseModel):
         ...,
         description="Change category (semver bump from current)",
     )
-    summary: str = Field(
-        ...,
+    summary: str | None = Field(
+        default=None,
         description="Human-readable summary stored on the new version",
     )
     columns: list[SchemaColumn] = Field(

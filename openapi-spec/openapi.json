@@ -7490,7 +7490,14 @@
             "description": "Change category (semver bump from current)"
           },
           "summary": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Summary",
             "description": "Human-readable summary stored on the new version"
           },
@@ -7507,7 +7514,6 @@
         "type": "object",
         "required": [
           "type",
-          "summary",
           "columns"
         ],
         "title": "MetaSchemaAddVersionRequest",
