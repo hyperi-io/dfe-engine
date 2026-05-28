@@ -3,7 +3,7 @@
 #  Purpose:      SOC2 audit event emitters for authentication and authorisation decisions.
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """SOC2 audit logging via structured log events.

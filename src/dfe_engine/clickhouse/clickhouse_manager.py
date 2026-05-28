@@ -3,7 +3,7 @@
 #  Purpose:      ClickHouse connection management using clickhouse-connect
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2025 HYPERI PTY LIMITED
 
 """

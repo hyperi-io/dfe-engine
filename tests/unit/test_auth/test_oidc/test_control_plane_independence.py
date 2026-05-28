@@ -3,7 +3,7 @@
 #  Purpose:      Prove that OIDC auth works with static YAML files when dfe-engine is down
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """CRITICAL: Verify auth works when dfe-engine management features are unavailable.

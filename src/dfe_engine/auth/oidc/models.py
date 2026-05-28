@@ -3,7 +3,7 @@
 #  Purpose:      Pydantic models for OIDC provider configuration and group resolution
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Pydantic models for OIDC provider registry.
