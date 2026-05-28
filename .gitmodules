@@ -4,8 +4,3 @@
 [submodule "config"]
 	path = config
 	url = https://github.com/hyperi-io/dfe-devex.git
-[submodule "tooling"]
-	path = tooling
-	url = https://github.com/hyperi-io/tooling.git
-	update = rebase
-	fetchRecurseSubmodules = true
