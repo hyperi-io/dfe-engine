@@ -3,7 +3,7 @@
 #  Purpose:      Pydantic models for Rust service surface definitions
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Service surface models — config settings + metrics exposed by Rust services.

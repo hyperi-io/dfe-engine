@@ -3,7 +3,7 @@
 #  Purpose:      Bootstrap auth stores with default groups, accounts, and roles
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Bootstrap auth stores for local authentication.

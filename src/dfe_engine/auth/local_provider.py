@@ -3,7 +3,7 @@
 #  Purpose:      Local authentication provider backed by AccountStore and GroupStore
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Local authentication provider backed by YAML stores.

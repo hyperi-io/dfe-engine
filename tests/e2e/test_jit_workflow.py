@@ -3,7 +3,7 @@
 #  Purpose:      E2E tests for JIT provisioning workflow on first OIDC login
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """E2E tests for JIT provisioning — shadow account creation on OIDC login."""

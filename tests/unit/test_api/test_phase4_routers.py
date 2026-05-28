@@ -3,7 +3,7 @@
 #  Purpose:      Tests for Phase 4 routers (discovery, sigma, schemas)
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tests for Phase 4: discovery, sigma, and schemas routers.

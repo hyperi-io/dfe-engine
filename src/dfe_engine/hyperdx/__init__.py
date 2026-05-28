@@ -3,7 +3,7 @@
 #  Purpose:      HyperDX integration package init
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """HyperDX integration — team and connection management via internal API."""
