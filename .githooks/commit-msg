@@ -3,7 +3,7 @@
 # File:      .githooks/commit-msg
 # Purpose:   Conventional commit validation hook
 #
-# License:   FSL-1.1-ALv2
+# License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 #
 # Install: git config core.hooksPath .githooks

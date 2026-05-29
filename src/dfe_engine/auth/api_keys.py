@@ -3,7 +3,7 @@
 #  Purpose:      YAML-backed API key store with SHA-256 hashed tokens
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """API key management for dfe-engine.

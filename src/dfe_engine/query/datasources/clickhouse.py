@@ -3,7 +3,7 @@
 #  Purpose:      ClickHouse datasource adapter
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """ClickHouse datasource adapter using clickhouse-connect."""

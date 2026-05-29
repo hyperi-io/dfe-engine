@@ -3,7 +3,7 @@
 #  Purpose:      Org CRUD REST endpoints (admin for write, read for list/get)
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Organisation management router — CRUD for customer organisations.

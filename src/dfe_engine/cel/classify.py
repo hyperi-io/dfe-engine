@@ -3,7 +3,7 @@
 #  Purpose:      CEL expression tier classification (Python mirror of Rust classify.rs)
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """CEL expression classifier — mirrors the Rust classify.rs logic.

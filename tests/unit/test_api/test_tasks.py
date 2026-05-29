@@ -3,7 +3,7 @@
 #  Purpose:      Tests for tasks REST API and Phase 3 routers
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tests for Phase 3 operational routers: tasks, hunts, queries, pipeline."""

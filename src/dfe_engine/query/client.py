@@ -3,7 +3,7 @@
 #  Purpose:      Query API client for consuming the DFE Query API
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Query API client.

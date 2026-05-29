@@ -93,7 +93,7 @@
 * set min_coverage to 70% in CI config (overrides hyperi-ci 80% default) ([6f26b8d](https://github.com/hyperi-io/dfe-engine/commit/6f26b8de1ff94eb41db557e5512fb683401ac71e))
 * shrink ruff ignore list, test rules handled by hyperi-ci ([37f3506](https://github.com/hyperi-io/dfe-engine/commit/37f3506125c0da306529201cc5a9b50efa278079))
 * trigger CI on push to release branch ([e5a978d](https://github.com/hyperi-io/dfe-engine/commit/e5a978dfff9c0bcac14c183113b148e3c5ac1e2e))
-* update license to FSL-1.1-ALv2 and harden clickhouse queries ([9d1365d](https://github.com/hyperi-io/dfe-engine/commit/9d1365d46c33fa73f4f0eb1a0078f547d8390cc0))
+* update license to BUSL-1.1 and harden clickhouse queries ([9d1365d](https://github.com/hyperi-io/dfe-engine/commit/9d1365d46c33fa73f4f0eb1a0078f547d8390cc0))
 
 ## [1.6.9-dev.4](https://github.com/hyperi-io/dfe-engine/compare/v1.6.9-dev.3...v1.6.9-dev.4) (2026-03-24)
 

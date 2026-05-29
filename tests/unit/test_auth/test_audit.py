@@ -3,7 +3,7 @@
 #  Purpose:      Tests that audit functions emit correct structured log events.
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tests for SOC2 audit event emitters.

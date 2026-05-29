@@ -3,7 +3,7 @@
 #  Purpose:      REST API for ClickHouse table/schema exploration
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Discovery router — ClickHouse table and column introspection.

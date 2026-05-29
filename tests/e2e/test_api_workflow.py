@@ -3,7 +3,7 @@
 #  Purpose:      End-to-end API workflow tests (auth → CRUD → task polling)
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """E2E workflow tests — validates full user journeys through the REST API.

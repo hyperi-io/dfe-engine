@@ -3,7 +3,7 @@
 #  Purpose:      FastAPI TestClient tests for /v1/cel/check endpoints
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tests for the /v1/cel/check and /v1/cel/check-batch endpoints.

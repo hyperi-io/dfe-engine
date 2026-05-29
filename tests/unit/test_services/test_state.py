@@ -3,7 +3,7 @@
 #  Purpose:      Tests for ServiceStateClient and _parse_prometheus_text
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tests for state.py — pure logic only. HTTP/async methods skipped."""

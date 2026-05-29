@@ -3,7 +3,7 @@
 #  Purpose:      Storage datasource adapters (S3, MinIO, filesystem)
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Storage datasource adapters for directory listing.
