@@ -3,7 +3,7 @@
 #  Purpose:      REST API for background task status polling and SSE streaming
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """Tasks router — status polling and SSE streaming for background tasks.

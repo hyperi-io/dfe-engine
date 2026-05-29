@@ -3,7 +3,7 @@
 #  Purpose:      Query result container with export utilities
 #  Language:     Python
 #
-#  License:      FSL-1.1-ALv2
+#  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
 """QueryResult — dict-native result container with export utilities."""
