@@ -9,7 +9,7 @@ readme = "README.md"
 
 dependencies = [
     # hyperi-pylib for logging and common utilities
-    "hyperi-pylib[expression,http]>=2.25.0",
+    "hyperi-pylib[expression,http]>=2.28.4",
     # Data processing
     "pandas>=3.0.1",
     "numpy>=2.4.2",
