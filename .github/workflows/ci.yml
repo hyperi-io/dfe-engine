@@ -1,6 +1,6 @@
 # Project:   DFE Engine
 # File:      .github/workflows/ci.yml
-# Purpose:   CI pipeline — quality, test, build, release, publish
+# Purpose:   CI pipeline -- quality, test, build, release, publish
 #
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
@@ -16,13 +16,25 @@ name: CI
     inputs:
       tag:
         type: string
-        required: true
-        description: "Tag to publish (e.g. v1.7.0)"
+        required: false
+        default: ""
+        description: "Tag to re-publish (existing tag). Omit + set from-head to release HEAD."
+      from-head:
+        type: string
+        required: false
+        default: ""
+        description: "'true' to release/retry the current HEAD -- the CI creates the tag (issue #35)."
+      bump:
+        type: string
+        required: false
+        default: "auto"
+        description: "Version resolution for from-head: auto | patch | minor (forced)."
 
 jobs:
   ci:
-    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@fd0e0aacf94ac0276d4d1b436e3ad8403d3b53cd # main
+    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@v2.6.4
     with:
-      publish-target: internal
       tag: ${{ inputs.tag || '' }}
+      from-head: ${{ inputs.from-head || '' }}
+      bump: ${{ inputs.bump || 'auto' }}
     secrets: inherit
