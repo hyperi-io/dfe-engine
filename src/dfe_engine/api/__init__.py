@@ -39,6 +39,11 @@ class _DfeApiApp:
                     v = "dev"
                 return VersionInfo(self.name, v)
 
+            def deployment_contract(self):
+                from dfe_engine.deployment_contract import engine_deployment_contract
+
+                return engine_deployment_contract()
+
             def register_commands(self, app) -> None:
                 from dfe_engine.cli import register_auth_commands
 
