@@ -7,7 +7,11 @@
 replicaCount: 1
 
 image:
-  repository: harbor.hyperi.io/dfe/dfe-engine
+  # -- Default registry/repository matches the deployment contract
+  # (deployment.image_registry, default ghcr.io/hyperi-io). Override per
+  # environment via Argo CD / Helm values; do not hardcode a deployment-specific
+  # registry here (dfe-engine is a generic product, not a HyperI-only tool).
+  repository: ghcr.io/hyperi-io/dfe-engine
   # -- Defaults to Chart appVersion
   tag: ""
   pullPolicy: IfNotPresent

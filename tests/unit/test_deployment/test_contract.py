@@ -160,31 +160,17 @@ class TestCommittedArtefactDrift:
     commit them; if you tweak Dockerfile/chart by hand, update the contract.
     """
 
-    def test_committed_dockerfile_has_contract_health_endpoint(self) -> None:
-        dockerfile = (PROJECT_ROOT / "Dockerfile").read_text()
-        contract = engine_deployment_contract()
-        assert contract.health.liveness_path in dockerfile, (
-            "committed Dockerfile healthcheck must use the contract's liveness_path"
-        )
+    def test_committed_dockerfile_matches_contract(self) -> None:
+        from hyperi_pylib.deployment import validate_dockerfile
 
-    def test_committed_dockerfile_exposes_metrics_port(self) -> None:
-        dockerfile = (PROJECT_ROOT / "Dockerfile").read_text()
-        contract = engine_deployment_contract()
-        assert f"EXPOSE {contract.metrics_port}" in dockerfile
+        mismatches = validate_dockerfile(engine_deployment_contract(), PROJECT_ROOT / "Dockerfile")
+        assert mismatches == [], f"committed Dockerfile drifted from contract: {mismatches}"
 
-    def test_committed_dockerfile_entrypoint_matches_contract(self) -> None:
-        dockerfile = (PROJECT_ROOT / "Dockerfile").read_text()
-        contract = engine_deployment_contract()
-        assert f'ENTRYPOINT ["{contract.binary()}"]' in dockerfile
-        # entrypoint_args render as the CMD list
-        for arg in contract.entrypoint_args:
-            assert f'"{arg}"' in dockerfile
+    def test_committed_chart_matches_contract(self) -> None:
+        from hyperi_pylib.deployment import validate_helm_values
 
-    def test_committed_chart_app_port_matches_contract(self) -> None:
-        chart_values = yaml.safe_load((PROJECT_ROOT / "chart" / "values.yaml").read_text())
-        contract = engine_deployment_contract()
-        # The committed chart exposes the API on contract.metrics_port.
-        assert chart_values["service"]["port"] == contract.metrics_port
+        mismatches = validate_helm_values(engine_deployment_contract(), PROJECT_ROOT / "chart")
+        assert mismatches == [], f"committed chart values drifted from contract: {mismatches}"
 
     def test_committed_chart_yaml_name_matches_contract(self) -> None:
         chart = yaml.safe_load((PROJECT_ROOT / "chart" / "Chart.yaml").read_text())

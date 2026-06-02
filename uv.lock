@@ -678,7 +678,7 @@ requires-dist = [
     { name = "google-api-python-client", specifier = ">=2.170.0" },
     { name = "google-auth", specifier = ">=2.38.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "hyperi-pylib", extras = ["expression", "http"], specifier = ">=2.28.4" },
+    { name = "hyperi-pylib", extras = ["expression", "http"], specifier = ">=2.28.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "msal", specifier = ">=1.32.0" },
     { name = "numpy", specifier = ">=2.4.2" },
@@ -975,7 +975,7 @@ wheels = [
 
 [[package]]
 name = "hyperi-pylib"
-version = "2.28.4"
+version = "2.28.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -993,9 +993,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f4/0d/113b98bb079ce0cfd432f3eeecc049c6525558ba5f59a64edb1d971cfb3e/hyperi_pylib-2.28.4.tar.gz", hash = "sha256:da91367a0c8d8546164e826df3929d41cdc0a26ef694436585a1aaaae4e5260f", size = 289385, upload-time = "2026-05-29T05:01:45.446Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/b0/a49bdc6749058a702132b1f898601baa57ca5e8d40f5dbb5152fe0901437/hyperi_pylib-2.28.5.tar.gz", hash = "sha256:9ea23280f07770b1117bcdce641c6983e6c28e5d76e18f62ab1ad13c26143079", size = 291034, upload-time = "2026-06-02T04:16:25.988Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/38/1b/50e4b2899bf077cd1ca58885cf84ca605fc884b3b7479f72bdd75fba04ef/hyperi_pylib-2.28.4-py3-none-any.whl", hash = "sha256:1b1fad039ac1f444afda9d1d68db58e8fc27af752b0196984f2fed6110baaebe", size = 362288, upload-time = "2026-05-29T05:01:44.15Z" },
+    { url = "https://files.pythonhosted.org/packages/41/26/a1c7a8c6cba9158a9b262591860fd05771a8f4fd5f905e9adc5748aa7d29/hyperi_pylib-2.28.5-py3-none-any.whl", hash = "sha256:318fcf8ee95e46e9af0973c685c6ea8d5ab21c1a93b2605398d398c5890f32c0", size = 364599, upload-time = "2026-06-02T04:16:27.46Z" },
 ]
 
 [package.optional-dependencies]
