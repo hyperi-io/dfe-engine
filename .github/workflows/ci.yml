@@ -32,7 +32,7 @@ name: CI
 
 jobs:
   ci:
-    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@v2.6.4
+    uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
     with:
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
