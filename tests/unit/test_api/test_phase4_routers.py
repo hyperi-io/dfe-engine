@@ -262,6 +262,15 @@ class TestSchemasMetaListRouter:
                 assert expr_filter.status_code == 200
                 assert expr_filter.json()["version"]["columns"]["total"] == 1
 
+                search_name_only = tc.get(
+                    f"{columns_url}?version=1&search=z&searchable_columns=name",
+                    headers=headers,
+                )
+                assert search_name_only.status_code == 200
+                item = search_name_only.json()["version"]["columns"]["items"][0]
+                assert item["name"] == "z_col"
+                assert item["_matched_searchable"] == ["name"]
+
                 page2 = tc.get(
                     f"{columns_url}?version=1&page=2&per_page=1",
                     headers=headers,

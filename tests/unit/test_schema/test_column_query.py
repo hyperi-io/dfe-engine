@@ -29,6 +29,7 @@ class TestFilterColumns:
         cols = [_col(name="x", comment="keep"), _col(name="y")]
         out = filter_columns(cols, search="keep")
         assert len(out) == 1
+        assert out[0].matched_searchable == ["comment"]
 
     def test_search_null_matches_nullable_substring(self):
         cols = [
@@ -55,3 +56,30 @@ class TestFilterColumns:
             _col(name="b"),
         ]
         assert filter_columns(cols, attribute="pii")[0].name == "a"
+
+    def test_searchable_columns_limits_search(self):
+        cols = [
+            _col(name="find_me", comment="noise"),
+            _col(name="other", comment="find_me"),
+        ]
+        out = filter_columns(cols, search="find", searchable_columns=["name"])
+        assert len(out) == 1
+        assert out[0].name == "find_me"
+        assert out[0].matched_searchable == ["name"]
+
+    def test_searchable_columns_type_filter_alias(self):
+        cols = [_col(name="a", type="integer"), _col(name="b", type="string")]
+        out = filter_columns(cols, search="int", searchable_columns=["type_filter"])
+        assert [c.name for c in out] == ["a"]
+        assert out[0].matched_searchable == ["type"]
+
+    def test_matched_searchable_empty_without_search(self):
+        cols = [_col(name="a")]
+        out = filter_columns(cols, name="a")
+        assert out[0].matched_searchable == []
+
+    def test_invalid_searchable_columns_raises(self):
+        import pytest
+
+        with pytest.raises(ValueError, match="Invalid searchable_columns"):
+            filter_columns([_col()], search="x", searchable_columns=["nope"])
