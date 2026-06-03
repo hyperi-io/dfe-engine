@@ -4864,6 +4864,27 @@
             "description": "Filter by attribute (substring)"
           },
           {
+            "name": "searchable_columns",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Fields to apply ``search`` against (name, type, type_filter, use_case, expr, comment, attribute). Defaults to all column fields.",
+              "title": "Searchable Columns"
+            },
+            "description": "Fields to apply ``search`` against (name, type, type_filter, use_case, expr, comment, attribute). Defaults to all column fields."
+          },
+          {
             "name": "page",
             "in": "query",
             "required": false,
@@ -5168,7 +5189,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
                   },
                   "type": "array",
                   "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
@@ -5688,7 +5709,7 @@
           "health"
         ],
         "summary": "Liveness",
-        "description": "Liveness probe \u2014 is the process alive?",
+        "description": "Liveness probe -- is the process alive?\n\nChecks run concurrently via ``run_blocking`` with per-check\ntimeout so a single slow check can't stall the kubelet probe.",
         "operationId": "liveness_health_live_get",
         "responses": {
           "200": {
@@ -5708,7 +5729,6 @@
           "health"
         ],
         "summary": "Readiness",
-        "description": "Readiness probe \u2014 can the service handle traffic?",
         "operationId": "readiness_health_ready_get",
         "responses": {
           "200": {
@@ -5728,7 +5748,6 @@
           "health"
         ],
         "summary": "Startup",
-        "description": "Startup probe \u2014 has initialisation completed?",
         "operationId": "startup_health_startup_get",
         "responses": {
           "200": {
@@ -7912,7 +7931,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
             },
             "type": "array",
             "title": "Items"
@@ -8957,6 +8976,14 @@
             ],
             "title": "Comment",
             "description": "Comment for the column"
+          },
+          "matched_searchable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Searchable",
+            "description": "Column fields that matched the search query (API only)"
           }
         },
         "type": "object",
@@ -9087,7 +9114,7 @@
           },
           "columns": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
             },
             "type": "array",
             "title": "Columns",
@@ -10992,7 +11019,7 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__schema__models__SchemaColumn": {
+      "dfe_engine__schema__models__SchemaColumn-Output": {
         "properties": {
           "name": {
             "type": "string",
@@ -11054,6 +11081,14 @@
             ],
             "title": "Comment",
             "description": "Comment for the column"
+          },
+          "_matched_searchable": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matched Searchable",
+            "description": "Column fields that matched the search query (API only)"
           }
         },
         "type": "object",
