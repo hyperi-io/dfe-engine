@@ -21,12 +21,19 @@ from dfe_engine.api.pagination import PaginatedResponse
 class SchemaColumn(BaseModel):
     """A column in the schema."""
 
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     name: str = Field(..., description="Name of the column")
     type: str = Field(..., description="Type of the column")
     attribute: list[str] | None = Field(default=None, description="Attributes of the column")
     use_case: str | None = Field(default=None, description="Use case of the column")
     expr: str | None = Field(default=None, description="Expression for the column")
     comment: str | None = Field(default=None, description="Comment for the column")
+    matched_searchable: list[str] = Field(
+        default_factory=list,
+        serialization_alias="_matched_searchable",
+        description="Column fields that matched the search query (API only)",
+    )
 
     @field_validator("attribute", mode="before")
     @classmethod
@@ -53,7 +60,7 @@ class SchemaColumn(BaseModel):
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence (omits None; omits empty optional strings)."""
-        raw = self.model_dump(mode="python", exclude_none=True)
+        raw = self.model_dump(mode="python", exclude_none=True, exclude={"matched_searchable"})
         optional_empty_omit = frozenset({"use_case", "expr", "comment"})
         out: dict[str, Any] = {}
         for key, value in raw.items():

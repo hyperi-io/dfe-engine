@@ -188,6 +188,13 @@ async def get_meta_schema(
     expr: str | None = Query(None, description="Filter by expr (substring)"),
     comment: str | None = Query(None, description="Filter by comment (substring)"),
     attribute: str | None = Query(None, description="Filter by attribute (substring)"),
+    searchable_columns: list[str] | None = Query(
+        None,
+        description=(
+            "Fields to apply ``search`` against (name, type, type_filter, use_case, "
+            "expr, comment, attribute). Defaults to all column fields."
+        ),
+    ),
 ) -> MetaSchemaGetResponse:
     """Get one meta-schema definition by registry path (e.g. ``aws/cloudtrail``).
 
@@ -228,16 +235,23 @@ async def get_meta_schema(
         )
     ver = meta.versions[version]
     version_ids = list(meta.versions.keys())
-    filtered = filter_columns(
-        ver.columns,
-        search=search,
-        name=name,
-        type=type_filter,
-        use_case=use_case,
-        expr=expr,
-        comment=comment,
-        attribute=attribute,
-    )
+    try:
+        filtered = filter_columns(
+            ver.columns,
+            search=search,
+            name=name,
+            type=type_filter,
+            use_case=use_case,
+            expr=expr,
+            comment=comment,
+            attribute=attribute,
+            searchable_columns=searchable_columns,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
     columns_page = PaginatedResponse.from_list(
         filtered,
         pagination.page,
