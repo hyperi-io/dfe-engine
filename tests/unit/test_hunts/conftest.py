@@ -134,7 +134,9 @@ def unique_names():
 
 @pytest.fixture(scope="session")
 def dfe_package(dfe_config_fixtures, setup_paths):
-    dfe_package_path = os.path.join(os.getcwd(), "dfe_package_testing.yaml")
+    dfe_tmp_dir = os.path.join(os.getcwd(), "tests", "tmp")
+    os.makedirs(dfe_tmp_dir, exist_ok=True)
+    dfe_package_path = os.path.join(dfe_tmp_dir, "dfe_package_testing.yaml")
 
     with open(dfe_package_path, "w") as f:
         yaml.dump(dfe_config_fixtures, f)
