@@ -1,5 +1,7 @@
 # =============================================================================
+
 # Core (from ci/templates/gitignore/core.gitignore)
+
 # =============================================================================
 
 # Editor/IDE
@@ -33,7 +35,9 @@ coverage/
 coverage.xml
 
 # =============================================================================
+
 # Python (from ci/templates/gitignore/python.gitignore)
+
 # =============================================================================
 
 # Python bytecode
@@ -62,7 +66,9 @@ htmlcov/
 .ruff_cache/
 
 # =============================================================================
+
 # Project-specific
+
 # =============================================================================
 
 # Test artifacts
@@ -80,3 +86,81 @@ docker-compose.yml
 
 # Runtime config directory (created by bootstrap)
 config/
+
+# OS junk (never useful in repo)
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Editor / IDE local state
+.idea/
+.vscode/
+
+# Local environment files (never commit -- contain secrets)
+.env
+.env.*
+!.env.example
+!.env.example.*
+
+# them alone if already present.
+docs/superpowers/
+.mcp.json
+.ai-version
+
+# committed -- mirrored in .git/info/exclude.
+CLAUDE.md
+TODO.md
+AGENTS.md
+GEMINI.md
+.claude/
+.codex/
+.cursor/
+.gemini/
+.cursorrules
+
+# Git worktrees (local dev convenience)
+.worktrees/
+
+# Python build artefacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Python virtual envs and caches
+.venv/
+venv/
+env/
+ENV/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+.tox/
+.nox/
+pip-wheel-metadata/
