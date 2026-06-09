@@ -1,92 +1,3 @@
-# =============================================================================
-
-# Core (from ci/templates/gitignore/core.gitignore)
-
-# =============================================================================
-
-# Editor/IDE
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Environment/secrets
-.env
-.env.local
-.env.*.local
-
-# Logs
-*.log
-
-# Build outputs
-dist/
-dist-bin/
-build/
-out/
-
-# Test/coverage
-test-results/
-coverage/
-coverage.xml
-
-# =============================================================================
-
-# Python (from ci/templates/gitignore/python.gitignore)
-
-# =============================================================================
-
-# Python bytecode
-__pycache__/
-*.py[cod]
-*.so
-
-# Virtual environments
-.venv/
-venv/
-
-# Packaging
-*.egg-info/
-*.egg
-
-# Testing
-.pytest_cache/
-.coverage
-.coverage.*
-htmlcov/
-
-# Type checking
-.mypy_cache/
-
-# Linting
-.ruff_cache/
-
-# =============================================================================
-
-# Project-specific
-
-# =============================================================================
-
-# Test artifacts
-cov.xml
-tests/job_outputs/
-tests/test_logs/
-tests/tmp/
-
-# Generated config files
-dfe_package_testing.yaml
-meta_schemas.zip
-
-# Docker
-docker-compose.yml
-
-# Runtime config directory (created by bootstrap)
-config/
-
 # OS junk (never useful in repo)
 .DS_Store
 Thumbs.db
@@ -104,11 +15,22 @@ Thumbs.db
 !.env.example
 !.env.example.*
 
+# Local working files (not committed)
+#
+# Authoritative protection for hyperi-ai content is .git/info/exclude
+# (per-repo, never committed). The entries below ALSO appear there;
+# duplicating them in .gitignore is belt-and-braces -- if a developer
+# uses a tool that doesn't respect .git/info/exclude (unusual), the
+# .gitignore still catches it. We do not RELY on these being committed
+# in .gitignore -- attach surgically appends them if missing, leaves
 # them alone if already present.
 docs/superpowers/
 .mcp.json
 .ai-version
 
+# hyperi-ai per-project context + tool-specific equivalents.
+# Real files in project tree (Claude Code / Codex / Gemini / Cursor
+# all load these from project root natively). Local-only, never
 # committed -- mirrored in .git/info/exclude.
 CLAUDE.md
 TODO.md
@@ -122,6 +44,13 @@ GEMINI.md
 
 # Git worktrees (local dev convenience)
 .worktrees/
+
+# Local scratch / tmp (CORE.md: scratch goes here, gitignored, NOT
+# /tmp). Bare patterns (no leading slash) match a tmp dir at ANY
+# depth, so these cover top-level .tmp/ and tmp/ as well as nested
+# ones like tests/tmp/. Mirrored in attach.py _DEFAULT_EXCLUDES.
+.tmp/
+tmp/
 
 # Python build artefacts
 __pycache__/
