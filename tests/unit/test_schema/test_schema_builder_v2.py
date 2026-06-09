@@ -92,7 +92,7 @@ def _make_source(
 
     data = {
         "source": "test_source",
-        "header": {"type": header_type, "version": "1.0.0"},
+        "header": {"type": header_type, "version": "1.1.0"},
         "schema": schema_config,
     }
     if sigma_mappings:
@@ -198,7 +198,7 @@ class TestBuild:
         source = _make_source(meta_schema="meta.yaml")
         result = builder.build(source)
         assert "@profile: timeseries" in result.create_table_ddl
-        assert "@profile_version: 1.0.0" in result.create_table_ddl
+        assert "@profile_version: 1.1.0" in result.create_table_ddl
 
 
 # ── Sigma View ──────────────────────────────────────────────────────
