@@ -67,41 +67,41 @@ hunt_scheduler:
   num_threads: 2
 
 ip_config_standard_enrichment:
-- name: hypersec-enrichment-ch-array-fields.csv
+- name: hyperi-enrichment-ch-array-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-ch-event-subschema-map.csv
+- name: hyperi-enrichment-ch-event-subschema-map.csv
   version: v100.000.000
-- name: hypersec-enrichment-ch-fields-with-invalid-char.csv
+- name: hyperi-enrichment-ch-fields-with-invalid-char.csv
   version: v100.000.000
-- name: hypersec-enrichment-ch-remap-fields.csv
+- name: hyperi-enrichment-ch-remap-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-domain-fields.csv
+- name: hyperi-enrichment-domain-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-extract-fields.csv
+- name: hyperi-enrichment-extract-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-filter-whitelist.csv
+- name: hyperi-enrichment-filter-whitelist.csv
   version: v100.000.000
-- name: hypersec-enrichment-ip-fields.csv
+- name: hyperi-enrichment-ip-fields.csv
   version: v100.000.000 
-- name: hypersec-enrichment-json-fields.csv
+- name: hyperi-enrichment-json-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-logs-syslog-remap-fields.csv
+- name: hyperi-enrichment-logs-syslog-remap-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-maxmind-list.csv
+- name: hyperi-enrichment-maxmind-list.csv
   version: v100.000.000
-- name: hypersec-enrichment-public-suffix-list.csv
+- name: hyperi-enrichment-public-suffix-list.csv
   version: v100.000.000
-- name: hypersec-enrichment-time-fields.csv
+- name: hyperi-enrichment-time-fields.csv
   version: v100.000.000
-- name: hypersec-enrichment-ts-match-tz.csv
+- name: hyperi-enrichment-ts-match-tz.csv
   version: v100.000.000
-- name: hypersec-enrichment-tz-offset-mapping.csv
+- name: hyperi-enrichment-tz-offset-mapping.csv
   version: v100.000.000
-- name: hypersec-enrichment-update-datatype.csv
+- name: hyperi-enrichment-update-datatype.csv
   version: v100.000.000
 
 ip_config_receiver:
-- name: hypersec-receiver-event-category-map.csv
+- name: hyperi-receiver-event-category-map.csv
   version: v100.000.000
 
 
@@ -194,17 +194,17 @@ vector_templates:
     version: 100.000.000
   - name: hs-xdr-vector-ct-all-prometheus.yml
     version: 100.000.000
-  - name: hypersec-receiver-sink-notest.yml
+  - name: hyperi-receiver-sink-notest.yml
     version: 100.000.000
-  - name: hypersec-receiver-sink.yml
+  - name: hyperi-receiver-sink.yml
     version: 100.000.000
-  - name: hypersec-receiver-source.yml
+  - name: hyperi-receiver-source.yml
     version: 100.000.000
-  - name: hypersec-receiver-transform-event-category.yml
+  - name: hyperi-receiver-transform-event-category.yml
     version: 100.000.000
-  - name: hypersec-receiver-transform-timestamp.yml
+  - name: hyperi-receiver-transform-timestamp.yml
     version: 100.000.000
-  - name: hypersec-receiver.yml
+  - name: hyperi-receiver.yml
     version: 100.000.000
   custom: null
 
@@ -232,8 +232,8 @@ ingestion_pipelines:
             target_CPU_utilization_percentage:  125
             persistence_size: 1Gi
           config_files:
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'                  # 
-            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'    # 
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'                  # 
+            extract_fields_csv: '/standard_enrichment_files/hyperi-enrichment-extract-fields.csv'    # 
             field_setter_iteration_group: 'finalise'                                                   # 
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -267,9 +267,9 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
           steps:
             - id: hs-xdr-vector-ct-all-main
               type: base
@@ -300,7 +300,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -391,7 +391,7 @@ ingestion_pipelines:
               targetCPUUtilizationPercentage:  125
               persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -477,9 +477,9 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
-            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
+            extract_fields_csv: '/standard_enrichment_files/hyperi-enrichment-extract-fields.csv'
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
             field_setter_iteration_group: 'finalise'
@@ -518,9 +518,9 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
           steps:
             - id: hs-xdr-vector-ct-all-main
               type: base
@@ -609,12 +609,12 @@ ingestion_pipelines:
             persistence_size: 1Gi
           config_files:
             field_setter_iteration_group: 'finalise'
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
-            domain_fields_csv: '/standard_enrichment_files/hypersec-enrichment-domain-fields.csv'
-            public_suffix_list_csv: '/standard_enrichment_files/hypersec-enrichment-public-suffix-list.csv'
+            domain_fields_csv: '/standard_enrichment_files/hyperi-enrichment-domain-fields.csv'
+            public_suffix_list_csv: '/standard_enrichment_files/hyperi-enrichment-public-suffix-list.csv'
           steps:
             - id: hs-xdr-vector-ct-all-main
               type: base
@@ -650,9 +650,9 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
-            event_subschema_csv: '/standard_enrichment_files/hypersec-enrichment-ch-event-subschema-map.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
+            event_subschema_csv: '/standard_enrichment_files/hyperi-enrichment-ch-event-subschema-map.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -747,7 +747,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -808,8 +808,8 @@ ingestion_pipelines:
             persistence_size: 1Gi
           config_files:
             field_setter_iteration_group: 'finalise'
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
           steps:
@@ -845,8 +845,8 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -879,7 +879,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -942,11 +942,11 @@ ingestion_pipelines:
             persistence_size: 1Gi
           config_files:
             field_setter_iteration_group: 'finalise'
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
-            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
+            extract_fields_csv: '/standard_enrichment_files/hyperi-enrichment-extract-fields.csv'
           steps:
             - id: hs-xdr-vector-ct-all-main
               type: base
@@ -982,8 +982,8 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1016,7 +1016,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1080,10 +1080,10 @@ ingestion_pipelines:
           config_files:
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
-            extract_fields_csv: '/standard_enrichment_files/hypersec-enrichment-extract-fields.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
+            extract_fields_csv: '/standard_enrichment_files/hyperi-enrichment-extract-fields.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             field_setter_iteration_group: 'finalise'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1124,7 +1124,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1215,7 +1215,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi 
           config_files:
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             field_setter_iteration_group: 'finalise'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1248,8 +1248,8 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1282,7 +1282,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             opensearch_role_arn: 'arn:aws:iam::239230600602:role/vector'
             opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
           steps:
@@ -1336,7 +1336,7 @@ ingestion_pipelines:
           kafka_source_topic: "logs_hypercol_metric"
           kafka_source_topic_suffix: "_land"
           kafka_sink_topic: "logs_hypercol_metric_load"
-          kafka_consumer_group: "vector-logs-hypersec-logs-hypersec-hypercollector-metric-finalize"
+          kafka_consumer_group: "vector-logs-hyperi-logs-hyperi-hypercollector-metric-finalize"
           kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
           container_config:
             min_replicas: 1
@@ -1345,7 +1345,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi 
           config_files:
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
             field_setter_iteration_group: 'finalise'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1380,7 +1380,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            json_fields:  '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
+            json_fields:  '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1452,7 +1452,7 @@ ingestion_pipelines:
         config:
           kafka_source_topic: "logs_hypercol_metric_load"
           kafka_source_topic_suffix: ""
-          kafka_consumer_group: "vector-logs-hypersec-logs-hypersec-hypercollector-metric-load-s3"
+          kafka_consumer_group: "vector-logs-hyperi-logs-hyperi-hypercollector-metric-load-s3"
           kafka_brokers: "b-2.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-3.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094,b-1.ghostburner.ra5n0s.c3.kafka.ap-southeast-2.amazonaws.com:9094"
           container_config: 
             min_replicas: 1
@@ -1492,11 +1492,11 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi 
           config_files:
-            json_fields: '/standard_enrichment_files/hypersec-enrichment-json-fields.csv'
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
-            ip_fields: '/standard_enrichment_files/hypersec-enrichment-ip-fields.csv'
-            maxmind_enrichment: '/standard_enrichment_files/hypersec-enrichment-maxmind-list.csv'
-            time_fields: "/standard_enrichment_files/hypersec-enrichment-time-fields.csv"
+            json_fields: '/standard_enrichment_files/hyperi-enrichment-json-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
+            ip_fields: '/standard_enrichment_files/hyperi-enrichment-ip-fields.csv'
+            maxmind_enrichment: '/standard_enrichment_files/hyperi-enrichment-maxmind-list.csv'
+            time_fields: "/standard_enrichment_files/hyperi-enrichment-time-fields.csv"
             geoip_asn: '/geoip/GeoLite2-ASN_mmdb/GeoLite2-ASN.mmdb'
             geoip_city: '/geoip/GeoLite2-City_mmdb/GeoLite2-City.mmdb'
             field_setter_iteration_group: 'finalise'
@@ -1539,8 +1539,8 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: "/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv"
-            json_fields: "/standard_enrichment_files/hypersec-enrichment-json-fields.csv"
+            remap_fields: "/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv"
+            json_fields: "/standard_enrichment_files/hyperi-enrichment-json-fields.csv"
             supported_timestamp_format: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f", "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F %X", "%FT%X"]'
           steps:
             - id: hs-xdr-vector-ct-all-main
@@ -1573,7 +1573,7 @@ ingestion_pipelines:
             targetCPUUtilizationPercentage:  125
             persistence_size: 1Gi
           config_files:
-            remap_fields: '/standard_enrichment_files/hypersec-enrichment-ch-remap-fields.csv'
+            remap_fields: '/standard_enrichment_files/hyperi-enrichment-ch-remap-fields.csv'
             opensearch_endpoint: 'https://vpc-ghostburner-vc3t7e5zqeeu4nsa6vrcz6hwfy.ap-southeast-2.es.amazonaws.com'
           steps:
             - id: hs-xdr-vector-ct-all-main

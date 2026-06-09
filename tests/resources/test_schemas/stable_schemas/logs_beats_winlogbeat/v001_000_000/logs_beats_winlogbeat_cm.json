@@ -7712,7 +7712,7 @@
     "description": "HyperI logs_beats_winlogbeat OpenSearch ISM log streaming template. vv001_000_000 COMPATIBILITY MODE."
   },
   "composed_of": [
-    "hypersec-log-component-template"
+    "hyperi-log-component-template"
   ],
   "priority": "100",
   "data_stream": {

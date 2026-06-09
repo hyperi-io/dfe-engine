@@ -232,7 +232,7 @@ GET /sources/windows_audit/history
 [
   {
     "sha": "abc1234",
-    "author": "derek@hypersec.io",
+    "author": "derek@hyperi.io",
     "timestamp": "2026-03-02T10:30:00Z",
     "message": "Update windows_audit schema: add process_name column",
     "etag": "def5678"

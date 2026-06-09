@@ -36,10 +36,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - observability.hypersec.io
+        - observability.hyperi.io
       secretName: hyperdx-tls
   rules:
-    - host: observability.hypersec.io
+    - host: observability.hyperi.io
       http:
         paths:
           # HyperDX UI
@@ -69,10 +69,10 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - observability.hypersec.io
+        - observability.hyperi.io
       secretName: hyperdx-tls
   rules:
-    - host: observability.hypersec.io
+    - host: observability.hyperi.io
       http:
         paths:
           - path: /oauth2

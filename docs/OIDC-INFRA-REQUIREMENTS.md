@@ -241,7 +241,7 @@ oidc:
   #       DFE_OIDC_GOOGLE_CLIENT_ID: client-id
   #       DFE_OIDC_GOOGLE_CLIENT_SECRET: client-secret
   #       DFE_GOOGLE_SA_JSON: service-account-json
-  #   - name: entra-hypersec
+  #   - name: entra-hyperi
   #     secretName: dfe-oidc-entra
   #     envMappings:
   #       DFE_OIDC_ENTRA_CLIENT_ID: client-id

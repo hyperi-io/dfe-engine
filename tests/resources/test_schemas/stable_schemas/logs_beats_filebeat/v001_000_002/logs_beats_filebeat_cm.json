@@ -30721,7 +30721,7 @@
     "description": "HyperI logs_beats_filebeat OpenSearch ISM log streaming template. vv001_000_003 COMPATIBILITY MODE."
   },
   "composed_of": [
-    "hypersec-log-component-template"
+    "hyperi-log-component-template"
   ],
   "priority": "100",
   "data_stream": {

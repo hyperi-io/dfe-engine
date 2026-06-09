@@ -111,15 +111,15 @@ mapping. Supports exact email and `@domain` suffix matching:
 ```bash
 # Google Workspace — map by email domain or specific user
 OIDC_EMAIL_CONNECTION_MAP='{
-  "admin@hypersec.io": "ch-admin",
-  "@hypersec.io": "ch-analyst",
+  "admin@hyperi.io": "ch-admin",
+  "@hyperi.io": "ch-analyst",
   "@contractor.example.com": "ch-readonly"
 }'
 ```
 
 Matching rules:
-- Exact email match is checked first (`admin@hypersec.io`)
-- Domain suffix match is checked second (`@hypersec.io`)
+- Exact email match is checked first (`admin@hyperi.io`)
+- Domain suffix match is checked second (`@hyperi.io`)
 - First match wins within each category
 
 ### Default Connection
@@ -428,7 +428,7 @@ OIDC_GROUP_CONNECTION_MAP: '{"ac51800c-...":"ch-admin","b7f3a2d1-...":"ch-analys
 # Email-based mapping (Google, or supplementary for any provider)
 # Keys: exact email or @domain suffix
 # Values: HyperDX Connection name
-OIDC_EMAIL_CONNECTION_MAP: '{"admin@hypersec.io":"ch-admin","@hypersec.io":"ch-analyst"}'
+OIDC_EMAIL_CONNECTION_MAP: '{"admin@hyperi.io":"ch-admin","@hyperi.io":"ch-analyst"}'
 
 # Default connection when no claim matches (optional)
 OIDC_DEFAULT_CONNECTION: 'ch-readonly'
@@ -577,7 +577,7 @@ User                oauth2-proxy       HyperDX API              MongoDB         
  │                      │── proxy request ─>│                      │                │
  │                      │   Headers:       │                       │                │
  │                      │   X-Forwarded-Groups: <guid1>,<guid2>   │                │
- │                      │   X-Forwarded-Email: user@hypersec.io   │                │
+ │                      │   X-Forwarded-Email: user@hyperi.io   │                │
  │                      │                  │                       │                │
  │                      │                  │── resolveOidcConnection               │
  │                      │                  │   1. check groups → match on <guid1>  │

@@ -7,7 +7,7 @@ class VectorStepType(Enum):
     """The type of vector step"""
 
     BASE = "hs"
-    HYPERSEC = "hypersec"
+    HYPERI = "hyperi"
     SOURCE = "0"
     TRANSFORM = "1"
     SINK = "2"

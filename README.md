@@ -11,7 +11,7 @@ uv pip install dfe-engine
 Or from source:
 
 ```bash
-git clone https://github.com/hypersec-io/dfe-engine.git
+git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
 uv pip install -e ".[dev]"
 ```
@@ -78,7 +78,7 @@ print(f"ClickHouse: {settings.clickhouse.host}:{settings.clickhouse.port}")
 
 ```bash
 # Clone the repository
-git clone https://github.com/hypersec-io/dfe-engine.git
+git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
 
 # Create virtual environment and install dependencies
@@ -226,9 +226,9 @@ yaml_dump(data, Path("output.yaml"))
 
 ## Related Projects
 
-- [dfe-cli](https://github.com/hypersec-io/dfe-cli) - CLI wrapper
-- [dfe-control-plane](https://github.com/hypersec-io/dfe-control-plane) - Control plane service
-- [hyperi-pylib](https://github.com/hypersec-io/hyperi-pylib) - Common utilities
+- [dfe-cli](https://github.com/hyperi-io/dfe-cli) - CLI wrapper
+- [dfe-control-plane](https://github.com/hyperi-io/dfe-control-plane) - Control plane service
+- [hyperi-pylib](https://github.com/hyperi-io/hyperi-pylib) - Common utilities
 
 ## License
 

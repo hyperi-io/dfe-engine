@@ -52,25 +52,25 @@ class TestConfigBuilder:
             },
             "ip_config_standard_enrichment": [
                 {
-                    "name": "hypersec-enrichment-ch-array-fields.csv",
+                    "name": "hyperi-enrichment-ch-array-fields.csv",
                     "version": "v001.000.000",
                 },
                 {
-                    "name": "hypersec-enrichment-ch-event-subschema-map.csv",
+                    "name": "hyperi-enrichment-ch-event-subschema-map.csv",
                     "version": "v001.000.000",
                 },
                 {
-                    "name": "hypersec-enrichment-ch-fields-with-invalid-char.csv",
+                    "name": "hyperi-enrichment-ch-fields-with-invalid-char.csv",
                     "version": "v001.000.000",
                 },
                 {
-                    "name": "hypersec-enrichment-ch-remap-fields.csv",
+                    "name": "hyperi-enrichment-ch-remap-fields.csv",
                     "version": "v001.000.000",
                 },
             ],
             "ip_config_receiver": [
                 {
-                    "name": "hypersec-receiver-event-category-map.csv",
+                    "name": "hyperi-receiver-event-category-map.csv",
                     "version": "v001.000.000",
                 }
             ],

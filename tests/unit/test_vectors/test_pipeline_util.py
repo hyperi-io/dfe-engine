@@ -105,7 +105,7 @@ def test_vector_step_type():
     assert VectorStepType.TRANSFORM.value == "1"
     assert VectorStepType.SINK.value == "2"
     assert VectorStepType.BASE.value == "hs"
-    assert VectorStepType.HYPERSEC.value == "hypersec"
+    assert VectorStepType.HYPERI.value == "hyperi"
 
 
 def test_find_vector_type():
@@ -113,7 +113,7 @@ def test_find_vector_type():
     assert find_vector_type("1-transform-step.yml") == VectorStepType.TRANSFORM
     assert find_vector_type("2-sink-step.yml") == VectorStepType.SINK
     assert find_vector_type("hs-base-step.yml") == VectorStepType.BASE
-    assert find_vector_type("hypersec-step.yml") == VectorStepType.HYPERSEC
+    assert find_vector_type("hyperi-step.yml") == VectorStepType.HYPERI
     assert find_vector_type("invalid-step.yml") is None
 
 

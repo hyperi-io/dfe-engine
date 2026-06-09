@@ -6,13 +6,13 @@ Each DFE service has its own git repository:
 
 | Service | Repository | Language |
 |---------|-----------|----------|
-| dfe-receiver | `hypersec-io/dfe-receiver` | Rust |
-| dfe-loader | `hypersec-io/dfe-loader` | Rust |
-| dfe-archiver | `hypersec-io/dfe-archiver` | Rust |
-| dfe-transform-vector | `hypersec-io/dfe-transform-vector` | Rust |
-| dfe-transform-wasm | `hypersec-io/dfe-transform-wasm` | Rust |
-| dfe-fetcher | `hypersec-io/dfe-fetcher` | Rust |
-| dfe-engine | `hypersec-io/dfe-engine` | Python |
+| dfe-receiver | `hyperi-io/dfe-receiver` | Rust |
+| dfe-loader | `hyperi-io/dfe-loader` | Rust |
+| dfe-archiver | `hyperi-io/dfe-archiver` | Rust |
+| dfe-transform-vector | `hyperi-io/dfe-transform-vector` | Rust |
+| dfe-transform-wasm | `hyperi-io/dfe-transform-wasm` | Rust |
+| dfe-fetcher | `hyperi-io/dfe-fetcher` | Rust |
+| dfe-engine | `hyperi-io/dfe-engine` | Python |
 
 ## Plugin System (supports both models)
 

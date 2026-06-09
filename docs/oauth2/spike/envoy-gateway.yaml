@@ -29,7 +29,7 @@ spec:
     - name: https
       protocol: HTTPS
       port: 443
-      hostname: observability.hypersec.io
+      hostname: observability.hyperi.io
       tls:
         mode: Terminate
         certificateRefs:
@@ -89,7 +89,7 @@ spec:
       - profile
       # Okta: add "groups" scope
       # Entra ID: groups come via token config, no extra scope needed
-    redirectURL: "https://observability.hypersec.io/oauth2/callback"
+    redirectURL: "https://observability.hyperi.io/oauth2/callback"
     logoutPath: "/oauth2/logout"
 
 ---
@@ -108,7 +108,7 @@ spec:
   parentRefs:
     - name: hyperdx-gateway
   hostnames:
-    - observability.hypersec.io
+    - observability.hyperi.io
   rules:
     # HyperDX API (includes /clickhouse-proxy — where oidc-connection middleware runs)
     - matches:

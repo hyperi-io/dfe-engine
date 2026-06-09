@@ -1,6 +1,6 @@
 {
   "composed_of": [
-    "hypersec-log-component-template"
+    "hyperi-log-component-template"
   ],
   "priority": "100",
   "data_stream": {

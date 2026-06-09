@@ -10,32 +10,32 @@ global_settings:
 
 default_env_vars:
   PROMETHEUS_EXPORTER: 0.0.0.0:9090
-  COERCE_CSV: hypersec-transform-coerce-types.csv
-  DLQ_EVENT_CATEGORY_CSV: hypersec-enrichment-dlq-event-category.csv
-  EVENT_CATEGORY_MAP_CSV: hypersec-receiver-event-category-map.csv
+  COERCE_CSV: hyperi-transform-coerce-types.csv
+  DLQ_EVENT_CATEGORY_CSV: hyperi-enrichment-dlq-event-category.csv
+  EVENT_CATEGORY_MAP_CSV: hyperi-receiver-event-category-map.csv
   EVENT_SUBSCHEMA_CSV: all-load-os-ch-event-subschema-map.csv
-  EXTRACT_FIELDS_CSV: hypersec-enrichment-extract-fields.csv
+  EXTRACT_FIELDS_CSV: hyperi-enrichment-extract-fields.csv
   FIELD_SETTER_ITERATION_GROUP: finalise
   FILTER_CSV: filter-core-load-ch.csv
   FILTER_ITERATION_GROUP: iterator
   GEOIP_ASN: GeoLite2-ASN.mmdb
   GEOIP_CITY: GeoLite2-City.mmdb
   GEOIP_COUNTRY: GeoLite2-Country.mmdb
-  IP_FIELDS: hypersec-enrichment-ip-fields.csv
-  JSON_FIELDS: hypersec-enrichment-json-fields.csv
+  IP_FIELDS: hyperi-enrichment-ip-fields.csv
+  JSON_FIELDS: hyperi-enrichment-json-fields.csv
   KAFKA_TLS_PATH: /etc/vector_tls
   KAFKA_MTLS_PATH: /etc/vector_tls
-  MAXMIND_ENRICHMENT: hypersec-enrichment-maxmind-list.csv
-  REMAP_FIELDS: hypersec-enrichment-ch-remap-fields.csv
+  MAXMIND_ENRICHMENT: hyperi-enrichment-maxmind-list.csv
+  REMAP_FIELDS: hyperi-enrichment-ch-remap-fields.csv
   SUPPORTED_TIMESTAMP_FORMAT: '["%FT%X%.3fZ", "%FT%X%.6fZ", "%FT%X%.9fZ", "%F %X%.3f",
     "%F %X%.6f", "%F %X%.9f","%FT%X%.3f", "%FT%X%.6f", "%FT%X%.9f","%FT%XZ","%FT%X","%F
     %X", "%FT%X"]'
-  TS_TZ_MATCH: hypersec-enrichment-ts-match-tz.csv
-  TZ_OFFSET_MAPPING: hypersec-enrichment-tz-offset-mapping.csv
-  TS_TO_EPOCH_MS_CSV: hypersec-enrichment-timestamp-to-epoch-fields.csv
-  TIMEZONES_DB: hypersec-enrichment-timezones.csv
-  DOMAIN_FIELDS_CSV: hypersec-enrichment-domain-fields.csv
-  TIME_FIELDS: hypersec-enrichment-time-fields.csv
+  TS_TZ_MATCH: hyperi-enrichment-ts-match-tz.csv
+  TZ_OFFSET_MAPPING: hyperi-enrichment-tz-offset-mapping.csv
+  TS_TO_EPOCH_MS_CSV: hyperi-enrichment-timestamp-to-epoch-fields.csv
+  TIMEZONES_DB: hyperi-enrichment-timezones.csv
+  DOMAIN_FIELDS_CSV: hyperi-enrichment-domain-fields.csv
+  TIME_FIELDS: hyperi-enrichment-time-fields.csv
   VECTOR_BUFFER_SIZE: '12000000000'
   VECTOR_DATA_DIR: /vector-data-dir
   VECTOR_ENRICHMENT_PATH: standard_mappings
@@ -143,16 +143,16 @@ ingestion_pipelines:
       VECTOR_THREADS: '8'
       PVC_SIZE: 128Gi
       VECTOR_BUFFER_SIZE: 32000000000
-      RECEIVER_EVENT_MAP_CSV_PATH: hypersec-receiver-event-category-map.csv
+      RECEIVER_EVENT_MAP_CSV_PATH: hyperi-receiver-event-category-map.csv
       FIELD_SETTER_ITERATION_GROUP: receiver
-      HYPERSEC_RECEIVER_SINK_INPUT: 08_transform_final
-      HYPERSEC_RECEIVER_TRANSFORM_EVENT_CATEGORY_INPUT: 01_collector
-      HYPERSEC_RECEIVER_TRANSFORM_TIMESTAMP_INPUT: 07_transform_event_category
+      hyperi_RECEIVER_SINK_INPUT: 08_transform_final
+      hyperi_RECEIVER_TRANSFORM_EVENT_CATEGORY_INPUT: 01_collector
+      hyperi_RECEIVER_TRANSFORM_TIMESTAMP_INPUT: 07_transform_event_category
     steps:
     - id: hs-xdr-vector-ct-all-main.yml
     - id: hs-xdr-vector-ct-all-prometheus.yml
-    - id: hypersec-receiver-source-v2.yml
-    - id: hypersec-receiver-transform-mux.yml
-    - id: hypersec-receiver-transform-event-category-mux.yml
-    - id: hypersec-receiver-transform-timestamp-mux.yml
-    - id: hypersec-receiver-sink.yml
+    - id: hyperi-receiver-source-v2.yml
+    - id: hyperi-receiver-transform-mux.yml
+    - id: hyperi-receiver-transform-event-category-mux.yml
+    - id: hyperi-receiver-transform-timestamp-mux.yml
+    - id: hyperi-receiver-sink.yml

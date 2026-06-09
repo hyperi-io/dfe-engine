@@ -57,7 +57,7 @@ npm install @apache-arrow/esnext-esm@^18.0.0
 ### Basic Usage
 
 ```typescript
-import { QueryClient, QueryResult } from '@hypersec/query-client';
+import { QueryClient, QueryResult } from '@hyperi/query-client';
 
 const client = new QueryClient({ baseUrl: 'http://localhost:8000' });
 
@@ -79,7 +79,7 @@ result.rows.forEach(row => {
 ### With React Query
 
 ```typescript
-import { useQuery } from '@hypersec/query-client/react';
+import { useQuery } from '@hyperi/query-client/react';
 
 function ThreatDashboard() {
   const { data, isLoading, error } = useQuery('hunts/active_threats', {
@@ -270,7 +270,7 @@ await client.query('system/table_stats');
 ```typescript
 // providers.tsx
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createQueryClient } from '@hypersec/query-client/react';
+import { createQueryClient } from '@hyperi/query-client/react';
 
 const queryClient = createQueryClient({
   baseUrl: process.env.NEXT_PUBLIC_API_URL!,
@@ -288,7 +288,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 ### useQuery Hook
 
 ```typescript
-import { useQuery } from '@hypersec/query-client/react';
+import { useQuery } from '@hyperi/query-client/react';
 
 function ActivityTable() {
   const { data, isLoading, error, refetch } = useQuery(
@@ -320,7 +320,7 @@ function ActivityTable() {
 ### useSuspenseQuery
 
 ```typescript
-import { useSuspenseQuery } from '@hypersec/query-client/react';
+import { useSuspenseQuery } from '@hyperi/query-client/react';
 
 function ThreatList() {
   // This will suspend until data is ready
@@ -344,7 +344,7 @@ function App() {
 ### useInfiniteQuery
 
 ```typescript
-import { useInfiniteQuery } from '@hypersec/query-client/react';
+import { useInfiniteQuery } from '@hyperi/query-client/react';
 
 function InfiniteEventList() {
   const {
@@ -383,7 +383,7 @@ function InfiniteEventList() {
 
 ```typescript
 import { Schema as S } from '@effect/schema';
-import { query } from '@hypersec/query-client';
+import { query } from '@hyperi/query-client';
 
 // Define row schema
 const ThreatAlert = S.Struct({
@@ -412,7 +412,7 @@ result.rows.forEach(alert => {
 
 ```typescript
 import { Effect, pipe } from 'effect';
-import { queryEffect } from '@hypersec/query-client/effect';
+import { queryEffect } from '@hyperi/query-client/effect';
 
 const program = pipe(
   queryEffect('hunts/active_threats', {
@@ -443,7 +443,7 @@ import {
   AuthorizationError,
   QueryTimeoutError,
   NetworkError,
-} from '@hypersec/query-client';
+} from '@hyperi/query-client';
 
 try {
   const result = await client.query('hunts/active_threats', {
@@ -600,7 +600,7 @@ while (result.metadata.hasMore && result.rows.length > 0) {
 ### React Query Infinite Pagination
 
 ```typescript
-import { useInfiniteQuery } from '@hypersec/query-client/react';
+import { useInfiniteQuery } from '@hyperi/query-client/react';
 
 function InfiniteEventList() {
   const {
@@ -767,7 +767,7 @@ while (true) {
 ### 3. Streaming Large Results
 
 ```typescript
-import { queryStream } from '@hypersec/query-client';
+import { queryStream } from '@hyperi/query-client';
 
 // Stream results in batches
 for await (const batch of queryStream('analytics/all_events', {
@@ -795,11 +795,11 @@ const result = await client.query('hunts/active_threats', {
 
 ```typescript
 // Import only what you need
-import { query } from '@hypersec/query-client/core';
-import { useQuery } from '@hypersec/query-client/react';
+import { query } from '@hyperi/query-client/core';
+import { useQuery } from '@hyperi/query-client/react';
 
 // Avoid default import which includes everything
-// import QueryClient from '@hypersec/query-client';
+// import QueryClient from '@hyperi/query-client';
 ```
 
 ### Arrow ESM Package
