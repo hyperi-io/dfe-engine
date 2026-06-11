@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dfe_engine.api.pagination import PaginatedResponse
+from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
 
 
 class SchemaColumn(BaseModel):
@@ -211,82 +211,15 @@ class SchemaSummaryObject(BaseModel):
     column_count: int = Field(description="Number of columns in the schema")
 
 
-class SchemaSummary(BaseModel):
-    """Tree node grouping schemas by path prefix (directory layout).
-
-    Wire input may use path segments as sibling keys alongside ``schemas``; those
-    map into ``children`` during validation. Serialized JSON uses explicit
-    ``schemas`` and ``children`` at every node.
-
-    Example (wire input shape)::
-
-        {
-            "children": {
-                "azure": {
-                    "activity_log": {"schemas": [SchemaSummaryObject, ...]},
-                    "schemas": [],
-                }
-            },
-            "schemas": [...],
-        }
-    """
-
-    schemas: list[SchemaSummaryObject] = Field(
-        default_factory=list,
-        description="Schema entries defined at this path level",
-    )
-    children: dict[str, SchemaSummary] = Field(
-        default_factory=dict,
-        description="Further nesting keyed by path segment",
-    )
-
-    @model_validator(mode="before")
-    @classmethod
-    def _coerce_path_segments(cls, data: Any) -> Any:
-        if data is None:
-            return {}
-        if not isinstance(data, dict):
-            return data
-        schemas = data.get("schemas", [])
-        children = data.get("children")
-        if isinstance(children, dict):
-            return {"schemas": schemas, "children": children}
-        return {
-            "schemas": schemas,
-            "children": {k: v for k, v in data.items() if k not in {"schemas", "children"}},
-        }
-
-    @classmethod
-    def objects_from_list(cls, data: list[SchemaSummaryObject]) -> SchemaSummary:
-        """Group flat ``name`` paths into a folder tree matching on-disk layout.
-
-        Each segment before the last is a directory; the last segment is the
-        schema id / YAML stem (e.g. ``aws/sub/path/logs`` → attach under
-        ``aws → sub → path``, not under a synthetic ``logs`` child).
-        """
-        root: dict[str, Any] = {"schemas": [], "children": {}}
-
-        for obj in data:
-            parts = [p for p in obj.name.split("/") if p]
-            if not parts:
-                continue
-
-            cur = root
-            for seg in parts[:-1]:
-                children = cur.setdefault("children", {})
-                cur = children.setdefault(seg, {"schemas": [], "children": {}})
-
-            cur.setdefault("schemas", []).append(obj)
-
-        return cls.model_validate(root)
+PathTree[SchemaSummaryObject].model_rebuild()
+SchemaSummary = PathTree[SchemaSummaryObject]
+"""Schema list tree grouped by registry path (``PathTree`` of ``SchemaSummaryObject``)."""
 
 
-class PaginatedSchemaSummaryResponse(PaginatedResponse[SchemaSummaryObject]):
-    """Schema list: full ``schema_objects`` tree plus paginated ``items``."""
-
-    schema_objects: SchemaSummary = Field(
-        description="All matching schemas as a path tree (not limited to current page)",
-    )
+class PaginatedSchemaSummaryResponse(
+    PaginatedResponseWithObjects[SchemaSummaryObject, SchemaSummary]
+):
+    """Schema list: path tree in ``objects`` plus paginated ``items``."""
 
     @classmethod
     def from_summaries(
@@ -295,8 +228,9 @@ class PaginatedSchemaSummaryResponse(PaginatedResponse[SchemaSummaryObject]):
         page: int,
         per_page: int,
     ) -> PaginatedSchemaSummaryResponse:
-        paginated = PaginatedResponse.from_list(summaries, page, per_page)
-        return cls(
-            schema_objects=SchemaSummary.objects_from_list(summaries),
-            **paginated.model_dump(),
+        return cls.with_objects(
+            summaries,
+            page,
+            per_page,
+            SchemaSummary.from_paths(summaries, path=lambda obj: obj.name),
         )

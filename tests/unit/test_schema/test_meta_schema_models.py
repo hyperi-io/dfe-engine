@@ -106,7 +106,7 @@ class TestMetaSchema:
 class TestSchemaSummaryTree:
     def test_coerce_path_segments_none_is_empty_tree(self):
         summary = SchemaSummary.model_validate(None)
-        assert summary.schemas == []
+        assert summary.items == []
         assert summary.children == {}
 
     def test_coerce_path_segments_non_dict_passthrough_raises(self):
@@ -117,18 +117,18 @@ class TestSchemaSummaryTree:
         """When ``children`` is present but not a mapping, treat path segments as children."""
         summary = SchemaSummary.model_validate(
             {
-                "schemas": [],
+                "items": [],
                 "children": [],
             }
         )
-        assert summary.schemas == []
+        assert summary.items == []
         assert summary.children == {}
 
     def test_coerce_path_segments_as_wire_shape(self):
         data = {
-            "schemas": [],
+            "items": [],
             "aws": {
-                "schemas": [
+                "items": [
                     {
                         "name": "aws/cloudtrail",
                         "current": "1.0.0",
@@ -140,11 +140,11 @@ class TestSchemaSummaryTree:
             },
         }
         summary = SchemaSummary.model_validate(data)
-        assert summary.schemas == []
+        assert summary.items == []
         assert "aws" in summary.children
-        assert summary.children["aws"].schemas[0].name == "aws/cloudtrail"
+        assert summary.children["aws"].items[0].name == "aws/cloudtrail"
 
-    def test_objects_from_list_nested(self):
+    def test_from_paths_nested(self):
         objs = [
             SchemaSummaryObject(
                 name="aws/cloudtrail",
@@ -161,12 +161,12 @@ class TestSchemaSummaryTree:
                 column_count=1,
             ),
         ]
-        tree = SchemaSummary.objects_from_list(objs)
-        assert tree.children["aws"].schemas
-        assert tree.children["aws"].schemas[0].name == "aws/cloudtrail"
-        assert tree.children["azure"].schemas[0].name == "azure/activity_log"
+        tree = SchemaSummary.from_paths(objs, path=lambda o: o.name)
+        assert tree.children["aws"].items
+        assert tree.children["aws"].items[0].name == "aws/cloudtrail"
+        assert tree.children["azure"].items[0].name == "azure/activity_log"
 
-    def test_objects_from_list_deep_segments(self):
+    def test_from_paths_deep_segments(self):
         objs = [
             SchemaSummaryObject(
                 name="aws/sub/logs",
@@ -176,14 +176,14 @@ class TestSchemaSummaryTree:
                 column_count=0,
             )
         ]
-        tree = SchemaSummary.objects_from_list(objs)
+        tree = SchemaSummary.from_paths(objs, path=lambda o: o.name)
         assert "aws" in tree.children
         assert "sub" in tree.children["aws"].children
         leaf = tree.children["aws"].children["sub"]
-        assert leaf.schemas
-        assert leaf.schemas[0].name == "aws/sub/logs"
+        assert leaf.items
+        assert leaf.items[0].name == "aws/sub/logs"
 
-    def test_objects_from_list_skips_empty_relative_name(self):
+    def test_from_paths_skips_empty_relative_name(self):
         objs = [
             SchemaSummaryObject(
                 name="///",
@@ -193,8 +193,8 @@ class TestSchemaSummaryTree:
                 column_count=0,
             )
         ]
-        tree = SchemaSummary.objects_from_list(objs)
-        assert tree.schemas == []
+        tree = SchemaSummary.from_paths(objs, path=lambda o: o.name)
+        assert tree.items == []
         assert tree.children == {}
 
 
@@ -219,7 +219,7 @@ class TestPaginatedSchemaSummaryResponse:
         resp = PaginatedSchemaSummaryResponse.from_summaries(objs, page=1, per_page=1)
         assert resp.total == 2
         assert len(resp.items) == 1
-        assert resp.schema_objects.children.keys() >= {"a", "b"}
+        assert resp.objects.children.keys() >= {"a", "b"}
 
 
 class TestMetaSchemaAddVersionRequest:

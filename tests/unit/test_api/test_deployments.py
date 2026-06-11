@@ -23,6 +23,7 @@ def app_with_deployments(tmp_path):
     deploy_dir.mkdir()
 
     settings = DFESettings(
+        config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         deployment=DeploymentSettings(config_dir=str(deploy_dir)),
