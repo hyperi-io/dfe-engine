@@ -219,7 +219,7 @@ class TestPaginatedSchemaSummaryResponse:
         resp = PaginatedSchemaSummaryResponse.from_summaries(objs, page=1, per_page=1)
         assert resp.total == 2
         assert len(resp.items) == 1
-        assert resp.schema_objects.children.keys() >= {"a", "b"}
+        assert resp.objects.children.keys() >= {"a", "b"}
 
 
 class TestMetaSchemaAddVersionRequest:

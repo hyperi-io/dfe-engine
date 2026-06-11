@@ -11,6 +11,7 @@ from typing import Annotated, Any, Generic, TypeVar
 from pydantic import AfterValidator, BaseModel, Field, computed_field
 
 T = TypeVar("T")
+ObjectT = TypeVar("ObjectT")
 
 
 def validate_per_page(value: int) -> int:
@@ -108,6 +109,29 @@ class PaginatedResponse(BaseModel, Generic[T]):
         )
 
 
+class PaginatedResponseWithObjects(PaginatedResponse[T], Generic[T, ObjectT]):
+    """Paginated ``items`` plus a full-collection ``objects`` payload.
+
+    Use when the client needs both a page of rows and a view over all matching
+    items (e.g. a folder tree) without repeating pagination on the tree.
+    """
+
+    objects: ObjectT = Field(
+        description="Full matching collection view (not limited to current page)",
+    )
+
+    @classmethod
+    def with_objects(
+        cls,
+        all_items: list[T],
+        page: int,
+        per_page: int,
+        objects: ObjectT,
+    ) -> PaginatedResponseWithObjects[T, ObjectT]:
+        paginated = PaginatedResponse.from_list(all_items, page, per_page)
+        return cls(objects=objects, **paginated.model_dump())
+
+
 # ── Helpers ──────────────────────────────────────────────────
 
 
@@ -124,11 +148,7 @@ def apply_schema_type_filter(
     if not schema_types:
         return items
     allowed = set(schema_types)
-    return [
-        item
-        for item in items
-        if schema_path_top_level(str(item.get("path", ""))) in allowed
-    ]
+    return [item for item in items if schema_path_top_level(str(item.get("path", ""))) in allowed]
 
 
 def apply_search(

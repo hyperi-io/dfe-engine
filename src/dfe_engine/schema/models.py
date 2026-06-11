@@ -15,7 +15,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from dfe_engine.api.pagination import PaginatedResponse
+from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects
 
 
 class SchemaColumn(BaseModel):
@@ -281,12 +281,10 @@ class SchemaSummary(BaseModel):
         return cls.model_validate(root)
 
 
-class PaginatedSchemaSummaryResponse(PaginatedResponse[SchemaSummaryObject]):
-    """Schema list: full ``schema_objects`` tree plus paginated ``items``."""
-
-    schema_objects: SchemaSummary = Field(
-        description="All matching schemas as a path tree (not limited to current page)",
-    )
+class PaginatedSchemaSummaryResponse(
+    PaginatedResponseWithObjects[SchemaSummaryObject, SchemaSummary]
+):
+    """Schema list: path tree in ``objects`` plus paginated ``items``."""
 
     @classmethod
     def from_summaries(
@@ -295,8 +293,9 @@ class PaginatedSchemaSummaryResponse(PaginatedResponse[SchemaSummaryObject]):
         page: int,
         per_page: int,
     ) -> PaginatedSchemaSummaryResponse:
-        paginated = PaginatedResponse.from_list(summaries, page, per_page)
-        return cls(
-            schema_objects=SchemaSummary.objects_from_list(summaries),
-            **paginated.model_dump(),
+        return cls.with_objects(
+            summaries,
+            page,
+            per_page,
+            SchemaSummary.objects_from_list(summaries),
         )

@@ -1,9 +1,11 @@
 """Tests for pagination models and helpers."""
 
 import pytest
+from pydantic import BaseModel
 
 from dfe_engine.api.pagination import (
     PaginatedResponse,
+    PaginatedResponseWithObjects,
     apply_schema_type_filter,
     apply_search,
     apply_sort,
@@ -94,6 +96,24 @@ class TestPaginatedResponse:
     def test_from_list_rejects_invalid_per_page(self):
         with pytest.raises(ValueError, match="per_page must be -1 or between 1 and 100"):
             PaginatedResponse.from_list([1], page=1, per_page=0)
+
+
+class TestPaginatedResponseWithObjects:
+    class _SidePayload(BaseModel):
+        ids: list[int]
+
+    def test_with_objects_pagination_and_side_payload(self):
+        items = [{"id": i} for i in range(5)]
+        resp = PaginatedResponseWithObjects.with_objects(
+            items,
+            page=2,
+            per_page=2,
+            objects=self._SidePayload(ids=[0, 1, 2, 3, 4]),
+        )
+        assert resp.items == [{"id": 2}, {"id": 3}]
+        assert resp.total == 5
+        assert resp.page == 2
+        assert resp.objects.ids == [0, 1, 2, 3, 4]
 
 
 class TestValidatePerPage:

@@ -8170,9 +8170,9 @@
             "title": "Per Page",
             "description": "Items per page"
           },
-          "schema_objects": {
+          "objects": {
             "$ref": "#/components/schemas/SchemaSummary",
-            "description": "All matching schemas as a path tree (not limited to current page)"
+            "description": "Full matching collection view (not limited to current page)"
           },
           "total_pages": {
             "type": "integer",
@@ -8210,13 +8210,13 @@
           "total",
           "page",
           "per_page",
-          "schema_objects",
+          "objects",
           "total_pages",
           "next_page",
           "prev_page"
         ],
         "title": "PaginatedSchemaSummaryResponse",
-        "description": "Schema list: full ``schema_objects`` tree plus paginated ``items``."
+        "description": "Schema list: path tree in ``objects`` plus paginated ``items``."
       },
       "PermissionsResponse": {
         "properties": {

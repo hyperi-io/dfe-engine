@@ -179,7 +179,7 @@ class TestSchemasMetaListRouter:
             assert body["total"] == 1
             assert len(body["items"]) == 1
             assert body["items"][0]["name"] == "aws/cloudtrail"
-            assert body["schema_objects"]["children"]["aws"]["schemas"]
+            assert body["objects"]["children"]["aws"]["schemas"]
         finally:
             _registries.clear()
 
@@ -259,7 +259,7 @@ class TestSchemasMetaListRouter:
             meta_body = meta_resp.json()
             assert meta_body["total"] == 1
             assert meta_body["items"][0]["name"] == "meta/logs_base"
-            assert set(meta_body["schema_objects"]["children"]) == {"meta"}
+            assert set(meta_body["objects"]["children"]) == {"meta"}
 
             assert multi_resp.status_code == 200
             assert multi_resp.json()["total"] == 2
