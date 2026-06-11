@@ -183,6 +183,93 @@ class TestSchemasMetaListRouter:
         finally:
             _registries.clear()
 
+    def test_list_meta_filters_by_schema_type(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schema_body = {
+            "current": "1",
+            "versions": {
+                "1": {
+                    "date": "2026-01-01",
+                    "type": "model",
+                    "summary": "init",
+                    "columns": [{"name": "e", "type": "string", "expr": "@source: E"}],
+                }
+            },
+        }
+
+        schemas_root = tmp_path / "schemas"
+        (schemas_root / "aws").mkdir(parents=True)
+        (schemas_root / "meta").mkdir(parents=True)
+        yaml_dump(schema_body, schemas_root / "aws" / "cloudtrail.yaml")
+        yaml_dump(schema_body, schemas_root / "meta" / "logs_base.yaml")
+
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        services_dir = tmp_path / "services"
+        services_dir.mkdir()
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(services_dir)),
+            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                all_resp = tc.get("/api/v1/schemas?per_page=-1", headers=headers)
+                meta_resp = tc.get(
+                    "/api/v1/schemas?schema_type=meta&per_page=-1",
+                    headers=headers,
+                )
+                multi_resp = tc.get(
+                    "/api/v1/schemas?schema_type=meta&schema_type=aws&per_page=-1",
+                    headers=headers,
+                )
+                none_resp = tc.get(
+                    "/api/v1/schemas?schema_type=unknown&per_page=-1",
+                    headers=headers,
+                )
+            assert all_resp.status_code == 200
+            assert all_resp.json()["total"] == 2
+
+            assert meta_resp.status_code == 200
+            meta_body = meta_resp.json()
+            assert meta_body["total"] == 1
+            assert meta_body["items"][0]["name"] == "meta/logs_base"
+            assert set(meta_body["schema_objects"]["children"]) == {"meta"}
+
+            assert multi_resp.status_code == 200
+            assert multi_resp.json()["total"] == 2
+
+            assert none_resp.status_code == 200
+            assert none_resp.json()["total"] == 0
+            assert none_resp.json()["items"] == []
+        finally:
+            _registries.clear()
+
     def test_get_meta_schema_returns_full_definition(self, tmp_path):
         from dfe_engine.api.app import create_app
         from dfe_engine.api.deps import _registries, create_access_token

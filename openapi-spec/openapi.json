@@ -4628,6 +4628,27 @@
             "description": "Search in path"
           },
           {
+            "name": "schema_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by top-level schema path segment (repeat param for multiple), e.g. meta, common-header, additional, hunt-results",
+              "title": "Schema Type"
+            },
+            "description": "Filter by top-level schema path segment (repeat param for multiple), e.g. meta, common-header, additional, hunt-results"
+          },
+          {
             "name": "sort_by",
             "in": "query",
             "required": false,

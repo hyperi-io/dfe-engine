@@ -2,7 +2,14 @@
 
 import pytest
 
-from dfe_engine.api.pagination import PaginatedResponse, apply_search, apply_sort, validate_per_page
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    apply_schema_type_filter,
+    apply_search,
+    apply_sort,
+    schema_path_top_level,
+    validate_per_page,
+)
 
 
 class TestPaginatedResponse:
@@ -100,6 +107,55 @@ class TestValidatePerPage:
     def test_rejects_invalid_values(self, value: int):
         with pytest.raises(ValueError, match="per_page must be -1 or between 1 and 100"):
             validate_per_page(value)
+
+
+class TestSchemaPathTopLevel:
+    """schema_path_top_level() helper."""
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("meta/logs_base", "meta"),
+            ("aws/cloudtrail", "aws"),
+            ("hunt-results/detection", "hunt-results"),
+            ("single_segment", "single_segment"),
+            ("", ""),
+            ("//", ""),
+            ("///a///b", "a"),
+        ],
+    )
+    def test_top_level_segment(self, path: str, expected: str):
+        assert schema_path_top_level(path) == expected
+
+
+class TestApplySchemaTypeFilter:
+    """apply_schema_type_filter() helper."""
+
+    def test_filters_by_top_level_segment(self):
+        items = [
+            {"path": "meta/logs_base"},
+            {"path": "aws/cloudtrail"},
+            {"path": "hunt-results/detection"},
+        ]
+        result = apply_schema_type_filter(items, ["meta", "hunt-results"])
+        assert [i["path"] for i in result] == ["meta/logs_base", "hunt-results/detection"]
+
+    def test_no_match_returns_empty(self):
+        items = [{"path": "aws/cloudtrail"}]
+        assert apply_schema_type_filter(items, ["meta"]) == []
+
+    def test_missing_path_key_treated_as_empty_top_level(self):
+        items = [{"path": "meta/a"}, {}]
+        result = apply_schema_type_filter(items, [""])
+        assert result == [{}]
+
+    def test_none_returns_all(self):
+        items = [{"path": "meta/a"}, {"path": "aws/b"}]
+        assert apply_schema_type_filter(items, None) == items
+
+    def test_empty_list_returns_all(self):
+        items = [{"path": "meta/a"}, {"path": "aws/b"}]
+        assert apply_schema_type_filter(items, []) == items
 
 
 class TestApplySearch:

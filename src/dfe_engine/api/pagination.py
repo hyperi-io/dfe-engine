@@ -111,6 +111,26 @@ class PaginatedResponse(BaseModel, Generic[T]):
 # ── Helpers ──────────────────────────────────────────────────
 
 
+def schema_path_top_level(path: str) -> str:
+    """First path segment of a schema registry key (e.g. ``meta/foo`` → ``meta``)."""
+    parts = [p for p in path.split("/") if p]
+    return parts[0] if parts else ""
+
+
+def apply_schema_type_filter(
+    items: list[dict[str, Any]], schema_types: list[str] | None
+) -> list[dict[str, Any]]:
+    """Keep items whose path top-level segment is in ``schema_types``."""
+    if not schema_types:
+        return items
+    allowed = set(schema_types)
+    return [
+        item
+        for item in items
+        if schema_path_top_level(str(item.get("path", ""))) in allowed
+    ]
+
+
 def apply_search(
     items: list[dict[str, Any]], query: str | None, fields: list[str]
 ) -> list[dict[str, Any]]:
