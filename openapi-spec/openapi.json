@@ -8171,7 +8171,7 @@
             "description": "Items per page"
           },
           "objects": {
-            "$ref": "#/components/schemas/SchemaSummary",
+            "$ref": "#/components/schemas/PathTree_SchemaSummaryObject_",
             "description": "Full matching collection view (not limited to current page)"
           },
           "total_pages": {
@@ -8217,6 +8217,28 @@
         ],
         "title": "PaginatedSchemaSummaryResponse",
         "description": "Schema list: path tree in ``objects`` plus paginated ``items``."
+      },
+      "PathTree_SchemaSummaryObject_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaSummaryObject"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Entries attached at this path level"
+          },
+          "children": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PathTree_SchemaSummaryObject_"
+            },
+            "type": "object",
+            "title": "Children",
+            "description": "Further nesting keyed by path segment"
+          }
+        },
+        "type": "object",
+        "title": "PathTree[SchemaSummaryObject]"
       },
       "PermissionsResponse": {
         "properties": {
@@ -9014,29 +9036,6 @@
         ],
         "title": "SchemaColumn",
         "description": "A column in the schema."
-      },
-      "SchemaSummary": {
-        "properties": {
-          "schemas": {
-            "items": {
-              "$ref": "#/components/schemas/SchemaSummaryObject"
-            },
-            "type": "array",
-            "title": "Schemas",
-            "description": "Schema entries defined at this path level"
-          },
-          "children": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SchemaSummary"
-            },
-            "type": "object",
-            "title": "Children",
-            "description": "Further nesting keyed by path segment"
-          }
-        },
-        "type": "object",
-        "title": "SchemaSummary",
-        "description": "Tree node grouping schemas by path prefix (directory layout).\n\nWire input may use path segments as sibling keys alongside ``schemas``; those\nmap into ``children`` during validation. Serialized JSON uses explicit\n``schemas`` and ``children`` at every node.\n\nExample (wire input shape)::\n\n    {\n        \"children\": {\n            \"azure\": {\n                \"activity_log\": {\"schemas\": [SchemaSummaryObject, ...]},\n                \"schemas\": [],\n            }\n        },\n        \"schemas\": [...],\n    }"
       },
       "SchemaSummaryObject": {
         "properties": {

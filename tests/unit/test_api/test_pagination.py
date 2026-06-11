@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginatedResponseWithObjects,
+    PathTree,
     apply_schema_type_filter,
     apply_search,
     apply_sort,
@@ -114,6 +115,23 @@ class TestPaginatedResponseWithObjects:
         assert resp.total == 5
         assert resp.page == 2
         assert resp.objects.ids == [0, 1, 2, 3, 4]
+
+
+class TestPathTree:
+    class _Row(BaseModel):
+        name: str
+
+    def test_from_paths_nested(self):
+        PathTree[self._Row].model_rebuild()
+        rows = [self._Row(name="a/x"), self._Row(name="b/y")]
+        tree = PathTree.from_paths(rows, path=lambda r: r.name)
+        assert tree.children["a"].items[0].name == "a/x"
+        assert tree.children["b"].items[0].name == "b/y"
+
+    def test_coerce_tree_node_items_only(self):
+        PathTree[self._Row].model_rebuild()
+        tree = PathTree[self._Row].model_validate({"items": [{"name": "only"}], "children": {}})
+        assert tree.items[0].name == "only"
 
 
 class TestValidatePerPage:

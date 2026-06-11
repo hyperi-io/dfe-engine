@@ -6,12 +6,14 @@ useInfiniteQuery: UI reads ``next_page`` from ``getNextPageParam``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated, Any, Generic, TypeVar
 
-from pydantic import AfterValidator, BaseModel, Field, computed_field
+from pydantic import AfterValidator, BaseModel, Field, computed_field, model_validator
 
 T = TypeVar("T")
 ObjectT = TypeVar("ObjectT")
+TreeItemT = TypeVar("TreeItemT")
 
 
 def validate_per_page(value: int) -> int:
@@ -130,6 +132,60 @@ class PaginatedResponseWithObjects(PaginatedResponse[T], Generic[T, ObjectT]):
     ) -> PaginatedResponseWithObjects[T, ObjectT]:
         paginated = PaginatedResponse.from_list(all_items, page, per_page)
         return cls(objects=objects, **paginated.model_dump())
+
+
+class PathTree(BaseModel, Generic[TreeItemT]):
+    """Nested tree: leaf ``items`` at each node plus ``children`` by path segment."""
+
+    items: list[TreeItemT] = Field(
+        default_factory=list,
+        description="Entries attached at this path level",
+    )
+    children: dict[str, PathTree[TreeItemT]] = Field(
+        default_factory=dict,
+        description="Further nesting keyed by path segment",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_tree_node(cls, data: Any) -> Any:
+        if data is None:
+            return {"items": [], "children": {}}
+        if not isinstance(data, dict):
+            return data
+        items = data.get("items", [])
+        children = data.get("children")
+        if isinstance(children, dict):
+            return {"items": items, "children": children}
+        return {
+            "items": items,
+            "children": {k: v for k, v in data.items() if k not in {"items", "children"}},
+        }
+
+    @classmethod
+    def from_paths(
+        cls,
+        data: list[TreeItemT],
+        *,
+        path: Callable[[TreeItemT], str],
+        separator: str = "/",
+    ) -> PathTree[TreeItemT]:
+        """Group flat rows into a folder tree from a slash-separated path field."""
+        root: dict[str, Any] = {"items": [], "children": {}}
+
+        for obj in data:
+            parts = [p for p in path(obj).split(separator) if p]
+            if not parts:
+                continue
+
+            cur = root
+            for seg in parts[:-1]:
+                children = cur.setdefault("children", {})
+                cur = children.setdefault(seg, {"items": [], "children": {}})
+
+            cur.setdefault("items", []).append(obj)
+
+        return cls.model_validate(root)
 
 
 # ── Helpers ──────────────────────────────────────────────────

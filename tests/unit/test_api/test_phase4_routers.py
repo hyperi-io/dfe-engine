@@ -179,7 +179,7 @@ class TestSchemasMetaListRouter:
             assert body["total"] == 1
             assert len(body["items"]) == 1
             assert body["items"][0]["name"] == "aws/cloudtrail"
-            assert body["objects"]["children"]["aws"]["schemas"]
+            assert body["objects"]["children"]["aws"]["items"]
         finally:
             _registries.clear()
 
