@@ -22,6 +22,7 @@ def app_with_fieldmaps(tmp_path):
     fm_dir.mkdir()
 
     settings = DFESettings(
+        config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         fieldmap=FieldMapSettings(fieldmaps_dir=str(fm_dir)),

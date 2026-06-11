@@ -17,6 +17,7 @@ def app_with_services(tmp_path):
     services_dir.mkdir()
 
     settings = DFESettings(
+        config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         auth=AuthSettings(
