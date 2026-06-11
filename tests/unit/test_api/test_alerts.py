@@ -22,6 +22,7 @@ def app_with_alerts(tmp_path):
     alert_dir.mkdir()
 
     settings = DFESettings(
+        config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         hunts=HuntsSettings(alert_destinations_dir=str(alert_dir)),

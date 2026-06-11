@@ -19,7 +19,13 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
 from dfe_engine.api.errors import ErrorResponse
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_schema_type_filter,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
@@ -141,11 +147,19 @@ async def list_schemas(
     registry: SchemaReg,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in path"),
+    schema_type: list[str] | None = Query(
+        None,
+        description=(
+            "Filter by top-level schema path segment (repeat param for multiple), "
+            "e.g. meta, common-header, additional, hunt-results"
+        ),
+    ),
     sort_by: str | None = Query(None, description="Sort field (path, current, updated_at)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List all meta schemas with optional filtering."""
     raw = registry.list_schemas()
+    raw = apply_schema_type_filter(raw, schema_type)
     raw = apply_search(raw, search, ["path"])
     raw = apply_sort(raw, sort_by, sort_order)
     summaries = [

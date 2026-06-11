@@ -1,8 +1,18 @@
 """Tests for pagination models and helpers."""
 
 import pytest
+from pydantic import BaseModel
 
-from dfe_engine.api.pagination import PaginatedResponse, apply_search, apply_sort, validate_per_page
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginatedResponseWithObjects,
+    PathTree,
+    apply_schema_type_filter,
+    apply_search,
+    apply_sort,
+    schema_path_top_level,
+    validate_per_page,
+)
 
 
 class TestPaginatedResponse:
@@ -89,6 +99,41 @@ class TestPaginatedResponse:
             PaginatedResponse.from_list([1], page=1, per_page=0)
 
 
+class TestPaginatedResponseWithObjects:
+    class _SidePayload(BaseModel):
+        ids: list[int]
+
+    def test_with_objects_pagination_and_side_payload(self):
+        items = [{"id": i} for i in range(5)]
+        resp = PaginatedResponseWithObjects.with_objects(
+            items,
+            page=2,
+            per_page=2,
+            objects=self._SidePayload(ids=[0, 1, 2, 3, 4]),
+        )
+        assert resp.items == [{"id": 2}, {"id": 3}]
+        assert resp.total == 5
+        assert resp.page == 2
+        assert resp.objects.ids == [0, 1, 2, 3, 4]
+
+
+class TestPathTree:
+    class _Row(BaseModel):
+        name: str
+
+    def test_from_paths_nested(self):
+        PathTree[self._Row].model_rebuild()
+        rows = [self._Row(name="a/x"), self._Row(name="b/y")]
+        tree = PathTree.from_paths(rows, path=lambda r: r.name)
+        assert tree.children["a"].items[0].name == "a/x"
+        assert tree.children["b"].items[0].name == "b/y"
+
+    def test_coerce_tree_node_items_only(self):
+        PathTree[self._Row].model_rebuild()
+        tree = PathTree[self._Row].model_validate({"items": [{"name": "only"}], "children": {}})
+        assert tree.items[0].name == "only"
+
+
 class TestValidatePerPage:
     """validate_per_page() bounds."""
 
@@ -100,6 +145,55 @@ class TestValidatePerPage:
     def test_rejects_invalid_values(self, value: int):
         with pytest.raises(ValueError, match="per_page must be -1 or between 1 and 100"):
             validate_per_page(value)
+
+
+class TestSchemaPathTopLevel:
+    """schema_path_top_level() helper."""
+
+    @pytest.mark.parametrize(
+        ("path", "expected"),
+        [
+            ("meta/logs_base", "meta"),
+            ("aws/cloudtrail", "aws"),
+            ("hunt-results/detection", "hunt-results"),
+            ("single_segment", "single_segment"),
+            ("", ""),
+            ("//", ""),
+            ("///a///b", "a"),
+        ],
+    )
+    def test_top_level_segment(self, path: str, expected: str):
+        assert schema_path_top_level(path) == expected
+
+
+class TestApplySchemaTypeFilter:
+    """apply_schema_type_filter() helper."""
+
+    def test_filters_by_top_level_segment(self):
+        items = [
+            {"path": "meta/logs_base"},
+            {"path": "aws/cloudtrail"},
+            {"path": "hunt-results/detection"},
+        ]
+        result = apply_schema_type_filter(items, ["meta", "hunt-results"])
+        assert [i["path"] for i in result] == ["meta/logs_base", "hunt-results/detection"]
+
+    def test_no_match_returns_empty(self):
+        items = [{"path": "aws/cloudtrail"}]
+        assert apply_schema_type_filter(items, ["meta"]) == []
+
+    def test_missing_path_key_treated_as_empty_top_level(self):
+        items = [{"path": "meta/a"}, {}]
+        result = apply_schema_type_filter(items, [""])
+        assert result == [{}]
+
+    def test_none_returns_all(self):
+        items = [{"path": "meta/a"}, {"path": "aws/b"}]
+        assert apply_schema_type_filter(items, None) == items
+
+    def test_empty_list_returns_all(self):
+        items = [{"path": "meta/a"}, {"path": "aws/b"}]
+        assert apply_schema_type_filter(items, []) == items
 
 
 class TestApplySearch:
