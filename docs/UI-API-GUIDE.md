@@ -225,8 +225,8 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/schemas` | List meta schemas (paginated `items` + path `objects` tree) |
-| GET | `/schemas/{source}/columns` | Schema columns for a source |
-| POST | `/schemas/{source}/build` | Build DDL from source definition |
+| GET | `/schemas/{source}/columns` | Composed schema columns for a source version (`?version=` source id; default `deployed_version`) |
+| POST | `/schemas/{source}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 
 ### Pipeline (`/api/v1/pipeline`)
 

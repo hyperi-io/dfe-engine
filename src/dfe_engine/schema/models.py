@@ -204,6 +204,24 @@ class MetaSchemaAddVersionRequest(BaseModel):
     )
 
 
+class MetaSchemaVersionWriteResponse(BaseModel):
+    """Meta-schema state after adding a version or updating metadata."""
+
+    path: str = Field(..., description="Registry path (e.g. ``aws/cloudtrail``)")
+    current: str = Field(..., description="Current version id after the write")
+    versions: list[str] = Field(..., description="All version ids on this schema")
+
+
+def meta_schema_version_write_response(
+    meta: MetaSchema, *, path: str
+) -> MetaSchemaVersionWriteResponse:
+    return MetaSchemaVersionWriteResponse(
+        path=path,
+        current=meta.current,
+        versions=sorted(meta.versions.keys()),
+    )
+
+
 # ── Response models ──────────────────────────────────────────
 
 

@@ -83,7 +83,7 @@ class TestNextVersionForType:
         assert next_version_for_type("1.2.3", "revision") == "1.2.4"
 
     def test_rejects_non_semver_current(self):
-        with pytest.raises(SchemaVersionError, match="x.x.x"):
+        with pytest.raises(SchemaVersionError, match=r"x\.x\.x"):
             next_version_for_type("1", "addition")
 
 

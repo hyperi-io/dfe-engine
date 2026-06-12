@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
-GET    /api/v1/sources/{name}           → Get full source
+GET    /api/v1/sources/{name}/versions     → Get one version snapshot
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
@@ -18,9 +18,15 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import (
+    PaginatedSourceSummaryResponse,
+    Source,
+    SourceSummaryObject,
+    SourceVersionGetResponse,
+    SourceWriteRequest,
+)
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
@@ -52,24 +58,27 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
 # ── Response models ──────────────────────────────────────────
 
 
-class SourceSummary(BaseModel):
-    """Lightweight source listing (for paginated list)."""
-
-    source: str = Field(description="Source name / identifier")
-    display_name: str | None = None
-    description: str | None = None
-    enabled: bool = True
-    header_type: str | None = None
-    has_transform: bool = False
-    has_fetcher: bool = False
-    mapping_standards: list[str] = Field(default_factory=list)
-
-
 class SourceResponse(BaseModel):
-    """Full source after create/update."""
+    """Legacy compact metadata after create/update (prefer full ``Source`` on write)."""
 
     source: str
     message: str = "ok"
+    current: str = Field(..., description="Working version id after the operation")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to runtime (null until first deploy)",
+    )
+    versions: list[str] = Field(..., description="All version ids on the source")
+
+
+def _source_response(source: Source, *, message: str) -> SourceResponse:
+    return SourceResponse(
+        source=source.source,
+        message=message,
+        current=source.current,
+        deployed_version=source.deployed_version,
+        versions=sorted(source.versions.keys()),
+    )
 
 
 class BulkActionRequest(BaseModel):
@@ -98,7 +107,7 @@ class SeedResponse(BaseModel):
 
 @router.get(
     "",
-    response_model=PaginatedResponse[SourceSummary],
+    response_model=PaginatedSourceSummaryResponse,
     dependencies=[Depends(require_action("source:read"))],
 )
 async def list_sources(
@@ -107,26 +116,25 @@ async def list_sources(
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in source name and description"),
     enabled: bool | None = Query(None, description="Filter by enabled status"),
-    sort_by: str | None = Query(None, description="Sort field (source, display_name, enabled)"),
+    sort_by: str | None = Query(
+        None,
+        description="Sort field (source, display_name, enabled, current, deployed_version, updated_at)",
+    ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List sources with pagination, search, and filtering."""
+    """List sources with pagination, search, filtering, and a full object tree."""
     raw_sources = registry.list_sources(enabled_only=bool(enabled))
 
-    # Filter by enabled if explicitly False (list_sources only has enabled_only)
     if enabled is False:
         raw_sources = [s for s in raw_sources if not s.get("enabled", True)]
 
-    # Search
     raw_sources = apply_search(raw_sources, search, ["source", "display_name", "description"])
-
-    # Sort
     raw_sources = apply_sort(raw_sources, sort_by, sort_order)
 
-    # Map to summary models
-    summaries = [_to_summary(s) for s in raw_sources]
-
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    summaries = [_to_summary(row) for row in raw_sources]
+    return PaginatedSourceSummaryResponse.from_summaries(
+        summaries, pagination.page, pagination.per_page
+    )
 
 
 @router.post(
@@ -145,11 +153,11 @@ async def list_sources(
     dependencies=[Depends(require_action("source:write"))],
 )
 async def create_source(
-    body: Source,
+    body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Create a new source from a source definition."""
+    """Create a new source from a flat source definition (initial version ``1.0.0``)."""
     name = body.source
 
     if not name:
@@ -171,11 +179,63 @@ async def create_source(
         )
 
     try:
-        source = registry.save_source(body, created_by=user.user_id)
+        source = registry.create_source_from_write(body, created_by=user.user_id)
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    return SourceResponse(source=source.source, message="created")
+    return _source_response(source, message="created")
+
+
+@router.get(
+    "/{name}/versions",
+    response_model=SourceVersionGetResponse,
+    dependencies=[Depends(require_action("source:read"))],
+)
+async def get_source_version(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str = Query(
+        ...,
+        min_length=1,
+        description="Source version id to return (required)",
+    ),
+):
+    """Get one immutable source version snapshot by id."""
+    from dfe_engine.source.registry import SourceNotFoundError
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        ) from None
+
+    if version not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for source '{name}'",
+            },
+        )
+
+    version_ids = sorted(source.versions.keys())
+    return SourceVersionGetResponse(
+        source=source.source,
+        display_name=source.display_name,
+        description=source.description,
+        enabled=source.enabled,
+        current=source.current,
+        deployed_version=source.deployed_version,
+        selected=version,
+        versions=version_ids,
+        version=source.versions[version],
+    )
 
 
 @router.get(
@@ -213,11 +273,13 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
 )
 async def update_source(
     name: str,
-    body: Source,
+    body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Update an existing source definition."""
+    """Update a source from a flat revision body (appends next major version)."""
+    from dfe_engine.source.registry import SourceNotFoundError
+
     if not registry.source_exists(name):
         raise HTTPException(
             status_code=404,
@@ -228,13 +290,19 @@ async def update_source(
         )
 
     try:
-        source = registry.save_source(
-            body.model_copy(update={"source": name}), created_by=user.user_id
-        )
+        source = registry.update_source_from_write(name, body, created_by=user.user_id)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        ) from None
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
-    return SourceResponse(source=source.source, message="updated")
+    return _source_response(source, message="updated")
 
 
 @router.delete(
@@ -312,17 +380,19 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _to_summary(raw: dict[str, Any]) -> SourceSummary:
-    """Convert raw source dict from list_sources() to SourceSummary."""
-    return SourceSummary(
-        source=raw.get("source", ""),
+def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
+    """Convert registry list row to ``SourceSummaryObject``."""
+    return SourceSummaryObject(
+        name=raw.get("source", ""),
         display_name=raw.get("display_name"),
         description=raw.get("description"),
         enabled=raw.get("enabled", True),
-        header_type=raw.get("header", {}).get("type")
-        if isinstance(raw.get("header"), dict)
-        else None,
-        has_transform=raw.get("transform") is not None,
-        has_fetcher=raw.get("fetcher") is not None,
-        mapping_standards=raw.get("mapping_standards", []),
+        current=raw.get("current", "1.0.0"),
+        deployed_version=raw.get("deployed_version"),
+        versions=list(raw.get("versions") or []),
+        updated_at=raw.get("updated_at") or "",
+        header_type=raw.get("header_type"),
+        has_transform=bool(raw.get("has_transform")),
+        has_fetcher=bool(raw.get("has_fetcher")),
+        mapping_standards=list(raw.get("mapping_standards") or []),
     )

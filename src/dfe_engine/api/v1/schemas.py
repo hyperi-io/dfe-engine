@@ -33,9 +33,11 @@ from dfe_engine.schema.models import (
     MetaSchemaAddVersionRequest,
     MetaSchemaGetResponse,
     MetaSchemaUpdateRequest,
+    MetaSchemaVersionWriteResponse,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
     SchemaVersionGet,
+    meta_schema_version_write_response,
 )
 from dfe_engine.schema.models import (
     SchemaColumn as MetaSchemaColumn,
@@ -287,7 +289,7 @@ async def get_meta_schema(
 
 @router.post(
     "/definitions/{schema_path:path}/versions",
-    response_model=MetaSchema,
+    response_model=MetaSchemaVersionWriteResponse,
     dependencies=[Depends(require_action("schema:write"))],
     status_code=status.HTTP_201_CREATED,
 )
@@ -296,7 +298,7 @@ async def add_meta_schema_version(
     body: MetaSchemaAddVersionRequest,
     user: CurrentUser,
     registry: SchemaReg,
-) -> MetaSchema:
+) -> MetaSchemaVersionWriteResponse:
     """Add a new meta-schema version (bumps semver from current and sets it current)."""
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -377,7 +379,7 @@ async def add_meta_schema_version(
         created_by=user.user_id,
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
-    return saved.model_copy(update={"path": canonical_path})
+    return meta_schema_version_write_response(saved, path=canonical_path)
 
 
 @router.post(
@@ -454,7 +456,7 @@ async def create_meta_schema(
 
 @router.patch(
     "/definitions/{schema_path:path}",
-    response_model=MetaSchema,
+    response_model=MetaSchemaVersionWriteResponse,
     dependencies=[Depends(require_action("schema:write"))],
 )
 async def update_meta_schema(
@@ -466,7 +468,7 @@ async def update_meta_schema(
         None,
         description="Version to update summary for (required when summary is set)",
     ),
-) -> MetaSchema:
+) -> MetaSchemaVersionWriteResponse:
     """Update meta-schema metadata: current pointer or a version summary."""
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -550,7 +552,7 @@ async def update_meta_schema(
         created_by=user.user_id,
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
-    return saved.model_copy(update={"path": canonical_path})
+    return meta_schema_version_write_response(saved, path=canonical_path)
 
 
 @router.delete(
@@ -644,11 +646,15 @@ async def get_schema_columns(
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
-    version: str | None = Query(None, description="Schema version (latest if not specified)"),
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to deployed_version)",
+    ),
     _auth: None = Depends(require_action("source:read")),
 ) -> list[SchemaColumn]:
-    """Get columns for a source's schema."""
-    from dfe_engine.schema import SchemaLoader, SchemaLoadError
+    """Get composed schema columns for a source version (profile + meta/derived/additional)."""
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
 
     try:
         source = registry.get_source(source_name)
@@ -658,31 +664,50 @@ async def get_schema_columns(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         )
 
-    schema_path = getattr(source, "schema_path", None)
-    if not schema_path:
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{source_name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
         raise HTTPException(
             status_code=404,
             detail={
                 "code": "no_schema",
-                "message": f"Source '{source_name}' has no schema file configured",
+                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
             },
         )
 
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
     try:
-        columns = SchemaLoader.load_columns(schema_path, version=version)
-    except SchemaLoadError as exc:
+        columns = builder.load_columns_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "schema_error", "message": str(exc)},
-        )
+        ) from exc
 
     return [
         SchemaColumn(
             name=col.name,
             type=col.type,
             use_case=getattr(col, "use_case", "") or "",
-            attribute=getattr(col, "attribute", "") or "",
-            description=getattr(col, "description", "") or "",
+            attribute=(
+                ", ".join(col.attribute)
+                if isinstance(col.attribute, list)
+                else (getattr(col, "attribute", "") or "")
+            ),
+            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
         )
         for col in columns
     ]
@@ -694,14 +719,18 @@ async def build_schema(
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to deployed_version)",
+    ),
     _auth: None = Depends(require_action("config:write")),
 ) -> SchemaBuildResult:
-    """Build complete schema (DDL) from a source definition.
+    """Build complete schema (DDL) from a source version snapshot.
 
     Runs the v2 YAML → DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
-    from dfe_engine.schema import SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
     try:
@@ -712,23 +741,50 @@ async def build_schema(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         )
 
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{source_name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
     try:
-        type_registry = TypeRegistry()
-        builder = SchemaBuilderV2(type_registry)
-        result = builder.build(source)
-    except Exception as exc:
+        result = builder.build_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
-        )
+        ) from exc
 
     columns = [
         SchemaColumn(
             name=col.name,
             type=col.type,
             use_case=getattr(col, "use_case", "") or "",
-            attribute=getattr(col, "attribute", "") or "",
-            description=getattr(col, "description", "") or "",
+            attribute=(
+                ", ".join(col.attribute)
+                if isinstance(col.attribute, list)
+                else (getattr(col, "attribute", "") or "")
+            ),
+            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
         )
         for col in result.columns
     ]
@@ -744,7 +800,7 @@ async def build_schema(
     audit_resource_change(user.user_id, "schema", source_name, "executed")
     return SchemaBuildResult(
         source_name=source_name,
-        version=getattr(result, "version", "") or "",
+        version=version_id,
         columns=columns,
         ddl=ddl,
     )

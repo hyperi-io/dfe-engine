@@ -24,7 +24,7 @@ from hyperi_pylib.logger import logger
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
-from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.models import SchemaColumn, Source, SourceVersion
 from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
@@ -96,45 +96,49 @@ class SchemaBuilderV2:
     # ── Main entry points ───────────────────────────────────────────
 
     def build(self, source: Source) -> SchemaBuildResult:
-        """Build the complete schema for a Source.
+        """Build the complete schema for a Source (deployed version)."""
+        return self.build_for_source_version(source, source_version=source.runtime_version_id())
 
-        Args:
-            source: Source model.
+    def build_for_source_version(
+        self,
+        source: Source,
+        *,
+        source_version: str | None = None,
+    ) -> SchemaBuildResult:
+        """Build schema DDL for a specific source version snapshot.
 
-        Returns:
-            SchemaBuildResult with columns, DDL, and any validation errors.
-
-        Raises:
-            SchemaBuildError: If a required schema file is missing.
+        Defaults to ``source.deployed_version`` when *source_version* is omitted.
         """
-        # 1. Load profile header columns
-        profile_columns = self._load_profile(source)
+        version_id = source_version or source.runtime_version_id()
+        if version_id not in source.versions:
+            raise SchemaBuildError(
+                f"Source version '{version_id}' is not defined for source '{source.source}'"
+            )
+        snap = source.versions[version_id]
 
-        # 2. Load source-specific schema columns
-        source_columns = self._load_source_columns(source)
-
-        # 3. Compose: profile + source
+        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        source_columns = self._load_source_columns_for_snapshot(source.source, snap)
         columns = SchemaLoader.compose(profile_columns, source_columns)
 
-        # 4. Validate
         errors = SchemaLoader.validate_columns(columns, self._registry)
         if errors:
             for err in errors:
                 logger.warning(f"Schema validation: {err}")
 
-        # 5. Generate CREATE TABLE DDL
-        ddl_config = self._build_ddl_config(source)
+        ddl_config = self._build_ddl_config_for_snapshot(snap)
         create_ddl = self._ddl_gen.generate_create_table(source.table_name, columns, ddl_config)
 
-        # 6. Generate Sigma view DDL (legacy path)
         sigma_ddl = None
-        if source.sigma and source.sigma.custom_mappings:
+        if snap.sigma and snap.sigma.custom_mappings:
             sigma_ddl = self._ddl_gen.generate_sigma_view(
-                source.table_name, source.sigma.custom_mappings, ddl_config
+                source.table_name, snap.sigma.custom_mappings, ddl_config
             )
 
-        # 7. Generate standard views from FieldMapRegistry
-        view_ddls = self._generate_view_ddls(source, ddl_config)
+        view_ddls = self._generate_view_ddls(
+            source,
+            ddl_config,
+            mapping_standards=snap.mapping_standards,
+        )
 
         return SchemaBuildResult(
             source_name=source.source,
@@ -144,6 +148,34 @@ class SchemaBuilderV2:
             view_ddls=view_ddls,
             validation_errors=errors,
         )
+
+    def load_columns_for_source_version(
+        self,
+        source: Source,
+        *,
+        source_version: str | None = None,
+    ) -> list[SchemaColumn]:
+        """Load composed schema columns for a specific source version snapshot.
+
+        Uses the version's ``header`` for the common profile and ``schema`` for
+        meta/derived/additional YAML references (including ``meta_schema_version``).
+        Defaults to ``source.deployed_version`` when *source_version* is omitted.
+        """
+        version_id = source_version or source.runtime_version_id()
+        if version_id not in source.versions:
+            raise SchemaBuildError(
+                f"Source version '{version_id}' is not defined for source '{source.source}'"
+            )
+        snap = source.versions[version_id]
+        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        source_columns = self._load_source_columns_for_snapshot(source.source, snap)
+        return SchemaLoader.compose(profile_columns, source_columns)
+
+    @staticmethod
+    def version_snapshot_has_schema_files(snap: SourceVersion) -> bool:
+        """True when the snapshot references at least one schema YAML file."""
+        cfg = snap.schema_config
+        return bool(cfg.meta_schema or cfg.derived_schema or cfg.additional_fields)
 
     def build_ddl_only(
         self,
@@ -179,13 +211,24 @@ class SchemaBuilderV2:
 
     # ── Internal: view generation ──────────────────────────────────
 
-    def _generate_view_ddls(self, source: Source, config: DDLConfig) -> dict[str, str]:
+    def _generate_view_ddls(
+        self,
+        source: Source,
+        config: DDLConfig,
+        *,
+        mapping_standards: list[str] | None = None,
+    ) -> dict[str, str]:
         """Generate standard view DDLs from the FieldMapRegistry.
 
         Only runs when a field_map_registry was provided and the source
         declares mapping_standards.
         """
-        if not self._field_map_registry or not source.mapping_standards:
+        standards = (
+            list(mapping_standards)
+            if mapping_standards is not None
+            else list(source.mapping_standards)
+        )
+        if not self._field_map_registry or not standards:
             return {}
 
         from dfe_engine.fieldmap.view_generator import ViewGenerator
@@ -194,35 +237,40 @@ class SchemaBuilderV2:
         return view_gen.generate_views_for_source(
             source_name=source.source,
             table_name=source.table_name,
-            standards=source.mapping_standards,
+            standards=standards,
             config=config,
         )
 
     # ── Internal: loading ───────────────────────────────────────────
 
     def _load_profile(self, source: Source) -> list[SchemaColumn]:
-        """Load the common header profile for the source.
+        """Load the common header profile for the deployed source version."""
+        return self._load_profile_for_snapshot(source.source, source.version())
 
-        Uses ``source.header.version`` to select a specific profile version.
-        """
-        profile_name = source.header.type
-        profile_version = source.header.version
+    def _load_profile_for_snapshot(
+        self, source_name: str, snap: SourceVersion
+    ) -> list[SchemaColumn]:
+        """Load the common header profile from a source version snapshot."""
+        profile_name = snap.header.type
+        profile_version = snap.header.version
         try:
             return SchemaLoader.load_profile(profile_name, version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile '{profile_name}' for source '{source.source}': {e}"
+                f"Failed to load profile '{profile_name}' for source '{source_name}': {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
-        """Load source-specific schema columns (meta + derived + additional).
+        """Load source-specific schema columns for the deployed version."""
+        return self._load_source_columns_for_snapshot(source.source, source.version())
 
-        Uses ``schema.meta_schema_version`` to pin meta schema columns.
-        """
-        schema_cfg = source.schema_config
+    def _load_source_columns_for_snapshot(
+        self, source_name: str, snap: SourceVersion
+    ) -> list[SchemaColumn]:
+        """Load meta/derived/additional columns from a source version snapshot."""
+        schema_cfg = snap.schema_config
         columns: list[SchemaColumn] = []
 
-        # Load meta_schema (base columns) — version-aware
         if schema_cfg.meta_schema:
             meta_path = self._resolve_path(schema_cfg.meta_schema)
             try:
@@ -231,15 +279,13 @@ class SchemaBuilderV2:
                 )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
-                    f"Failed to load meta_schema for source '{source.source}': {e}"
+                    f"Failed to load meta_schema for source '{source_name}': {e}"
                 ) from e
 
-        # Apply derived_schema (overrides)
         if schema_cfg.derived_schema:
             derived_path = self._resolve_path(schema_cfg.derived_schema)
             columns = SchemaLoader.apply_derived_schema(columns, derived_path)
 
-        # Apply additional_fields (append)
         if schema_cfg.additional_fields:
             additional_path = self._resolve_path(schema_cfg.additional_fields)
             columns = SchemaLoader.apply_additional_fields(columns, additional_path)
@@ -258,11 +304,15 @@ class SchemaBuilderV2:
     # ── Internal: DDL config ────────────────────────────────────────
 
     def _build_ddl_config(self, source: Source) -> DDLConfig:
-        """Build DDLConfig from the Source model."""
-        schema_cfg = source.schema_config
+        """Build DDLConfig from the deployed source version."""
+        return self._build_ddl_config_for_snapshot(source.version())
+
+    def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
+        """Build DDLConfig from a source version snapshot."""
+        schema_cfg = snap.schema_config
         return DDLConfig(
             engine=schema_cfg.engine,
             ttl_days=schema_cfg.ttl_days,
-            profile=source.header.type,
-            profile_version=source.header.version,
+            profile=snap.header.type,
+            profile_version=snap.header.version,
         )
