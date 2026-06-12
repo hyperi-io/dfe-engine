@@ -24,7 +24,7 @@ from hyperi_pylib.logger import logger
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
 from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
-from dfe_engine.source.models import SchemaColumn, Source
+from dfe_engine.source.models import SchemaColumn, Source, SourceVersion
 from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
@@ -145,6 +145,34 @@ class SchemaBuilderV2:
             validation_errors=errors,
         )
 
+    def load_columns_for_source_version(
+        self,
+        source: Source,
+        *,
+        source_version: str | None = None,
+    ) -> list[SchemaColumn]:
+        """Load composed schema columns for a specific source version snapshot.
+
+        Uses the version's ``header`` for the common profile and ``schema`` for
+        meta/derived/additional YAML references (including ``meta_schema_version``).
+        Defaults to ``source.deployed_version`` when *source_version* is omitted.
+        """
+        version_id = source_version or source.deployed_version
+        if version_id not in source.versions:
+            raise SchemaBuildError(
+                f"Source version '{version_id}' is not defined for source '{source.source}'"
+            )
+        snap = source.versions[version_id]
+        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        source_columns = self._load_source_columns_for_snapshot(source.source, snap)
+        return SchemaLoader.compose(profile_columns, source_columns)
+
+    @staticmethod
+    def version_snapshot_has_schema_files(snap: SourceVersion) -> bool:
+        """True when the snapshot references at least one schema YAML file."""
+        cfg = snap.schema_config
+        return bool(cfg.meta_schema or cfg.derived_schema or cfg.additional_fields)
+
     def build_ddl_only(
         self,
         columns: list[SchemaColumn],
@@ -201,28 +229,33 @@ class SchemaBuilderV2:
     # ── Internal: loading ───────────────────────────────────────────
 
     def _load_profile(self, source: Source) -> list[SchemaColumn]:
-        """Load the common header profile for the source.
+        """Load the common header profile for the deployed source version."""
+        return self._load_profile_for_snapshot(source.source, source.version())
 
-        Uses ``source.header.version`` to select a specific profile version.
-        """
-        profile_name = source.header.type
-        profile_version = source.header.version
+    def _load_profile_for_snapshot(
+        self, source_name: str, snap: SourceVersion
+    ) -> list[SchemaColumn]:
+        """Load the common header profile from a source version snapshot."""
+        profile_name = snap.header.type
+        profile_version = snap.header.version
         try:
             return SchemaLoader.load_profile(profile_name, version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile '{profile_name}' for source '{source.source}': {e}"
+                f"Failed to load profile '{profile_name}' for source '{source_name}': {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
-        """Load source-specific schema columns (meta + derived + additional).
+        """Load source-specific schema columns for the deployed version."""
+        return self._load_source_columns_for_snapshot(source.source, source.version())
 
-        Uses ``schema.meta_schema_version`` to pin meta schema columns.
-        """
-        schema_cfg = source.schema_config
+    def _load_source_columns_for_snapshot(
+        self, source_name: str, snap: SourceVersion
+    ) -> list[SchemaColumn]:
+        """Load meta/derived/additional columns from a source version snapshot."""
+        schema_cfg = snap.schema_config
         columns: list[SchemaColumn] = []
 
-        # Load meta_schema (base columns) — version-aware
         if schema_cfg.meta_schema:
             meta_path = self._resolve_path(schema_cfg.meta_schema)
             try:
@@ -231,15 +264,13 @@ class SchemaBuilderV2:
                 )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
-                    f"Failed to load meta_schema for source '{source.source}': {e}"
+                    f"Failed to load meta_schema for source '{source_name}': {e}"
                 ) from e
 
-        # Apply derived_schema (overrides)
         if schema_cfg.derived_schema:
             derived_path = self._resolve_path(schema_cfg.derived_schema)
             columns = SchemaLoader.apply_derived_schema(columns, derived_path)
 
-        # Apply additional_fields (append)
         if schema_cfg.additional_fields:
             additional_path = self._resolve_path(schema_cfg.additional_fields)
             columns = SchemaLoader.apply_additional_fields(columns, additional_path)

@@ -5311,7 +5311,7 @@
           "schemas"
         ],
         "summary": "Get Schema Columns",
-        "description": "Get columns for a source's schema.",
+        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).",
         "operationId": "get_schema_columns_api_v1_schemas__source_name__columns_get",
         "parameters": [
           {
@@ -5336,10 +5336,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Schema version (latest if not specified)",
+              "description": "Source version id (defaults to deployed_version)",
               "title": "Version"
             },
-            "description": "Schema version (latest if not specified)"
+            "description": "Source version id (defaults to deployed_version)"
           }
         ],
         "responses": {

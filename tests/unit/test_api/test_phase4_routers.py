@@ -89,15 +89,23 @@ class TestSchemasRouter:
         assert resp.status_code == 404
 
     def test_columns_with_existing_source(self, client, admin_headers, sample_source):
-        """Create a source, then try to get columns (may 404 if no schema path)."""
+        """Create a source, then try to get columns (404 when version has no schema YAML refs)."""
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
             f"/api/v1/schemas/{sample_source['source']}/columns",
             headers=admin_headers,
         )
-        assert resp.status_code in (200, 404)
-        if resp.status_code == 404:
-            assert resp.json()["code"] in ("not_found", "no_schema")
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "no_schema"
+
+    def test_columns_unknown_source_version(self, client, admin_headers, sample_source):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.get(
+            f"/api/v1/schemas/{sample_source['source']}/columns?version=9.9.9",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+        assert "9.9.9" in resp.json()["message"]
 
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/schemas/test/columns")
