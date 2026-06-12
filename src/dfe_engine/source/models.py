@@ -689,6 +689,6 @@ class PaginatedSourceSummaryResponse(
             per_page,
             SourceSummaryTree.from_paths(
                 summaries,
-                path=lambda obj: obj.name.replace("_", "/"),
+                path=lambda obj: obj.name,
             ),
         )

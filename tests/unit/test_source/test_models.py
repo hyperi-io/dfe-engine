@@ -578,8 +578,9 @@ class TestPaginatedSourceSummaryResponse:
         resp = PaginatedSourceSummaryResponse.from_summaries(objs, page=1, per_page=1)
         assert resp.total == 2
         assert len(resp.items) == 1
-        assert "aws" in resp.objects.children
-        assert resp.objects.items[0].name == "syslog"
+        root_names = {obj.name for obj in resp.objects.items}
+        assert root_names == {"aws_cloudtrail", "syslog"}
+        assert resp.objects.children == {}
 
 
 class TestSourceVersioning:

@@ -92,16 +92,23 @@ class TestListSources:
         names = [item["name"] for item in data["items"]]
         assert names == sorted(names)
 
-    def test_list_object_tree_groups_by_underscore(self, client: TestClient, admin_headers: dict):
+    def test_list_object_tree_places_sources_at_root(self, client: TestClient, admin_headers: dict):
         client.post(
             "/api/v1/sources",
             json={"source": "aws_cloudtrail", "display_name": "AWS CloudTrail"},
             headers=admin_headers,
         )
+        client.post(
+            "/api/v1/sources",
+            json={"source": "dfe_alerts", "display_name": "DFE Alerts"},
+            headers=admin_headers,
+        )
         resp = client.get("/api/v1/sources", headers=admin_headers)
         data = resp.json()
-        assert "aws" in data["objects"]["children"]
-        assert data["objects"]["children"]["aws"]["items"][0]["name"] == "aws_cloudtrail"
+        root_names = {item["name"] for item in data["objects"]["items"]}
+        assert "aws_cloudtrail" in root_names
+        assert "dfe_alerts" in root_names
+        assert data["objects"]["children"] == {}
 
         resp = client.get("/api/v1/sources")
         assert resp.status_code == 401
