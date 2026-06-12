@@ -75,30 +75,57 @@ interface FieldError {
 
 ## Pagination
 
-List endpoints use `PaginatedResponse<T>`:
+Most list endpoints return `PaginatedResponse<T>`. Some also include a full
+collection view in `objects` (see below) so the UI can render a tree or other
+aggregate without paginating that structure separately.
 
 ```typescript
 interface PaginatedResponse<T> {
   items: T[];
   total: number;       // Total across all pages
   page: number;        // Current page (1-based)
-  per_page: number;
+  per_page: number;    // -1 means all items in one response (page forced to 1)
   total_pages: number;
   next_page: number | null;   // null = last page
   prev_page: number | null;
 }
 
-// TanStack Query integration
+// List + full side payload (e.g. GET /api/v1/schemas)
+interface PaginatedResponseWithObjects<T, ObjectT> extends PaginatedResponse<T> {
+  objects: ObjectT;    // All matching rows after filters — not limited to `items`
+}
+
+// Nested folder tree used in `objects` for schema list
+interface PathTree<T> {
+  items: T[];                          // Entries at this path level
+  children: Record<string, PathTree<T>>;  // Keyed by path segment
+}
+```
+
+`items` is the current page only. When `objects` is present, it is built from
+the same filtered, sorted result set as `items`, but includes every match
+(e.g. a path tree for the schema browser). Re-fetching page 2 still returns the
+full `objects` tree; only `items` changes.
+
+```typescript
+// TanStack Query — simple list (sources, tasks, …)
 const { data, fetchNextPage } = useInfiniteQuery({
   queryKey: ['sources'],
   queryFn: ({ pageParam = 1 }) =>
     fetch(`/api/v1/sources?page=${pageParam}&per_page=25`).then(r => r.json()),
   getNextPageParam: (lastPage) => lastPage.next_page ?? undefined,
 });
+
+// Schema list: table from `items`, sidebar tree from `objects` (any page)
+type SchemaList = PaginatedResponseWithObjects<SchemaSummaryObject, PathTree<SchemaSummaryObject>>;
+const list = await fetch('/api/v1/schemas?page=1&per_page=25').then(r => r.json()) as SchemaList;
+const tableRows = list.items;
+const pathTree = list.objects;
 ```
 
-Query parameters: `page` (1-based), `per_page` (1–100, default 25),
-`search` (text filter), `sort_by`, `sort_order` (asc/desc).
+Query parameters: `page` (1-based), `per_page` (1–100 or `-1` for all, default 25),
+`search` (text filter), `sort_by`, `sort_order` (asc/desc). Schema list also
+accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 
 ## API Surface (74 Endpoints)
 
@@ -197,6 +224,7 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 
 | Method | Path | Purpose |
 |--------|------|---------|
+| GET | `/schemas` | List meta schemas (paginated `items` + path `objects` tree) |
 | GET | `/schemas/{source}/columns` | Schema columns for a source |
 | POST | `/schemas/{source}/build` | Build DDL from source definition |
 

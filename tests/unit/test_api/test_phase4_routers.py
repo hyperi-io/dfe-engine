@@ -735,5 +735,14 @@ class TestSchemasMetaWriteRouter:
                 assert body["versions"]["1.1.1"]["summary"] == "added column p"
                 assert len(body["versions"]["1.1.1"]["columns"]) == 3
                 assert "1.0.0" in body["versions"]
+
+                empty_cols = tc.post(
+                    f"{base}/versions",
+                    json={"type": "model", "columns": []},
+                    headers=headers,
+                )
+                assert empty_cols.status_code == 422
+                assert "validation_error" in empty_cols.text
+                assert "column" in empty_cols.text.lower()
         finally:
             _registries.clear()

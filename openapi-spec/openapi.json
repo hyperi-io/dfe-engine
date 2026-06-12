@@ -7546,8 +7546,9 @@
               "$ref": "#/components/schemas/SchemaColumn-Input"
             },
             "type": "array",
+            "minItems": 1,
             "title": "Columns",
-            "description": "Complete column snapshot for the new version"
+            "description": "Complete column snapshot for the new version (at least one column)"
           }
         },
         "additionalProperties": false,
