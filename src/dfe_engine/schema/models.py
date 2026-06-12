@@ -141,6 +141,19 @@ class MetaSchema(BaseModel):
         description="DirectoryConfigStore table key / relative path (not stored in YAML files)",
     )
 
+    @model_validator(mode="after")
+    def _current_version_must_have_columns(self) -> MetaSchema:
+        if not self.current:
+            return self
+        version = self.versions.get(self.current)
+        if version is None:
+            msg = f"current version '{self.current}' is not defined in versions"
+            raise ValueError(msg)
+        if not version.columns:
+            msg = f"current version '{self.current}' must define at least one column"
+            raise ValueError(msg)
+        return self
+
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence (excludes registry-only ``path``)."""
         data: dict[str, Any] = {

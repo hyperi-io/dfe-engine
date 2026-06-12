@@ -358,10 +358,11 @@ class TestSchemaRegistryCoverage:
         assert "invalid_meta" not in paths
         assert "good/meta" in paths
 
-    def test_list_schemas_column_count_fallback_other_version(self, registry):
+    def test_list_schemas_column_count_fallback_when_current_unset(self, registry):
+        """Listing uses the first version's columns when ``current`` is empty."""
         ms = MetaSchema(
             path="orphan/v",
-            current="missing",
+            current="",
             versions={
                 "1": SchemaVersion(
                     date="2026-01-01",
@@ -382,13 +383,27 @@ class TestSchemaRegistryCoverage:
     def test_list_schemas_column_count_zero_empty_versions(self, registry):
         ms = MetaSchema(
             path="empty/vers",
-            current="1",
+            current="",
             versions={},
         )
         registry.save_schema(ms)
         rows = registry.list_schemas()
         row = next(r for r in rows if r["path"] == "empty/vers")
         assert row["column_count"] == 0
+
+    def test_list_schemas_skips_current_not_in_versions(self, registry, schemas_dir):
+        """Invalid on-disk YAML (current missing from versions) is excluded from list."""
+        bad = schemas_dir / "orphan" / "bad.yaml"
+        bad.parent.mkdir(parents=True)
+        bad.write_text(
+            "current: missing\nversions:\n  '1':\n"
+            "  date: '2026-01-01'\n  type: model\n  summary: init\n"
+            "  columns:\n    - {name: a, type: string, expr: '@a'}\n",
+            encoding="utf-8",
+        )
+        registry._store._refresh_all()
+        paths = {r["path"] for r in registry.list_schemas()}
+        assert "orphan/bad" not in paths
 
     def test_list_schemas_updated_at_empty_on_stat_failure(self, registry, monkeypatch):
         registry.save_schema(_minimal_meta("stat/break"))

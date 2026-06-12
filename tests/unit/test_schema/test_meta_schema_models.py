@@ -14,6 +14,7 @@ from dfe_engine.schema.models import (
     SchemaSummaryObject,
     SchemaVersion,
 )
+from dfe_engine.schema.registry import coerce_common_header_legacy_versions
 
 
 @pytest.fixture
@@ -101,6 +102,55 @@ class TestMetaSchema:
         }
         with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
             MetaSchema.model_validate(bad)
+
+    def test_historical_version_may_omit_columns_only_for_common_header_legacy(self):
+        stub_yaml = {
+            "current": "1.1.0",
+            "versions": {
+                "1.0.0": {
+                    "date": "2026-01-15",
+                    "type": "model",
+                    "summary": "Initial stub",
+                },
+                "1.1.0": {
+                    "date": "2026-04-10",
+                    "type": "model",
+                    "summary": "Full definition",
+                    "columns": [
+                        {"name": "event_id", "type": "string", "expr": "@source: id"},
+                    ],
+                },
+            },
+        }
+        with pytest.raises(pydantic.ValidationError, match="columns"):
+            MetaSchema.model_validate(stub_yaml)
+
+        ms = MetaSchema.model_validate(
+            coerce_common_header_legacy_versions("common-header/minimal", stub_yaml)
+        )
+        assert ms.versions["1.0.0"].columns == []
+        assert len(ms.versions["1.1.0"].columns) == 1
+
+    def test_current_version_must_have_columns(self):
+        with pytest.raises(
+            pydantic.ValidationError,
+            match="current version '1.0.0' must define at least one column",
+        ):
+            MetaSchema.model_validate(
+                coerce_common_header_legacy_versions(
+                    "common-header/minimal",
+                    {
+                        "current": "1.0.0",
+                        "versions": {
+                            "1.0.0": {
+                                "date": "2026-01-15",
+                                "type": "model",
+                                "summary": "Stub without columns",
+                            },
+                        },
+                    },
+                )
+            )
 
 
 class TestSchemaSummaryTree:

@@ -30,6 +30,7 @@ from typing import Any
 
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
+from pydantic import ValidationError
 
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.yaml_utils import yaml_dump
@@ -61,6 +62,32 @@ def canonical_schema_path(schema_path: str) -> str:
     """Normalize a registry key (forward slashes, no empty segments)."""
     parent, name = _schema_location(schema_path)
     return f"{parent}/{name}" if parent else name
+
+
+_COMMON_HEADER_PREFIX = "common-header/"
+
+
+def coerce_common_header_legacy_versions(table: str, config_data: dict[str, Any]) -> dict[str, Any]:
+    """Fill missing ``columns`` on version stubs under ``common-header/`` only.
+
+    Legacy common-header YAML kept summary-only ``1.0.0`` entries before columns
+    were required on every version.
+    """
+    key = table.replace("\\", "/")
+    if not key.startswith(_COMMON_HEADER_PREFIX):
+        return config_data
+    versions = config_data.get("versions")
+    if not isinstance(versions, dict):
+        return config_data
+    coerced = dict(config_data)
+    coerced_versions: dict[str, Any] = {}
+    for ver_id, ver_data in versions.items():
+        if isinstance(ver_data, dict) and "columns" not in ver_data:
+            coerced_versions[ver_id] = {**ver_data, "columns": []}
+        else:
+            coerced_versions[ver_id] = ver_data
+    coerced["versions"] = coerced_versions
+    return coerced
 
 
 class SchemaRegistry:
@@ -157,6 +184,9 @@ class SchemaRegistry:
             raise SchemaValidationError("Schema path escapes schemas directory")
         return candidate
 
+    def _parse_meta_schema(self, table: str, config_data: dict[str, Any]) -> MetaSchema:
+        return MetaSchema.model_validate(coerce_common_header_legacy_versions(table, config_data))
+
     # -----------------------------------------------------------------
     # CRUD
     # -----------------------------------------------------------------
@@ -179,7 +209,7 @@ class SchemaRegistry:
             desc = f"{path}"
             raise SchemaNotFoundError(f"Schema not found: '{desc}'")
 
-        return MetaSchema.model_validate(config_data)
+        return self._parse_meta_schema(table, config_data)
 
     def save_schema(
         self,
@@ -201,8 +231,9 @@ class SchemaRegistry:
             SchemaValidationError: Validation failed.
         """
         if isinstance(meta_schema, dict):
+            table = str(meta_schema.get("path") or "")
             try:
-                meta_schema = MetaSchema.model_validate(meta_schema)
+                meta_schema = self._parse_meta_schema(table, meta_schema)
             except Exception as e:
                 raise SchemaValidationError(f"Invalid schema definition: {e}") from e
 
@@ -331,9 +362,12 @@ class SchemaRegistry:
                 continue
 
             try:
-                schema = MetaSchema.model_validate(config_data)
+                schema = self._parse_meta_schema(table, config_data)
+            except ValidationError as e:
+                logger.error("Invalid schema '%s' (excluded from list): %s", table, e)
+                continue
             except Exception as e:
-                logger.warning(f"Failed to parse schema '{table}', skipping: {e}")
+                logger.error("Failed to load schema '%s' (excluded from list): %s", table, e)
                 continue
 
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
