@@ -287,6 +287,8 @@ class SchemaManager:
             raise SchemaVersionError(f"Version '{new_version}' already exists in {p}")
 
         col_dicts = _normalise_columns(columns)
+        if not col_dicts:
+            raise SchemaVersionError("columns must contain at least one column")
         if validate:
             _validate_columns(col_dicts)
 

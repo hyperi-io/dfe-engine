@@ -152,6 +152,26 @@ class TestMetaSchema:
                 )
             )
 
+    def test_meta_path_rejects_empty_columns_on_current(self):
+        with pytest.raises(
+            pydantic.ValidationError,
+            match="current version '2.0.0' must define at least one column",
+        ):
+            MetaSchema.model_validate(
+                {
+                    "current": "2.0.0",
+                    "path": "meta/m365/alerts",
+                    "versions": {
+                        "2.0.0": {
+                            "date": "2026-06-12",
+                            "type": "model",
+                            "summary": "stub",
+                            "columns": [],
+                        },
+                    },
+                },
+            )
+
 
 class TestSchemaSummaryTree:
     def test_coerce_path_segments_none_is_empty_tree(self):
@@ -289,3 +309,7 @@ class TestMetaSchemaAddVersionRequest:
             columns=[SchemaColumn(name="x", type="string", expr="@source: X")],
         )
         assert req.summary == "Bump columns"
+
+    def test_rejects_empty_columns(self):
+        with pytest.raises(pydantic.ValidationError, match="at least 1"):
+            MetaSchemaAddVersionRequest.model_validate({"type": "model", "columns": []})

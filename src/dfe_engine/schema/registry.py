@@ -211,6 +211,26 @@ class SchemaRegistry:
 
         return self._parse_meta_schema(table, config_data)
 
+    def get_schema_current_version(self, path: str) -> str:
+        """Return ``current`` from cached YAML without full MetaSchema validation."""
+        table = self._table_name(path)
+        config_data = self._store.get(table)
+        if config_data is None:
+            raise SchemaNotFoundError(f"Schema not found: '{path}'")
+        current = config_data.get("current")
+        if not isinstance(current, str) or not current.strip():
+            raise SchemaValidationError(f"Schema '{path}' has no valid current version pointer")
+        return current
+
+    def schema_version_exists(self, path: str, version: str) -> bool:
+        """Whether ``version`` is already present in on-disk YAML (raw store view)."""
+        table = self._table_name(path)
+        config_data = self._store.get(table)
+        if not isinstance(config_data, dict):
+            return False
+        versions = config_data.get("versions")
+        return isinstance(versions, dict) and version in versions
+
     def save_schema(
         self,
         meta_schema: MetaSchema | dict[str, Any],

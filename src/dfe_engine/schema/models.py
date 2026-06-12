@@ -199,7 +199,8 @@ class MetaSchemaAddVersionRequest(BaseModel):
     )
     columns: list[SchemaColumn] = Field(
         ...,
-        description="Complete column snapshot for the new version",
+        min_length=1,
+        description="Complete column snapshot for the new version (at least one column)",
     )
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pydantic
 import pytest
 from dulwich import porcelain as dulwich_porcelain
 from dulwich.repo import Repo
@@ -101,6 +102,22 @@ class TestSchemaRegistryCRUD:
                     },
                 }
             )
+
+    def test_get_schema_current_version_reads_raw_yaml(self, registry, schemas_dir):
+        bad = schemas_dir / "meta" / "m365" / "alerts.yaml"
+        bad.parent.mkdir(parents=True)
+        bad.write_text(
+            "current: '2.0.0'\nversions:\n  '1.0.0':\n"
+            "    date: '2026-01-01'\n    type: model\n    summary: init\n"
+            "    columns:\n      - {name: a, type: string, expr: '@a'}\n"
+            "  '2.0.0':\n    date: '2026-06-12'\n    type: model\n"
+            "    summary: stub\n    columns: []\n",
+            encoding="utf-8",
+        )
+        registry._store._refresh_all()
+        assert registry.get_schema_current_version("meta/m365/alerts") == "2.0.0"
+        with pytest.raises(pydantic.ValidationError, match="must define at least one column"):
+            registry.get_schema("meta/m365/alerts")
 
     def test_list_schemas_metadata(self, registry):
         registry.save_schema(_minimal_meta("aws/cloudtrail"))

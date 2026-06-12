@@ -318,8 +318,17 @@ async def add_meta_schema_version(
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
+    if not body.columns:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": "columns must contain at least one column",
+            },
+        )
+
     try:
-        meta = registry.get_schema(canonical_path)
+        current = registry.get_schema_current_version(canonical_path)
     except SchemaNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -327,14 +336,19 @@ async def add_meta_schema_version(
                 "code": "not_found",
                 "message": f"Schema '{schema_path}' not found",
             },
-        )
+        ) from None
+    except SchemaValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
 
     yaml_path = registry._yaml_path(canonical_path)
     version_type = body.type
-    new_ver = next_version_for_type(meta.current, version_type)
+    new_ver = next_version_for_type(current, version_type)
 
     try:
-        if new_ver in meta.versions:
+        if registry.schema_version_exists(canonical_path, new_ver):
             raise SchemaVersionError(f"Version '{new_ver}' already exists")
         col_dicts = [col.to_yaml_dict() for col in body.columns]
         SchemaManager.add_version(
