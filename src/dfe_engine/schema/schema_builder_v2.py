@@ -96,45 +96,49 @@ class SchemaBuilderV2:
     # ── Main entry points ───────────────────────────────────────────
 
     def build(self, source: Source) -> SchemaBuildResult:
-        """Build the complete schema for a Source.
+        """Build the complete schema for a Source (deployed version)."""
+        return self.build_for_source_version(source, source_version=source.deployed_version)
 
-        Args:
-            source: Source model.
+    def build_for_source_version(
+        self,
+        source: Source,
+        *,
+        source_version: str | None = None,
+    ) -> SchemaBuildResult:
+        """Build schema DDL for a specific source version snapshot.
 
-        Returns:
-            SchemaBuildResult with columns, DDL, and any validation errors.
-
-        Raises:
-            SchemaBuildError: If a required schema file is missing.
+        Defaults to ``source.deployed_version`` when *source_version* is omitted.
         """
-        # 1. Load profile header columns
-        profile_columns = self._load_profile(source)
+        version_id = source_version or source.deployed_version
+        if version_id not in source.versions:
+            raise SchemaBuildError(
+                f"Source version '{version_id}' is not defined for source '{source.source}'"
+            )
+        snap = source.versions[version_id]
 
-        # 2. Load source-specific schema columns
-        source_columns = self._load_source_columns(source)
-
-        # 3. Compose: profile + source
+        profile_columns = self._load_profile_for_snapshot(source.source, snap)
+        source_columns = self._load_source_columns_for_snapshot(source.source, snap)
         columns = SchemaLoader.compose(profile_columns, source_columns)
 
-        # 4. Validate
         errors = SchemaLoader.validate_columns(columns, self._registry)
         if errors:
             for err in errors:
                 logger.warning(f"Schema validation: {err}")
 
-        # 5. Generate CREATE TABLE DDL
-        ddl_config = self._build_ddl_config(source)
+        ddl_config = self._build_ddl_config_for_snapshot(snap)
         create_ddl = self._ddl_gen.generate_create_table(source.table_name, columns, ddl_config)
 
-        # 6. Generate Sigma view DDL (legacy path)
         sigma_ddl = None
-        if source.sigma and source.sigma.custom_mappings:
+        if snap.sigma and snap.sigma.custom_mappings:
             sigma_ddl = self._ddl_gen.generate_sigma_view(
-                source.table_name, source.sigma.custom_mappings, ddl_config
+                source.table_name, snap.sigma.custom_mappings, ddl_config
             )
 
-        # 7. Generate standard views from FieldMapRegistry
-        view_ddls = self._generate_view_ddls(source, ddl_config)
+        view_ddls = self._generate_view_ddls(
+            source,
+            ddl_config,
+            mapping_standards=snap.mapping_standards,
+        )
 
         return SchemaBuildResult(
             source_name=source.source,
@@ -207,13 +211,24 @@ class SchemaBuilderV2:
 
     # ── Internal: view generation ──────────────────────────────────
 
-    def _generate_view_ddls(self, source: Source, config: DDLConfig) -> dict[str, str]:
+    def _generate_view_ddls(
+        self,
+        source: Source,
+        config: DDLConfig,
+        *,
+        mapping_standards: list[str] | None = None,
+    ) -> dict[str, str]:
         """Generate standard view DDLs from the FieldMapRegistry.
 
         Only runs when a field_map_registry was provided and the source
         declares mapping_standards.
         """
-        if not self._field_map_registry or not source.mapping_standards:
+        standards = (
+            list(mapping_standards)
+            if mapping_standards is not None
+            else list(source.mapping_standards)
+        )
+        if not self._field_map_registry or not standards:
             return {}
 
         from dfe_engine.fieldmap.view_generator import ViewGenerator
@@ -222,7 +237,7 @@ class SchemaBuilderV2:
         return view_gen.generate_views_for_source(
             source_name=source.source,
             table_name=source.table_name,
-            standards=source.mapping_standards,
+            standards=standards,
             config=config,
         )
 
@@ -289,11 +304,15 @@ class SchemaBuilderV2:
     # ── Internal: DDL config ────────────────────────────────────────
 
     def _build_ddl_config(self, source: Source) -> DDLConfig:
-        """Build DDLConfig from the Source model."""
-        schema_cfg = source.schema_config
+        """Build DDLConfig from the deployed source version."""
+        return self._build_ddl_config_for_snapshot(source.version())
+
+    def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
+        """Build DDLConfig from a source version snapshot."""
+        schema_cfg = snap.schema_config
         return DDLConfig(
             engine=schema_cfg.engine,
             ttl_days=schema_cfg.ttl_days,
-            profile=source.header.type,
-            profile_version=source.header.version,
+            profile=snap.header.type,
+            profile_version=snap.header.version,
         )

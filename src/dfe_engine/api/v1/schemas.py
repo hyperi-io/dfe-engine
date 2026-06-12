@@ -717,14 +717,18 @@ async def build_schema(
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to deployed_version)",
+    ),
     _auth: None = Depends(require_action("config:write")),
 ) -> SchemaBuildResult:
-    """Build complete schema (DDL) from a source definition.
+    """Build complete schema (DDL) from a source version snapshot.
 
     Runs the v2 YAML → DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
-    from dfe_engine.schema import SchemaBuilderV2
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
     try:
@@ -735,23 +739,50 @@ async def build_schema(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         )
 
+    version_id = version or source.deployed_version
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{source_name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
     try:
-        type_registry = TypeRegistry()
-        builder = SchemaBuilderV2(type_registry)
-        result = builder.build(source)
-    except Exception as exc:
+        result = builder.build_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "build_error", "message": str(exc)},
-        )
+        ) from exc
 
     columns = [
         SchemaColumn(
             name=col.name,
             type=col.type,
             use_case=getattr(col, "use_case", "") or "",
-            attribute=getattr(col, "attribute", "") or "",
-            description=getattr(col, "description", "") or "",
+            attribute=(
+                ", ".join(col.attribute)
+                if isinstance(col.attribute, list)
+                else (getattr(col, "attribute", "") or "")
+            ),
+            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
         )
         for col in result.columns
     ]
@@ -767,7 +798,7 @@ async def build_schema(
     audit_resource_change(user.user_id, "schema", source_name, "executed")
     return SchemaBuildResult(
         source_name=source_name,
-        version=getattr(result, "version", "") or "",
+        version=version_id,
         columns=columns,
         ddl=ddl,
     )

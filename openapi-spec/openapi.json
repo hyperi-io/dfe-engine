@@ -5381,7 +5381,7 @@
           "schemas"
         ],
         "summary": "Build Schema",
-        "description": "Build complete schema (DDL) from a source definition.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
         "operationId": "build_schema_api_v1_schemas__source_name__build_post",
         "parameters": [
           {
@@ -5392,6 +5392,24 @@
               "type": "string",
               "title": "Source Name"
             }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
           }
         ],
         "responses": {

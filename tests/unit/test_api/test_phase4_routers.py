@@ -88,6 +88,14 @@ class TestSchemasRouter:
         resp = client.post("/api/v1/schemas/nonexistent/build", headers=admin_headers)
         assert resp.status_code == 404
 
+    def test_build_unknown_source_version(self, client, admin_headers, sample_source):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.post(
+            f"/api/v1/schemas/{sample_source['source']}/build?version=9.9.9",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
     def test_columns_with_existing_source(self, client, admin_headers, sample_source):
         """Create a source, then try to get columns (404 when version has no schema YAML refs)."""
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
