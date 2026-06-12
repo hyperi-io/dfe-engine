@@ -224,6 +224,7 @@ class SourceSigma(BaseModel):
 
 
 _DEFAULT_SOURCE_VERSION = "1.0.0"
+_FORBIDDEN_WRITE_KEYS = frozenset({"versions", "current", "deployed_version", "date_time"})
 _VERSIONED_KEYS = (
     "header",
     "schema",
@@ -268,6 +269,145 @@ class SourceVersion(BaseModel):
             if isinstance(raw[key], (dict, list)) and not raw[key]:
                 del raw[key]
         return raw
+
+
+def _next_major_semver(current: str) -> str:
+    """Bump semver major (``1.2.3`` → ``2.0.0``)."""
+    parts = current.strip().split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"Version {current!r} is not semver (expected x.x.x)")
+    major = int(parts[0])
+    return f"{major + 1}.0.0"
+
+
+def next_major_source_version(
+    existing_version_ids: dict[str, SourceVersion] | dict[str, Any],
+) -> str:
+    """Return the next major semver after the highest existing source version id."""
+    if not existing_version_ids:
+        return _DEFAULT_SOURCE_VERSION
+
+    best = _DEFAULT_SOURCE_VERSION
+    best_tuple = (1, 0, 0)
+    for vid in existing_version_ids:
+        parts = str(vid).split(".")
+        if len(parts) != 3 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"Existing source version id {vid!r} is not semver (expected x.x.x)")
+        tup = (int(parts[0]), int(parts[1]), int(parts[2]))
+        if tup > best_tuple:
+            best_tuple = tup
+            best = str(vid)
+
+    return _next_major_semver(best)
+
+
+class SourceWriteRequest(BaseModel):
+    """Flat source definition for create/update API (no version tree)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    source: str | None = Field(
+        default=None,
+        description="Source name (_source label); required on create",
+    )
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    match: SourceMatch | None = Field(default=None, description="Receiver match rule")
+    header: SourceHeader | None = Field(
+        default=None,
+        description="Common schema header configuration for this revision",
+    )
+    schema_config: SourceSchema | None = Field(
+        default=None,
+        description="Schema configuration for this revision",
+        alias="schema",
+    )
+    transform: SourceTransform | None = Field(
+        default=None, description="Transform stage (optional, top-level)"
+    )
+    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
+    mapping_standards: list[str] | None = Field(
+        default=None,
+        description="Standards to generate mapping views for",
+    )
+    field_mappings: list[str] | None = Field(
+        default=None,
+        description="Field map registry paths for this revision",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_version_tree_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            forbidden = _FORBIDDEN_WRITE_KEYS.intersection(data.keys())
+            if forbidden:
+                names = ", ".join(sorted(forbidden))
+                raise ValueError(f"Fields not allowed on write: {names}")
+        return data
+
+    def to_version_snapshot(self) -> SourceVersion:
+        """Build a new immutable version entry from this write payload."""
+        return SourceVersion(
+            date_time=date.today().isoformat(),
+            header=self.header or SourceHeader(),
+            schema_config=self.schema_config or SourceSchema(),
+            mapping_standards=self.mapping_standards or [],
+            sigma=self.sigma,
+            field_mappings=self.field_mappings,
+            fetcher=self.fetcher,
+        )
+
+
+def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
+    """Create a new Source with initial version ``1.0.0`` from a flat write body."""
+    version_id = _DEFAULT_SOURCE_VERSION
+    snapshot = write.to_version_snapshot()
+    payload: dict[str, Any] = {
+        "source": source_name,
+        "display_name": write.display_name,
+        "description": write.description,
+        "enabled": write.enabled,
+        "deployed_version": version_id,
+        "current": version_id,
+        "match": write.match.model_dump(mode="json") if write.match else None,
+        "transform": write.transform.model_dump(mode="json") if write.transform else None,
+        "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
+    }
+    return Source.model_validate(payload)
+
+
+def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
+    """Append a new major version; never overwrite published version entries."""
+    new_version_id = next_major_source_version(existing.versions)
+    if new_version_id in existing.versions:
+        raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
+
+    snapshot = write.to_version_snapshot()
+    merged_versions = dict(existing.versions)
+    merged_versions[new_version_id] = snapshot
+
+    payload: dict[str, Any] = {
+        "source": existing.source,
+        "display_name": write.display_name
+        if write.display_name is not None
+        else existing.display_name,
+        "description": write.description if write.description is not None else existing.description,
+        "enabled": write.enabled,
+        "deployed_version": existing.deployed_version,
+        "current": new_version_id,
+        "match": write.match.model_dump(mode="json")
+        if write.match is not None
+        else (existing.match.model_dump(mode="json") if existing.match else None),
+        "transform": write.transform.model_dump(mode="json")
+        if write.transform is not None
+        else (existing.transform.model_dump(mode="json") if existing.transform else None),
+        "versions": {
+            vid: ver.model_dump(mode="json", by_alias=True) for vid, ver in merged_versions.items()
+        },
+    }
+    return Source.model_validate(payload)
 
 
 # ---------------------------------------------------------------------------
@@ -326,10 +466,8 @@ class Source(BaseModel):
                 data["deployed_version"] = current
             return data
 
-        version_id = data.get("current") or _DEFAULT_SOURCE_VERSION
+        version_id = _DEFAULT_SOURCE_VERSION
         header_raw = data.pop("header", None)
-        if isinstance(header_raw, dict) and header_raw.get("version"):
-            version_id = str(header_raw["version"])
 
         version_body: dict[str, Any] = {
             "date_time": data.pop("date_time", None) or date.today().isoformat()

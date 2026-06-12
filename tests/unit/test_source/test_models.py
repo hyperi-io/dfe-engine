@@ -12,6 +12,10 @@ from dfe_engine.source.models import (
     SourceSigma,
     SourceTransform,
     SourceVersion,
+    SourceWriteRequest,
+    apply_source_write_update,
+    next_major_source_version,
+    source_from_write,
 )
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -427,6 +431,104 @@ class TestSourceVersion:
         out = ver.to_yaml_dict()
         assert "mapping_standards" not in out
         assert out["date_time"] == "2026-06-10"
+
+
+class TestSourceWriteRequest:
+    def test_rejects_version_tree_keys(self):
+        with pytest.raises(ValueError, match="not allowed"):
+            SourceWriteRequest.model_validate(
+                {
+                    "source": "x",
+                    "versions": {"1.0.0": {}},
+                }
+            )
+
+    def test_create_uses_1_0_0_not_header_profile_version(self):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "profile_pin",
+                "header": {"type": "common-header/minimal", "version": "1.1.0"},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+        src = source_from_write(write, source_name="profile_pin")
+        assert "1.0.0" in src.versions
+        assert src.versions["1.0.0"].header.version == "1.1.0"
+        assert src.current == "1.0.0"
+
+    def test_next_major_source_version(self):
+        assert next_major_source_version({}) == "1.0.0"
+        assert next_major_source_version({"1.0.0": {}}) == "2.0.0"
+        assert next_major_source_version({"1.0.0": {}, "2.1.0": {}}) == "3.0.0"
+
+    def test_next_major_source_version_rejects_invalid_ids(self):
+        with pytest.raises(ValueError, match="not semver"):
+            next_major_source_version({"v1": {}})
+
+    def test_next_major_semver_invalid(self):
+        from dfe_engine.source.models import _next_major_semver
+
+        with pytest.raises(ValueError, match="not semver"):
+            _next_major_semver("not-a-version")
+
+    def test_apply_write_update_refuses_overwrite(self, monkeypatch):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {},
+                    },
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate({"schema": {"engine": "MergeTree"}})
+        monkeypatch.setattr(
+            "dfe_engine.source.models.next_major_source_version",
+            lambda _versions: "2.0.0",
+        )
+        with pytest.raises(ValueError, match="Refusing to overwrite"):
+            apply_source_write_update(existing, write)
+
+    def test_apply_write_update_appends_without_overwriting(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {"ttl_days": 90},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "enabled": True,
+                "description": "rev 2",
+                "schema": {"ttl_days": 30, "engine": "MergeTree"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert "1.0.0" in updated.versions
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
+        assert "2.0.0" in updated.versions
+        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+        assert updated.current == "2.0.0"
+        assert updated.deployed_version == "1.0.0"
+        assert updated.description == "rev 2"
 
 
 class TestSourceVersioning:

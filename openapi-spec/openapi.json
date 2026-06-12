@@ -1531,14 +1531,14 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a source definition.",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Source-Input"
+                "$ref": "#/components/schemas/SourceWriteRequest"
               }
             }
           }
@@ -1622,7 +1622,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Source-Output"
+                  "$ref": "#/components/schemas/Source"
                 }
               }
             }
@@ -1649,7 +1649,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update an existing source definition.",
+        "description": "Update a source from a flat revision body (appends next major version).",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
@@ -1667,7 +1667,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Source-Input"
+                "$ref": "#/components/schemas/SourceWriteRequest"
               }
             }
           }
@@ -9402,7 +9402,7 @@
         ],
         "title": "SizeResponse"
       },
-      "Source-Input": {
+      "Source": {
         "properties": {
           "source": {
             "type": "string",
@@ -9475,94 +9475,7 @@
           },
           "versions": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/SourceVersion-Input"
-            },
-            "type": "object",
-            "title": "Versions",
-            "description": "Version id \u2192 configuration snapshot"
-          }
-        },
-        "type": "object",
-        "required": [
-          "source"
-        ],
-        "title": "Source",
-        "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
-      },
-      "Source-Output": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "title": "Source",
-            "description": "The _source label \u2014 immutable identifier"
-          },
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name",
-            "description": "Human-readable display name"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "Source description"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "description": "Whether the source is active",
-            "default": true
-          },
-          "deployed_version": {
-            "type": "string",
-            "title": "Deployed Version",
-            "description": "Version deployed to ClickHouse / runtime",
-            "default": "1.0.0"
-          },
-          "current": {
-            "type": "string",
-            "title": "Current",
-            "description": "Working version (latest definition)",
-            "default": "1.0.0"
-          },
-          "match": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceMatch"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Receiver match rule"
-          },
-          "transform": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceTransform"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Transform stage (optional)"
-          },
-          "versions": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SourceVersion-Output"
+              "$ref": "#/components/schemas/SourceVersion"
             },
             "type": "object",
             "title": "Versions",
@@ -9947,7 +9860,7 @@
         "title": "SourceTransform",
         "description": "Transform stage configuration (vector or wasm)."
       },
-      "SourceVersion-Input": {
+      "SourceVersion": {
         "properties": {
           "date_time": {
             "type": "string",
@@ -10015,28 +9928,104 @@
         "title": "SourceVersion",
         "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
       },
-      "SourceVersion-Output": {
+      "SourceWriteRequest": {
         "properties": {
-          "date_time": {
-            "type": "string",
-            "title": "Date Time",
-            "description": "Version creation date (YYYY-MM-DD)"
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source name (_source label); required on create"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active",
+            "default": true
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule"
           },
           "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common schema header configuration for this revision"
           },
           "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema configuration for this revision"
           },
-          "mapping_standards": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "title": "Mapping Standards",
-            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage (optional, top-level)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SaaS API fetcher (optional)"
           },
           "sigma": {
             "anyOf": [
@@ -10048,6 +10037,21 @@
               }
             ],
             "description": "Sigma field mappings (optional)"
+          },
+          "mapping_standards": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Standards",
+            "description": "Standards to generate mapping views for"
           },
           "field_mappings": {
             "anyOf": [
@@ -10062,26 +10066,12 @@
               }
             ],
             "title": "Field Mappings",
-            "description": "Field map registry paths for this version (optional)"
-          },
-          "fetcher": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceFetcher"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SaaS API fetcher (optional)"
+            "description": "Field map registry paths for this revision"
           }
         },
         "type": "object",
-        "required": [
-          "date_time"
-        ],
-        "title": "SourceVersion",
-        "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
+        "title": "SourceWriteRequest",
+        "description": "Flat source definition for create/update API (no version tree)."
       },
       "SqlValidationError": {
         "properties": {

@@ -154,6 +154,25 @@ class TestUpdateSource:
         # Verify the update persisted
         get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
         assert get_resp.json()["description"] == "Updated description"
+        body = get_resp.json()
+        assert "1.0.0" in body["versions"]
+        assert "2.0.0" in body["versions"]
+        assert body["current"] == "2.0.0"
+        assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
+
+    def test_update_rejects_versions_payload(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.put(
+            "/api/v1/sources/test_source",
+            json={
+                **sample_source,
+                "versions": {"1.0.0": {"date_time": "2026-01-01", "schema": {}}},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
 
     def test_update_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.put(

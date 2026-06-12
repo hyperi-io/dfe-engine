@@ -31,7 +31,12 @@ from typing import Any
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import (
+    Source,
+    SourceWriteRequest,
+    apply_source_write_update,
+    source_from_write,
+)
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -213,6 +218,49 @@ class SourceRegistry:
 
         logger.info(f"Saved source '{source.source}' → {yaml_path}")
         return source
+
+    def create_source_from_write(
+        self,
+        write: SourceWriteRequest | dict[str, Any],
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Source:
+        """Create a source from a flat write body (initial version ``1.0.0``)."""
+        if isinstance(write, dict):
+            try:
+                write = SourceWriteRequest.model_validate(write)
+            except Exception as e:
+                raise SourceValidationError(f"Invalid source definition: {e}") from e
+
+        if not write.source:
+            raise SourceValidationError("'source' field is required")
+
+        source = source_from_write(write, source_name=write.source)
+        return self.save_source(source, created_by=created_by, description=description)
+
+    def update_source_from_write(
+        self,
+        source_name: str,
+        write: SourceWriteRequest | dict[str, Any],
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Source:
+        """Update a source by appending a new major version (never overwrites history)."""
+        if isinstance(write, dict):
+            try:
+                write = SourceWriteRequest.model_validate(write)
+            except Exception as e:
+                raise SourceValidationError(f"Invalid source definition: {e}") from e
+
+        existing = self.get_source(source_name)
+        try:
+            updated = apply_source_write_update(existing, write)
+        except ValueError as e:
+            raise SourceValidationError(str(e)) from e
+
+        return self.save_source(updated, created_by=created_by, description=description)
 
     def delete_source(self, source_name: str) -> None:
         """Delete a source definition.

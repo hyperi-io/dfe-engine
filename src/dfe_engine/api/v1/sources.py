@@ -20,7 +20,7 @@ from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import Source, SourceWriteRequest
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
@@ -145,11 +145,11 @@ async def list_sources(
     dependencies=[Depends(require_action("source:write"))],
 )
 async def create_source(
-    body: Source,
+    body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Create a new source from a source definition."""
+    """Create a new source from a flat source definition (initial version ``1.0.0``)."""
     name = body.source
 
     if not name:
@@ -171,7 +171,7 @@ async def create_source(
         )
 
     try:
-        source = registry.save_source(body, created_by=user.user_id)
+        source = registry.create_source_from_write(body, created_by=user.user_id)
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
@@ -213,11 +213,13 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
 )
 async def update_source(
     name: str,
-    body: Source,
+    body: SourceWriteRequest,
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Update an existing source definition."""
+    """Update a source from a flat revision body (appends next major version)."""
+    from dfe_engine.source.registry import SourceNotFoundError
+
     if not registry.source_exists(name):
         raise HTTPException(
             status_code=404,
@@ -228,9 +230,15 @@ async def update_source(
         )
 
     try:
-        source = registry.save_source(
-            body.model_copy(update={"source": name}), created_by=user.user_id
-        )
+        source = registry.update_source_from_write(name, body, created_by=user.user_id)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        ) from None
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
