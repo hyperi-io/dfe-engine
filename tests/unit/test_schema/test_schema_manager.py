@@ -161,6 +161,10 @@ class TestAddVersion:
                 [{"name": "ts", "type": "datetime"}],
             )
 
+    def test_refuse_empty_columns(self, versioned_schema):
+        with pytest.raises(SchemaVersionError, match="columns must contain at least one column"):
+            SchemaManager.add_version(versioned_schema, "1.1.0", [])
+
     def test_validates_columns(self, versioned_schema):
         with pytest.raises(SchemaVersionError, match="validation failed"):
             SchemaManager.add_version(
