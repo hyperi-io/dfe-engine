@@ -59,10 +59,26 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
 
 
 class SourceResponse(BaseModel):
-    """Full source after create/update."""
+    """Legacy compact metadata after create/update (prefer full ``Source`` on write)."""
 
     source: str
     message: str = "ok"
+    current: str = Field(..., description="Working version id after the operation")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to runtime (null until first deploy)",
+    )
+    versions: list[str] = Field(..., description="All version ids on the source")
+
+
+def _source_response(source: Source, *, message: str) -> SourceResponse:
+    return SourceResponse(
+        source=source.source,
+        message=message,
+        current=source.current,
+        deployed_version=source.deployed_version,
+        versions=sorted(source.versions.keys()),
+    )
 
 
 class BulkActionRequest(BaseModel):
@@ -167,7 +183,7 @@ async def create_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
-    return SourceResponse(source=source.source, message="created")
+    return _source_response(source, message="created")
 
 
 @router.get(
@@ -179,7 +195,11 @@ async def get_source_version(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
-    version: str = Query(..., description="Source version id to return (required)"),
+    version: str = Query(
+        ...,
+        min_length=1,
+        description="Source version id to return (required)",
+    ),
 ):
     """Get one immutable source version snapshot by id."""
     from dfe_engine.source.registry import SourceNotFoundError
@@ -282,7 +302,7 @@ async def update_source(
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
-    return SourceResponse(source=source.source, message="updated")
+    return _source_response(source, message="updated")
 
 
 @router.delete(

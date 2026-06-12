@@ -1621,6 +1621,7 @@
             "required": true,
             "schema": {
               "type": "string",
+              "minLength": 1,
               "description": "Source version id to return (required)",
               "title": "Version"
             },
@@ -5050,7 +5051,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MetaSchema-Output"
+                  "$ref": "#/components/schemas/MetaSchemaVersionWriteResponse"
                 }
               }
             }
@@ -5182,7 +5183,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MetaSchema-Output"
+                  "$ref": "#/components/schemas/MetaSchemaVersionWriteResponse"
                 }
               }
             }
@@ -7710,6 +7711,36 @@
         "title": "MetaSchemaUpdateRequest",
         "description": "Partial update for meta-schema metadata (current pointer or version summary)."
       },
+      "MetaSchemaVersionWriteResponse": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Registry path (e.g. ``aws/cloudtrail``)"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version id after the write"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All version ids on this schema"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "current",
+          "versions"
+        ],
+        "title": "MetaSchemaVersionWriteResponse",
+        "description": "Meta-schema state after adding a version or updating metadata."
+      },
       "MetricEntry": {
         "properties": {
           "name": {
@@ -9753,14 +9784,41 @@
             "type": "string",
             "title": "Message",
             "default": "ok"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version id after the operation"
+          },
+          "deployed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Version",
+            "description": "Version deployed to runtime (null until first deploy)"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All version ids on the source"
           }
         },
         "type": "object",
         "required": [
-          "source"
+          "source",
+          "current",
+          "versions"
         ],
         "title": "SourceResponse",
-        "description": "Full source after create/update."
+        "description": "Legacy compact metadata after create/update (prefer full ``Source`` on write)."
       },
       "SourceSchema": {
         "properties": {

@@ -720,7 +720,10 @@ class TestSchemasMetaWriteRouter:
             with TestClient(app, raise_server_exceptions=False) as tc:
                 set_current = tc.patch(base, json={"current": "1.1.0"}, headers=headers)
                 assert set_current.status_code == 200
-                assert set_current.json()["current"] == "1.1.0"
+                set_body = set_current.json()
+                assert set_body["current"] == "1.1.0"
+                assert set_body["path"] == "aws/cloudtrail"
+                assert "1.1.0" in set_body["versions"]
 
                 summary = tc.patch(
                     f"{base}?version=1.0.0",
@@ -728,7 +731,14 @@ class TestSchemasMetaWriteRouter:
                     headers=headers,
                 )
                 assert summary.status_code == 200
-                assert summary.json()["versions"]["1.0.0"]["summary"] == "updated init"
+                summary_body = summary.json()
+                assert summary_body["current"] == "1.1.0"
+                get_def = tc.get(
+                    f"{base}/versions/columns?version=1.0.0",
+                    headers=headers,
+                )
+                assert get_def.status_code == 200
+                assert get_def.json()["version"]["summary"] == "updated init"
 
                 add = tc.post(
                     f"{base}/versions",
@@ -745,12 +755,19 @@ class TestSchemasMetaWriteRouter:
                 )
                 assert add.status_code == 201
                 body = add.json()
+                assert body["path"] == "aws/cloudtrail"
                 assert body["current"] == "1.1.1"
                 assert "1.1.1" in body["versions"]
-                assert body["versions"]["1.1.1"]["type"] == "revision"
-                assert body["versions"]["1.1.1"]["summary"] == "added column p"
-                assert len(body["versions"]["1.1.1"]["columns"]) == 3
                 assert "1.0.0" in body["versions"]
+                get_new = tc.get(
+                    f"{base}/versions/columns?version=1.1.1",
+                    headers=headers,
+                )
+                assert get_new.status_code == 200
+                ver = get_new.json()["version"]
+                assert ver["type"] == "revision"
+                assert ver["summary"] == "added column p"
+                assert len(ver["columns"]["items"]) == 3
 
                 empty_cols = tc.post(
                     f"{base}/versions",

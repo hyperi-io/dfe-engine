@@ -155,6 +155,9 @@ class TestCreateSource:
         data = resp.json()
         assert data["source"] == "test_source"
         assert data["message"] == "created"
+        assert data["current"] == "1.0.0"
+        assert data["deployed_version"] is None
+        assert data["versions"] == ["1.0.0"]
 
         get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
         body = get_resp.json()
@@ -310,7 +313,11 @@ class TestUpdateSource:
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["message"] == "updated"
+        updated = resp.json()
+        assert updated["message"] == "updated"
+        assert updated["current"] == "2.0.0"
+        assert updated["deployed_version"] is None
+        assert updated["versions"] == ["1.0.0", "2.0.0"]
 
         # Verify the update persisted
         get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)

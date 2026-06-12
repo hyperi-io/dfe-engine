@@ -33,9 +33,11 @@ from dfe_engine.schema.models import (
     MetaSchemaAddVersionRequest,
     MetaSchemaGetResponse,
     MetaSchemaUpdateRequest,
+    MetaSchemaVersionWriteResponse,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
     SchemaVersionGet,
+    meta_schema_version_write_response,
 )
 from dfe_engine.schema.models import (
     SchemaColumn as MetaSchemaColumn,
@@ -287,7 +289,7 @@ async def get_meta_schema(
 
 @router.post(
     "/definitions/{schema_path:path}/versions",
-    response_model=MetaSchema,
+    response_model=MetaSchemaVersionWriteResponse,
     dependencies=[Depends(require_action("schema:write"))],
     status_code=status.HTTP_201_CREATED,
 )
@@ -296,7 +298,7 @@ async def add_meta_schema_version(
     body: MetaSchemaAddVersionRequest,
     user: CurrentUser,
     registry: SchemaReg,
-) -> MetaSchema:
+) -> MetaSchemaVersionWriteResponse:
     """Add a new meta-schema version (bumps semver from current and sets it current)."""
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -377,7 +379,7 @@ async def add_meta_schema_version(
         created_by=user.user_id,
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
-    return saved.model_copy(update={"path": canonical_path})
+    return meta_schema_version_write_response(saved, path=canonical_path)
 
 
 @router.post(
@@ -454,7 +456,7 @@ async def create_meta_schema(
 
 @router.patch(
     "/definitions/{schema_path:path}",
-    response_model=MetaSchema,
+    response_model=MetaSchemaVersionWriteResponse,
     dependencies=[Depends(require_action("schema:write"))],
 )
 async def update_meta_schema(
@@ -466,7 +468,7 @@ async def update_meta_schema(
         None,
         description="Version to update summary for (required when summary is set)",
     ),
-) -> MetaSchema:
+) -> MetaSchemaVersionWriteResponse:
     """Update meta-schema metadata: current pointer or a version summary."""
     from dfe_engine.schema.registry import (
         SchemaNotFoundError,
@@ -550,7 +552,7 @@ async def update_meta_schema(
         created_by=user.user_id,
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
-    return saved.model_copy(update={"path": canonical_path})
+    return meta_schema_version_write_response(saved, path=canonical_path)
 
 
 @router.delete(
