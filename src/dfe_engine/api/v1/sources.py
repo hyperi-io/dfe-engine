@@ -2,7 +2,7 @@
 
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
-GET    /api/v1/sources/{name}           → Get full source
+GET    /api/v1/sources/{name}/versions     → Get one version snapshot
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
@@ -24,6 +24,7 @@ from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     Source,
     SourceSummaryObject,
+    SourceVersionGetResponse,
     SourceWriteRequest,
 )
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
@@ -167,6 +168,56 @@ async def create_source(
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
     return SourceResponse(source=source.source, message="created")
+
+
+@router.get(
+    "/{name}/versions",
+    response_model=SourceVersionGetResponse,
+    dependencies=[Depends(require_action("source:read"))],
+)
+async def get_source_version(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str = Query(..., description="Source version id to return (required)"),
+):
+    """Get one immutable source version snapshot by id."""
+    from dfe_engine.source.registry import SourceNotFoundError
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source '{name}' not found",
+            },
+        ) from None
+
+    if version not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version}' not found for source '{name}'",
+            },
+        )
+
+    version_ids = sorted(source.versions.keys())
+    return SourceVersionGetResponse(
+        source=source.source,
+        display_name=source.display_name,
+        description=source.description,
+        enabled=source.enabled,
+        current=source.current,
+        deployed_version=source.deployed_version,
+        selected=version,
+        versions=version_ids,
+        match=source.match,
+        transform=source.transform,
+        version=source.versions[version],
+    )
 
 
 @router.get(

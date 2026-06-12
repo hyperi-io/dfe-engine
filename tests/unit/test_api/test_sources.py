@@ -1,6 +1,12 @@
 """Tests for sources router — CRUD, pagination, search, sort, bulk."""
 
+import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
+
+from dfe_engine.api.deps import _registries
+from dfe_engine.api.v1.sources import _raise_save_validation_http
+from dfe_engine.source.registry import SourceValidationError
 
 
 class TestListSources:
@@ -104,6 +110,33 @@ class TestListSources:
         resp = client.get("/api/v1/sources", headers=viewer_headers)
         assert resp.status_code == 200
 
+    def test_list_enabled_false_returns_only_disabled(
+        self, client: TestClient, admin_headers: dict
+    ):
+        client.post(
+            "/api/v1/sources",
+            json={"source": "enabled_only_src", "enabled": True},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/sources",
+            json={"source": "disabled_only_src", "enabled": False},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/sources?enabled=false", headers=admin_headers)
+        assert resp.status_code == 200
+        names = [item["name"] for item in resp.json()["items"]]
+        assert "disabled_only_src" in names
+        assert "enabled_only_src" not in names
+
+
+class TestSaveValidationHttpMapping:
+    def test_generic_validation_error_is_422(self):
+        with pytest.raises(HTTPException) as exc_info:
+            _raise_save_validation_http(SourceValidationError("invalid source definition"))
+        assert exc_info.value.status_code == 422
+        assert exc_info.value.detail["code"] == "validation_error"
+
 
 class TestCreateSource:
     """POST /api/v1/sources"""
@@ -151,6 +184,94 @@ class TestGetSource:
         assert resp.status_code == 404
 
 
+class TestGetSourceVersion:
+    """GET /api/v1/sources/{name}/versions?version="""
+
+    def test_get_version_after_create(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.get(
+            "/api/v1/sources/test_source/versions?version=1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["source"] == "test_source"
+        assert body["selected"] == "1.0.0"
+        assert body["current"] == "1.0.0"
+        assert body["versions"] == ["1.0.0"]
+        assert body["version"]["schema"]["engine"] == "MergeTree"
+
+    def test_get_version_after_update_preserves_history(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        client.put(
+            "/api/v1/sources/test_source",
+            json={**sample_source, "description": "v2"},
+            headers=admin_headers,
+        )
+        v1 = client.get(
+            "/api/v1/sources/test_source/versions?version=1.0.0",
+            headers=admin_headers,
+        )
+        assert v1.status_code == 200
+        assert v1.json()["selected"] == "1.0.0"
+        assert v1.json()["current"] == "2.0.0"
+
+        v2 = client.get(
+            "/api/v1/sources/test_source/versions?version=2.0.0",
+            headers=admin_headers,
+        )
+        assert v2.status_code == 200
+        assert v2.json()["version"]["schema"]["engine"] == "MergeTree"
+
+    def test_get_version_not_found(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.get(
+            "/api/v1/sources/test_source/versions?version=9.9.9",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_get_version_source_not_found(self, client: TestClient, admin_headers: dict):
+        resp = client.get(
+            "/api/v1/sources/missing/versions?version=1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_get_version_query_required(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.get("/api/v1/sources/test_source/versions", headers=admin_headers)
+        assert resp.status_code == 422
+
+    def test_get_version_includes_top_level_metadata(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        body = {
+            **sample_source,
+            "match": {"field": "ingest_type", "value": "test_ingest"},
+            "transform": {"engine": "vector", "config_file": "/etc/vector/test.toml"},
+        }
+        client.post("/api/v1/sources", json=body, headers=admin_headers)
+        resp = client.get(
+            "/api/v1/sources/test_source/versions?version=1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["display_name"] == sample_source["display_name"]
+        assert data["deployed_version"] == "1.0.0"
+        assert data["match"]["field"] == "ingest_type"
+        assert data["transform"]["engine"] == "vector"
+
+
 class TestUpdateSource:
     """PUT /api/v1/sources/{name}"""
 
@@ -191,6 +312,28 @@ class TestUpdateSource:
         resp = client.put(
             "/api/v1/sources/nonexistent",
             json={"source": "nonexistent"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_update_not_found_when_registry_raises_after_exists_check(
+        self,
+        monkeypatch,
+        client: TestClient,
+        admin_headers: dict,
+        sample_source: dict,
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        registry = _registries["source"]
+        from dfe_engine.source.registry import SourceNotFoundError
+
+        def missing(*args, **kwargs):
+            raise SourceNotFoundError("test_source")
+
+        monkeypatch.setattr(registry, "update_source_from_write", missing)
+        resp = client.put(
+            "/api/v1/sources/test_source",
+            json={**sample_source, "description": "gone"},
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -281,6 +424,36 @@ class TestBulkAction:
         data = resp.json()
         assert set(data["succeeded"]) == {"bulk_a", "bulk_c"}
         assert data["failed"] == []
+
+    def test_bulk_disable_and_enable(self, client: TestClient, admin_headers: dict):
+        client.post(
+            "/api/v1/sources",
+            json={"source": "bulk_toggle"},
+            headers=admin_headers,
+        )
+        disable = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "disable", "sources": ["bulk_toggle"]},
+            headers=admin_headers,
+        )
+        assert disable.status_code == 200
+        assert disable.json()["succeeded"] == ["bulk_toggle"]
+        assert (
+            client.get("/api/v1/sources/bulk_toggle", headers=admin_headers).json()["enabled"]
+            is False
+        )
+
+        enable = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "enable", "sources": ["bulk_toggle"]},
+            headers=admin_headers,
+        )
+        assert enable.status_code == 200
+        assert enable.json()["succeeded"] == ["bulk_toggle"]
+        assert (
+            client.get("/api/v1/sources/bulk_toggle", headers=admin_headers).json()["enabled"]
+            is True
+        )
 
     def test_bulk_invalid_action(self, client: TestClient, admin_headers: dict):
         resp = client.post(

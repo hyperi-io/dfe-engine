@@ -1597,6 +1597,65 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/versions": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get Source Version",
+        "description": "Get one immutable source version snapshot by id.",
+        "operationId": "get_source_version_api_v1_sources__name__versions_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Source version id to return (required)",
+              "title": "Version"
+            },
+            "description": "Source version id to return (required)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceVersionGetResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}": {
       "get": {
         "tags": [
@@ -9989,6 +10048,105 @@
         ],
         "title": "SourceVersion",
         "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
+      },
+      "SourceVersionGetResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source name (_source label)"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active",
+            "default": true
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version id"
+          },
+          "deployed_version": {
+            "type": "string",
+            "title": "Deployed Version",
+            "description": "Version deployed to ClickHouse / runtime"
+          },
+          "selected": {
+            "type": "string",
+            "title": "Selected",
+            "description": "Version id requested via query parameter"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All version ids defined on this source"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage (top-level, not versioned)"
+          },
+          "version": {
+            "$ref": "#/components/schemas/SourceVersion",
+            "description": "Immutable configuration snapshot for ``selected``"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "current",
+          "deployed_version",
+          "selected",
+          "versions",
+          "version"
+        ],
+        "title": "SourceVersionGetResponse",
+        "description": "Source payload for a single requested version (mirrors ``MetaSchemaGetResponse``)."
       },
       "SourceWriteRequest": {
         "properties": {

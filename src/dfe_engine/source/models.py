@@ -601,6 +601,31 @@ class Source(BaseModel):
         return data
 
 
+# ── Version GET response (API) ───────────────────────────────
+
+
+class SourceVersionGetResponse(BaseModel):
+    """Source payload for a single requested version (mirrors ``MetaSchemaGetResponse``)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: str = Field(..., description="Source name (_source label)")
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    current: str = Field(..., description="Working version id")
+    deployed_version: str = Field(..., description="Version deployed to ClickHouse / runtime")
+    selected: str = Field(..., description="Version id requested via query parameter")
+    versions: list[str] = Field(..., description="All version ids defined on this source")
+    match: SourceMatch | None = Field(default=None, description="Receiver match rule")
+    transform: SourceTransform | None = Field(
+        default=None, description="Transform stage (top-level, not versioned)"
+    )
+    version: SourceVersion = Field(
+        ..., description="Immutable configuration snapshot for ``selected``"
+    )
+
+
 # ── List / summary response models (API) ─────────────────────
 
 

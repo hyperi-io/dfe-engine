@@ -14,6 +14,7 @@ from dfe_engine.source.models import (
     SourceSummaryObject,
     SourceTransform,
     SourceVersion,
+    SourceVersionGetResponse,
     SourceWriteRequest,
     apply_source_write_update,
     next_major_source_version,
@@ -531,6 +532,32 @@ class TestSourceWriteRequest:
         assert updated.current == "2.0.0"
         assert updated.deployed_version == "1.0.0"
         assert updated.description == "rev 2"
+
+
+class TestSourceVersionGetResponse:
+    def test_round_trip_fields(self):
+        snap = SourceVersion(
+            date_time="2026-06-12",
+            header=SourceHeader(type="time_series", version="1.0.0"),
+            schema_config=SourceSchema(engine="MergeTree"),
+        )
+        resp = SourceVersionGetResponse(
+            source="my_source",
+            display_name="My Source",
+            description="desc",
+            enabled=False,
+            current="2.0.0",
+            deployed_version="1.0.0",
+            selected="1.0.0",
+            versions=["1.0.0", "2.0.0"],
+            match=SourceMatch(field="ingest_type", value="x"),
+            transform=SourceTransform(engine="vector"),
+            version=snap,
+        )
+        assert resp.source == "my_source"
+        assert resp.version.schema_config.engine == "MergeTree"
+        assert resp.match is not None
+        assert resp.match.value == "x"
 
 
 class TestPaginatedSourceSummaryResponse:
