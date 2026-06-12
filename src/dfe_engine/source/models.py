@@ -16,9 +16,12 @@ Usage:
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+
+from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 
 # _source naming: lowercase alphanumeric + underscores, starts with letter
 _SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -222,6 +225,198 @@ class SourceSigma(BaseModel):
     )
 
 
+_DEFAULT_SOURCE_VERSION = "1.0.0"
+_FORBIDDEN_WRITE_KEYS = frozenset({"versions", "current", "deployed_version", "date_time"})
+_VERSIONED_KEYS = (
+    "header",
+    "schema",
+    "schema_config",
+    "mapping_standards",
+    "sigma",
+    "field_mappings",
+    "fetcher",
+    "match",
+    "transform",
+)
+
+
+class SourceVersion(BaseModel):
+    """Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    date_time: str = Field(..., description="Version creation date (YYYY-MM-DD)")
+    header: SourceHeader = Field(
+        default_factory=SourceHeader,
+        description="Common schema header configuration",
+    )
+    schema_config: SourceSchema = Field(
+        default_factory=SourceSchema,
+        description="Schema configuration",
+        alias="schema",
+    )
+    mapping_standards: list[str] = Field(
+        default_factory=list,
+        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
+    )
+    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
+    field_mappings: list[str] | None = Field(
+        default=None,
+        description="Field map registry paths for this version (optional)",
+    )
+    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    match: SourceMatch | None = Field(default=None, description="Receiver match rule (optional)")
+    transform: SourceTransform | None = Field(
+        default=None, description="Transform stage (optional)"
+    )
+
+    def to_yaml_dict(self) -> dict[str, Any]:
+        """Serialize for YAML persistence under ``versions.<id>``."""
+        raw = self.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for key in list(raw.keys()):
+            if isinstance(raw[key], (dict, list)) and not raw[key]:
+                del raw[key]
+        return raw
+
+
+def _next_major_semver(current: str) -> str:
+    """Bump semver major (``1.2.3`` → ``2.0.0``)."""
+    parts = current.strip().split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        raise ValueError(f"Version {current!r} is not semver (expected x.x.x)")
+    major = int(parts[0])
+    return f"{major + 1}.0.0"
+
+
+def next_major_source_version(
+    existing_version_ids: dict[str, SourceVersion] | dict[str, Any],
+) -> str:
+    """Return the next major semver after the highest existing source version id."""
+    if not existing_version_ids:
+        return _DEFAULT_SOURCE_VERSION
+
+    best = _DEFAULT_SOURCE_VERSION
+    best_tuple = (1, 0, 0)
+    for vid in existing_version_ids:
+        parts = str(vid).split(".")
+        if len(parts) != 3 or not all(p.isdigit() for p in parts):
+            raise ValueError(f"Existing source version id {vid!r} is not semver (expected x.x.x)")
+        tup = (int(parts[0]), int(parts[1]), int(parts[2]))
+        if tup > best_tuple:
+            best_tuple = tup
+            best = str(vid)
+
+    return _next_major_semver(best)
+
+
+class SourceWriteRequest(BaseModel):
+    """Flat source definition for create/update API (no version tree)."""
+
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
+    source: str | None = Field(
+        default=None,
+        description="Source name (_source label); required on create",
+    )
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    match: SourceMatch | None = Field(default=None, description="Receiver match rule")
+    header: SourceHeader | None = Field(
+        default=None,
+        description="Common schema header configuration for this revision",
+    )
+    schema_config: SourceSchema | None = Field(
+        default=None,
+        description="Schema configuration for this revision",
+        alias="schema",
+    )
+    transform: SourceTransform | None = Field(
+        default=None, description="Transform stage (optional, top-level)"
+    )
+    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
+    mapping_standards: list[str] | None = Field(
+        default=None,
+        description="Standards to generate mapping views for",
+    )
+    field_mappings: list[str] | None = Field(
+        default=None,
+        description="Field map registry paths for this revision",
+    )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _reject_version_tree_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            forbidden = _FORBIDDEN_WRITE_KEYS.intersection(data.keys())
+            if forbidden:
+                names = ", ".join(sorted(forbidden))
+                raise ValueError(f"Fields not allowed on write: {names}")
+        return data
+
+    def to_version_snapshot(self) -> SourceVersion:
+        """Build a new immutable version entry from this write payload."""
+        return SourceVersion(
+            date_time=date.today().isoformat(),
+            header=self.header or SourceHeader(),
+            schema_config=self.schema_config or SourceSchema(),
+            mapping_standards=self.mapping_standards or [],
+            sigma=self.sigma,
+            field_mappings=self.field_mappings,
+            fetcher=self.fetcher,
+            match=self.match,
+            transform=self.transform,
+        )
+
+
+def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
+    """Create a new Source with initial version ``1.0.0`` from a flat write body."""
+    version_id = _DEFAULT_SOURCE_VERSION
+    snapshot = write.to_version_snapshot()
+    payload: dict[str, Any] = {
+        "source": source_name,
+        "display_name": write.display_name,
+        "description": write.description,
+        "enabled": write.enabled,
+        "deployed_version": None,
+        "current": version_id,
+        "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
+    }
+    return Source.model_validate(payload)
+
+
+def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
+    """Append a new major version; never overwrite published version entries."""
+    new_version_id = next_major_source_version(existing.versions)
+    if new_version_id in existing.versions:
+        raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
+
+    snapshot = write.to_version_snapshot()
+    if write.match is None and existing.match is not None:
+        snapshot = snapshot.model_copy(update={"match": existing.match})
+    if write.transform is None and existing.transform is not None:
+        snapshot = snapshot.model_copy(update={"transform": existing.transform})
+
+    merged_versions = dict(existing.versions)
+    merged_versions[new_version_id] = snapshot
+
+    payload: dict[str, Any] = {
+        "source": existing.source,
+        "display_name": write.display_name
+        if write.display_name is not None
+        else existing.display_name,
+        "description": write.description if write.description is not None else existing.description,
+        "enabled": write.enabled,
+        "deployed_version": existing.deployed_version,
+        "current": new_version_id,
+        "versions": {
+            vid: ver.model_dump(mode="json", by_alias=True) for vid, ver in merged_versions.items()
+        },
+    }
+    return Source.model_validate(payload)
+
+
 # ---------------------------------------------------------------------------
 # Source — Top-Level Model
 # ---------------------------------------------------------------------------
@@ -236,37 +431,76 @@ class Source(BaseModel):
     See docs/SOURCE.md for the full specification.
     """
 
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
     source: str = Field(..., description="The _source label — immutable identifier")
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
-
-    header: SourceHeader = Field(
-        default_factory=SourceHeader,
-        description="Common schema header configuration",
-    )
-    match: SourceMatch | None = Field(
+    deployed_version: str | None = Field(
         default=None,
-        description="Receiver match rule",
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
     )
-    schema_config: SourceSchema = Field(
-        default_factory=SourceSchema,
-        description="Schema configuration",
-        alias="schema",
+    current: str = Field(
+        default=_DEFAULT_SOURCE_VERSION,
+        description="Working version (latest definition)",
     )
-    transform: SourceTransform | None = Field(
-        default=None, description="Transform stage (optional)"
-    )
-    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
-    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
-    mapping_standards: list[str] = Field(
-        default_factory=list,
-        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
+    versions: dict[str, SourceVersion] = Field(
+        default_factory=dict,
+        description="Version id → configuration snapshot",
     )
 
-    model_config = {
-        "populate_by_name": True,
-    }
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_or_versioned(cls, data: Any) -> Any:
+        """Accept legacy flat YAML/API bodies and normalize to the version tree."""
+        if not isinstance(data, dict):
+            return data
+
+        data = dict(data)
+        if data.get("versions"):
+            top_match = data.pop("match", None)
+            top_transform = data.pop("transform", None)
+            if top_match is not None or top_transform is not None:
+                for ver in data["versions"].values():
+                    if not isinstance(ver, dict):
+                        continue
+                    if top_match is not None and "match" not in ver:
+                        ver["match"] = top_match
+                    if top_transform is not None and "transform" not in ver:
+                        ver["transform"] = top_transform
+            current = data.get("current") or data.get("deployed_version")
+            if current and "current" not in data:
+                data["current"] = current
+            return data
+
+        version_id = _DEFAULT_SOURCE_VERSION
+        header_raw = data.pop("header", None)
+
+        version_body: dict[str, Any] = {
+            "date_time": data.pop("date_time", None) or date.today().isoformat()
+        }
+        if header_raw is not None:
+            version_body["header"] = header_raw
+        else:
+            version_body["header"] = {"type": "time_series", "version": version_id}
+
+        if "schema" in data:
+            version_body["schema"] = data.pop("schema")
+        elif "schema_config" in data:
+            version_body["schema"] = data.pop("schema_config")
+        else:
+            version_body["schema"] = {}
+
+        for key in _VERSIONED_KEYS:
+            if key in ("header", "schema", "schema_config"):
+                continue
+            if key in data:
+                version_body[key] = data.pop(key)
+
+        data.setdefault("current", version_id)
+        data["versions"] = {version_id: version_body}
+        return data
 
     @field_validator("source")
     @classmethod
@@ -282,11 +516,70 @@ class Source(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _set_display_name(self) -> Source:
-        """Default display_name to title-cased source name."""
+    def _validate_versions_and_display_name(self) -> Source:
+        """Default display_name and ensure version pointers are valid."""
         if self.display_name is None:
             self.display_name = self.source.replace("_", " ").title()
+
+        if not self.versions:
+            raise ValueError("versions must contain at least one version entry")
+
+        if self.current not in self.versions:
+            raise ValueError(f"current version '{self.current}' is not defined in versions")
+        if self.deployed_version is not None and self.deployed_version not in self.versions:
+            raise ValueError(
+                f"deployed_version '{self.deployed_version}' is not defined in versions"
+            )
         return self
+
+    def runtime_version_id(self) -> str:
+        """Version used for runtime accessors when ``deployed_version`` is unset."""
+        return self.deployed_version or self.current
+
+    def version(self, version_id: str | None = None) -> SourceVersion:
+        """Return a specific version snapshot (defaults to deployed, else current)."""
+        vid = version_id or self.runtime_version_id()
+        try:
+            return self.versions[vid]
+        except KeyError as e:
+            raise ValueError(f"Source version '{vid}' is not defined") from e
+
+    @property
+    def header(self) -> SourceHeader:
+        """Deployed version header (legacy accessor)."""
+        return self.version().header
+
+    @property
+    def schema_config(self) -> SourceSchema:
+        """Deployed version schema config (legacy accessor)."""
+        return self.version().schema_config
+
+    @property
+    def mapping_standards(self) -> list[str]:
+        """Deployed version mapping standards (legacy accessor)."""
+        return self.version().mapping_standards
+
+    @property
+    def sigma(self) -> SourceSigma | None:
+        """Deployed version sigma config (legacy accessor)."""
+        return self.version().sigma
+
+    @property
+    def fetcher(self) -> SourceFetcher | None:
+        """Deployed version fetcher config (legacy accessor)."""
+        return self.version().fetcher
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def match(self) -> SourceMatch | None:
+        """Receiver match rule on the deployed version (serialized for API compat)."""
+        return self.version().match
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def transform(self) -> SourceTransform | None:
+        """Transform config on the deployed version (serialized for API compat)."""
+        return self.version().transform
 
     # -----------------------------------------------------------------
     # Derived properties
@@ -310,12 +603,100 @@ class Source(BaseModel):
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize to a dict suitable for YAML output.
 
-        Uses 'schema' key (not 'schema_config') for YAML compatibility.
-        Excludes None values for clean output.
+        Top-level identity and routing; versioned config under ``versions``.
         """
-        data = self.model_dump(mode="json", by_alias=True, exclude_none=True)
-        # Remove empty containers
-        for key in list(data.keys()):
-            if isinstance(data[key], (dict, list)) and not data[key]:
-                del data[key]
+        data: dict[str, Any] = {
+            "source": self.source,
+            "display_name": self.display_name,
+            "enabled": self.enabled,
+            "current": self.current,
+            "versions": {vid: ver.to_yaml_dict() for vid, ver in sorted(self.versions.items())},
+        }
+        if self.deployed_version is not None:
+            data["deployed_version"] = self.deployed_version
+        if self.description is not None:
+            data["description"] = self.description
         return data
+
+
+# ── Version GET response (API) ───────────────────────────────
+
+
+class SourceVersionGetResponse(BaseModel):
+    """Source payload for a single requested version (mirrors ``MetaSchemaGetResponse``)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    source: str = Field(..., description="Source name (_source label)")
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    current: str = Field(..., description="Working version id")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
+    )
+    selected: str = Field(..., description="Version id requested via query parameter")
+    versions: list[str] = Field(..., description="All version ids defined on this source")
+    version: SourceVersion = Field(
+        ..., description="Immutable configuration snapshot for ``selected``"
+    )
+
+
+# ── List / summary response models (API) ─────────────────────
+
+
+class SourceSummaryObject(BaseModel):
+    """Summary row for paginated source list (mirrors ``SchemaSummaryObject``)."""
+
+    name: str = Field(description="Source name (_source label)")
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    current: str = Field(description="Working version id")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
+    )
+    versions: list[str] = Field(description="All defined version ids")
+    updated_at: str = Field(default="", description="Last updated timestamp (ISO 8601)")
+    header_type: str | None = Field(
+        default=None,
+        description="Common header profile type (deployed version)",
+    )
+    has_transform: bool = Field(
+        default=False, description="Whether a transform stage is configured"
+    )
+    has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
+    mapping_standards: list[str] = Field(
+        default_factory=list,
+        description="Mapping standards on the deployed version",
+    )
+
+
+PathTree[SourceSummaryObject].model_rebuild()
+SourceSummaryTree = PathTree[SourceSummaryObject]
+"""Source list tree grouped by path segments derived from the source name."""
+
+
+class PaginatedSourceSummaryResponse(
+    PaginatedResponseWithObjects[SourceSummaryObject, SourceSummaryTree]
+):
+    """Source list: path tree in ``objects`` plus paginated ``items``."""
+
+    @classmethod
+    def from_summaries(
+        cls,
+        summaries: list[SourceSummaryObject],
+        page: int,
+        per_page: int,
+    ) -> PaginatedSourceSummaryResponse:
+        return cls.with_objects(
+            summaries,
+            page,
+            per_page,
+            SourceSummaryTree.from_paths(
+                summaries,
+                path=lambda obj: obj.name,
+            ),
+        )

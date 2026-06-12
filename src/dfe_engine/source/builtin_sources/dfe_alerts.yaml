@@ -14,16 +14,18 @@ description: >-
   Contains matched_uuid linking back to the original source record,
   plus rule metadata (rule_id, rule_name, hunt_name, severity).
 enabled: true
+deployed_version: "1.0.0"
+current: "1.0.0"
 
-header:
-  type: time_series
-  version: "1.0.0"
-
-schema:
-  meta_schema: null
-  ttl_days: 365
-  engine: MergeTree
-  additional_fields: hunt-results/detection.yaml
-
-mapping_standards:
-  - sigma
+versions:
+  "1.0.0":
+    date_time: "2026-01-15"
+    header:
+      type: time_series
+      version: "1.0.0"
+    schema:
+      ttl_days: 365
+      engine: MergeTree
+      additional_fields: hunt-results/detection.yaml
+    mapping_standards:
+      - sigma

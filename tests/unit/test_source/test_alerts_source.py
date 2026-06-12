@@ -30,6 +30,18 @@ class TestBuiltinAlertsSource:
         assert source.display_name == "DFE Alerts"
         assert source.enabled is True
         assert source.header.type == "time_series"
+        assert source.current == "1.0.0"
+        assert source.deployed_version == "1.0.0"
+        assert "1.0.0" in source.versions
+
+    def test_builtin_yaml_uses_version_tree(self):
+        data = _load_builtin("dfe_alerts")
+        assert data["current"] == "1.0.0"
+        assert data["deployed_version"] == "1.0.0"
+        assert "1.0.0" in data["versions"]
+        assert "header" not in data
+        assert "schema" not in data
+        assert data["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
 
     def test_has_sigma_mapping_standard(self):
         """dfe_alerts declares sigma mapping standard."""

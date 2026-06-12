@@ -31,7 +31,12 @@ from typing import Any
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
-from dfe_engine.source.models import Source
+from dfe_engine.source.models import (
+    Source,
+    SourceWriteRequest,
+    apply_source_write_update,
+    source_from_write,
+)
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -214,6 +219,49 @@ class SourceRegistry:
         logger.info(f"Saved source '{source.source}' → {yaml_path}")
         return source
 
+    def create_source_from_write(
+        self,
+        write: SourceWriteRequest | dict[str, Any],
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Source:
+        """Create a source from a flat write body (initial version ``1.0.0``)."""
+        if isinstance(write, dict):
+            try:
+                write = SourceWriteRequest.model_validate(write)
+            except Exception as e:
+                raise SourceValidationError(f"Invalid source definition: {e}") from e
+
+        if not write.source:
+            raise SourceValidationError("'source' field is required")
+
+        source = source_from_write(write, source_name=write.source)
+        return self.save_source(source, created_by=created_by, description=description)
+
+    def update_source_from_write(
+        self,
+        source_name: str,
+        write: SourceWriteRequest | dict[str, Any],
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Source:
+        """Update a source by appending a new major version (never overwrites history)."""
+        if isinstance(write, dict):
+            try:
+                write = SourceWriteRequest.model_validate(write)
+            except Exception as e:
+                raise SourceValidationError(f"Invalid source definition: {e}") from e
+
+        existing = self.get_source(source_name)
+        try:
+            updated = apply_source_write_update(existing, write)
+        except ValueError as e:
+            raise SourceValidationError(str(e)) from e
+
+        return self.save_source(updated, created_by=created_by, description=description)
+
     def delete_source(self, source_name: str) -> None:
         """Delete a source definition.
 
@@ -290,9 +338,16 @@ class SourceRegistry:
                 {
                     "source": source.source,
                     "display_name": source.display_name,
+                    "description": source.description,
                     "enabled": source.enabled,
+                    "current": source.current,
+                    "deployed_version": source.deployed_version,
+                    "versions": sorted(source.versions.keys()),
                     "header_type": source.header.type,
-                    "updated_at": updated_at,
+                    "has_transform": source.transform is not None,
+                    "has_fetcher": source.fetcher is not None,
+                    "mapping_standards": list(source.mapping_standards),
+                    "updated_at": updated_at or "",
                 }
             )
 
@@ -354,6 +409,11 @@ class SourceRegistry:
 
     def _validate_save(self, source: Source) -> None:
         """Validate before saving: unique source, no match conflicts."""
+        try:
+            candidate_match = source.versions[source.current].match
+        except KeyError:
+            candidate_match = None
+
         for table in self._store.list_tables():
             if table == source.source:
                 continue  # Same source (update)
@@ -369,18 +429,18 @@ class SourceRegistry:
 
             # Check match conflicts: same field+value on different sources
             if (
-                source.match
+                candidate_match
                 and existing.match
                 and existing.enabled
                 and source.enabled
-                and source.match.field == existing.match.field
-                and source.match.value == existing.match.value
+                and candidate_match.field == existing.match.field
+                and candidate_match.value == existing.match.value
             ):
                 raise SourceMatchConflictError(
                     source=source.source,
                     conflicting_source=existing.source,
-                    field=source.match.field,
-                    value=source.match.value,
+                    field=candidate_match.field,
+                    value=candidate_match.value,
                 )
 
     # -----------------------------------------------------------------

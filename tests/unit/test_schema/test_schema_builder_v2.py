@@ -447,3 +447,86 @@ class TestViewDDLIntegration:
 
         assert "`cs_event_id` AS `EventID`" in result.view_ddls["sigma"]
         assert "`user_name` AS `User`" in result.view_ddls["sigma"]
+
+
+class TestLoadColumnsForSourceVersion:
+    def test_loads_schema_from_requested_version_snapshot(self, registry, schemas_dir):
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [
+                            {"name": "user_name", "type": "string", "use_case": "dimension"},
+                        ]
+                    }
+                },
+            },
+            schemas_dir / "meta_v1.yaml",
+        )
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = Source.model_validate(
+            {
+                "source": "versioned_src",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "schema": {
+                            "meta_schema": "meta_v1.yaml",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-02-01",
+                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "schema": {"additional_fields": "additional.yaml"},
+                    },
+                },
+            }
+        )
+        v1_names = {
+            c.name for c in builder.load_columns_for_source_version(source, source_version="1.0.0")
+        }
+        v2_names = {
+            c.name for c in builder.load_columns_for_source_version(source, source_version="2.0.0")
+        }
+        assert "user_name" in v1_names
+        assert "severity" in v2_names
+        assert "user_name" not in v2_names
+
+    def test_unknown_version_raises(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(meta_schema="meta.yaml")
+        with pytest.raises(SchemaBuildError, match=r"Source version '9\.9\.9'"):
+            builder.load_columns_for_source_version(source, source_version="9.9.9")
+
+    def test_build_for_source_version_uses_snapshot(self, registry, schemas_dir):
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = Source.model_validate(
+            {
+                "source": "versioned_src",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "schema": {"meta_schema": "meta.yaml"},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-02-01",
+                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "schema": {"additional_fields": "additional.yaml"},
+                    },
+                },
+            }
+        )
+        r1 = builder.build_for_source_version(source, source_version="1.0.0")
+        r2 = builder.build_for_source_version(source, source_version="2.0.0")
+        assert "user_name" in [c.name for c in r1.columns]
+        assert "severity" in [c.name for c in r2.columns]
+        assert r1.create_table_ddl
+        assert r2.create_table_ddl

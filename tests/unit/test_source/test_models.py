@@ -3,6 +3,7 @@
 import pytest
 
 from dfe_engine.source.models import (
+    PaginatedSourceSummaryResponse,
     SchemaColumn,
     Source,
     SourceFetcher,
@@ -10,7 +11,14 @@ from dfe_engine.source.models import (
     SourceMatch,
     SourceSchema,
     SourceSigma,
+    SourceSummaryObject,
     SourceTransform,
+    SourceVersion,
+    SourceVersionGetResponse,
+    SourceWriteRequest,
+    apply_source_write_update,
+    next_major_source_version,
+    source_from_write,
 )
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -57,6 +65,15 @@ class TestSchemaColumn:
         col = SchemaColumn(name="x", type="string", attribute="lowcardinality")
         assert col.attribute == ["lowcardinality"]
 
+    def test_attribute_coercion_from_list(self):
+        col = SchemaColumn(name="x", type="string", attribute=["lowcardinality", "nullable"])
+        assert col.attribute == ["lowcardinality", "nullable"]
+
+    def test_validate_valid_ch_override(self, registry: TypeRegistry):
+        col = SchemaColumn(name="x", type="string", ch_override="String")
+        errors = col.validate_against_registry(registry)
+        assert errors == []
+
     def test_attribute_coercion_from_none(self):
         col = SchemaColumn(name="x", type="string", attribute=None)
         assert col.attribute == []
@@ -65,8 +82,6 @@ class TestSchemaColumn:
         col = SchemaColumn(name="x", type="string", use_case="dimension")
         errors = col.validate_against_registry(registry)
         assert errors == []
-
-    def test_validate_invalid_use_case(self, registry: TypeRegistry):
         col = SchemaColumn(name="x", type="integer", use_case="fulltext")
         errors = col.validate_against_registry(registry)
         assert len(errors) == 1
@@ -302,12 +317,12 @@ class TestSource:
     def test_mapping_standards_in_yaml_dict(self):
         s = Source(source="syslog", mapping_standards=["sigma"])
         d = s.to_yaml_dict()
-        assert d["mapping_standards"] == ["sigma"]
+        assert d["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
 
     def test_mapping_standards_excluded_when_empty(self):
         s = Source(source="syslog")
         d = s.to_yaml_dict()
-        assert "mapping_standards" not in d
+        assert "mapping_standards" not in d["versions"]["1.0.0"]
 
 
 # ---------------------------------------------------------------------------
@@ -371,15 +386,18 @@ class TestSourceYaml:
         yaml_dict = s.to_yaml_dict()
 
         assert yaml_dict["source"] == "filebeat"
-        assert yaml_dict["match"]["field"] == "tags.collector.type"
-        assert yaml_dict["schema"]["ttl_days"] == 90
-        assert "schema_config" not in yaml_dict  # Uses alias 'schema'
+        assert yaml_dict["versions"]["1.0.0"]["match"]["field"] == "tags.collector.type"
+        assert yaml_dict["versions"]["1.0.0"]["schema"]["ttl_days"] == 90
+        assert "schema_config" not in yaml_dict
+        assert "deployed_version" not in yaml_dict
+        assert "current" in yaml_dict
 
     def test_excludes_none(self):
         s = Source(source="syslog")
         yaml_dict = s.to_yaml_dict()
         assert "match" not in yaml_dict
         assert "transform" not in yaml_dict
+        assert "deployed_version" not in yaml_dict
         assert "fetcher" not in yaml_dict
         assert "sigma" not in yaml_dict
         assert "description" not in yaml_dict
@@ -406,3 +424,352 @@ class TestSourceYaml:
         assert s1.display_name == s2.display_name
         assert s1.enabled == s2.enabled
         assert s1.schema_config.engine == s2.schema_config.engine
+
+
+class TestSourceVersion:
+    def test_to_yaml_dict_omits_empty_containers(self):
+        ver = SourceVersion(
+            date_time="2026-06-10",
+            mapping_standards=[],
+        )
+        out = ver.to_yaml_dict()
+        assert "mapping_standards" not in out
+        assert out["date_time"] == "2026-06-10"
+
+
+class TestSourceWriteRequest:
+    def test_rejects_version_tree_keys(self):
+        with pytest.raises(ValueError, match="not allowed"):
+            SourceWriteRequest.model_validate(
+                {
+                    "source": "x",
+                    "versions": {"1.0.0": {}},
+                }
+            )
+
+    def test_rejects_deployed_version_on_write(self):
+        with pytest.raises(ValueError, match="not allowed"):
+            SourceWriteRequest.model_validate(
+                {"source": "x", "deployed_version": "1.0.0"},
+            )
+
+    def test_create_uses_1_0_0_not_header_profile_version(self):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "profile_pin",
+                "header": {"type": "common-header/minimal", "version": "1.1.0"},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+        src = source_from_write(write, source_name="profile_pin")
+        assert "1.0.0" in src.versions
+        assert src.versions["1.0.0"].header.version == "1.1.0"
+        assert src.current == "1.0.0"
+        assert src.deployed_version is None
+
+    def test_next_major_source_version(self):
+        assert next_major_source_version({}) == "1.0.0"
+        assert next_major_source_version({"1.0.0": {}}) == "2.0.0"
+        assert next_major_source_version({"1.0.0": {}, "2.1.0": {}}) == "3.0.0"
+
+    def test_next_major_source_version_rejects_invalid_ids(self):
+        with pytest.raises(ValueError, match="not semver"):
+            next_major_source_version({"v1": {}})
+
+    def test_next_major_semver_invalid(self):
+        from dfe_engine.source.models import _next_major_semver
+
+        with pytest.raises(ValueError, match="not semver"):
+            _next_major_semver("not-a-version")
+
+    def test_apply_write_update_refuses_overwrite(self, monkeypatch):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {},
+                    },
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate({"schema": {"engine": "MergeTree"}})
+        monkeypatch.setattr(
+            "dfe_engine.source.models.next_major_source_version",
+            lambda _versions: "2.0.0",
+        )
+        with pytest.raises(ValueError, match="Refusing to overwrite"):
+            apply_source_write_update(existing, write)
+
+    def test_apply_write_update_appends_without_overwriting(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "schema": {"ttl_days": 90},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "enabled": True,
+                "description": "rev 2",
+                "schema": {"ttl_days": 30, "engine": "MergeTree"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert "1.0.0" in updated.versions
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 90
+        assert "2.0.0" in updated.versions
+        assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+        assert updated.current == "2.0.0"
+        assert updated.deployed_version == "1.0.0"
+        assert updated.description == "rev 2"
+
+
+class TestSourceVersionGetResponse:
+    def test_round_trip_fields(self):
+        resp = SourceVersionGetResponse(
+            source="my_source",
+            display_name="My Source",
+            description="desc",
+            enabled=False,
+            current="2.0.0",
+            deployed_version="1.0.0",
+            selected="1.0.0",
+            versions=["1.0.0", "2.0.0"],
+            version=SourceVersion(
+                date_time="2026-06-12",
+                header=SourceHeader(type="time_series", version="1.0.0"),
+                schema_config=SourceSchema(engine="MergeTree"),
+                match=SourceMatch(field="ingest_type", value="x"),
+                transform=SourceTransform(engine="vector"),
+            ),
+        )
+        assert resp.source == "my_source"
+        assert resp.version.schema_config.engine == "MergeTree"
+        assert resp.version.match is not None
+        assert resp.version.match.value == "x"
+
+
+class TestPaginatedSourceSummaryResponse:
+    def test_from_summaries_pagination_and_tree(self):
+        objs = [
+            SourceSummaryObject(
+                name="aws_cloudtrail",
+                current="1.0.0",
+                deployed_version="1.0.0",
+                versions=["1.0.0"],
+            ),
+            SourceSummaryObject(
+                name="syslog",
+                current="1.0.0",
+                deployed_version="1.0.0",
+                versions=["1.0.0"],
+            ),
+        ]
+        resp = PaginatedSourceSummaryResponse.from_summaries(objs, page=1, per_page=1)
+        assert resp.total == 2
+        assert len(resp.items) == 1
+        root_names = {obj.name for obj in resp.objects.items}
+        assert root_names == {"aws_cloudtrail", "syslog"}
+        assert resp.objects.children == {}
+
+
+class TestSourceVersioning:
+    def test_versioned_input_migrates_top_level_match_and_transform(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "legacy_top",
+                "current": "1.0.0",
+                "deployed_version": "1.0.0",
+                "match": {"field": "f", "value": "v"},
+                "transform": {"engine": "vector"},
+                "versions": {"1.0.0": ver_body},
+            }
+        )
+        assert s.versions["1.0.0"].match is not None
+        assert s.versions["1.0.0"].match.value == "v"
+        assert s.versions["1.0.0"].transform is not None
+        out = s.to_yaml_dict()
+        assert "match" not in out
+        assert out["versions"]["1.0.0"]["match"]["value"] == "v"
+
+    def test_versioned_yaml_shape(self):
+        data = {
+            "source": "no_transform",
+            "display_name": "No Transform",
+            "enabled": True,
+            "deployed_version": "1.0.0",
+            "current": "1.0.0",
+            "versions": {
+                "1.0.0": {
+                    "date_time": "2026-06-10",
+                    "header": {"type": "time_series", "version": "1.0.0"},
+                    "schema": {
+                        "meta_schema": "meta/aws/cloudwatch_logs",
+                        "meta_schema_version": "1.0.0",
+                        "engine": "MergeTree",
+                    },
+                    "mapping_standards": ["ecs/no_transform", "sigma/no_transform"],
+                    "fetcher": {
+                        "source_type": "aws.cloudtrail",
+                        "base_url": "https://{service}.{region}.amazonaws.com",
+                        "poll_interval_secs": 10,
+                    },
+                }
+            },
+        }
+        s = Source.model_validate(data)
+        out = s.to_yaml_dict()
+        assert out["deployed_version"] == "1.0.0"
+        assert out["versions"]["1.0.0"]["date_time"] == "2026-06-10"
+        assert out["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/aws/cloudwatch_logs"
+        assert s.fetcher is not None
+        assert s.fetcher.poll_interval_secs == 10
+
+    def test_legacy_flat_input_normalizes_to_versions(self):
+        s = Source.model_validate({"source": "syslog", "schema": {"ttl_days": 90}})
+        assert "1.0.0" in s.versions
+        assert s.schema_config.ttl_days == 90
+        assert s.current == "1.0.0"
+        assert s.deployed_version is None
+
+    def test_legacy_flat_schema_config_key(self):
+        s = Source.model_validate(
+            {"source": "syslog", "schema_config": {"ttl_days": 45, "engine": "MergeTree"}}
+        )
+        assert s.schema_config.ttl_days == 45
+
+    def test_legacy_flat_moves_versioned_keys_into_snapshot(self):
+        s = Source.model_validate(
+            {
+                "source": "pull_src",
+                "field_mappings": ["ecs/custom"],
+                "fetcher": {"source_type": "m365"},
+                "sigma": {"taxonomy": "windows"},
+                "mapping_standards": ["sigma"],
+            }
+        )
+        ver = s.versions["1.0.0"]
+        assert ver.field_mappings == ["ecs/custom"]
+        assert ver.fetcher is not None
+        assert ver.sigma is not None
+        assert ver.mapping_standards == ["sigma"]
+
+    def test_versioned_input_defaults_current_from_deployed_only(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "x",
+                "deployed_version": "1.0.0",
+                "versions": {"1.0.0": ver_body},
+            }
+        )
+        assert s.current == "1.0.0"
+        assert s.deployed_version == "1.0.0"
+
+    def test_versioned_input_without_deployed_leaves_deployed_unset(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "2.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "x",
+                "current": "2.0.0",
+                "versions": {"2.0.0": ver_body},
+            }
+        )
+        assert s.current == "2.0.0"
+        assert s.deployed_version is None
+
+    def test_before_validator_passthrough_non_dict(self):
+        with pytest.raises(Exception):
+            Source.model_validate(42)
+
+    def test_empty_versions_rejected(self):
+        src = Source.model_construct(
+            source="empty_ver",
+            display_name="Empty",
+            enabled=True,
+            current="1.0.0",
+            deployed_version="1.0.0",
+            versions={},
+        )
+        with pytest.raises(ValueError, match="at least one"):
+            Source._validate_versions_and_display_name(src)
+
+    def test_current_not_in_versions(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        with pytest.raises(ValueError, match=r"current version '2\.0\.0'"):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    "current": "2.0.0",
+                    "deployed_version": "1.0.0",
+                    "versions": {"1.0.0": ver_body},
+                }
+            )
+
+    def test_deployed_version_not_in_versions(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        with pytest.raises(ValueError, match=r"deployed_version '9\.9\.9'"):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    "current": "1.0.0",
+                    "deployed_version": "9.9.9",
+                    "versions": {"1.0.0": ver_body},
+                }
+            )
+
+    def test_version_lookup_unknown_id(self):
+        s = Source.model_validate({"source": "x"})
+        with pytest.raises(ValueError, match=r"Source version '9\.9\.9' is not defined"):
+            s.version("9.9.9")
+
+    def test_to_yaml_dict_includes_transform(self):
+        s = Source.model_validate(
+            {
+                "source": "with_xform",
+                "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
+            }
+        )
+        out = s.to_yaml_dict()
+        ver = out["versions"]["1.0.0"]
+        assert ver["transform"]["engine"] == "vector"
+        assert ver["transform"]["config_file"] == "/etc/vector/x.yaml"
