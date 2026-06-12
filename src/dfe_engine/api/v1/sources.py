@@ -214,8 +214,6 @@ async def get_source_version(
         deployed_version=source.deployed_version,
         selected=version,
         versions=version_ids,
-        match=source.match,
-        transform=source.transform,
         version=source.versions[version],
     )
 

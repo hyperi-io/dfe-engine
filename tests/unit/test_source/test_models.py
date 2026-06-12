@@ -386,7 +386,7 @@ class TestSourceYaml:
         yaml_dict = s.to_yaml_dict()
 
         assert yaml_dict["source"] == "filebeat"
-        assert yaml_dict["match"]["field"] == "tags.collector.type"
+        assert yaml_dict["versions"]["1.0.0"]["match"]["field"] == "tags.collector.type"
         assert yaml_dict["versions"]["1.0.0"]["schema"]["ttl_days"] == 90
         assert "schema_config" not in yaml_dict
         assert "deployed_version" in yaml_dict
@@ -536,11 +536,6 @@ class TestSourceWriteRequest:
 
 class TestSourceVersionGetResponse:
     def test_round_trip_fields(self):
-        snap = SourceVersion(
-            date_time="2026-06-12",
-            header=SourceHeader(type="time_series", version="1.0.0"),
-            schema_config=SourceSchema(engine="MergeTree"),
-        )
         resp = SourceVersionGetResponse(
             source="my_source",
             display_name="My Source",
@@ -550,14 +545,18 @@ class TestSourceVersionGetResponse:
             deployed_version="1.0.0",
             selected="1.0.0",
             versions=["1.0.0", "2.0.0"],
-            match=SourceMatch(field="ingest_type", value="x"),
-            transform=SourceTransform(engine="vector"),
-            version=snap,
+            version=SourceVersion(
+                date_time="2026-06-12",
+                header=SourceHeader(type="time_series", version="1.0.0"),
+                schema_config=SourceSchema(engine="MergeTree"),
+                match=SourceMatch(field="ingest_type", value="x"),
+                transform=SourceTransform(engine="vector"),
+            ),
         )
         assert resp.source == "my_source"
         assert resp.version.schema_config.engine == "MergeTree"
-        assert resp.match is not None
-        assert resp.match.value == "x"
+        assert resp.version.match is not None
+        assert resp.version.match.value == "x"
 
 
 class TestPaginatedSourceSummaryResponse:
@@ -584,6 +583,29 @@ class TestPaginatedSourceSummaryResponse:
 
 
 class TestSourceVersioning:
+    def test_versioned_input_migrates_top_level_match_and_transform(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "legacy_top",
+                "current": "1.0.0",
+                "deployed_version": "1.0.0",
+                "match": {"field": "f", "value": "v"},
+                "transform": {"engine": "vector"},
+                "versions": {"1.0.0": ver_body},
+            }
+        )
+        assert s.versions["1.0.0"].match is not None
+        assert s.versions["1.0.0"].match.value == "v"
+        assert s.versions["1.0.0"].transform is not None
+        out = s.to_yaml_dict()
+        assert "match" not in out
+        assert out["versions"]["1.0.0"]["match"]["value"] == "v"
+
     def test_versioned_yaml_shape(self):
         data = {
             "source": "no_transform",
@@ -739,5 +761,6 @@ class TestSourceVersioning:
             }
         )
         out = s.to_yaml_dict()
-        assert out["transform"]["engine"] == "vector"
-        assert out["transform"]["config_file"] == "/etc/vector/x.yaml"
+        ver = out["versions"]["1.0.0"]
+        assert ver["transform"]["engine"] == "vector"
+        assert ver["transform"]["config_file"] == "/etc/vector/x.yaml"

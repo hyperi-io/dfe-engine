@@ -268,8 +268,8 @@ class TestGetSourceVersion:
         data = resp.json()
         assert data["display_name"] == sample_source["display_name"]
         assert data["deployed_version"] == "1.0.0"
-        assert data["match"]["field"] == "ingest_type"
-        assert data["transform"]["engine"] == "vector"
+        assert data["version"]["match"]["field"] == "ingest_type"
+        assert data["version"]["transform"]["engine"] == "vector"
 
 
 class TestUpdateSource:

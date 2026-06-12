@@ -9538,6 +9538,14 @@
             "description": "Working version (latest definition)",
             "default": "1.0.0"
           },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SourceVersion"
+            },
+            "type": "object",
+            "title": "Versions",
+            "description": "Version id \u2192 configuration snapshot"
+          },
           "match": {
             "anyOf": [
               {
@@ -9547,7 +9555,8 @@
                 "type": "null"
               }
             ],
-            "description": "Receiver match rule"
+            "description": "Receiver match rule on the deployed version (serialized for API compat).",
+            "readOnly": true
           },
           "transform": {
             "anyOf": [
@@ -9558,20 +9567,15 @@
                 "type": "null"
               }
             ],
-            "description": "Transform stage (optional)"
-          },
-          "versions": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SourceVersion"
-            },
-            "type": "object",
-            "title": "Versions",
-            "description": "Version id \u2192 configuration snapshot"
+            "description": "Transform config on the deployed version (serialized for API compat).",
+            "readOnly": true
           }
         },
         "type": "object",
         "required": [
-          "source"
+          "source",
+          "match",
+          "transform"
         ],
         "title": "Source",
         "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
@@ -10040,6 +10044,28 @@
               }
             ],
             "description": "SaaS API fetcher (optional)"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule (optional)"
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform stage (optional)"
           }
         },
         "type": "object",
@@ -10108,28 +10134,6 @@
             "type": "array",
             "title": "Versions",
             "description": "All version ids defined on this source"
-          },
-          "match": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceMatch"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Receiver match rule"
-          },
-          "transform": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceTransform"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Transform stage (top-level, not versioned)"
           },
           "version": {
             "$ref": "#/components/schemas/SourceVersion",

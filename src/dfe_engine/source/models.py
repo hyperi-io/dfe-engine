@@ -19,7 +19,7 @@ import re
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 
@@ -235,6 +235,8 @@ _VERSIONED_KEYS = (
     "sigma",
     "field_mappings",
     "fetcher",
+    "match",
+    "transform",
 )
 
 
@@ -263,6 +265,10 @@ class SourceVersion(BaseModel):
         description="Field map registry paths for this version (optional)",
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+    match: SourceMatch | None = Field(default=None, description="Receiver match rule (optional)")
+    transform: SourceTransform | None = Field(
+        default=None, description="Transform stage (optional)"
+    )
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence under ``versions.<id>``."""
@@ -359,6 +365,8 @@ class SourceWriteRequest(BaseModel):
             sigma=self.sigma,
             field_mappings=self.field_mappings,
             fetcher=self.fetcher,
+            match=self.match,
+            transform=self.transform,
         )
 
 
@@ -373,8 +381,6 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
         "enabled": write.enabled,
         "deployed_version": version_id,
         "current": version_id,
-        "match": write.match.model_dump(mode="json") if write.match else None,
-        "transform": write.transform.model_dump(mode="json") if write.transform else None,
         "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
     }
     return Source.model_validate(payload)
@@ -387,6 +393,11 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
 
     snapshot = write.to_version_snapshot()
+    if write.match is None and existing.match is not None:
+        snapshot = snapshot.model_copy(update={"match": existing.match})
+    if write.transform is None and existing.transform is not None:
+        snapshot = snapshot.model_copy(update={"transform": existing.transform})
+
     merged_versions = dict(existing.versions)
     merged_versions[new_version_id] = snapshot
 
@@ -399,12 +410,6 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         "enabled": write.enabled,
         "deployed_version": existing.deployed_version,
         "current": new_version_id,
-        "match": write.match.model_dump(mode="json")
-        if write.match is not None
-        else (existing.match.model_dump(mode="json") if existing.match else None),
-        "transform": write.transform.model_dump(mode="json")
-        if write.transform is not None
-        else (existing.transform.model_dump(mode="json") if existing.transform else None),
         "versions": {
             vid: ver.model_dump(mode="json", by_alias=True) for vid, ver in merged_versions.items()
         },
@@ -440,13 +445,6 @@ class Source(BaseModel):
         default=_DEFAULT_SOURCE_VERSION,
         description="Working version (latest definition)",
     )
-    match: SourceMatch | None = Field(
-        default=None,
-        description="Receiver match rule",
-    )
-    transform: SourceTransform | None = Field(
-        default=None, description="Transform stage (optional)"
-    )
     versions: dict[str, SourceVersion] = Field(
         default_factory=dict,
         description="Version id → configuration snapshot",
@@ -461,6 +459,16 @@ class Source(BaseModel):
 
         data = dict(data)
         if data.get("versions"):
+            top_match = data.pop("match", None)
+            top_transform = data.pop("transform", None)
+            if top_match is not None or top_transform is not None:
+                for ver in data["versions"].values():
+                    if not isinstance(ver, dict):
+                        continue
+                    if top_match is not None and "match" not in ver:
+                        ver["match"] = top_match
+                    if top_transform is not None and "transform" not in ver:
+                        ver["transform"] = top_transform
             current = data.get("current") or data.get("deployed_version")
             if current and "current" not in data:
                 data["current"] = current
@@ -560,6 +568,18 @@ class Source(BaseModel):
         """Deployed version fetcher config (legacy accessor)."""
         return self.version().fetcher
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def match(self) -> SourceMatch | None:
+        """Receiver match rule on the deployed version (serialized for API compat)."""
+        return self.version().match
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def transform(self) -> SourceTransform | None:
+        """Transform config on the deployed version (serialized for API compat)."""
+        return self.version().transform
+
     # -----------------------------------------------------------------
     # Derived properties
     # -----------------------------------------------------------------
@@ -594,10 +614,6 @@ class Source(BaseModel):
         }
         if self.description is not None:
             data["description"] = self.description
-        if self.match is not None:
-            data["match"] = self.match.model_dump(mode="json", exclude_none=True)
-        if self.transform is not None:
-            data["transform"] = self.transform.model_dump(mode="json", exclude_none=True)
         return data
 
 
@@ -617,10 +633,6 @@ class SourceVersionGetResponse(BaseModel):
     deployed_version: str = Field(..., description="Version deployed to ClickHouse / runtime")
     selected: str = Field(..., description="Version id requested via query parameter")
     versions: list[str] = Field(..., description="All version ids defined on this source")
-    match: SourceMatch | None = Field(default=None, description="Receiver match rule")
-    transform: SourceTransform | None = Field(
-        default=None, description="Transform stage (top-level, not versioned)"
-    )
     version: SourceVersion = Field(
         ..., description="Immutable configuration snapshot for ``selected``"
     )

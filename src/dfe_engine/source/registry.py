@@ -409,6 +409,11 @@ class SourceRegistry:
 
     def _validate_save(self, source: Source) -> None:
         """Validate before saving: unique source, no match conflicts."""
+        try:
+            candidate_match = source.versions[source.current].match
+        except KeyError:
+            candidate_match = None
+
         for table in self._store.list_tables():
             if table == source.source:
                 continue  # Same source (update)
@@ -424,18 +429,18 @@ class SourceRegistry:
 
             # Check match conflicts: same field+value on different sources
             if (
-                source.match
+                candidate_match
                 and existing.match
                 and existing.enabled
                 and source.enabled
-                and source.match.field == existing.match.field
-                and source.match.value == existing.match.value
+                and candidate_match.field == existing.match.field
+                and candidate_match.value == existing.match.value
             ):
                 raise SourceMatchConflictError(
                     source=source.source,
                     conflicting_source=existing.source,
-                    field=source.match.field,
-                    value=source.match.value,
+                    field=candidate_match.field,
+                    value=candidate_match.value,
                 )
 
     # -----------------------------------------------------------------
