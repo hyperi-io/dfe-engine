@@ -9545,10 +9545,16 @@
             "default": true
           },
           "deployed_version": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Deployed Version",
-            "description": "Version deployed to ClickHouse / runtime",
-            "default": "1.0.0"
+            "description": "Version deployed to ClickHouse / runtime (null until first deploy)"
           },
           "current": {
             "type": "string",
@@ -9899,9 +9905,16 @@
             "description": "Working version id"
           },
           "deployed_version": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Deployed Version",
-            "description": "Version deployed to ClickHouse / runtime"
+            "description": "Version deployed to ClickHouse / runtime (null until first deploy)"
           },
           "versions": {
             "items": {
@@ -9954,7 +9967,6 @@
         "required": [
           "name",
           "current",
-          "deployed_version",
           "versions"
         ],
         "title": "SourceSummaryObject",
@@ -10136,9 +10148,16 @@
             "description": "Working version id"
           },
           "deployed_version": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Deployed Version",
-            "description": "Version deployed to ClickHouse / runtime"
+            "description": "Version deployed to ClickHouse / runtime (null until first deploy)"
           },
           "selected": {
             "type": "string",
@@ -10162,7 +10181,6 @@
         "required": [
           "source",
           "current",
-          "deployed_version",
           "selected",
           "versions",
           "version"

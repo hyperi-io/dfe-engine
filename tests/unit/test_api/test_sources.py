@@ -32,6 +32,7 @@ class TestListSources:
         assert "objects" in data
         assert data["items"][0]["versions"] == ["1.0.0"]
         assert data["items"][0]["current"] == "1.0.0"
+        assert data["items"][0]["deployed_version"] is None
 
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources
@@ -155,6 +156,25 @@ class TestCreateSource:
         assert data["source"] == "test_source"
         assert data["message"] == "created"
 
+        get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
+        body = get_resp.json()
+        assert body["current"] == "1.0.0"
+        assert body["deployed_version"] is None
+        assert "1.0.0" in body["versions"]
+
+    def test_create_rejects_version_tree_in_body(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        resp = client.post(
+            "/api/v1/sources",
+            json={
+                **sample_source,
+                "versions": {"1.0.0": {"date_time": "2026-01-01", "schema": {}}},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
     def test_create_duplicate(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
@@ -274,7 +294,7 @@ class TestGetSourceVersion:
         assert resp.status_code == 200
         data = resp.json()
         assert data["display_name"] == sample_source["display_name"]
-        assert data["deployed_version"] == "1.0.0"
+        assert data["deployed_version"] is None
         assert data["version"]["match"]["field"] == "ingest_type"
         assert data["version"]["transform"]["engine"] == "vector"
 

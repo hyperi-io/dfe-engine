@@ -662,7 +662,7 @@ async def get_schema_columns(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         )
 
-    version_id = version or source.deployed_version
+    version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
         raise HTTPException(
             status_code=404,
@@ -739,7 +739,7 @@ async def build_schema(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         )
 
-    version_id = version or source.deployed_version
+    version_id = version or source.runtime_version_id()
     if version_id not in source.versions:
         raise HTTPException(
             status_code=404,

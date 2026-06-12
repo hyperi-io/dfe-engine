@@ -65,7 +65,7 @@ class TestCRUD:
             }
         )
         data = yaml_load(sources_dir / "versioned_src.yaml")
-        assert data["deployed_version"] == "1.0.0"
+        assert "deployed_version" not in data
         assert data["current"] == "1.0.0"
         assert "1.0.0" in data["versions"]
         assert data["versions"]["1.0.0"]["schema"]["ttl_days"] == 30

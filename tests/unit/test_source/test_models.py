@@ -389,7 +389,7 @@ class TestSourceYaml:
         assert yaml_dict["versions"]["1.0.0"]["match"]["field"] == "tags.collector.type"
         assert yaml_dict["versions"]["1.0.0"]["schema"]["ttl_days"] == 90
         assert "schema_config" not in yaml_dict
-        assert "deployed_version" in yaml_dict
+        assert "deployed_version" not in yaml_dict
         assert "current" in yaml_dict
 
     def test_excludes_none(self):
@@ -397,6 +397,7 @@ class TestSourceYaml:
         yaml_dict = s.to_yaml_dict()
         assert "match" not in yaml_dict
         assert "transform" not in yaml_dict
+        assert "deployed_version" not in yaml_dict
         assert "fetcher" not in yaml_dict
         assert "sigma" not in yaml_dict
         assert "description" not in yaml_dict
@@ -446,6 +447,12 @@ class TestSourceWriteRequest:
                 }
             )
 
+    def test_rejects_deployed_version_on_write(self):
+        with pytest.raises(ValueError, match="not allowed"):
+            SourceWriteRequest.model_validate(
+                {"source": "x", "deployed_version": "1.0.0"},
+            )
+
     def test_create_uses_1_0_0_not_header_profile_version(self):
         write = SourceWriteRequest.model_validate(
             {
@@ -458,6 +465,7 @@ class TestSourceWriteRequest:
         assert "1.0.0" in src.versions
         assert src.versions["1.0.0"].header.version == "1.1.0"
         assert src.current == "1.0.0"
+        assert src.deployed_version is None
 
     def test_next_major_source_version(self):
         assert next_major_source_version({}) == "1.0.0"
@@ -645,7 +653,7 @@ class TestSourceVersioning:
         assert "1.0.0" in s.versions
         assert s.schema_config.ttl_days == 90
         assert s.current == "1.0.0"
-        assert s.deployed_version == "1.0.0"
+        assert s.deployed_version is None
 
     def test_legacy_flat_schema_config_key(self):
         s = Source.model_validate(
@@ -685,7 +693,7 @@ class TestSourceVersioning:
         assert s.current == "1.0.0"
         assert s.deployed_version == "1.0.0"
 
-    def test_versioned_input_defaults_deployed_from_current_only(self):
+    def test_versioned_input_without_deployed_leaves_deployed_unset(self):
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "2.0.0"},
@@ -699,7 +707,7 @@ class TestSourceVersioning:
             }
         )
         assert s.current == "2.0.0"
-        assert s.deployed_version == "2.0.0"
+        assert s.deployed_version is None
 
     def test_before_validator_passthrough_non_dict(self):
         with pytest.raises(Exception):

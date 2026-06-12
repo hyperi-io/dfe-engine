@@ -97,7 +97,7 @@ class SchemaBuilderV2:
 
     def build(self, source: Source) -> SchemaBuildResult:
         """Build the complete schema for a Source (deployed version)."""
-        return self.build_for_source_version(source, source_version=source.deployed_version)
+        return self.build_for_source_version(source, source_version=source.runtime_version_id())
 
     def build_for_source_version(
         self,
@@ -109,7 +109,7 @@ class SchemaBuilderV2:
 
         Defaults to ``source.deployed_version`` when *source_version* is omitted.
         """
-        version_id = source_version or source.deployed_version
+        version_id = source_version or source.runtime_version_id()
         if version_id not in source.versions:
             raise SchemaBuildError(
                 f"Source version '{version_id}' is not defined for source '{source.source}'"
@@ -161,7 +161,7 @@ class SchemaBuilderV2:
         meta/derived/additional YAML references (including ``meta_schema_version``).
         Defaults to ``source.deployed_version`` when *source_version* is omitted.
         """
-        version_id = source_version or source.deployed_version
+        version_id = source_version or source.runtime_version_id()
         if version_id not in source.versions:
             raise SchemaBuildError(
                 f"Source version '{version_id}' is not defined for source '{source.source}'"

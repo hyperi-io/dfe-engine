@@ -379,7 +379,7 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
         "display_name": write.display_name,
         "description": write.description,
         "enabled": write.enabled,
-        "deployed_version": version_id,
+        "deployed_version": None,
         "current": version_id,
         "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
     }
@@ -437,9 +437,9 @@ class Source(BaseModel):
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
-    deployed_version: str = Field(
-        default=_DEFAULT_SOURCE_VERSION,
-        description="Version deployed to ClickHouse / runtime",
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
     )
     current: str = Field(
         default=_DEFAULT_SOURCE_VERSION,
@@ -472,8 +472,6 @@ class Source(BaseModel):
             current = data.get("current") or data.get("deployed_version")
             if current and "current" not in data:
                 data["current"] = current
-            if current and "deployed_version" not in data:
-                data["deployed_version"] = current
             return data
 
         version_id = _DEFAULT_SOURCE_VERSION
@@ -501,7 +499,6 @@ class Source(BaseModel):
                 version_body[key] = data.pop(key)
 
         data.setdefault("current", version_id)
-        data.setdefault("deployed_version", version_id)
         data["versions"] = {version_id: version_body}
         return data
 
@@ -529,15 +526,19 @@ class Source(BaseModel):
 
         if self.current not in self.versions:
             raise ValueError(f"current version '{self.current}' is not defined in versions")
-        if self.deployed_version not in self.versions:
+        if self.deployed_version is not None and self.deployed_version not in self.versions:
             raise ValueError(
                 f"deployed_version '{self.deployed_version}' is not defined in versions"
             )
         return self
 
+    def runtime_version_id(self) -> str:
+        """Version used for runtime accessors when ``deployed_version`` is unset."""
+        return self.deployed_version or self.current
+
     def version(self, version_id: str | None = None) -> SourceVersion:
-        """Return a specific version snapshot (defaults to deployed_version)."""
-        vid = version_id or self.deployed_version
+        """Return a specific version snapshot (defaults to deployed, else current)."""
+        vid = version_id or self.runtime_version_id()
         try:
             return self.versions[vid]
         except KeyError as e:
@@ -608,10 +609,11 @@ class Source(BaseModel):
             "source": self.source,
             "display_name": self.display_name,
             "enabled": self.enabled,
-            "deployed_version": self.deployed_version,
             "current": self.current,
             "versions": {vid: ver.to_yaml_dict() for vid, ver in sorted(self.versions.items())},
         }
+        if self.deployed_version is not None:
+            data["deployed_version"] = self.deployed_version
         if self.description is not None:
             data["description"] = self.description
         return data
@@ -630,7 +632,10 @@ class SourceVersionGetResponse(BaseModel):
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
     current: str = Field(..., description="Working version id")
-    deployed_version: str = Field(..., description="Version deployed to ClickHouse / runtime")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
+    )
     selected: str = Field(..., description="Version id requested via query parameter")
     versions: list[str] = Field(..., description="All version ids defined on this source")
     version: SourceVersion = Field(
@@ -649,7 +654,10 @@ class SourceSummaryObject(BaseModel):
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
     current: str = Field(description="Working version id")
-    deployed_version: str = Field(description="Version deployed to ClickHouse / runtime")
+    deployed_version: str | None = Field(
+        default=None,
+        description="Version deployed to ClickHouse / runtime (null until first deploy)",
+    )
     versions: list[str] = Field(description="All defined version ids")
     updated_at: str = Field(default="", description="Last updated timestamp (ISO 8601)")
     header_type: str | None = Field(

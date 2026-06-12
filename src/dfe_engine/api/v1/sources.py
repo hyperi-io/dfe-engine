@@ -368,7 +368,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         description=raw.get("description"),
         enabled=raw.get("enabled", True),
         current=raw.get("current", "1.0.0"),
-        deployed_version=raw.get("deployed_version", "1.0.0"),
+        deployed_version=raw.get("deployed_version"),
         versions=list(raw.get("versions") or []),
         updated_at=raw.get("updated_at") or "",
         header_type=raw.get("header_type"),
