@@ -21,6 +21,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
+
 # _source naming: lowercase alphanumeric + underscores, starts with letter
 _SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _SOURCE_MAX_LENGTH = 64
@@ -597,3 +599,59 @@ class Source(BaseModel):
         if self.transform is not None:
             data["transform"] = self.transform.model_dump(mode="json", exclude_none=True)
         return data
+
+
+# ── List / summary response models (API) ─────────────────────
+
+
+class SourceSummaryObject(BaseModel):
+    """Summary row for paginated source list (mirrors ``SchemaSummaryObject``)."""
+
+    name: str = Field(description="Source name (_source label)")
+    display_name: str | None = Field(default=None, description="Human-readable display name")
+    description: str | None = Field(default=None, description="Source description")
+    enabled: bool = Field(default=True, description="Whether the source is active")
+    current: str = Field(description="Working version id")
+    deployed_version: str = Field(description="Version deployed to ClickHouse / runtime")
+    versions: list[str] = Field(description="All defined version ids")
+    updated_at: str = Field(default="", description="Last updated timestamp (ISO 8601)")
+    header_type: str | None = Field(
+        default=None,
+        description="Common header profile type (deployed version)",
+    )
+    has_transform: bool = Field(
+        default=False, description="Whether a transform stage is configured"
+    )
+    has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
+    mapping_standards: list[str] = Field(
+        default_factory=list,
+        description="Mapping standards on the deployed version",
+    )
+
+
+PathTree[SourceSummaryObject].model_rebuild()
+SourceSummaryTree = PathTree[SourceSummaryObject]
+"""Source list tree grouped by path segments derived from the source name."""
+
+
+class PaginatedSourceSummaryResponse(
+    PaginatedResponseWithObjects[SourceSummaryObject, SourceSummaryTree]
+):
+    """Source list: path tree in ``objects`` plus paginated ``items``."""
+
+    @classmethod
+    def from_summaries(
+        cls,
+        summaries: list[SourceSummaryObject],
+        page: int,
+        per_page: int,
+    ) -> PaginatedSourceSummaryResponse:
+        return cls.with_objects(
+            summaries,
+            page,
+            per_page,
+            SourceSummaryTree.from_paths(
+                summaries,
+                path=lambda obj: obj.name.replace("_", "/"),
+            ),
+        )

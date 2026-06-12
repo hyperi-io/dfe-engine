@@ -3,6 +3,7 @@
 import pytest
 
 from dfe_engine.source.models import (
+    PaginatedSourceSummaryResponse,
     SchemaColumn,
     Source,
     SourceFetcher,
@@ -10,6 +11,7 @@ from dfe_engine.source.models import (
     SourceMatch,
     SourceSchema,
     SourceSigma,
+    SourceSummaryObject,
     SourceTransform,
     SourceVersion,
     SourceWriteRequest,
@@ -531,6 +533,29 @@ class TestSourceWriteRequest:
         assert updated.description == "rev 2"
 
 
+class TestPaginatedSourceSummaryResponse:
+    def test_from_summaries_pagination_and_tree(self):
+        objs = [
+            SourceSummaryObject(
+                name="aws_cloudtrail",
+                current="1.0.0",
+                deployed_version="1.0.0",
+                versions=["1.0.0"],
+            ),
+            SourceSummaryObject(
+                name="syslog",
+                current="1.0.0",
+                deployed_version="1.0.0",
+                versions=["1.0.0"],
+            ),
+        ]
+        resp = PaginatedSourceSummaryResponse.from_summaries(objs, page=1, per_page=1)
+        assert resp.total == 2
+        assert len(resp.items) == 1
+        assert "aws" in resp.objects.children
+        assert resp.objects.items[0].name == "syslog"
+
+
 class TestSourceVersioning:
     def test_versioned_yaml_shape(self):
         data = {
@@ -648,7 +673,7 @@ class TestSourceVersioning:
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema": {},
         }
-        with pytest.raises(ValueError, match="current version '2.0.0'"):
+        with pytest.raises(ValueError, match=r"current version '2\.0\.0'"):
             Source.model_validate(
                 {
                     "source": "x",
@@ -664,7 +689,7 @@ class TestSourceVersioning:
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema": {},
         }
-        with pytest.raises(ValueError, match="deployed_version '9.9.9'"):
+        with pytest.raises(ValueError, match=r"deployed_version '9\.9\.9'"):
             Source.model_validate(
                 {
                     "source": "x",
@@ -676,7 +701,7 @@ class TestSourceVersioning:
 
     def test_version_lookup_unknown_id(self):
         s = Source.model_validate({"source": "x"})
-        with pytest.raises(ValueError, match="Source version '9.9.9' is not defined"):
+        with pytest.raises(ValueError, match=r"Source version '9\.9\.9' is not defined"):
             s.version("9.9.9")
 
     def test_to_yaml_dict_includes_transform(self):

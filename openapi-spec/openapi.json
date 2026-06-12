@@ -1407,7 +1407,7 @@
           "Sources"
         ],
         "summary": "List Sources",
-        "description": "List sources with pagination, search, and filtering.",
+        "description": "List sources with pagination, search, filtering, and a full object tree.",
         "operationId": "list_sources_api_v1_sources_get",
         "parameters": [
           {
@@ -1459,10 +1459,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (source, display_name, enabled)",
+              "description": "Sort field (source, display_name, enabled, current, deployed_version, updated_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (source, display_name, enabled)"
+            "description": "Sort field (source, display_name, enabled, current, deployed_version, updated_at)"
           },
           {
             "name": "sort_order",
@@ -1504,7 +1504,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PaginatedResponse_SourceSummary_"
+                  "$ref": "#/components/schemas/PaginatedSourceSummaryResponse"
                 }
               }
             }
@@ -8081,72 +8081,6 @@
         ],
         "title": "PaginatedResponse[ServiceConfigSummary]"
       },
-      "PaginatedResponse_SourceSummary_": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/SourceSummary"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[SourceSummary]"
-      },
       "PaginatedSchemaSummaryResponse": {
         "properties": {
           "items": {
@@ -8219,6 +8153,78 @@
         "title": "PaginatedSchemaSummaryResponse",
         "description": "Schema list: path tree in ``objects`` plus paginated ``items``."
       },
+      "PaginatedSourceSummaryResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryObject"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "objects": {
+            "$ref": "#/components/schemas/PathTree_SourceSummaryObject_",
+            "description": "Full matching collection view (not limited to current page)"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "objects",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedSourceSummaryResponse",
+        "description": "Source list: path tree in ``objects`` plus paginated ``items``."
+      },
       "PathTree_SchemaSummaryObject_": {
         "properties": {
           "items": {
@@ -8240,6 +8246,28 @@
         },
         "type": "object",
         "title": "PathTree[SchemaSummaryObject]"
+      },
+      "PathTree_SourceSummaryObject_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SourceSummaryObject"
+            },
+            "type": "array",
+            "title": "Items",
+            "description": "Entries attached at this path level"
+          },
+          "children": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/PathTree_SourceSummaryObject_"
+            },
+            "type": "object",
+            "title": "Children",
+            "description": "Further nesting keyed by path segment"
+          }
+        },
+        "type": "object",
+        "title": "PathTree[SourceSummaryObject]"
       },
       "PermissionsResponse": {
         "properties": {
@@ -9747,12 +9775,12 @@
         "title": "SourceSigma",
         "description": "Sigma field mapping configuration for this source."
       },
-      "SourceSummary": {
+      "SourceSummaryObject": {
         "properties": {
-          "source": {
+          "name": {
             "type": "string",
-            "title": "Source",
-            "description": "Source name / identifier"
+            "title": "Name",
+            "description": "Source name (_source label)"
           },
           "display_name": {
             "anyOf": [
@@ -9763,7 +9791,8 @@
                 "type": "null"
               }
             ],
-            "title": "Display Name"
+            "title": "Display Name",
+            "description": "Human-readable display name"
           },
           "description": {
             "anyOf": [
@@ -9774,12 +9803,38 @@
                 "type": "null"
               }
             ],
-            "title": "Description"
+            "title": "Description",
+            "description": "Source description"
           },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
+            "description": "Whether the source is active",
             "default": true
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version id"
+          },
+          "deployed_version": {
+            "type": "string",
+            "title": "Deployed Version",
+            "description": "Version deployed to ClickHouse / runtime"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Versions",
+            "description": "All defined version ids"
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "description": "Last updated timestamp (ISO 8601)",
+            "default": ""
           },
           "header_type": {
             "anyOf": [
@@ -9790,16 +9845,19 @@
                 "type": "null"
               }
             ],
-            "title": "Header Type"
+            "title": "Header Type",
+            "description": "Common header profile type (deployed version)"
           },
           "has_transform": {
             "type": "boolean",
             "title": "Has Transform",
+            "description": "Whether a transform stage is configured",
             "default": false
           },
           "has_fetcher": {
             "type": "boolean",
             "title": "Has Fetcher",
+            "description": "Whether a fetcher is configured",
             "default": false
           },
           "mapping_standards": {
@@ -9807,15 +9865,19 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Mapping Standards"
+            "title": "Mapping Standards",
+            "description": "Mapping standards on the deployed version"
           }
         },
         "type": "object",
         "required": [
-          "source"
+          "name",
+          "current",
+          "deployed_version",
+          "versions"
         ],
-        "title": "SourceSummary",
-        "description": "Lightweight source listing (for paginated list)."
+        "title": "SourceSummaryObject",
+        "description": "Summary row for paginated source list (mirrors ``SchemaSummaryObject``)."
       },
       "SourceTransform": {
         "properties": {

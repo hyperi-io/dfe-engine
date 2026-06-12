@@ -18,9 +18,14 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
-from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
-from dfe_engine.source.models import Source, SourceWriteRequest
+from dfe_engine.source.models import (
+    PaginatedSourceSummaryResponse,
+    Source,
+    SourceSummaryObject,
+    SourceWriteRequest,
+)
 from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
@@ -50,19 +55,6 @@ def _raise_save_validation_http(exc: SourceValidationError) -> NoReturn:
 
 
 # ── Response models ──────────────────────────────────────────
-
-
-class SourceSummary(BaseModel):
-    """Lightweight source listing (for paginated list)."""
-
-    source: str = Field(description="Source name / identifier")
-    display_name: str | None = None
-    description: str | None = None
-    enabled: bool = True
-    header_type: str | None = None
-    has_transform: bool = False
-    has_fetcher: bool = False
-    mapping_standards: list[str] = Field(default_factory=list)
 
 
 class SourceResponse(BaseModel):
@@ -98,7 +90,7 @@ class SeedResponse(BaseModel):
 
 @router.get(
     "",
-    response_model=PaginatedResponse[SourceSummary],
+    response_model=PaginatedSourceSummaryResponse,
     dependencies=[Depends(require_action("source:read"))],
 )
 async def list_sources(
@@ -107,26 +99,25 @@ async def list_sources(
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in source name and description"),
     enabled: bool | None = Query(None, description="Filter by enabled status"),
-    sort_by: str | None = Query(None, description="Sort field (source, display_name, enabled)"),
+    sort_by: str | None = Query(
+        None,
+        description="Sort field (source, display_name, enabled, current, deployed_version, updated_at)",
+    ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List sources with pagination, search, and filtering."""
+    """List sources with pagination, search, filtering, and a full object tree."""
     raw_sources = registry.list_sources(enabled_only=bool(enabled))
 
-    # Filter by enabled if explicitly False (list_sources only has enabled_only)
     if enabled is False:
         raw_sources = [s for s in raw_sources if not s.get("enabled", True)]
 
-    # Search
     raw_sources = apply_search(raw_sources, search, ["source", "display_name", "description"])
-
-    # Sort
     raw_sources = apply_sort(raw_sources, sort_by, sort_order)
 
-    # Map to summary models
-    summaries = [_to_summary(s) for s in raw_sources]
-
-    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
+    summaries = [_to_summary(row) for row in raw_sources]
+    return PaginatedSourceSummaryResponse.from_summaries(
+        summaries, pagination.page, pagination.per_page
+    )
 
 
 @router.post(
@@ -320,17 +311,19 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _to_summary(raw: dict[str, Any]) -> SourceSummary:
-    """Convert raw source dict from list_sources() to SourceSummary."""
-    return SourceSummary(
-        source=raw.get("source", ""),
+def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
+    """Convert registry list row to ``SourceSummaryObject``."""
+    return SourceSummaryObject(
+        name=raw.get("source", ""),
         display_name=raw.get("display_name"),
         description=raw.get("description"),
         enabled=raw.get("enabled", True),
-        header_type=raw.get("header", {}).get("type")
-        if isinstance(raw.get("header"), dict)
-        else None,
-        has_transform=raw.get("transform") is not None,
-        has_fetcher=raw.get("fetcher") is not None,
-        mapping_standards=raw.get("mapping_standards", []),
+        current=raw.get("current", "1.0.0"),
+        deployed_version=raw.get("deployed_version", "1.0.0"),
+        versions=list(raw.get("versions") or []),
+        updated_at=raw.get("updated_at") or "",
+        header_type=raw.get("header_type"),
+        has_transform=bool(raw.get("has_transform")),
+        has_fetcher=bool(raw.get("has_fetcher")),
+        mapping_standards=list(raw.get("mapping_standards") or []),
     )

@@ -134,7 +134,7 @@ class TestMetaSchema:
     def test_current_version_must_have_columns(self):
         with pytest.raises(
             pydantic.ValidationError,
-            match="current version '1.0.0' must define at least one column",
+            match=r"current version '1\.0\.0' must define at least one column",
         ):
             MetaSchema.model_validate(
                 coerce_common_header_legacy_versions(
@@ -155,7 +155,7 @@ class TestMetaSchema:
     def test_meta_path_rejects_empty_columns_on_current(self):
         with pytest.raises(
             pydantic.ValidationError,
-            match="current version '2.0.0' must define at least one column",
+            match=r"current version '2\.0\.0' must define at least one column",
         ):
             MetaSchema.model_validate(
                 {

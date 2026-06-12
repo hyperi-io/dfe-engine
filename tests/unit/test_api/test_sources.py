@@ -21,8 +21,11 @@ class TestListSources:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] >= 1
-        names = [item["source"] for item in data["items"]]
+        names = [item["name"] for item in data["items"]]
         assert "test_source" in names
+        assert "objects" in data
+        assert data["items"][0]["versions"] == ["1.0.0"]
+        assert data["items"][0]["current"] == "1.0.0"
 
     def test_list_pagination(self, client: TestClient, admin_headers: dict):
         # Create 5 sources
@@ -68,7 +71,7 @@ class TestListSources:
         resp = client.get("/api/v1/sources?search=windows", headers=admin_headers)
         data = resp.json()
         assert data["total"] == 1
-        assert data["items"][0]["source"] == "windows_audit"
+        assert data["items"][0]["name"] == "windows_audit"
 
     def test_list_sort(self, client: TestClient, admin_headers: dict):
         for name in ["charlie", "alpha", "bravo"]:
@@ -80,10 +83,20 @@ class TestListSources:
 
         resp = client.get("/api/v1/sources?sort_by=source&sort_order=asc", headers=admin_headers)
         data = resp.json()
-        names = [item["source"] for item in data["items"]]
+        names = [item["name"] for item in data["items"]]
         assert names == sorted(names)
 
-    def test_list_requires_auth(self, client: TestClient):
+    def test_list_object_tree_groups_by_underscore(self, client: TestClient, admin_headers: dict):
+        client.post(
+            "/api/v1/sources",
+            json={"source": "aws_cloudtrail", "display_name": "AWS CloudTrail"},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/sources", headers=admin_headers)
+        data = resp.json()
+        assert "aws" in data["objects"]["children"]
+        assert data["objects"]["children"]["aws"]["items"][0]["name"] == "aws_cloudtrail"
+
         resp = client.get("/api/v1/sources")
         assert resp.status_code == 401
 

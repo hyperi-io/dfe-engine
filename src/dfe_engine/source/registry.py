@@ -338,9 +338,16 @@ class SourceRegistry:
                 {
                     "source": source.source,
                     "display_name": source.display_name,
+                    "description": source.description,
                     "enabled": source.enabled,
+                    "current": source.current,
+                    "deployed_version": source.deployed_version,
+                    "versions": sorted(source.versions.keys()),
                     "header_type": source.header.type,
-                    "updated_at": updated_at,
+                    "has_transform": source.transform is not None,
+                    "has_fetcher": source.fetcher is not None,
+                    "mapping_standards": list(source.mapping_standards),
+                    "updated_at": updated_at or "",
                 }
             )
 
