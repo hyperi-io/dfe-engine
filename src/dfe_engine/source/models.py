@@ -16,9 +16,10 @@ Usage:
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 # _source naming: lowercase alphanumeric + underscores, starts with letter
 _SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -222,6 +223,53 @@ class SourceSigma(BaseModel):
     )
 
 
+_DEFAULT_SOURCE_VERSION = "1.0.0"
+_VERSIONED_KEYS = (
+    "header",
+    "schema",
+    "schema_config",
+    "mapping_standards",
+    "sigma",
+    "field_mappings",
+    "fetcher",
+)
+
+
+class SourceVersion(BaseModel):
+    """Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    date_time: str = Field(..., description="Version creation date (YYYY-MM-DD)")
+    header: SourceHeader = Field(
+        default_factory=SourceHeader,
+        description="Common schema header configuration",
+    )
+    schema_config: SourceSchema = Field(
+        default_factory=SourceSchema,
+        description="Schema configuration",
+        alias="schema",
+    )
+    mapping_standards: list[str] = Field(
+        default_factory=list,
+        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
+    )
+    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
+    field_mappings: list[str] | None = Field(
+        default=None,
+        description="Field map registry paths for this version (optional)",
+    )
+    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+
+    def to_yaml_dict(self) -> dict[str, Any]:
+        """Serialize for YAML persistence under ``versions.<id>``."""
+        raw = self.model_dump(mode="json", by_alias=True, exclude_none=True)
+        for key in list(raw.keys()):
+            if isinstance(raw[key], (dict, list)) and not raw[key]:
+                del raw[key]
+        return raw
+
+
 # ---------------------------------------------------------------------------
 # Source — Top-Level Model
 # ---------------------------------------------------------------------------
@@ -236,37 +284,78 @@ class Source(BaseModel):
     See docs/SOURCE.md for the full specification.
     """
 
+    model_config = ConfigDict(populate_by_name=True, extra="ignore")
+
     source: str = Field(..., description="The _source label — immutable identifier")
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
-
-    header: SourceHeader = Field(
-        default_factory=SourceHeader,
-        description="Common schema header configuration",
+    deployed_version: str = Field(
+        default=_DEFAULT_SOURCE_VERSION,
+        description="Version deployed to ClickHouse / runtime",
+    )
+    current: str = Field(
+        default=_DEFAULT_SOURCE_VERSION,
+        description="Working version (latest definition)",
     )
     match: SourceMatch | None = Field(
         default=None,
         description="Receiver match rule",
     )
-    schema_config: SourceSchema = Field(
-        default_factory=SourceSchema,
-        description="Schema configuration",
-        alias="schema",
-    )
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
-    fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
-    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
-    mapping_standards: list[str] = Field(
-        default_factory=list,
-        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
+    versions: dict[str, SourceVersion] = Field(
+        default_factory=dict,
+        description="Version id → configuration snapshot",
     )
 
-    model_config = {
-        "populate_by_name": True,
-    }
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_legacy_or_versioned(cls, data: Any) -> Any:
+        """Accept legacy flat YAML/API bodies and normalize to the version tree."""
+        if not isinstance(data, dict):
+            return data
+
+        data = dict(data)
+        if data.get("versions"):
+            current = data.get("current") or data.get("deployed_version")
+            if current and "current" not in data:
+                data["current"] = current
+            if current and "deployed_version" not in data:
+                data["deployed_version"] = current
+            return data
+
+        version_id = data.get("current") or _DEFAULT_SOURCE_VERSION
+        header_raw = data.pop("header", None)
+        if isinstance(header_raw, dict) and header_raw.get("version"):
+            version_id = str(header_raw["version"])
+
+        version_body: dict[str, Any] = {
+            "date_time": data.pop("date_time", None) or date.today().isoformat()
+        }
+        if header_raw is not None:
+            version_body["header"] = header_raw
+        else:
+            version_body["header"] = {"type": "time_series", "version": version_id}
+
+        if "schema" in data:
+            version_body["schema"] = data.pop("schema")
+        elif "schema_config" in data:
+            version_body["schema"] = data.pop("schema_config")
+        else:
+            version_body["schema"] = {}
+
+        for key in _VERSIONED_KEYS:
+            if key in ("header", "schema", "schema_config"):
+                continue
+            if key in data:
+                version_body[key] = data.pop(key)
+
+        data.setdefault("current", version_id)
+        data.setdefault("deployed_version", version_id)
+        data["versions"] = {version_id: version_body}
+        return data
 
     @field_validator("source")
     @classmethod
@@ -282,11 +371,54 @@ class Source(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def _set_display_name(self) -> Source:
-        """Default display_name to title-cased source name."""
+    def _validate_versions_and_display_name(self) -> Source:
+        """Default display_name and ensure version pointers are valid."""
         if self.display_name is None:
             self.display_name = self.source.replace("_", " ").title()
+
+        if not self.versions:
+            raise ValueError("versions must contain at least one version entry")
+
+        if self.current not in self.versions:
+            raise ValueError(f"current version '{self.current}' is not defined in versions")
+        if self.deployed_version not in self.versions:
+            raise ValueError(
+                f"deployed_version '{self.deployed_version}' is not defined in versions"
+            )
         return self
+
+    def version(self, version_id: str | None = None) -> SourceVersion:
+        """Return a specific version snapshot (defaults to deployed_version)."""
+        vid = version_id or self.deployed_version
+        try:
+            return self.versions[vid]
+        except KeyError as e:
+            raise ValueError(f"Source version '{vid}' is not defined") from e
+
+    @property
+    def header(self) -> SourceHeader:
+        """Deployed version header (legacy accessor)."""
+        return self.version().header
+
+    @property
+    def schema_config(self) -> SourceSchema:
+        """Deployed version schema config (legacy accessor)."""
+        return self.version().schema_config
+
+    @property
+    def mapping_standards(self) -> list[str]:
+        """Deployed version mapping standards (legacy accessor)."""
+        return self.version().mapping_standards
+
+    @property
+    def sigma(self) -> SourceSigma | None:
+        """Deployed version sigma config (legacy accessor)."""
+        return self.version().sigma
+
+    @property
+    def fetcher(self) -> SourceFetcher | None:
+        """Deployed version fetcher config (legacy accessor)."""
+        return self.version().fetcher
 
     # -----------------------------------------------------------------
     # Derived properties
@@ -310,12 +442,20 @@ class Source(BaseModel):
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize to a dict suitable for YAML output.
 
-        Uses 'schema' key (not 'schema_config') for YAML compatibility.
-        Excludes None values for clean output.
+        Top-level identity and routing; versioned config under ``versions``.
         """
-        data = self.model_dump(mode="json", by_alias=True, exclude_none=True)
-        # Remove empty containers
-        for key in list(data.keys()):
-            if isinstance(data[key], (dict, list)) and not data[key]:
-                del data[key]
+        data: dict[str, Any] = {
+            "source": self.source,
+            "display_name": self.display_name,
+            "enabled": self.enabled,
+            "deployed_version": self.deployed_version,
+            "current": self.current,
+            "versions": {vid: ver.to_yaml_dict() for vid, ver in sorted(self.versions.items())},
+        }
+        if self.description is not None:
+            data["description"] = self.description
+        if self.match is not None:
+            data["match"] = self.match.model_dump(mode="json", exclude_none=True)
+        if self.transform is not None:
+            data["transform"] = self.transform.model_dump(mode="json", exclude_none=True)
         return data

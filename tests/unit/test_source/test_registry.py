@@ -9,6 +9,7 @@ from dfe_engine.source.registry import (
     SourceRegistry,
     SourceValidationError,
 )
+from dfe_engine.yaml_utils import yaml_load
 
 
 @pytest.fixture
@@ -54,6 +55,21 @@ class TestCRUD:
         loaded = registry.get_source("filebeat")
         assert loaded.source == "filebeat"
         assert loaded.match.value == "filebeat"
+
+    def test_save_writes_versioned_yaml(self, registry: SourceRegistry, sources_dir):
+        registry.save_source(
+            {
+                "source": "versioned_src",
+                "display_name": "Versioned",
+                "schema": {"ttl_days": 30},
+            }
+        )
+        data = yaml_load(sources_dir / "versioned_src.yaml")
+        assert data["deployed_version"] == "1.0.0"
+        assert data["current"] == "1.0.0"
+        assert "1.0.0" in data["versions"]
+        assert data["versions"]["1.0.0"]["schema"]["ttl_days"] == 30
+        assert "header" not in data
 
     def test_save_from_dict(self, registry: SourceRegistry):
         registry.save_source(

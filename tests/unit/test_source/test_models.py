@@ -11,6 +11,7 @@ from dfe_engine.source.models import (
     SourceSchema,
     SourceSigma,
     SourceTransform,
+    SourceVersion,
 )
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -57,6 +58,15 @@ class TestSchemaColumn:
         col = SchemaColumn(name="x", type="string", attribute="lowcardinality")
         assert col.attribute == ["lowcardinality"]
 
+    def test_attribute_coercion_from_list(self):
+        col = SchemaColumn(name="x", type="string", attribute=["lowcardinality", "nullable"])
+        assert col.attribute == ["lowcardinality", "nullable"]
+
+    def test_validate_valid_ch_override(self, registry: TypeRegistry):
+        col = SchemaColumn(name="x", type="string", ch_override="String")
+        errors = col.validate_against_registry(registry)
+        assert errors == []
+
     def test_attribute_coercion_from_none(self):
         col = SchemaColumn(name="x", type="string", attribute=None)
         assert col.attribute == []
@@ -65,8 +75,6 @@ class TestSchemaColumn:
         col = SchemaColumn(name="x", type="string", use_case="dimension")
         errors = col.validate_against_registry(registry)
         assert errors == []
-
-    def test_validate_invalid_use_case(self, registry: TypeRegistry):
         col = SchemaColumn(name="x", type="integer", use_case="fulltext")
         errors = col.validate_against_registry(registry)
         assert len(errors) == 1
@@ -302,12 +310,12 @@ class TestSource:
     def test_mapping_standards_in_yaml_dict(self):
         s = Source(source="syslog", mapping_standards=["sigma"])
         d = s.to_yaml_dict()
-        assert d["mapping_standards"] == ["sigma"]
+        assert d["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
 
     def test_mapping_standards_excluded_when_empty(self):
         s = Source(source="syslog")
         d = s.to_yaml_dict()
-        assert "mapping_standards" not in d
+        assert "mapping_standards" not in d["versions"]["1.0.0"]
 
 
 # ---------------------------------------------------------------------------
@@ -372,8 +380,10 @@ class TestSourceYaml:
 
         assert yaml_dict["source"] == "filebeat"
         assert yaml_dict["match"]["field"] == "tags.collector.type"
-        assert yaml_dict["schema"]["ttl_days"] == 90
-        assert "schema_config" not in yaml_dict  # Uses alias 'schema'
+        assert yaml_dict["versions"]["1.0.0"]["schema"]["ttl_days"] == 90
+        assert "schema_config" not in yaml_dict
+        assert "deployed_version" in yaml_dict
+        assert "current" in yaml_dict
 
     def test_excludes_none(self):
         s = Source(source="syslog")
@@ -406,3 +416,174 @@ class TestSourceYaml:
         assert s1.display_name == s2.display_name
         assert s1.enabled == s2.enabled
         assert s1.schema_config.engine == s2.schema_config.engine
+
+
+class TestSourceVersion:
+    def test_to_yaml_dict_omits_empty_containers(self):
+        ver = SourceVersion(
+            date_time="2026-06-10",
+            mapping_standards=[],
+        )
+        out = ver.to_yaml_dict()
+        assert "mapping_standards" not in out
+        assert out["date_time"] == "2026-06-10"
+
+
+class TestSourceVersioning:
+    def test_versioned_yaml_shape(self):
+        data = {
+            "source": "no_transform",
+            "display_name": "No Transform",
+            "enabled": True,
+            "deployed_version": "1.0.0",
+            "current": "1.0.0",
+            "versions": {
+                "1.0.0": {
+                    "date_time": "2026-06-10",
+                    "header": {"type": "time_series", "version": "1.0.0"},
+                    "schema": {
+                        "meta_schema": "meta/aws/cloudwatch_logs",
+                        "meta_schema_version": "1.0.0",
+                        "engine": "MergeTree",
+                    },
+                    "mapping_standards": ["ecs/no_transform", "sigma/no_transform"],
+                    "fetcher": {
+                        "source_type": "aws.cloudtrail",
+                        "base_url": "https://{service}.{region}.amazonaws.com",
+                        "poll_interval_secs": 10,
+                    },
+                }
+            },
+        }
+        s = Source.model_validate(data)
+        out = s.to_yaml_dict()
+        assert out["deployed_version"] == "1.0.0"
+        assert out["versions"]["1.0.0"]["date_time"] == "2026-06-10"
+        assert out["versions"]["1.0.0"]["schema"]["meta_schema"] == "meta/aws/cloudwatch_logs"
+        assert s.fetcher is not None
+        assert s.fetcher.poll_interval_secs == 10
+
+    def test_legacy_flat_input_normalizes_to_versions(self):
+        s = Source.model_validate({"source": "syslog", "schema": {"ttl_days": 90}})
+        assert "1.0.0" in s.versions
+        assert s.schema_config.ttl_days == 90
+        assert s.current == "1.0.0"
+        assert s.deployed_version == "1.0.0"
+
+    def test_legacy_flat_schema_config_key(self):
+        s = Source.model_validate(
+            {"source": "syslog", "schema_config": {"ttl_days": 45, "engine": "MergeTree"}}
+        )
+        assert s.schema_config.ttl_days == 45
+
+    def test_legacy_flat_moves_versioned_keys_into_snapshot(self):
+        s = Source.model_validate(
+            {
+                "source": "pull_src",
+                "field_mappings": ["ecs/custom"],
+                "fetcher": {"source_type": "m365"},
+                "sigma": {"taxonomy": "windows"},
+                "mapping_standards": ["sigma"],
+            }
+        )
+        ver = s.versions["1.0.0"]
+        assert ver.field_mappings == ["ecs/custom"]
+        assert ver.fetcher is not None
+        assert ver.sigma is not None
+        assert ver.mapping_standards == ["sigma"]
+
+    def test_versioned_input_defaults_current_from_deployed_only(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "x",
+                "deployed_version": "1.0.0",
+                "versions": {"1.0.0": ver_body},
+            }
+        )
+        assert s.current == "1.0.0"
+        assert s.deployed_version == "1.0.0"
+
+    def test_versioned_input_defaults_deployed_from_current_only(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "2.0.0"},
+            "schema": {},
+        }
+        s = Source.model_validate(
+            {
+                "source": "x",
+                "current": "2.0.0",
+                "versions": {"2.0.0": ver_body},
+            }
+        )
+        assert s.current == "2.0.0"
+        assert s.deployed_version == "2.0.0"
+
+    def test_before_validator_passthrough_non_dict(self):
+        with pytest.raises(Exception):
+            Source.model_validate(42)
+
+    def test_empty_versions_rejected(self):
+        src = Source.model_construct(
+            source="empty_ver",
+            display_name="Empty",
+            enabled=True,
+            current="1.0.0",
+            deployed_version="1.0.0",
+            versions={},
+        )
+        with pytest.raises(ValueError, match="at least one"):
+            Source._validate_versions_and_display_name(src)
+
+    def test_current_not_in_versions(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        with pytest.raises(ValueError, match="current version '2.0.0'"):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    "current": "2.0.0",
+                    "deployed_version": "1.0.0",
+                    "versions": {"1.0.0": ver_body},
+                }
+            )
+
+    def test_deployed_version_not_in_versions(self):
+        ver_body = {
+            "date_time": "2026-01-01",
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema": {},
+        }
+        with pytest.raises(ValueError, match="deployed_version '9.9.9'"):
+            Source.model_validate(
+                {
+                    "source": "x",
+                    "current": "1.0.0",
+                    "deployed_version": "9.9.9",
+                    "versions": {"1.0.0": ver_body},
+                }
+            )
+
+    def test_version_lookup_unknown_id(self):
+        s = Source.model_validate({"source": "x"})
+        with pytest.raises(ValueError, match="Source version '9.9.9' is not defined"):
+            s.version("9.9.9")
+
+    def test_to_yaml_dict_includes_transform(self):
+        s = Source.model_validate(
+            {
+                "source": "with_xform",
+                "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
+            }
+        )
+        out = s.to_yaml_dict()
+        assert out["transform"]["engine"] == "vector"
+        assert out["transform"]["config_file"] == "/etc/vector/x.yaml"

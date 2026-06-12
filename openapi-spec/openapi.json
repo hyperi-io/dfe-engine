@@ -9439,9 +9439,17 @@
             "description": "Whether the source is active",
             "default": true
           },
-          "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+          "deployed_version": {
+            "type": "string",
+            "title": "Deployed Version",
+            "description": "Version deployed to ClickHouse / runtime",
+            "default": "1.0.0"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version (latest definition)",
+            "default": "1.0.0"
           },
           "match": {
             "anyOf": [
@@ -9454,10 +9462,6 @@
             ],
             "description": "Receiver match rule"
           },
-          "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
-          },
           "transform": {
             "anyOf": [
               {
@@ -9469,35 +9473,13 @@
             ],
             "description": "Transform stage (optional)"
           },
-          "fetcher": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceFetcher"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SaaS API fetcher (optional)"
-          },
-          "sigma": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceSigma"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Sigma field mappings (optional)"
-          },
-          "mapping_standards": {
-            "items": {
-              "type": "string"
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SourceVersion-Input"
             },
-            "type": "array",
-            "title": "Mapping Standards",
-            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+            "type": "object",
+            "title": "Versions",
+            "description": "Version id \u2192 configuration snapshot"
           }
         },
         "type": "object",
@@ -9544,9 +9526,17 @@
             "description": "Whether the source is active",
             "default": true
           },
-          "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+          "deployed_version": {
+            "type": "string",
+            "title": "Deployed Version",
+            "description": "Version deployed to ClickHouse / runtime",
+            "default": "1.0.0"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version (latest definition)",
+            "default": "1.0.0"
           },
           "match": {
             "anyOf": [
@@ -9559,10 +9549,6 @@
             ],
             "description": "Receiver match rule"
           },
-          "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
-          },
           "transform": {
             "anyOf": [
               {
@@ -9574,35 +9560,13 @@
             ],
             "description": "Transform stage (optional)"
           },
-          "fetcher": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceFetcher"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "SaaS API fetcher (optional)"
-          },
-          "sigma": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceSigma"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Sigma field mappings (optional)"
-          },
-          "mapping_standards": {
-            "items": {
-              "type": "string"
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SourceVersion-Output"
             },
-            "type": "array",
-            "title": "Mapping Standards",
-            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+            "type": "object",
+            "title": "Versions",
+            "description": "Version id \u2192 configuration snapshot"
           }
         },
         "type": "object",
@@ -9982,6 +9946,142 @@
         ],
         "title": "SourceTransform",
         "description": "Transform stage configuration (vector or wasm)."
+      },
+      "SourceVersion-Input": {
+        "properties": {
+          "date_time": {
+            "type": "string",
+            "title": "Date Time",
+            "description": "Version creation date (YYYY-MM-DD)"
+          },
+          "header": {
+            "$ref": "#/components/schemas/SourceHeader",
+            "description": "Common schema header configuration"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "Schema configuration"
+          },
+          "mapping_standards": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mapping Standards",
+            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSigma"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sigma field mappings (optional)"
+          },
+          "field_mappings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Mappings",
+            "description": "Field map registry paths for this version (optional)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SaaS API fetcher (optional)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date_time"
+        ],
+        "title": "SourceVersion",
+        "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
+      },
+      "SourceVersion-Output": {
+        "properties": {
+          "date_time": {
+            "type": "string",
+            "title": "Date Time",
+            "description": "Version creation date (YYYY-MM-DD)"
+          },
+          "header": {
+            "$ref": "#/components/schemas/SourceHeader",
+            "description": "Common schema header configuration"
+          },
+          "schema": {
+            "$ref": "#/components/schemas/SourceSchema",
+            "description": "Schema configuration"
+          },
+          "mapping_standards": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mapping Standards",
+            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
+          },
+          "sigma": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSigma"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sigma field mappings (optional)"
+          },
+          "field_mappings": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Mappings",
+            "description": "Field map registry paths for this version (optional)"
+          },
+          "fetcher": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceFetcher"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "SaaS API fetcher (optional)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "date_time"
+        ],
+        "title": "SourceVersion",
+        "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
       },
       "SqlValidationError": {
         "properties": {
