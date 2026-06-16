@@ -105,6 +105,72 @@ def _resolve_schemas_root() -> Path | None:
     return None
 
 
+_COMMON_HEADER_PREFIX = "common-header/"
+
+
+def _profile_short_name(profile_name: str) -> str:
+    """Strip registry prefix so ``common-header/minimal`` → ``minimal``."""
+    normalized = profile_name.replace("\\", "/").strip("/")
+    if normalized.startswith(_COMMON_HEADER_PREFIX):
+        return normalized[len(_COMMON_HEADER_PREFIX) :]
+    return normalized
+
+
+def _resolve_profile_yaml_path(
+    profile_name: str,
+    profiles_dir: str | Path | None = None,
+) -> Path:
+    """Map a profile ref (short name or ``common-header/…`` registry path) to a YAML file."""
+    if profiles_dir is not None:
+        short = _profile_short_name(profile_name)
+        return Path(profiles_dir) / f"{short}.yaml"
+
+    normalized = profile_name.replace("\\", "/").strip("/")
+    schemas_root = _resolve_schemas_root()
+    if schemas_root and (normalized.startswith(_COMMON_HEADER_PREFIX) or "/" in normalized):
+        parts = [p for p in normalized.split("/") if p]
+        if len(parts) == 1:
+            candidate = schemas_root / f"{parts[0]}.yaml"
+        else:
+            candidate = schemas_root.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+        if candidate.exists():
+            return candidate
+
+    short = _profile_short_name(normalized)
+    return _resolve_profiles_dir() / f"{short}.yaml"
+
+
+def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
+    """Resolve a schema file reference under ``schemas_base``.
+
+    Accepts legacy filenames (``meta.yaml``), explicit ``.yaml`` paths, and
+    registry-style keys without a suffix (``meta/aws/cloudtrail``).
+    """
+    normalized = path_str.replace("\\", "/").strip("/")
+    path = Path(normalized)
+    if path.is_absolute():
+        if path.exists():
+            return path
+        if path.suffix not in (".yaml", ".yml"):
+            with_suffix = path.with_suffix(".yaml")
+            if with_suffix.exists():
+                return with_suffix
+        return path
+
+    candidates: list[Path] = [schemas_base / normalized]
+    if not normalized.lower().endswith((".yaml", ".yml")):
+        parts = [p for p in normalized.split("/") if p]
+        if len(parts) == 1:
+            candidates.append(schemas_base / f"{parts[0]}.yaml")
+        elif parts:
+            candidates.append(schemas_base.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml")
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[-1]
+
+
 def is_shipped_schema(path: str | Path) -> bool:
     """Check whether a path is inside the shipped (read-only) schemas.
 
@@ -298,7 +364,8 @@ class SchemaLoader:
         4. Bundled ``schema/profiles/`` inside the package
 
         Args:
-            profile_name: Profile name (e.g. 'timeseries').
+            profile_name: Short profile name (e.g. ``timeseries``) or registry
+                          path (e.g. ``common-header/minimal``).
             profiles_dir: Directory containing profile YAML files.
                           When provided, skips the resolution chain.
             version: Target schema version (semver).  When ``None``,
@@ -310,11 +377,7 @@ class SchemaLoader:
         Raises:
             SchemaLoadError: If profile not found.
         """
-        if profiles_dir:
-            profile_path = Path(profiles_dir) / f"{profile_name}.yaml"
-        else:
-            resolved_dir = _resolve_profiles_dir()
-            profile_path = resolved_dir / f"{profile_name}.yaml"
+        profile_path = _resolve_profile_yaml_path(profile_name, profiles_dir)
 
         if not profile_path.exists():
             raise SchemaLoadError(f"Profile '{profile_name}' not found at {profile_path}")
