@@ -28,7 +28,7 @@ name: CI
         type: string
         required: false
         default: "auto"
-        description: "Version resolution for from-head: auto | patch | minor (forced)."
+        description: "Version resolution for from-head: auto | patch | minor (forced) | X.Y.Z (exact version)."
 
 jobs:
   ci:
