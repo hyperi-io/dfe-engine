@@ -151,6 +151,9 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/sources` | List sources (paginated) |
 | POST | `/sources` | Create source |
 | GET | `/sources/{name}` | Get source details |
+| GET | `/sources/{name}/versions` | Get one version snapshot |
+| GET | `/sources/{name}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
+| POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 | PUT | `/sources/{name}` | Update source |
 | DELETE | `/sources/{name}` | Delete source |
 | POST | `/sources/bulk` | Bulk import |
@@ -225,8 +228,6 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 | Method | Path | Purpose |
 |--------|------|---------|
 | GET | `/schemas` | List meta schemas (paginated `items` + path `objects` tree) |
-| GET | `/schemas/{source}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
-| POST | `/schemas/{source}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 
 ### Pipeline (`/api/v1/pipeline`)
 

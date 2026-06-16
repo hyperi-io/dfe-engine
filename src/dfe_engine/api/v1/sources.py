@@ -2,7 +2,10 @@
 
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
-GET    /api/v1/sources/{name}/versions     → Get one version snapshot
+GET    /api/v1/sources/{name}           → Get source details
+GET    /api/v1/sources/{name}/versions  → Get one version snapshot
+GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
+POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
@@ -18,8 +21,9 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
-from dfe_engine.api.pagination import PaginationParams, apply_search, apply_sort
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.settings import get_settings
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     Source,
@@ -27,7 +31,11 @@ from dfe_engine.source.models import (
     SourceVersionGetResponse,
     SourceWriteRequest,
 )
-from dfe_engine.source.registry import SourceMatchConflictError, SourceValidationError
+from dfe_engine.source.registry import (
+    SourceMatchConflictError,
+    SourceNotFoundError,
+    SourceValidationError,
+)
 
 router = APIRouter(prefix="/sources", tags=["Sources"])
 
@@ -100,6 +108,33 @@ class SeedResponse(BaseModel):
     """Result of seeding built-in sources."""
 
     seeded: int = Field(description="Number of sources seeded")
+
+
+class SchemaColumn(BaseModel):
+    """A column in a composed source schema (API response)."""
+
+    name: str
+    type: str
+    use_case: str = ""
+    attribute: str = ""
+    description: str = ""
+
+
+class DDLResult(BaseModel):
+    """Generated DDL output."""
+
+    source_name: str
+    create_table: str = Field(description="CREATE TABLE DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+
+
+class SchemaBuildResult(BaseModel):
+    """Result of building a schema from a source."""
+
+    source_name: str
+    version: str = ""
+    columns: list[SchemaColumn]
+    ddl: DDLResult | None = None
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -235,6 +270,159 @@ async def get_source_version(
         selected=version,
         versions=version_ids,
         version=source.versions[version],
+    )
+
+
+@router.get(
+    "/{name}/columns",
+    response_model=PaginatedResponse[SchemaColumn],
+    dependencies=[Depends(require_action("source:read"))],
+)
+async def get_source_schema_columns(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to deployed_version)",
+    ),
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[SchemaColumn]:
+    """Get composed schema columns for a source version (profile + meta/derived/additional).
+
+    Use ``per_page=-1`` to return all columns in one page.
+    """
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    try:
+        columns = builder.load_columns_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "schema_error", "message": str(exc)},
+        ) from exc
+
+    all_columns = [_to_api_schema_column(col) for col in columns]
+    return PaginatedResponse.from_list(
+        all_columns,
+        pagination.page,
+        pagination.per_page,
+    )
+
+
+@router.post(
+    "/{name}/build",
+    response_model=SchemaBuildResult,
+    dependencies=[Depends(require_action("config:write"))],
+)
+async def build_source_schema(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to deployed_version)",
+    ),
+) -> SchemaBuildResult:
+    """Build complete schema (DDL) from a source version snapshot.
+
+    Runs the v2 YAML → DDL pipeline and returns the generated DDL
+    without executing it against ClickHouse.
+    """
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    try:
+        result = builder.build_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "build_error", "message": str(exc)},
+        ) from exc
+
+    columns = [_to_api_schema_column(col) for col in result.columns]
+
+    ddl = None
+    if result.create_table_ddl:
+        ddl = DDLResult(
+            source_name=name,
+            create_table=result.create_table_ddl,
+            views={k: v for k, v in (result.view_ddls or {}).items()},
+        )
+
+    audit_resource_change(user.user_id, "schema", name, "executed")
+    return SchemaBuildResult(
+        source_name=name,
+        version=version_id,
+        columns=columns,
+        ddl=ddl,
     )
 
 
@@ -395,4 +583,18 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
         mapping_standards=list(raw.get("mapping_standards") or []),
+    )
+
+
+def _to_api_schema_column(col: Any) -> SchemaColumn:
+    return SchemaColumn(
+        name=col.name,
+        type=col.type,
+        use_case=getattr(col, "use_case", "") or "",
+        attribute=(
+            ", ".join(col.attribute)
+            if isinstance(col.attribute, list)
+            else (getattr(col, "attribute", "") or "")
+        ),
+        description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
     )
