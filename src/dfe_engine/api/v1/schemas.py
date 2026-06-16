@@ -15,9 +15,8 @@ for DDL pipeline execution.
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, SchemaReg, SourceReg, require_action
+from dfe_engine.api.deps import CurrentUser, SchemaReg, require_action
 from dfe_engine.api.errors import ErrorResponse
 from dfe_engine.api.pagination import (
     PaginatedResponse,
@@ -47,7 +46,6 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaService,
 )
 from dfe_engine.settings import get_settings
-from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -98,44 +96,6 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
             )
         chunks.append(chunk)
     return b"".join(chunks)
-
-
-# ── Response models ─────────────────────────────────────────
-
-
-class SchemaColumn(BaseModel):
-    """A column in a schema definition."""
-
-    name: str
-    type: str
-    use_case: str = ""
-    attribute: str = ""
-    description: str = ""
-
-
-class SchemaVersionInfo(BaseModel):
-    """Summary of a schema version."""
-
-    version: str
-    column_count: int
-    columns: list[SchemaColumn]
-
-
-class DDLResult(BaseModel):
-    """Generated DDL output."""
-
-    source_name: str
-    create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
-
-
-class SchemaBuildResult(BaseModel):
-    """Result of building a schema from a source."""
-
-    source_name: str
-    version: str = ""
-    columns: list[SchemaColumn]
-    ddl: DDLResult | None = None
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -638,181 +598,3 @@ async def elastic_converter(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail={"code": "elastic_convert_error", "message": str(exc)},
         ) from exc
-
-
-@router.get(
-    "/{source_name}/columns",
-    response_model=PaginatedResponse[SchemaColumn],
-)
-async def get_schema_columns(
-    source_name: str,
-    request: Request,
-    user: CurrentUser,
-    registry: SourceReg,
-    version: str | None = Query(
-        None,
-        description="Source version id (defaults to deployed_version)",
-    ),
-    pagination: PaginationParams = Depends(),
-    _auth: None = Depends(require_action("source:read")),
-) -> PaginatedResponse[SchemaColumn]:
-    """Get composed schema columns for a source version (profile + meta/derived/additional).
-
-    Use ``per_page=-1`` to return all columns in one page.
-    """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
-
-    try:
-        source = registry.get_source(source_name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-        )
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{source_name}'",
-            },
-        )
-
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
-    try:
-        columns = builder.load_columns_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "schema_error", "message": str(exc)},
-        ) from exc
-
-    all_columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in columns
-    ]
-    return PaginatedResponse.from_list(
-        all_columns,
-        pagination.page,
-        pagination.per_page,
-    )
-
-
-@router.post("/{source_name}/build", response_model=SchemaBuildResult)
-async def build_schema(
-    source_name: str,
-    request: Request,
-    user: CurrentUser,
-    registry: SourceReg,
-    version: str | None = Query(
-        None,
-        description="Source version id (defaults to deployed_version)",
-    ),
-    _auth: None = Depends(require_action("config:write")),
-) -> SchemaBuildResult:
-    """Build complete schema (DDL) from a source version snapshot.
-
-    Runs the v2 YAML → DDL pipeline and returns the generated DDL
-    without executing it against ClickHouse.
-    """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
-
-    try:
-        source = registry.get_source(source_name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
-        )
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{source_name}'",
-            },
-        )
-
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
-    try:
-        result = builder.build_for_source_version(source, source_version=version_id)
-    except SchemaBuildError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
-
-    columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in result.columns
-    ]
-
-    ddl = None
-    if result.create_table_ddl:
-        ddl = DDLResult(
-            source_name=source_name,
-            create_table=result.create_table_ddl,
-            views={k: v for k, v in (result.view_ddls or {}).items()},
-        )
-
-    audit_resource_change(user.user_id, "schema", source_name, "executed")
-    return SchemaBuildResult(
-        source_name=source_name,
-        version=version_id,
-        columns=columns,
-        ddl=ddl,
-    )
