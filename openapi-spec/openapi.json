@@ -5312,7 +5312,7 @@
           "schemas"
         ],
         "summary": "Get Schema Columns",
-        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).",
+        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).\n\nUse ``per_page=-1`` to return all columns in one page.",
         "operationId": "get_schema_columns_api_v1_schemas__source_name__columns_get",
         "parameters": [
           {
@@ -5341,6 +5341,27 @@
               "title": "Version"
             },
             "description": "Source version id (defaults to deployed_version)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
           }
         ],
         "responses": {
@@ -5349,11 +5370,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
-                  },
-                  "title": "Response Get Schema Columns Api V1 Schemas  Source Name  Columns Get"
+                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___2"
                 }
               }
             }
@@ -8057,72 +8074,6 @@
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
       },
-      "PaginatedResponse_SchemaColumn_": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[SchemaColumn]"
-      },
       "PaginatedResponse_ServiceConfigSummary_": {
         "properties": {
           "items": {
@@ -9306,7 +9257,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/PaginatedResponse_SchemaColumn_",
+            "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1",
             "description": "Paginated columns for this version"
           }
         },
@@ -11268,6 +11219,138 @@
         ],
         "title": "ViewParameter",
         "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse \u2192 Python \u2192 TypeScript \u2192 HTML)."
+      },
+      "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SchemaColumn]"
+      },
+      "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___2": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SchemaColumn]"
       },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {
