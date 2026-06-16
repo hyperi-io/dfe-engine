@@ -53,12 +53,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     auth_dir = Path(auth_dir_str)
     default_admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
-    account_store, group_store, api_key_store, role_config = bootstrap_auth(
+    account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
         auth_dir, default_admin_password=default_admin_pw
     )
     app.state.account_store = account_store
     app.state.group_store = group_store
     app.state.api_key_store = api_key_store
+    app.state.role_store = role_store
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 

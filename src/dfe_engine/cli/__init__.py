@@ -45,7 +45,7 @@ def _get_stores() -> tuple[AccountStore, GroupStore, APIKeyStore]:
     config_dir = os.environ.get("DFE_CONFIG_DIR", "./config")
     auth_dir = os.environ.get("DFE_AUTH_DIR", str(Path(config_dir) / "auth"))
     admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
-    account_store, group_store, api_key_store, _ = bootstrap_auth(
+    account_store, group_store, api_key_store, _, _ = bootstrap_auth(
         Path(auth_dir), default_admin_password=admin_pw
     )
     return account_store, group_store, api_key_store
