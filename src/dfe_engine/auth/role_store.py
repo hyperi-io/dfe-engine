@@ -12,7 +12,12 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth.roles import RoleConfig, RoleDefinition
+from dfe_engine.auth.roles import (
+    RoleConfig,
+    RoleDefinition,
+    RoleResourceType,
+    builtin_core_role_names,
+)
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -23,6 +28,7 @@ class Role(BaseModel):
     description: str = ""
     permissions: list[str] = Field(default_factory=list)
     scoped: bool = False
+    resource_type: RoleResourceType = "custom"
 
 
 class RoleStore:
@@ -71,9 +77,16 @@ class RoleStore:
             description=description,
             permissions=permissions,
             scoped=scoped,
+            resource_type="custom",
         )
         self._write_roles(roles)
-        return Role(name=name, description=description, permissions=permissions, scoped=scoped)
+        return Role(
+            name=name,
+            description=description,
+            permissions=permissions,
+            scoped=scoped,
+            resource_type="custom",
+        )
 
     def update(
         self,
@@ -107,14 +120,20 @@ class RoleStore:
         config = self.load_config()
         if name not in config.roles:
             raise KeyError(f"Role '{name}' not found")
+        existing = config.roles[name]
+        if existing.resource_type == "core":
+            raise ValueError(f"Cannot delete core role '{name}'")
         roles = dict(config.roles)
         del roles[name]
         self._write_roles(roles)
 
     def _write_roles(self, roles: dict[str, RoleDefinition]) -> RoleConfig:
+        core_names = builtin_core_role_names()
         payload: dict[str, dict[str, object]] = {}
         for role_name, definition in sorted(roles.items()):
             data = definition.model_dump()
+            if role_name in core_names:
+                data["resource_type"] = "core"
             if not data.get("scoped"):
                 data.pop("scoped", None)
             payload[role_name] = data

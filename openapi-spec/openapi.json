@@ -6974,6 +6974,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "name",
@@ -9095,6 +9096,11 @@
           "scoped": {
             "type": "boolean",
             "title": "Scoped"
+          },
+          "resource_type": {
+            "type": "string",
+            "title": "Resource Type",
+            "description": "core for system roles, custom for user-created roles"
           }
         },
         "type": "object",
@@ -9102,7 +9108,8 @@
           "name",
           "description",
           "permissions",
-          "scoped"
+          "scoped",
+          "resource_type"
         ],
         "title": "RoleResponse"
       },
@@ -11304,6 +11311,7 @@
             "description": "Replace org-scoped flag"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "title": "UpdateRoleRequest"
       },

@@ -30,11 +30,34 @@ from __future__ import annotations
 
 import importlib.resources
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from dfe_engine.yaml_utils import yaml_load, yaml_load_string
+
+RoleResourceType = Literal["core", "custom"]
+
+_BUILTIN_CORE_ROLE_NAMES: frozenset[str] | None = None
+
+
+def builtin_core_role_names() -> frozenset[str]:
+    """Role names shipped in ``auth/resources/roles.yaml``."""
+    global _BUILTIN_CORE_ROLE_NAMES
+    if _BUILTIN_CORE_ROLE_NAMES is None:
+        pkg = importlib.resources.files("dfe_engine.auth.resources")
+        resource = pkg.joinpath("roles.yaml")
+        data: dict[str, Any] = yaml_load_string(resource.read_text(encoding="utf-8"))
+        roles = data.get("roles") or {}
+        _BUILTIN_CORE_ROLE_NAMES = frozenset(roles.keys())
+    return _BUILTIN_CORE_ROLE_NAMES
+
+
+def _normalize_role_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    data = dict(raw)
+    if "resoure_type" in data and "resource_type" not in data:
+        data["resource_type"] = data.pop("resoure_type")
+    return data
 
 
 def permission_matches(permission: str, action: str) -> bool:
@@ -87,9 +110,12 @@ def permission_matches(permission: str, action: str) -> bool:
 class RoleDefinition(BaseModel):
     """Definition of a single role with permissions and scope flag."""
 
+    model_config = ConfigDict(extra="ignore")
+
     description: str
     permissions: list[str]
     scoped: bool = False
+    resource_type: RoleResourceType = "custom"
 
 
 class RoleConfig:
@@ -195,6 +221,14 @@ class RoleConfig:
         if "roles" not in data:
             raise ValueError("YAML must contain a 'roles' key")
         roles: dict[str, RoleDefinition] = {}
+        core_names = builtin_core_role_names()
         for name, raw in data["roles"].items():
-            roles[name] = RoleDefinition.model_validate(raw)
+            if not isinstance(raw, dict):
+                raise ValueError(f"Role '{name}' must be a mapping")
+            normalized = _normalize_role_raw(raw)
+            if name in core_names:
+                normalized["resource_type"] = "core"
+            else:
+                normalized.setdefault("resource_type", "custom")
+            roles[name] = RoleDefinition.model_validate(normalized)
         return cls(roles=roles)

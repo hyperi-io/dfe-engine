@@ -1,10 +1,12 @@
 roles:
   admin:
     description: "Full access to all resources and all orgs"
+    resource_type: core
     permissions:
       - "*"
   data_analyst:
     description: "Hunt, query, source, fieldmap CRUD"
+    resource_type: core
     permissions:
       - "hunt:*"
       - "query:*"
@@ -16,6 +18,7 @@ roles:
       - "transforms:*"
   data_analyst_viewer:
     description: "Same scope as data_analyst, read-only"
+    resource_type: core
     permissions:
       - "hunt:read"
       - "query:read"
@@ -27,12 +30,14 @@ roles:
       - "org:read"
   data_viewer:
     description: "HyperDX dashboards and query execution"
+    resource_type: core
     permissions:
       - "query:execute"
       - "source:read"
       - "dashboard:read"
   infra_admin:
     description: "Service configs, deployments, helm, Argo CD"
+    resource_type: core
     permissions:
       - "config:*"
       - "service:*:config:*"
@@ -42,6 +47,7 @@ roles:
       - "argo:*"
   infra_viewer:
     description: "Infrastructure read-only"
+    resource_type: core
     permissions:
       - "config:read"
       - "service:*:config:read"
@@ -52,6 +58,7 @@ roles:
       - "argo:projects:get"
   customer_viewer:
     description: "Org-restricted data viewer"
+    resource_type: core
     permissions:
       - "query:execute"
       - "source:read"

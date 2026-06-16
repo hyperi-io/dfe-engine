@@ -43,6 +43,7 @@ class TestRoleStore:
             scoped=True,
         )
         assert created.scoped is True
+        assert created.resource_type == "custom"
         assert store.get("custom") is not None
 
         updated = store.update("custom", description="Updated")

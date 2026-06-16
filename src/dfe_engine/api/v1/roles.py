@@ -21,7 +21,7 @@ All endpoints require admin role (org:write).
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog
@@ -31,6 +31,8 @@ router = APIRouter(prefix="/roles", tags=["Roles"])
 
 
 class CreateRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str = Field(description="Unique role name")
     description: str = Field("", description="Human-readable description")
     permissions: list[str] = Field(description="Casbin-style permission patterns")
@@ -38,6 +40,8 @@ class CreateRoleRequest(BaseModel):
 
 
 class UpdateRoleRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     description: str | None = Field(None, description="Replace description")
     permissions: list[str] | None = Field(None, description="Replace permission patterns")
     scoped: bool | None = Field(None, description="Replace org-scoped flag")
@@ -48,6 +52,7 @@ class RoleResponse(BaseModel):
     description: str
     permissions: list[str]
     scoped: bool
+    resource_type: str = Field(description="core for system roles, custom for user-created roles")
 
 
 class CasbinScopesResponse(BaseModel):
@@ -63,6 +68,7 @@ def _role_response(role: Role) -> RoleResponse:
         description=role.description,
         permissions=role.permissions,
         scoped=role.scoped,
+        resource_type=role.resource_type,
     )
 
 
@@ -204,6 +210,11 @@ async def delete_role(
     store: RoleStore = request.app.state.role_store
     try:
         store.delete(name)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "conflict", "message": str(exc)},
+        ) from exc
     except KeyError:
         raise HTTPException(
             status_code=404,
