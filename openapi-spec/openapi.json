@@ -1657,6 +1657,159 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/columns": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get Source Schema Columns",
+        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).\n\nUse ``per_page=-1`` to return all columns in one page.",
+        "operationId": "get_source_schema_columns_api_v1_sources__name__columns_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/{name}/build": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Build Source Schema",
+        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "operationId": "build_source_schema_api_v1_sources__name__build_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaBuildResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}": {
       "get": {
         "tags": [
@@ -5306,159 +5459,6 @@
         ]
       }
     },
-    "/api/v1/schemas/{source_name}/columns": {
-      "get": {
-        "tags": [
-          "schemas"
-        ],
-        "summary": "Get Schema Columns",
-        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).\n\nUse ``per_page=-1`` to return all columns in one page.",
-        "operationId": "get_schema_columns_api_v1_schemas__source_name__columns_get",
-        "parameters": [
-          {
-            "name": "source_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Source Name"
-            }
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Source version id (defaults to deployed_version)",
-              "title": "Version"
-            },
-            "description": "Source version id (defaults to deployed_version)"
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 1,
-              "title": "Page"
-            }
-          },
-          {
-            "name": "per_page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "default": 25,
-              "title": "Per Page"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___2"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/schemas/{source_name}/build": {
-      "post": {
-        "tags": [
-          "schemas"
-        ],
-        "summary": "Build Schema",
-        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
-        "operationId": "build_schema_api_v1_schemas__source_name__build_post",
-        "parameters": [
-          {
-            "name": "source_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Source Name"
-            }
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "description": "Source version id (defaults to deployed_version)",
-              "title": "Version"
-            },
-            "description": "Source version id (defaults to deployed_version)"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SchemaBuildResult"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
     "/api/v1/sigma/mappings/{source_name}": {
       "get": {
         "tags": [
@@ -9021,7 +9021,7 @@
           },
           "columns": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SchemaColumn"
             },
             "type": "array",
             "title": "Columns"
@@ -9257,7 +9257,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1",
+            "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___2",
             "description": "Paginated columns for this version"
           }
         },
@@ -11224,7 +11224,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+              "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SchemaColumn"
             },
             "type": "array",
             "title": "Items"
@@ -11290,7 +11290,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
             },
             "type": "array",
             "title": "Items"
@@ -11423,40 +11423,6 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__api__v1__schemas__SchemaColumn": {
-        "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name"
-          },
-          "type": {
-            "type": "string",
-            "title": "Type"
-          },
-          "use_case": {
-            "type": "string",
-            "title": "Use Case",
-            "default": ""
-          },
-          "attribute": {
-            "type": "string",
-            "title": "Attribute",
-            "default": ""
-          },
-          "description": {
-            "type": "string",
-            "title": "Description",
-            "default": ""
-          }
-        },
-        "type": "object",
-        "required": [
-          "name",
-          "type"
-        ],
-        "title": "SchemaColumn",
-        "description": "A column in a schema definition."
-      },
       "dfe_engine__api__v1__services__SeedResponse": {
         "properties": {
           "seeded": {
@@ -11489,6 +11455,40 @@
           "valid"
         ],
         "title": "ValidationResult"
+      },
+      "dfe_engine__api__v1__sources__SchemaColumn": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          },
+          "use_case": {
+            "type": "string",
+            "title": "Use Case",
+            "default": ""
+          },
+          "attribute": {
+            "type": "string",
+            "title": "Attribute",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "SchemaColumn",
+        "description": "A column in a composed source schema (API response)."
       },
       "dfe_engine__api__v1__sources__SeedResponse": {
         "properties": {

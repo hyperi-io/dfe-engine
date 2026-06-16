@@ -76,22 +76,22 @@ class TestSigmaRouter:
 
 
 class TestSchemasRouter:
-    """GET/POST /api/v1/schemas endpoints."""
+    """GET/POST /api/v1/sources/{name}/columns and /build (formerly under /schemas)."""
 
     def test_columns_source_not_found(self, client, admin_headers):
         """Returns 404 when source doesn't exist."""
-        resp = client.get("/api/v1/schemas/nonexistent/columns", headers=admin_headers)
+        resp = client.get("/api/v1/sources/nonexistent/columns", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_build_source_not_found(self, client, admin_headers):
         """Returns 404 when source doesn't exist."""
-        resp = client.post("/api/v1/schemas/nonexistent/build", headers=admin_headers)
+        resp = client.post("/api/v1/sources/nonexistent/build", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_build_unknown_source_version(self, client, admin_headers, sample_source):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.post(
-            f"/api/v1/schemas/{sample_source['source']}/build?version=9.9.9",
+            f"/api/v1/sources/{sample_source['source']}/build?version=9.9.9",
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -100,7 +100,7 @@ class TestSchemasRouter:
         """Create a source, then try to get columns (404 when version has no schema YAML refs)."""
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            f"/api/v1/schemas/{sample_source['source']}/columns",
+            f"/api/v1/sources/{sample_source['source']}/columns",
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -109,7 +109,7 @@ class TestSchemasRouter:
     def test_columns_unknown_source_version(self, client, admin_headers, sample_source):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            f"/api/v1/schemas/{sample_source['source']}/columns?version=9.9.9",
+            f"/api/v1/sources/{sample_source['source']}/columns?version=9.9.9",
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -117,7 +117,7 @@ class TestSchemasRouter:
 
     def test_columns_invalid_per_page_returns_422(self, client, admin_headers):
         resp = client.get(
-            "/api/v1/schemas/nonexistent/columns?per_page=0",
+            "/api/v1/sources/nonexistent/columns?per_page=0",
             headers=admin_headers,
         )
         assert resp.status_code == 422
@@ -203,7 +203,7 @@ class TestSchemasRouter:
             settings=settings,
         )
         headers = {"Authorization": f"Bearer {token}"}
-        base_url = "/api/v1/schemas/cols_src/columns"
+        base_url = "/api/v1/sources/cols_src/columns"
 
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
@@ -243,7 +243,7 @@ class TestSchemasRouter:
             _registries.clear()
 
     def test_requires_auth(self, client):
-        resp = client.get("/api/v1/schemas/test/columns")
+        resp = client.get("/api/v1/sources/test/columns")
         assert resp.status_code == 401
 
 
