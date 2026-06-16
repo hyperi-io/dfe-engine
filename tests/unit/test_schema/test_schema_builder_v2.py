@@ -127,6 +127,28 @@ class TestBuild:
         assert "CREATE TABLE IF NOT EXISTS" in result.create_table_ddl
         assert "test_source" in result.create_table_ddl
 
+    def test_build_meta_schema_registry_path_without_suffix(self, registry, tmp_path):
+        meta_dir = tmp_path / "meta" / "aws"
+        meta_dir.mkdir(parents=True)
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [{"name": "event_name", "type": "string"}],
+                    }
+                },
+            },
+            meta_dir / "cloudtrail.yaml",
+        )
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=tmp_path)
+        source = _make_source(
+            meta_schema="meta/aws/cloudtrail",
+            header_type="minimal",
+        )
+        result = builder.build(source)
+        assert "event_name" in [c.name for c in result.columns]
+
     def test_build_with_derived_and_additional(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(

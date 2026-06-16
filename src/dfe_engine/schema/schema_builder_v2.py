@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 from hyperi_pylib.logger import logger
 
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
-from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError
+from dfe_engine.schema.schema_loader import SchemaLoader, SchemaLoadError, resolve_schema_yaml_path
 from dfe_engine.source.models import SchemaColumn, Source, SourceVersion
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -294,12 +294,9 @@ class SchemaBuilderV2:
 
     def _resolve_path(self, path_str: str) -> Path:
         """Resolve a schema file path (relative to schemas_base_dir or absolute)."""
-        path = Path(path_str)
-        if path.is_absolute():
-            return path
         if self._schemas_base_dir:
-            return self._schemas_base_dir / path
-        return path
+            return resolve_schema_yaml_path(self._schemas_base_dir, path_str)
+        return Path(path_str)
 
     # ── Internal: DDL config ────────────────────────────────────────
 

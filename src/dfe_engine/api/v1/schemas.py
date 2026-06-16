@@ -640,7 +640,10 @@ async def elastic_converter(
         ) from exc
 
 
-@router.get("/{source_name}/columns", response_model=list[SchemaColumn])
+@router.get(
+    "/{source_name}/columns",
+    response_model=PaginatedResponse[SchemaColumn],
+)
 async def get_schema_columns(
     source_name: str,
     request: Request,
@@ -650,9 +653,13 @@ async def get_schema_columns(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
+    pagination: PaginationParams = Depends(),
     _auth: None = Depends(require_action("source:read")),
-) -> list[SchemaColumn]:
-    """Get composed schema columns for a source version (profile + meta/derived/additional)."""
+) -> PaginatedResponse[SchemaColumn]:
+    """Get composed schema columns for a source version (profile + meta/derived/additional).
+
+    Use ``per_page=-1`` to return all columns in one page.
+    """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -697,7 +704,7 @@ async def get_schema_columns(
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
-    return [
+    all_columns = [
         SchemaColumn(
             name=col.name,
             type=col.type,
@@ -711,6 +718,11 @@ async def get_schema_columns(
         )
         for col in columns
     ]
+    return PaginatedResponse.from_list(
+        all_columns,
+        pagination.page,
+        pagination.per_page,
+    )
 
 
 @router.post("/{source_name}/build", response_model=SchemaBuildResult)

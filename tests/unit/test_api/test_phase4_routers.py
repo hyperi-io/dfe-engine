@@ -115,6 +115,133 @@ class TestSchemasRouter:
         assert resp.status_code == 404
         assert "9.9.9" in resp.json()["message"]
 
+    def test_columns_invalid_per_page_returns_422(self, client, admin_headers):
+        resp = client.get(
+            "/api/v1/schemas/nonexistent/columns?per_page=0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_source_columns_paginated(self, tmp_path, monkeypatch):
+        import shutil
+
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        common_header = schemas_root / "common-header"
+        common_header.mkdir()
+        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [
+                            {"name": "alpha", "type": "string", "use_case": "dimension"},
+                            {"name": "beta", "type": "integer"},
+                            {"name": "gamma", "type": "text", "use_case": "fulltext"},
+                        ]
+                    }
+                },
+            },
+            schemas_root / "meta_cols.yaml",
+        )
+
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        yaml_dump(
+            {
+                "source": "cols_src",
+                "enabled": True,
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "minimal", "version": "1.0.0"},
+                        "schema": {
+                            "meta_schema": "meta_cols.yaml",
+                            "meta_schema_version": "1.0.0",
+                            "engine": "MergeTree",
+                        },
+                    }
+                },
+            },
+            sources_dir / "cols_src.yaml",
+        )
+
+        services_dir = tmp_path / "services"
+        services_dir.mkdir()
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(services_dir)),
+            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-source-columns"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        base_url = "/api/v1/schemas/cols_src/columns"
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                resp = tc.get(base_url, headers=headers)
+                assert resp.status_code == 200
+                body = resp.json()
+                total = body["total"]
+                assert total >= 3
+                assert body["page"] == 1
+                assert body["per_page"] == 25
+                assert len(body["items"]) == total
+                assert all(
+                    key in body["items"][0]
+                    for key in ("name", "type", "use_case", "attribute", "description")
+                )
+
+                page2 = tc.get(f"{base_url}?page=2&per_page=2", headers=headers)
+                assert page2.status_code == 200
+                page2_body = page2.json()
+                assert page2_body["page"] == 2
+                assert page2_body["per_page"] == 2
+                assert page2_body["total"] == total
+                expected_page2_len = min(2, max(0, total - 2))
+                assert len(page2_body["items"]) == expected_page2_len
+                if total > 2:
+                    assert page2_body["next_page"] == 3
+                    assert page2_body["prev_page"] == 1
+
+                all_page = tc.get(f"{base_url}?per_page=-1", headers=headers)
+                assert all_page.status_code == 200
+                all_body = all_page.json()
+                assert all_body["per_page"] == -1
+                assert len(all_body["items"]) == all_body["total"]
+                names = {item["name"] for item in all_body["items"]}
+                assert {"alpha", "beta", "gamma"}.issubset(names)
+        finally:
+            _registries.clear()
+
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/schemas/test/columns")
         assert resp.status_code == 401
