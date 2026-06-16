@@ -188,6 +188,26 @@ AlertDestStore = Annotated[Any, Depends(get_alert_destinations_store)]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 
 
+# ── ClickHouse client ─────────────────────────────────────────
+
+
+def get_clickhouse_client(settings: Settings) -> Any:
+    """FastAPI dependency: resolve a pooled ClickHouse client wrapper.
+
+    Returns a ``ClickHouseClientWrapper`` whose ``execute()`` accepts
+    clickhouse-connect ``parameters={...}`` server-side binding. Tests
+    override this via ``app.dependency_overrides`` to inject a fake client.
+    """
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_clickhouse_config
+
+    manager = ClickHouseManager.get_instance(get_clickhouse_config(settings))
+    return manager.get_clickhouse_client()
+
+
+ClickHouseClient = Annotated[Any, Depends(get_clickhouse_client)]
+
+
 # ── Authentication ────────────────────────────────────────────
 
 

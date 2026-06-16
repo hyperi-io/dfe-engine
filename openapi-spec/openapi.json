@@ -5843,6 +5843,310 @@
         ]
       }
     },
+    "/api/v1/schemas/{source_name}/columns": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Get Schema Columns",
+        "description": "Get composed schema columns for a source version (profile + meta/derived/additional).",
+        "operationId": "get_schema_columns_api_v1_schemas__source_name__columns_get",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+                  },
+                  "title": "Response Get Schema Columns Api V1 Schemas  Source Name  Columns Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/{source_name}/build": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Build Schema",
+        "description": "Build complete schema (DDL) from a source version snapshot.\n\nRuns the v2 YAML \u2192 DDL pipeline and returns the generated DDL\nwithout executing it against ClickHouse.",
+        "operationId": "build_schema_api_v1_schemas__source_name__build_post",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaBuildResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/{source_name}/json-paths": {
+      "get": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Discover Json Paths",
+        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
+        "operationId": "discover_json_paths_api_v1_schemas__source_name__json_paths_get",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "samples",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "maximum": 100,
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Random distinct example values per path",
+              "title": "Samples"
+            },
+            "description": "Random distinct example values per path"
+          },
+          {
+            "name": "stats",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Include coverage_pct + distinct_count (expensive, opt-in)",
+              "default": false,
+              "title": "Stats"
+            },
+            "description": "Include coverage_pct + distinct_count (expensive, opt-in)"
+          },
+          {
+            "name": "paths",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated paths to restrict discovery + sampling",
+              "title": "Paths"
+            },
+            "description": "Comma-separated paths to restrict discovery + sampling"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JsonPathsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/schemas/{source_name}/promote-field": {
+      "post": {
+        "tags": [
+          "schemas"
+        ],
+        "summary": "Promote Field",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema, adding one column\nper path with a ``@copy`` directive so dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
+        "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Return the proposed diff without committing",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Return the proposed diff without committing"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromoteFieldRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PromoteFieldResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sigma/mappings/{source_name}": {
       "get": {
         "tags": [
@@ -7913,6 +8217,127 @@
         "title": "HuntSummary",
         "description": "Summary of a configured hunt."
       },
+      "JsonPathInfo": {
+        "properties": {
+          "path": {
+            "type": "string",
+            "title": "Path",
+            "description": "Dotted path inside the JSON column"
+          },
+          "types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Types",
+            "description": "ClickHouse types observed for this path"
+          },
+          "is_consistent": {
+            "type": "boolean",
+            "title": "Is Consistent",
+            "description": "True when the path has exactly one type"
+          },
+          "promoted_to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Promoted To",
+            "description": "Existing column name if already promoted"
+          },
+          "suggested_column_name": {
+            "type": "string",
+            "title": "Suggested Column Name",
+            "description": "Server-derived snake_case column name"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct",
+            "description": "% rows where path is non-null (only with ?stats=true)"
+          },
+          "distinct_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distinct Count",
+            "description": "Approx distinct values (only with ?stats=true)"
+          },
+          "samples": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Samples",
+            "description": "Random distinct example values (only with ?samples=N)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "path",
+          "types",
+          "is_consistent",
+          "suggested_column_name"
+        ],
+        "title": "JsonPathInfo",
+        "description": "One JSON path discovered inside a source's ``_json`` column."
+      },
+      "JsonPathsResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "table": {
+            "type": "string",
+            "title": "Table",
+            "description": "Fully-qualified ClickHouse table queried"
+          },
+          "json_column": {
+            "type": "string",
+            "title": "Json Column",
+            "description": "JSON column inspected (always _json)"
+          },
+          "paths": {
+            "items": {
+              "$ref": "#/components/schemas/JsonPathInfo"
+            },
+            "type": "array",
+            "title": "Paths"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "table",
+          "json_column",
+          "paths"
+        ],
+        "title": "JsonPathsResponse",
+        "description": "Discovered JSON paths for a source."
+      },
       "LoginRequest": {
         "properties": {
           "username": {
@@ -8999,6 +9424,203 @@
         "title": "PipelineTemplate",
         "description": "A discovered pipeline template."
       },
+      "PromoteFieldRequest": {
+        "properties": {
+          "json_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Json Path",
+            "description": "JSON path (e.g. user.email) or a list of paths for batch promotion"
+          },
+          "column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Name",
+            "description": "Target column name (single promotion only; batch uses suggested names)"
+          },
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type",
+            "description": "DFE primitive override; auto-derived from the JSON type when omitted"
+          },
+          "index_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "minmax",
+                  "set",
+                  "bloom_filter",
+                  "tokenbf_v1",
+                  "ngrambf_v1"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Type",
+            "description": "Optional ClickHouse secondary index family"
+          },
+          "atomic": {
+            "type": "boolean",
+            "title": "Atomic",
+            "description": "When true, all paths succeed or none commit; else best-effort",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "json_path"
+        ],
+        "title": "PromoteFieldRequest",
+        "description": "Promote one or more JSON paths into dedicated typed columns."
+      },
+      "PromoteFieldResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "schema_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Version",
+            "description": "New schema version, or null on dry_run / no commit"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/PromoteResult"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "diff": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SchemaDiff"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Populated only when dry_run=true"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "results"
+        ],
+        "title": "PromoteFieldResponse",
+        "description": "Result of a promote-field call."
+      },
+      "PromoteResult": {
+        "properties": {
+          "json_path": {
+            "type": "string",
+            "title": "Json Path"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "error"
+            ],
+            "title": "Status"
+          },
+          "column_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Name"
+          },
+          "data_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Type"
+          },
+          "index_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Index Type"
+          },
+          "copy_cel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Copy Cel"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "json_path",
+          "status"
+        ],
+        "title": "PromoteResult",
+        "description": "Per-path outcome of a promotion."
+      },
       "ProviderResponse": {
         "properties": {
           "name": {
@@ -9733,6 +10355,38 @@
         ],
         "title": "SchemaColumn",
         "description": "A column in the schema."
+      },
+      "SchemaDiff": {
+        "properties": {
+          "new_columns": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+            },
+            "type": "array",
+            "title": "New Columns"
+          },
+          "ddl": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ddl",
+            "description": "ALTER statements that would run"
+          },
+          "copy_directives": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Copy Directives"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_columns"
+        ],
+        "title": "SchemaDiff",
+        "description": "Proposed schema change returned by ``?dry_run=true``."
       },
       "SchemaSummaryObject": {
         "properties": {
