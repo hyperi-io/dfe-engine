@@ -888,24 +888,40 @@
       }
     },
     "/api/v1/auth/roles": {
-      "get": {
+      "post": {
         "tags": [
           "Roles"
         ],
-        "summary": "List Roles",
-        "description": "List all roles (admin only).",
-        "operationId": "list_roles_api_v1_auth_roles_get",
+        "summary": "Create Role",
+        "description": "Create a new RBAC role (admin only).",
+        "operationId": "create_role_api_v1_auth_roles_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRoleRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/RoleResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Roles Api V1 Auth Roles Get"
+                  "$ref": "#/components/schemas/RoleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -917,30 +933,83 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Roles"
         ],
-        "summary": "Create Role",
-        "description": "Create a new RBAC role (admin only).",
-        "operationId": "create_role_api_v1_auth_roles_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateRoleRequest"
-              }
+        "summary": "List Roles",
+        "description": "List roles with pagination (admin only).",
+        "operationId": "list_roles_api_v1_auth_roles_get",
+        "parameters": [
+          {
+            "name": "resource_type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "core",
+                    "custom"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only roles with this resource_type (core or custom)",
+              "title": "Resource Type"
+            },
+            "description": "Return only roles with this resource_type (core or custom)"
+          },
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive match on role name or description",
+              "title": "Search"
+            },
+            "description": "Case-insensitive match on role name or description"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/RoleResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_RoleResponse_"
                 }
               }
             }
@@ -8386,6 +8455,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
+      },
+      "PaginatedResponse_RoleResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoleResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[RoleResponse]"
       },
       "PaginatedResponse_ServiceConfigSummary_": {
         "properties": {

@@ -20,12 +20,17 @@ All endpoints require admin role (org:write).
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from typing import Literal
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog
 from dfe_engine.auth.role_store import Role, RoleStore
+
+RoleResourceTypeQuery = Literal["core", "custom"]
 
 router = APIRouter(prefix="/roles", tags=["Roles"])
 
@@ -126,16 +131,32 @@ async def create_role(
 
 @router.get(
     "",
-    response_model=list[RoleResponse],
+    response_model=PaginatedResponse[RoleResponse],
     dependencies=[Depends(require_action("org:write"))],
 )
 async def list_roles(
     user: CurrentUser,
     request: Request,
-) -> list[RoleResponse]:
-    """List all roles (admin only)."""
+    pagination: PaginationParams = Depends(),
+    resource_type: RoleResourceTypeQuery | None = Query(
+        None,
+        description="Return only roles with this resource_type (core or custom)",
+    ),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive match on role name or description",
+    ),
+) -> PaginatedResponse[RoleResponse]:
+    """List roles with pagination (admin only)."""
     store: RoleStore = request.app.state.role_store
-    return [_role_response(role) for role in store.list()]
+    roles = store.list()
+    if resource_type is not None:
+        roles = [role for role in roles if role.resource_type == resource_type]
+
+    rows = [_role_response(role).model_dump() for role in roles]
+    rows = apply_search(rows, search, ["name", "description"])
+    summaries = [RoleResponse.model_validate(row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.get(
