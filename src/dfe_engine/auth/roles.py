@@ -55,8 +55,8 @@ def builtin_core_role_names() -> frozenset[str]:
 
 def _normalize_role_raw(raw: dict[str, Any]) -> dict[str, Any]:
     data = dict(raw)
-    if "resoure_type" in data and "resource_type" not in data:
-        data["resource_type"] = data.pop("resoure_type")
+    if "resource_type" in data and "resource_type" not in data:
+        data["resource_type"] = data.pop("resource_type")
     return data
 
 

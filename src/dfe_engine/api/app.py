@@ -180,6 +180,11 @@ def create_app(
     health_manager = HealthManager()
     app.state.health_manager = health_manager
 
+    # Core-resource write guard (register before CORS so 409 responses still get CORS headers)
+    from dfe_engine.api.middleware.core_resource_guard import install_core_resource_guard
+
+    install_core_resource_guard(app)
+
     # CORS
     origins = cors_origins or settings.api.cors_origins
     app.add_middleware(

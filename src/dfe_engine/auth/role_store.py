@@ -18,6 +18,7 @@ from dfe_engine.auth.roles import (
     RoleResourceType,
     builtin_core_role_names,
 )
+from dfe_engine.core_resources.yaml_resource_type import CORE_RESOURCE_MUTATION_MESSAGE
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -100,6 +101,8 @@ class RoleStore:
         existing = config.roles.get(name)
         if existing is None:
             raise KeyError(f"Role '{name}' not found")
+        if existing.resource_type == "core":
+            raise ValueError(CORE_RESOURCE_MUTATION_MESSAGE)
         updated = existing.model_copy(
             update={
                 k: v
@@ -122,7 +125,7 @@ class RoleStore:
             raise KeyError(f"Role '{name}' not found")
         existing = config.roles[name]
         if existing.resource_type == "core":
-            raise ValueError(f"Cannot delete core role '{name}'")
+            raise ValueError(CORE_RESOURCE_MUTATION_MESSAGE)
         roles = dict(config.roles)
         del roles[name]
         self._write_roles(roles)

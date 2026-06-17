@@ -143,4 +143,23 @@ class TestRolesCrud:
     def test_delete_core_role_returns_409(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/roles/infra_viewer", headers=admin_headers)
         assert resp.status_code == 409
-        assert "core" in resp.json()["message"].lower()
+        data = resp.json()
+        assert data["code"] == "conflict"
+        assert data["message"] == "Core resources can't be mutated"
+        assert len(resp.content) > 0
+
+    def test_update_core_role_returns_409(self, client, admin_headers):
+        resp = client.put(
+            "/api/v1/auth/roles/admin",
+            json={
+                "description": "Full access to all resources and all orgs",
+                "permissions": ["*"],
+                "scoped": False,
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 409
+        data = resp.json()
+        assert data["code"] == "conflict"
+        assert data["message"] == "Core resources can't be mutated"
+        assert len(resp.content) > 0
