@@ -537,7 +537,7 @@
           "Groups"
         ],
         "summary": "Update Group",
-        "description": "Update group roles or description (admin only).",
+        "description": "Update group roles, description, or members (admin only).",
         "operationId": "update_group_api_v1_auth_groups__name__put",
         "parameters": [
           {
@@ -7047,6 +7047,14 @@
             "title": "Description",
             "description": "Human-readable description",
             "default": ""
+          },
+          "members": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Members",
+            "description": "Account usernames in this group (local login resolves roles from this list)"
           }
         },
         "type": "object",
@@ -11411,6 +11419,21 @@
             ],
             "title": "Description",
             "description": "Replace description"
+          },
+          "members": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Members",
+            "description": "Replace member username list"
           }
         },
         "type": "object",

@@ -27,6 +27,19 @@ class TestCreateGroup:
         assert data["description"] == "A test group"
         assert data["members"] == []
 
+    def test_create_group_with_members(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={
+                "name": "members-on-create",
+                "roles": ["data_viewer"],
+                "members": ["admin", "admin"],
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["members"] == ["admin"]
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/groups",
@@ -126,6 +139,20 @@ class TestUpdateGroup:
         )
         assert resp.status_code == 200
         assert resp.json()["description"] == "Updated description"
+
+    def test_update_members(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "mem-upd-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/auth/groups/mem-upd-group",
+            json={"members": ["admin", "viewer"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["members"] == ["admin", "viewer"]
 
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(

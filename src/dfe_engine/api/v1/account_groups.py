@@ -36,11 +36,16 @@ class CreateGroupRequest(BaseModel):
     name: str = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
+    members: list[str] = Field(
+        default_factory=list,
+        description="Account usernames in this group (local login resolves roles from this list)",
+    )
 
 
 class UpdateGroupRequest(BaseModel):
     roles: list[str] | None = Field(None, description="Replace role list")
     description: str | None = Field(None, description="Replace description")
+    members: list[str] | None = Field(None, description="Replace member username list")
 
 
 class AddMemberRequest(BaseModel):
@@ -77,7 +82,12 @@ async def create_group(
             status_code=409,
             detail={"code": "conflict", "message": f"Group '{body.name}' already exists"},
         )
-    group = store.create(body.name, roles=body.roles, description=body.description)
+    group = store.create(
+        body.name,
+        roles=body.roles,
+        description=body.description,
+        members=body.members,
+    )
     return GroupResponse(
         name=group.name,
         description=group.description,
@@ -149,7 +159,7 @@ async def update_group(
     user: CurrentUser,
     request: Request,
 ):
-    """Update group roles or description (admin only)."""
+    """Update group roles, description, or members (admin only)."""
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
@@ -163,6 +173,14 @@ async def update_group(
         update_fields["roles"] = body.roles
     if body.description is not None:
         update_fields["description"] = body.description
+    if body.members is not None:
+        seen: set[str] = set()
+        deduped: list[str] = []
+        for username in body.members:
+            if username not in seen:
+                seen.add(username)
+                deduped.append(username)
+        update_fields["members"] = deduped
     group = store.update(name, **update_fields)
     return GroupResponse(
         name=group.name,
