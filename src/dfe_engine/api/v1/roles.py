@@ -61,10 +61,42 @@ class RoleResponse(BaseModel):
 
 
 class CasbinScopesResponse(BaseModel):
-    scopes: list[str]
+    """Assignable Casbin scopes (paginated) plus picker metadata."""
+
+    scopes: list[str] = Field(description="Permission patterns for the current page")
+    total: int = Field(description="Total scopes matching filters")
+    page: int = Field(description="Current page (1-based)")
+    per_page: int = Field(description="Page size; -1 means all scopes in one page")
+    total_pages: int
+    next_page: int | None = None
+    prev_page: int | None = None
     wildcard: bool
     argo_namespace_prefix: str
     notes: str
+
+
+def _casbin_scopes_response(
+    scope_strings: list[str],
+    *,
+    page: int,
+    per_page: int,
+    wildcard: bool,
+    argo_namespace_prefix: str,
+    notes: str,
+) -> CasbinScopesResponse:
+    paginated = PaginatedResponse.from_list(scope_strings, page, per_page)
+    return CasbinScopesResponse(
+        scopes=paginated.items,
+        total=paginated.total,
+        page=paginated.page,
+        per_page=paginated.per_page,
+        total_pages=paginated.total_pages,
+        next_page=paginated.next_page,
+        prev_page=paginated.prev_page,
+        wildcard=wildcard,
+        argo_namespace_prefix=argo_namespace_prefix,
+        notes=notes,
+    )
 
 
 def _role_response(role: Role) -> RoleResponse:
@@ -94,10 +126,33 @@ def _role_in_use(request: Request, role_name: str) -> bool:
     response_model=CasbinScopesResponse,
     dependencies=[Depends(require_action("org:write"))],
 )
-async def list_casbin_scopes(user: CurrentUser) -> CasbinScopesResponse:
+async def list_casbin_scopes(
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(
+        None,
+        description="Case-insensitive substring match on permission scope strings",
+    ),
+    prefix: str | None = Query(
+        None,
+        description="Return only scopes that start with this prefix (e.g. config:, argo:)",
+    ),
+) -> CasbinScopesResponse:
     """Return assignable Casbin permission scopes for role configuration."""
     data = casbin_scope_catalog()
-    return CasbinScopesResponse.model_validate(data)
+    rows = [{"scope": s} for s in data["scopes"]]
+    if prefix:
+        rows = [row for row in rows if str(row["scope"]).startswith(prefix)]
+    rows = apply_search(rows, search, ["scope"])
+    scope_strings = [str(row["scope"]) for row in rows]
+    return _casbin_scopes_response(
+        scope_strings,
+        page=pagination.page,
+        per_page=pagination.per_page,
+        wildcard=bool(data["wildcard"]),
+        argo_namespace_prefix=str(data["argo_namespace_prefix"]),
+        notes=str(data["notes"]),
+    )
 
 
 @router.post(

@@ -868,6 +868,65 @@
         "summary": "List Casbin Scopes",
         "description": "Return assignable Casbin permission scopes for role configuration.",
         "operationId": "list_casbin_scopes_api_v1_auth_roles_scopes_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive substring match on permission scope strings",
+              "title": "Search"
+            },
+            "description": "Case-insensitive substring match on permission scope strings"
+          },
+          {
+            "name": "prefix",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Return only scopes that start with this prefix (e.g. config:, argo:)",
+              "title": "Prefix"
+            },
+            "description": "Return only scopes that start with this prefix (e.g. config:, argo:)"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -875,6 +934,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CasbinScopesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -6472,7 +6541,49 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Scopes"
+            "title": "Scopes",
+            "description": "Permission patterns for the current page"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total scopes matching filters"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Page size; -1 means all scopes in one page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages"
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page"
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page"
           },
           "wildcard": {
             "type": "boolean",
@@ -6490,11 +6601,16 @@
         "type": "object",
         "required": [
           "scopes",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
           "wildcard",
           "argo_namespace_prefix",
           "notes"
         ],
-        "title": "CasbinScopesResponse"
+        "title": "CasbinScopesResponse",
+        "description": "Assignable Casbin scopes (paginated) plus picker metadata."
       },
       "CelCheckBatchRequest": {
         "properties": {

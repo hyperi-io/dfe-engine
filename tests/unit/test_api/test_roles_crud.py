@@ -11,9 +11,22 @@ class TestRolesScopes:
         assert resp.status_code == 200
         body = resp.json()
         assert "scopes" in body
+        assert "total" in body
         assert "config:read" in body["scopes"]
         assert body["wildcard"] is True
         assert body["argo_namespace_prefix"] == "argo:"
+
+    def test_list_scopes_search_and_prefix(self, client, admin_headers):
+        resp = client.get(
+            "/api/v1/auth/roles/scopes",
+            params={"search": "config", "prefix": "config:", "per_page": 5, "page": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["per_page"] == 5
+        assert all(s.startswith("config:") for s in body["scopes"])
+        assert all("config" in s.lower() for s in body["scopes"])
 
 
 class TestRolesCrud:
