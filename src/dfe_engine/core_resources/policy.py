@@ -105,7 +105,6 @@ def _fieldmap_mutation_conflict(
     if path == prefix and method == "POST":
         standard, source = parse_fieldmap_post_body(body)
         if fieldmap_target_is_core(standard, source, fieldmap_registry):
-            label = standard if source is None else f"{standard}/{source}"
             return core_resource_conflict_message()
         return None
 
