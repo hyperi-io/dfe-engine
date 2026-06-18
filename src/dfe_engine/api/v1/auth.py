@@ -105,9 +105,9 @@ async def refresh_token(user: CurrentUser, settings: Settings):
 
 
 @router.get("/me", response_model=UserResponse)
-async def get_me(user: CurrentUser):
+async def get_me(user: CurrentUser, request: Request):
     """Get the current authenticated user's info."""
-    role_config = RoleConfig.load_builtin()
+    role_config = getattr(request.app.state, "role_config", None) or RoleConfig.load_builtin()
     permissions = sorted(role_config.resolve_permissions(user.roles))
     return UserResponse(
         org_id=user.org_id,
@@ -119,9 +119,9 @@ async def get_me(user: CurrentUser):
 
 
 @router.get("/permissions", response_model=PermissionsResponse)
-async def get_permissions(user: CurrentUser):
+async def get_permissions(user: CurrentUser, request: Request):
     """Get resolved permissions for the current user's roles."""
-    role_config = RoleConfig.load_builtin()
+    role_config = getattr(request.app.state, "role_config", None) or RoleConfig.load_builtin()
     all_perms = role_config.resolve_permissions(user.roles)
 
     return PermissionsResponse(

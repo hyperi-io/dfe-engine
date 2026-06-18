@@ -1,3 +1,4 @@
+resource_type: core
 standard: cim
 version: "5.0"
 description: Default CIM (Splunk Common Information Model) field mappings for DFE platform

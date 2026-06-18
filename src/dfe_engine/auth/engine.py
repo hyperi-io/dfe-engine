@@ -31,6 +31,36 @@ ENGINE_ACTIONS: set[str] = {
     "helm:create_topics",
 }
 
+# Actions enforced on REST handlers via require_action() (documentation catalog).
+API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
+    {
+        "alert:read",
+        "alert:write",
+        "config:read",
+        "config:write",
+        "deployment:read",
+        "deployment:write",
+        "discovery:read",
+        "fieldmap:read",
+        "fieldmap:write",
+        "hunt:execute",
+        "hunt:read",
+        "hunt:write",
+        "org:read",
+        "org:write",
+        "query:execute",
+        "query:read",
+        "query:write",
+        "schema:delete",
+        "schema:read",
+        "schema:write",
+        "source:read",
+        "source:write",
+        "transforms:compile",
+        "transforms:test",
+    }
+)
+
 # Argo CD actions use the "argo:" prefix namespace.
 # Format: argo:<resource>:<action>  (e.g. argo:applications:sync)
 # These are NOT hardcoded -- any argo:*:* action is valid.

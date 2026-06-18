@@ -31,6 +31,7 @@ from hyperi_pylib.logger import logger
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 
 # Default password that triggers a startup warning
@@ -48,7 +49,7 @@ _DEFAULT_GROUPS: dict[str, tuple[list[str], str]] = {
 def bootstrap_auth(
     auth_dir: Path,
     default_admin_password: str = _DEFAULT_PASSWORD,
-) -> tuple[AccountStore, GroupStore, APIKeyStore, RoleConfig]:
+) -> tuple[AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
     """Bootstrap auth stores with sensible defaults.
 
     Creates subdirectories, seeds roles/groups/admin account if missing,
@@ -59,7 +60,7 @@ def bootstrap_auth(
         default_admin_password: Password for the seeded admin account.
 
     Returns:
-        Tuple of (AccountStore, GroupStore, APIKeyStore, RoleConfig).
+        Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
     """
     accounts_dir = auth_dir / "accounts"
     groups_dir = auth_dir / "groups"
@@ -77,7 +78,8 @@ def bootstrap_auth(
         logger.info("Seeded built-in roles.yaml to %s", str(roles_path))
 
     # Load role config
-    role_config = RoleConfig.load(roles_path)
+    role_store = RoleStore(roles_path)
+    role_config = role_store.load_config()
 
     # Instantiate stores
     account_store = AccountStore(accounts_dir)
@@ -99,7 +101,7 @@ def bootstrap_auth(
                 _DEFAULT_PASSWORD,
             )
 
-    return account_store, group_store, api_key_store, role_config
+    return account_store, group_store, api_key_store, role_store, role_config
 
 
 def _seed_roles(dest: Path) -> None:
