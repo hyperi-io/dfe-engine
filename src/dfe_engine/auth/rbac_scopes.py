@@ -44,6 +44,8 @@ cel_scopes = {
     "cel_check": "cel:check",
 }
 
+dashboard_scopes = {"dashboard_read": "dashboard:read"}
+
 deployment_scopes = {
     "deployment_read": "deployment:read",
     "deployment_write": "deployment:write",
@@ -148,6 +150,7 @@ scopes_dict = {
     **alerts_scopes,
     **api_keys_scopes,
     **cel_scopes,
+    **dashboard_scopes,
     **deployment_scopes,
     **discovery_scopes,
     **fieldmap_scopes,
@@ -177,6 +180,7 @@ def casbin_scopes_for_role_configuration() -> list[str]:
     """
     patterns: set[str] = set(ENGINE_ACTIONS)
     patterns.update(API_ENFORCED_ACTIONS)
+    patterns.update(scopes_dict.values())
     for role in RoleConfig.load_builtin().roles.values():
         patterns.update(role.permissions)
     return sorted(patterns)
