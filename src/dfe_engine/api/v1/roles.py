@@ -27,7 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
-from dfe_engine.auth.rbac_scopes import casbin_scope_catalog
+from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
 
 RoleResourceTypeQuery = Literal["core", "custom"]
@@ -124,7 +124,7 @@ def _role_in_use(request: Request, role_name: str) -> bool:
 @router.get(
     "/scopes",
     response_model=CasbinScopesResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_scopes"]))],
 )
 async def list_casbin_scopes(
     user: CurrentUser,
@@ -159,7 +159,7 @@ async def list_casbin_scopes(
     "",
     response_model=RoleResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_write"]))],
 )
 async def create_role(
     body: CreateRoleRequest,
@@ -187,7 +187,7 @@ async def create_role(
 @router.get(
     "",
     response_model=PaginatedResponse[RoleResponse],
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_read"]))],
 )
 async def list_roles(
     user: CurrentUser,
@@ -217,7 +217,7 @@ async def list_roles(
 @router.get(
     "/{name}",
     response_model=RoleResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_read"]))],
 )
 async def get_role(
     name: str,
@@ -238,7 +238,7 @@ async def get_role(
 @router.put(
     "/{name}",
     response_model=RoleResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_write"]))],
 )
 async def update_role(
     name: str,
@@ -267,7 +267,7 @@ async def update_role(
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["role_delete"]))],
 )
 async def delete_role(
     name: str,

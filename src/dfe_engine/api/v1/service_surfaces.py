@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.services.surfaces.models import ServiceSurface
 from dfe_engine.services.surfaces.registry import SurfaceRegistry
 
@@ -75,7 +76,7 @@ class ManifestRefreshResponse(BaseModel):
 @router.get(
     "",
     response_model=list[SurfaceSummary],
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["service_surfaces_read"]))],
 )
 async def list_service_surfaces(
     user: CurrentUser,
@@ -98,7 +99,7 @@ async def list_service_surfaces(
 @router.get(
     "/{name}",
     response_model=ServiceSurface,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["service_surfaces_read"]))],
 )
 async def get_service_surface(
     name: str,
@@ -121,7 +122,7 @@ async def get_service_surface(
 @router.post(
     "/{name}/metrics/refresh",
     response_model=ManifestRefreshResponse,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["service_surfaces_write"]))],
 )
 async def refresh_service_manifest(
     name: str,

@@ -25,10 +25,11 @@ structured results with:
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser
+from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.cel import FilterTier
 from dfe_engine.cel.syntax import SyntaxCheckResult, check_syntax
 
@@ -150,6 +151,7 @@ class CelCheckBatchResponse(BaseModel):
         "human-readable description of what the expression matches. "
         "Designed for live UI validation as the user types — completes in <1ms."
     ),
+    dependencies=[Depends(require_action(scopes_dict["cel_check"]))],
 )
 async def check_cel_expression(
     request: CelCheckRequest,
@@ -168,6 +170,7 @@ async def check_cel_expression(
         "Batch version of /cel/check. Use when the UI needs to validate an "
         "entire filter list at once (e.g., on form submit). Max 100 expressions."
     ),
+    dependencies=[Depends(require_action(scopes_dict["cel_check"]))],
 )
 async def check_cel_expressions_batch(
     request: CelCheckBatchRequest,

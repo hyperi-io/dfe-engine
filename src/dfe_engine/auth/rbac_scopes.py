@@ -13,6 +13,161 @@ from __future__ import annotations
 from dfe_engine.auth.engine import API_ENFORCED_ACTIONS, ARGO_ACTION_PREFIX, ENGINE_ACTIONS
 from dfe_engine.auth.roles import RoleConfig
 
+account_groups_scopes = {
+    "group_write": "group:write",
+    "group_read": "group:read",
+    "group_update": "group:update",
+    "group_add_member": "group:add_member",
+    "group_remove_member": "group:remove_member",
+    "group_delete": "group:delete",
+}
+
+accounts_scopes = {
+    "account_write": "account:write",
+    "account_read": "account:read",
+    "account_delete": "account:delete",
+}
+
+alerts_scopes = {
+    "alert_read": "alert:read",
+    "alert_write": "alert:write",
+    "alert_delete": "alert:delete",
+}
+
+api_keys_scopes = {
+    "api_key_read": "api_key:read",
+    "api_key_write": "api_key:write",
+    "api_key_delete": "api_key:delete",
+}
+
+cel_scopes = {
+    "cel_check": "cel:check",
+}
+
+deployment_scopes = {
+    "deployment_read": "deployment:read",
+    "deployment_write": "deployment:write",
+    "deployment_delete": "deployment:delete",
+}
+
+discovery_scopes = {
+    "discovery_read": "discovery:read",
+}
+
+fieldmap_scopes = {
+    "fieldmap_read": "fieldmap:read",
+    "fieldmap_write": "fieldmap:write",
+    "fieldmap_delete": "fieldmap:delete",
+}
+
+hunt_scopes = {
+    "hunt_read": "hunt:read",
+    "hunt_execute": "hunt:execute",
+}
+
+oidc_scopes = {
+    "oidc_read": "oidc:read",
+    "oidc_write": "oidc:write",
+    "oidc_delete": "oidc:delete",
+}
+
+org_scopes = {
+    "org_read": "org:read",
+    "org_write": "org:write",
+    "org_delete": "org:delete",
+}
+
+pipeline_scopes = {
+    "pipeline_read": "pipeline:read",
+    "pipeline_write": "pipeline:write",
+}
+
+query_scopes = {
+    "query_read": "query:read",
+    "query_execute": "query:execute",
+}
+
+role_scopes = {
+    "role_read": "role:read",
+    "role_write": "role:write",
+    "role_delete": "role:delete",
+    "role_scopes": "role:scopes",
+}
+
+rules_scopes = {
+    "rules_write": "rules:write",
+    "rules_validate": "rules:validate",
+}
+
+schemas_scopes = {
+    "schemas_read": "schemas:read",
+    "schemas_write": "schemas:write",
+    "schemas_delete": "schemas:delete",
+}
+
+service_surfaces_scopes = {
+    "service_surfaces_read": "service_surfaces:read",
+    "service_surfaces_write": "service_surfaces:write",
+}
+
+services_scopes = {
+    "services_read": "services:read",
+    "services_write": "services:write",
+    "services_delete": "services:delete",
+    "services_validate": "services:validate",
+}
+
+sigma_scopes = {
+    "sigma_read": "sigma:read",
+    "sigma_write": "sigma:write",
+}
+
+source_scopes = {
+    "source_read": "source:read",
+    "source_write": "source:write",
+    "source_delete": "source:delete",
+}
+
+system_scopes = {
+    "system_read": "system:read",
+}
+
+tasks_scopes = {
+    "tasks_read": "tasks:read",
+    "tasks_write": "tasks:write",
+}
+
+transform_scopes = {
+    "transform_compile": "transform:compile",
+    "transform_test": "transform:test",
+}
+
+scopes_dict = {
+    **account_groups_scopes,
+    **accounts_scopes,
+    **alerts_scopes,
+    **api_keys_scopes,
+    **cel_scopes,
+    **deployment_scopes,
+    **discovery_scopes,
+    **fieldmap_scopes,
+    **hunt_scopes,
+    **oidc_scopes,
+    **org_scopes,
+    **pipeline_scopes,
+    **query_scopes,
+    **role_scopes,
+    **rules_scopes,
+    **schemas_scopes,
+    **service_surfaces_scopes,
+    **services_scopes,
+    **sigma_scopes,
+    **source_scopes,
+    **system_scopes,
+    **tasks_scopes,
+    **transform_scopes,
+}
+
 
 def casbin_scopes_for_role_configuration() -> list[str]:
     """Return sorted permission patterns assignable in ``roles.yaml``.

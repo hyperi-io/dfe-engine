@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
@@ -64,7 +65,7 @@ class AccountResponse(BaseModel):
     "",
     response_model=AccountResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def create_account(
     body: CreateAccountRequest,
@@ -93,7 +94,7 @@ async def create_account(
 @router.get(
     "",
     response_model=list[AccountResponse],
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
 async def list_accounts(
     user: CurrentUser,
@@ -118,7 +119,7 @@ async def list_accounts(
 @router.get(
     "/{username}",
     response_model=AccountResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
 async def get_account(
     username: str,
@@ -147,7 +148,7 @@ async def get_account(
 @router.put(
     "/{username}",
     response_model=AccountResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def update_account(
     username: str,
@@ -182,7 +183,7 @@ async def update_account(
 @router.post(
     "/{username}/reset-password",
     status_code=200,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def reset_password(
     username: str,
@@ -206,7 +207,7 @@ async def reset_password(
 @router.delete(
     "/{username}",
     status_code=204,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
 )
 async def delete_account(
     username: str,

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/pipeline", tags=["pipeline"])
 
@@ -67,10 +68,14 @@ def _get_task_manager(request: Request) -> TaskManager:
 # ── Endpoints ───────────────────────────────────────────────
 
 
-@router.get("/templates", response_model=list[PipelineTemplate])
+@router.get(
+    "/templates",
+    response_model=list[PipelineTemplate],
+    dependencies=[Depends(require_action(scopes_dict["pipeline_read"]))],
+)
 async def list_templates(
     user: CurrentUser,
-    _auth: None = Depends(require_action("config:read")),
+    _auth: None = Depends(require_action(scopes_dict["pipeline_read"])),
 ) -> list[PipelineTemplate]:
     """List available Vector pipeline templates."""
     from dfe_engine.pipeline.pipeline_controller import PipelineBuilderController
@@ -96,12 +101,13 @@ async def list_templates(
     "/build",
     response_model=PipelineBuildResponse,
     status_code=202,
+    dependencies=[Depends(require_action(scopes_dict["pipeline_write"]))],
 )
 async def build_pipeline(
     body: PipelineBuildRequest,
     request: Request,
     user: CurrentUser,
-    _auth: None = Depends(require_action("config:write")),
+    _auth: None = Depends(require_action(scopes_dict["pipeline_write"])),
 ) -> PipelineBuildResponse:
     """Trigger pipeline manifest generation.
 

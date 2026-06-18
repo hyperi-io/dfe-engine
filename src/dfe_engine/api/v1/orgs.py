@@ -25,6 +25,7 @@ from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/orgs", tags=["Organisations"])
 
@@ -76,7 +77,7 @@ class OrgResponse(BaseModel):
     "",
     response_model=OrgResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["org_write"]))],
 )
 async def create_org(
     body: CreateOrgRequest,
@@ -114,7 +115,7 @@ async def create_org(
 @router.get(
     "",
     response_model=list[OrgResponse],
-    dependencies=[Depends(require_action("org:read"))],
+    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def list_orgs(
     user: CurrentUser,
@@ -130,7 +131,7 @@ async def list_orgs(
 @router.get(
     "/{name}",
     response_model=OrgResponse,
-    dependencies=[Depends(require_action("org:read"))],
+    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def get_org(
     name: str,
@@ -153,7 +154,7 @@ async def get_org(
 @router.put(
     "/{name}",
     response_model=OrgResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["org_write"]))],
 )
 async def update_org(
     name: str,
@@ -218,7 +219,7 @@ async def update_org(
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["org_delete"]))],
 )
 async def delete_org(
     name: str,

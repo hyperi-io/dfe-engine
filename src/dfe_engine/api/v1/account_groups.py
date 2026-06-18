@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
 
@@ -66,7 +67,7 @@ class GroupResponse(BaseModel):
     "",
     response_model=GroupResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
 )
 async def create_group(
     body: CreateGroupRequest,
@@ -99,7 +100,7 @@ async def create_group(
 @router.get(
     "",
     response_model=list[GroupResponse],
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
 async def list_groups(
     user: CurrentUser,
@@ -123,7 +124,7 @@ async def list_groups(
 @router.get(
     "/{name}",
     response_model=GroupResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
 )
 async def get_group(
     name: str,
@@ -151,7 +152,7 @@ async def get_group(
 @router.put(
     "/{name}",
     response_model=GroupResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
 )
 async def update_group(
     name: str,
@@ -194,7 +195,7 @@ async def update_group(
     "/{name}/members",
     response_model=GroupResponse,
     status_code=200,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_add_member"]))],
 )
 async def add_member(
     name: str,
@@ -225,7 +226,7 @@ async def add_member(
     "/{name}/members/{username}",
     response_model=GroupResponse,
     status_code=200,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_remove_member"]))],
 )
 async def remove_member(
     name: str,
@@ -255,7 +256,7 @@ async def remove_member(
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["group_delete"]))],
 )
 async def delete_group(
     name: str,
