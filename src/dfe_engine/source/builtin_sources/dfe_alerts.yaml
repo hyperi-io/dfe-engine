@@ -23,6 +23,9 @@ versions:
     header:
       type: time_series
       version: "1.0.0"
+    match:
+      field: _source
+      value: dfe_alerts
     schema:
       ttl_days: 365
       engine: MergeTree

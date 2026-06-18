@@ -27,6 +27,7 @@ def _make_source(
     data: dict = {
         "source": name,
         "enabled": enabled,
+        "match": {"field": "tags.collector.type", "value": name},
         "schema": {
             "engine": engine,
         },

@@ -265,7 +265,7 @@ class SourceVersion(BaseModel):
         description="Field map registry paths for this version (optional)",
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
-    match: SourceMatch | None = Field(default=None, description="Receiver match rule (optional)")
+    match: SourceMatch = Field(..., description="Receiver match rule (required)")
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
     )
@@ -321,7 +321,7 @@ class SourceWriteRequest(BaseModel):
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
     enabled: bool = Field(default=True, description="Whether the source is active")
-    match: SourceMatch | None = Field(default=None, description="Receiver match rule")
+    match: SourceMatch = Field(..., description="Receiver match rule (required)")
     header: SourceHeader | None = Field(
         default=None,
         description="Common schema header configuration for this revision",
@@ -393,8 +393,6 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
 
     snapshot = write.to_version_snapshot()
-    if write.match is None and existing.match is not None:
-        snapshot = snapshot.model_copy(update={"match": existing.match})
     if write.transform is None and existing.transform is not None:
         snapshot = snapshot.model_copy(update={"transform": existing.transform})
 
