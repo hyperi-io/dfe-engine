@@ -92,7 +92,7 @@ def _make_source(
 
     data = {
         "source": "test_source",
-        "header": {"type": header_type, "version": "1.1.0"},
+        "header": {"type": header_type, "version": "1.0.0"},
         "schema": schema_config,
     }
     if sigma_mappings:
@@ -220,7 +220,7 @@ class TestBuild:
         source = _make_source(meta_schema="meta.yaml")
         result = builder.build(source)
         assert "@profile: timeseries" in result.create_table_ddl
-        assert "@profile_version: 1.1.0" in result.create_table_ddl
+        assert "@profile_version: 1.0.0" in result.create_table_ddl
 
 
 # ── Sigma View ──────────────────────────────────────────────────────
@@ -495,7 +495,7 @@ class TestLoadColumnsForSourceVersion:
                 "versions": {
                     "1.0.0": {
                         "date_time": "2026-01-01",
-                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "header": {"type": "minimal", "version": "1.0.0"},
                         "schema": {
                             "meta_schema": "meta_v1.yaml",
                             "meta_schema_version": "1.0.0",
@@ -503,7 +503,7 @@ class TestLoadColumnsForSourceVersion:
                     },
                     "2.0.0": {
                         "date_time": "2026-02-01",
-                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "header": {"type": "minimal", "version": "1.0.0"},
                         "schema": {"additional_fields": "additional.yaml"},
                     },
                 },
@@ -535,12 +535,12 @@ class TestLoadColumnsForSourceVersion:
                 "versions": {
                     "1.0.0": {
                         "date_time": "2026-01-01",
-                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "header": {"type": "minimal", "version": "1.0.0"},
                         "schema": {"meta_schema": "meta.yaml"},
                     },
                     "2.0.0": {
                         "date_time": "2026-02-01",
-                        "header": {"type": "minimal", "version": "1.1.0"},
+                        "header": {"type": "minimal", "version": "1.0.0"},
                         "schema": {"additional_fields": "additional.yaml"},
                     },
                 },

@@ -1,14 +1,16 @@
 # Common header profile: timeseries (default)
 #
-# Full event ingestion — logs, alerts, audit trails.
+# Full event ingestion - logs, alerts, audit trails.
+#
+# Requires: ClickHouse 26.2+ (JSON type GA, text index GA)
 
 current: "1.0.0"
 
 versions:
   "1.0.0":
-    date: "2026-01-15"
+    date: "2026-06-10"
     type: model
-    summary: "Initial 9-column common header"
+    summary: "JSON max_dynamic_paths=2048, text index on _raw, CH 26.2+ hard deck"
     columns:
       - name: _timestamp_load
         type: timestamp
@@ -18,16 +20,16 @@ versions:
         comment: "Insertion timestamp (ms precision)"
 
       - name: _timestamp
-        type: datetime
+        type: timestamp
         use_case: range
         order: 1
         expr: "@source: timestamp | now()"
         comment: "Event timestamp from source data"
 
       - name: _timestamp_received
-        type: datetime
+        type: timestamp
         expr: "@source: first(timestamp_received/received_at)"
-        comment: "When the event was first received by the collector"
+        comment: "When the event was first received by the receiver"
 
       - name: _uuid
         type: uuid
@@ -37,7 +39,7 @@ versions:
 
       - name: _org_id
         type: string
-        attribute: [lowcardinality]
+        attribute: [lowcardinality, not_null]
         use_case: dimension
         order: 2
         expr: "@source: org_id"
@@ -48,16 +50,18 @@ versions:
         attribute: [lowcardinality]
         use_case: dimension
         expr: "@source: first(_source) | topic_name"
-        comment: "Data source label (e.g. syslog, crowdstrike_edr)"
+        comment: "Data source label (e.g. beats, syslog, crowdstrike_edr)"
 
       - name: _raw
         type: text
         use_case: text_search
+        index: "text(tokenizer = 'default') GRANULARITY 64"
         expr: "@captured: raw_payload"
-        comment: "Original event payload as text"
+        comment: "Original event payload as text (full-text indexed)"
 
       - name: _json
         type: json
+        max_dynamic_paths: 2048
         expr: "@captured: raw_payload as JSON"
         comment: "Original event payload as structured JSON"
 
