@@ -365,10 +365,17 @@ def require_action(action: str):
     """
 
     async def _check(
+        request: Request,
         user: AuthContext = Depends(get_current_user),
         settings: DFESettings = Depends(get_app_settings),
     ) -> None:
-        result = authorize(user, action, enabled=settings.auth.enabled)
+        role_config = getattr(request.app.state, "role_config", None)
+        result = authorize(
+            user,
+            action,
+            enabled=settings.auth.enabled,
+            role_config=role_config,
+        )
         if not result.allowed:
             audit_permission_denied(user.user_id, action, user.roles, result.reason)
             raise AuthorizationError(f"Action '{action}' denied: {result.reason}")

@@ -74,7 +74,14 @@ class GroupStore:
     # Public API
     # ------------------------------------------------------------------
 
-    def create(self, name: str, roles: list[str], description: str = "") -> Group:
+    def create(
+        self,
+        name: str,
+        roles: list[str],
+        description: str = "",
+        *,
+        members: list[str] | None = None,
+    ) -> Group:
         """Create a new group and persist it to YAML.
 
         Raises:
@@ -82,7 +89,19 @@ class GroupStore:
         """
         if self._path(name).exists():
             raise ValueError(f"Group '{name}' already exists")
-        group = Group(name=name, roles=roles, description=description)
+        member_list: list[str] = []
+        if members:
+            seen: set[str] = set()
+            for username in members:
+                if username not in seen:
+                    seen.add(username)
+                    member_list.append(username)
+        group = Group(
+            name=name,
+            roles=roles,
+            description=description,
+            members=member_list,
+        )
         self._write(group)
         return group
 
