@@ -92,6 +92,7 @@ def _make_source(
 
     data = {
         "source": "test_source",
+        "match": {"field": "tags.collector.type", "value": "test_source"},
         "header": {"type": header_type, "version": "1.0.0"},
         "schema": schema_config,
     }
@@ -275,6 +276,7 @@ class TestErrors:
         builder = SchemaBuilderV2(registry=registry)
         data = {
             "source": "bad_source",
+            "match": {"field": "tags.collector.type", "value": "bad_source"},
             "header": {"type": "nonexistent_profile"},
             "schema": {},
         }
@@ -490,6 +492,7 @@ class TestLoadColumnsForSourceVersion:
         source = Source.model_validate(
             {
                 "source": "versioned_src",
+                "match": {"field": "tags.collector.type", "value": "versioned_src"},
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
                 "versions": {
@@ -530,6 +533,7 @@ class TestLoadColumnsForSourceVersion:
         source = Source.model_validate(
             {
                 "source": "versioned_src",
+                "match": {"field": "tags.collector.type", "value": "versioned_src"},
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
                 "versions": {

@@ -39,7 +39,11 @@ class TestListSources:
         for i in range(5):
             client.post(
                 "/api/v1/sources",
-                json={"source": f"src_{i}", "enabled": True},
+                json={
+                    "source": f"src_{i}",
+                    "enabled": True,
+                    "match": {"field": "tags.collector.type", "value": f"src_{i}"},
+                },
                 headers=admin_headers,
             )
 
@@ -66,12 +70,20 @@ class TestListSources:
     def test_list_search(self, client: TestClient, admin_headers: dict):
         client.post(
             "/api/v1/sources",
-            json={"source": "windows_audit", "display_name": "Windows Audit Logs"},
+            json={
+                "source": "windows_audit",
+                "display_name": "Windows Audit Logs",
+                "match": {"field": "tags.collector.type", "value": "windows_audit"},
+            },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
-            json={"source": "linux_syslog", "display_name": "Linux Syslog"},
+            json={
+                "source": "linux_syslog",
+                "display_name": "Linux Syslog",
+                "match": {"field": "tags.collector.type", "value": "linux_syslog"},
+            },
             headers=admin_headers,
         )
 
@@ -84,7 +96,10 @@ class TestListSources:
         for name in ["charlie", "alpha", "bravo"]:
             client.post(
                 "/api/v1/sources",
-                json={"source": name},
+                json={
+                    "source": name,
+                    "match": {"field": "tags.collector.type", "value": name},
+                },
                 headers=admin_headers,
             )
 
@@ -96,12 +111,20 @@ class TestListSources:
     def test_list_object_tree_places_sources_at_root(self, client: TestClient, admin_headers: dict):
         client.post(
             "/api/v1/sources",
-            json={"source": "aws_cloudtrail", "display_name": "AWS CloudTrail"},
+            json={
+                "source": "aws_cloudtrail",
+                "display_name": "AWS CloudTrail",
+                "match": {"field": "tags.collector.type", "value": "aws_cloudtrail"},
+            },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
-            json={"source": "dfe_alerts", "display_name": "DFE Alerts"},
+            json={
+                "source": "dfe_alerts",
+                "display_name": "DFE Alerts",
+                "match": {"field": "tags.collector.type", "value": "dfe_alerts"},
+            },
             headers=admin_headers,
         )
         resp = client.get("/api/v1/sources", headers=admin_headers)
@@ -123,12 +146,20 @@ class TestListSources:
     ):
         client.post(
             "/api/v1/sources",
-            json={"source": "enabled_only_src", "enabled": True},
+            json={
+                "source": "enabled_only_src",
+                "enabled": True,
+                "match": {"field": "tags.collector.type", "value": "enabled_only_src"},
+            },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
-            json={"source": "disabled_only_src", "enabled": False},
+            json={
+                "source": "disabled_only_src",
+                "enabled": False,
+                "match": {"field": "tags.collector.type", "value": "disabled_only_src"},
+            },
             headers=admin_headers,
         )
         resp = client.get("/api/v1/sources?enabled=false", headers=admin_headers)
@@ -345,7 +376,10 @@ class TestUpdateSource:
     def test_update_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.put(
             "/api/v1/sources/nonexistent",
-            json={"source": "nonexistent"},
+            json={
+                "source": "nonexistent",
+                "match": {"field": "tags.collector.type", "value": "nonexistent"},
+            },
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -445,7 +479,10 @@ class TestBulkAction:
         for name in ["bulk_a", "bulk_b", "bulk_c"]:
             client.post(
                 "/api/v1/sources",
-                json={"source": name},
+                json={
+                    "source": name,
+                    "match": {"field": "tags.collector.type", "value": name},
+                },
                 headers=admin_headers,
             )
 
@@ -462,7 +499,10 @@ class TestBulkAction:
     def test_bulk_disable_and_enable(self, client: TestClient, admin_headers: dict):
         client.post(
             "/api/v1/sources",
-            json={"source": "bulk_toggle"},
+            json={
+                "source": "bulk_toggle",
+                "match": {"field": "tags.collector.type", "value": "bulk_toggle"},
+            },
             headers=admin_headers,
         )
         disable = client.post(
