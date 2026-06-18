@@ -119,7 +119,7 @@ class DDLFileWriter:
         """Generate DDL for the hunt results table.
 
         Composes filtered profile columns (no _raw, _tags) with detection
-        columns from hunt-results/detection.yaml.
+        columns from hunts/results.yaml.
         """
         profile_cols = SchemaLoader.load_profile(profile)
         filtered = [c for c in profile_cols if c.name not in ("_raw", "_tags")]
@@ -217,14 +217,14 @@ class DDLFileWriter:
 
     @staticmethod
     def _resolve_hunt_results_path() -> Path:
-        """Resolve the path to hunt-results/detection.yaml."""
+        """Resolve the path to hunts/results.yaml."""
         schemas_root = _resolve_schemas_root()
         if schemas_root:
-            candidate = schemas_root / "hunt-results" / "detection.yaml"
+            candidate = schemas_root / "hunts" / "results.yaml"
             if candidate.exists():
                 return candidate
         # Bundled fallback — shouldn't normally be needed
         raise FileNotFoundError(
-            "hunt-results/detection.yaml not found in schemas directory. "
+            "hunts/results.yaml not found in schemas directory. "
             "Ensure the dfe-schemas submodule is checked out."
         )

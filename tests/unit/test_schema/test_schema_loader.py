@@ -150,7 +150,7 @@ class TestLoadProfile:
         assert "_source" not in names
 
     def test_load_minimal_registry_path(self):
-        columns = SchemaLoader.load_profile("common-header/minimal", version="1.1.0")
+        columns = SchemaLoader.load_profile("common-header/minimal", version="1.0.0")
         names = [c.name for c in columns]
         assert "_json" in names
         assert "_uuid" in names
