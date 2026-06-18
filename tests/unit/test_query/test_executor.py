@@ -56,7 +56,13 @@ def _make_auth(
     user_id: str = "user-456",
     roles: list[str] | None = None,
 ) -> AuthContext:
+    """Build AuthContext. Include a builtin role with query:execute when auth is enabled."""
     return AuthContext(org_id=org_id, user_id=user_id, roles=roles or [], request_id="req-001")
+
+
+def _roles_with_query_execute(*extra: str) -> list[str]:
+    """Roles that pass authorize(..., 'query:execute') with builtin roles.yaml."""
+    return ["data_analyst", *extra]
 
 
 def _make_query_result(num_rows: int = 5):
@@ -77,7 +83,7 @@ class TestViewExecutorSecurity:
         client.query.return_value = _make_query_result()
 
         executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
-        auth = _make_auth(org_id="real-org")
+        auth = _make_auth(org_id="real-org", roles=_roles_with_query_execute())
 
         executor.execute("analytics/events", params={"org_id": "hacker-org"}, auth=auth)
 
@@ -94,7 +100,7 @@ class TestViewExecutorSecurity:
         client.query.return_value = _make_query_result()
 
         executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
-        auth = _make_auth(roles=["analyst"])
+        auth = _make_auth(roles=_roles_with_query_execute("analyst"))
         result = executor.execute("analytics/events", params={}, auth=auth)
         assert result.num_rows == 5
 
@@ -105,7 +111,7 @@ class TestViewExecutorSecurity:
 
         client = MagicMock()
         executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
-        auth = _make_auth(roles=["viewer"])
+        auth = _make_auth(roles=_roles_with_query_execute("viewer"))
         with pytest.raises(AuthorizationError, match="requires one of roles"):
             executor.execute("analytics/events", params={}, auth=auth)
 
@@ -116,7 +122,7 @@ class TestViewExecutorSecurity:
 
         client = MagicMock()
         executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
-        auth = _make_auth(roles=["viewer"])
+        auth = _make_auth(roles=["data_viewer"])
         with pytest.raises(AuthorizationError, match="not tenant-isolated"):
             executor.execute("analytics/events", params={}, auth=auth)
 
