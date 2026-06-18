@@ -66,6 +66,12 @@ class DiscoveredPath:
     coverage_pct: float | None = None
     distinct_count: int | None = None
     samples: list[str] | None = None
+    # Draft column the path would become in a meta-schema (server-derived so the
+    # editor does not re-map ClickHouse types). Derived from the first observed
+    # type; check ``is_consistent`` before trusting it for a multi-type path.
+    column_type: str | None = None
+    column_attributes: list[str] = field(default_factory=list)
+    copy_expr: str = ""
 
 
 @dataclass
@@ -181,15 +187,34 @@ def promoted_paths(columns: list[MetaSchemaColumn]) -> dict[str, str]:
 
 
 def _json_subcolumn(path: str) -> str:
-    """SQL accessor for a discovered JSON path, e.g. ``_json.`user.email```.
+    """SQL accessor for a discovered JSON path, e.g. ``assumeNotNull(_json).`user.email```.
 
     The whole dotted path is one backtick-quoted identifier (that is how
-    JSONDynamicPathsWithTypes reports nested paths). Rejects backticks to keep
-    the identifier injection-safe.
+    JSONDynamicPathsWithTypes reports nested paths). ``assumeNotNull`` unwraps the
+    ``Nullable(JSON)`` column (a no-op on a non-nullable column) so subcolumn
+    access type-checks. Rejects backticks to keep the identifier injection-safe.
     """
     if "`" in path:
         raise JsonPromotionError(f"Illegal JSON path: {path!r}")
-    return f"{JSON_COLUMN}.`{path}`"
+    return f"assumeNotNull({JSON_COLUMN}).`{path}`"
+
+
+def _match_condition(
+    match_field: str | None, match_value: str | None
+) -> tuple[str, dict[str, Any]]:
+    """SQL boolean condition + params restricting rows to one source's match rule.
+
+    Returns ``("", {})`` when no match is supplied (the source owns its whole
+    table). Otherwise compares the ``_json`` subcolumn for ``match_field`` to
+    ``match_value`` as a string -- used when discovering against the shared
+    catch-all landing table, where a source's rows are identified by its match.
+    The value is parameterised (injection-safe); the field goes through
+    ``_json_subcolumn`` which rejects backticks.
+    """
+    if not (match_field and match_value):
+        return "", {}
+    sub = _json_subcolumn(match_field)
+    return f"toString({sub}) = {{match_value:String}}", {"match_value": match_value}
 
 
 # ── Discovery (I/O) ──────────────────────────────────────────────────
@@ -201,11 +226,18 @@ def discover_paths(
     db: str,
     source: str,
     existing_columns: list[MetaSchemaColumn],
+    match_field: str | None = None,
+    match_value: str | None = None,
     paths: list[str] | None = None,
     samples: int | None = None,
     stats: bool = False,
 ) -> list[DiscoveredPath]:
     """Discover JSON paths in ``db.source._json`` with optional samples/stats.
+
+    When ``match_field``/``match_value`` are supplied, rows are restricted to a
+    single source's match rule -- used to discover against the shared catch-all
+    landing table before the source has its own table. Without them, the whole
+    table is scanned.
 
     Raises:
         JsonPromotionError: when the underlying ClickHouse query fails (e.g. the
@@ -214,13 +246,16 @@ def discover_paths(
     table = qualified_table(db, source)
     promoted = promoted_paths(existing_columns)
     existing_names = {col.name for col in existing_columns}
+    match_sql, match_params = _match_condition(match_field, match_value)
 
     sql = (
         f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "
-        f"ARRAY JOIN JSONDynamicPathsWithTypes({JSON_COLUMN}) AS tup "
-        "GROUP BY path, type"
+        f"ARRAY JOIN JSONDynamicPathsWithTypes(assumeNotNull({JSON_COLUMN})) AS tup "
     )
-    params: dict[str, Any] = {}
+    if match_sql:
+        sql += f"WHERE {match_sql} "
+    sql += "GROUP BY path, type"
+    params: dict[str, Any] = dict(match_params)
     if paths:
         sql += " HAVING path IN {paths:Array(String)}"
         params["paths"] = paths
@@ -244,37 +279,61 @@ def discover_paths(
     discovered: list[DiscoveredPath] = []
     for path, types in types_by_path.items():
         suggested = suggested_column_name(path, existing_names)
+        primitive, attributes = ch_dynamic_type_to_primitive(types[0]) if types else (None, [])
         item = DiscoveredPath(
             path=path,
             types=types,
             is_consistent=len(types) == 1,
             suggested_column_name=suggested,
             promoted_to=promoted.get(path),
+            column_type=primitive,
+            column_attributes=attributes,
+            copy_expr=ExpressionBuilder.copy(copy_cel_for_path(path)),
         )
         if samples:
-            item.samples = _fetch_samples(client, table, path, samples)
+            item.samples = _fetch_samples(
+                client, table, path, samples, match_sql, match_params
+            )
         if stats:
-            item.coverage_pct, item.distinct_count = _fetch_stats(client, table, path)
+            item.coverage_pct, item.distinct_count = _fetch_stats(
+                client, table, path, match_sql, match_params
+            )
         discovered.append(item)
 
     return discovered
 
 
-def _fetch_samples(client: Any, table: str, path: str, n: int) -> list[str]:
+def _fetch_samples(
+    client: Any,
+    table: str,
+    path: str,
+    n: int,
+    match_sql: str = "",
+    match_params: dict[str, Any] | None = None,
+) -> list[str]:
     """Random, distinct example values for a path (ORDER BY rand())."""
     sub = _json_subcolumn(path)
+    where = f"{sub} IS NOT NULL"
+    if match_sql:
+        where += f" AND {match_sql}"
     sql = (
         f"SELECT DISTINCT toString({sub}) AS value FROM {table} "
-        f"WHERE {sub} IS NOT NULL ORDER BY rand() LIMIT {{n:UInt32}}"
+        f"WHERE {where} ORDER BY rand() LIMIT {{n:UInt32}}"
     )
     try:
-        rows = client.execute(sql, parameters={"n": n})
+        rows = client.execute(sql, parameters={"n": n, **(match_params or {})})
     except Exception as exc:
         raise JsonPromotionError(f"Sampling failed for path {path!r}: {exc}") from exc
     return [str(row[0]) for row in rows]
 
 
-def _fetch_stats(client: Any, table: str, path: str) -> tuple[float | None, int | None]:
+def _fetch_stats(
+    client: Any,
+    table: str,
+    path: str,
+    match_sql: str = "",
+    match_params: dict[str, Any] | None = None,
+) -> tuple[float | None, int | None]:
     """Coverage percentage and approximate distinct count for a path."""
     sub = _json_subcolumn(path)
     sql = (
@@ -283,8 +342,10 @@ def _fetch_stats(client: Any, table: str, path: str) -> tuple[float | None, int 
         f"uniqHLL12({sub}) AS distinct_count "
         f"FROM {table}"
     )
+    if match_sql:
+        sql += f" WHERE {match_sql}"
     try:
-        rows = client.execute(sql, parameters={})
+        rows = client.execute(sql, parameters=dict(match_params or {}))
     except Exception as exc:
         raise JsonPromotionError(f"Stats failed for path {path!r}: {exc}") from exc
     if not rows:

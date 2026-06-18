@@ -18,6 +18,7 @@ from dfe_engine.services.schema.json_promotion_service import (
     build_promotion_columns,
     ch_dynamic_type_to_primitive,
     copy_cel_for_path,
+    discover_paths,
     promoted_paths,
     promotion_preview_ddl,
     qualified_table,
@@ -466,3 +467,124 @@ class TestPromotionPreviewDdl:
         assert "ALTER TABLE dfe.filebeat ADD COLUMN IF NOT EXISTS `user_email`" in joined
         assert "@copy: _json.user.email" in joined
         assert "ADD INDEX idx_user_email `user_email` TYPE bloom_filter" in joined
+
+
+# ── discover_paths (SQL building) ────────────────────────────
+
+
+class _RecordingClient:
+    """Fake ClickHouse client that records queries and returns canned rows.
+
+    Routes by SQL shape: the discovery GROUP BY query, the sample query
+    (``ORDER BY rand()``), and the stats query (``uniqHLL12``).
+    """
+
+    def __init__(
+        self,
+        discover_rows: list[tuple[str, str]] | None = None,
+        sample_rows: list[tuple[str]] | None = None,
+        stats_rows: list[tuple[float, int]] | None = None,
+    ) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._discover_rows = discover_rows or []
+        self._sample_rows = sample_rows or []
+        self._stats_rows = stats_rows or [(100.0, 1)]
+
+    def execute(self, sql: str, parameters: dict[str, Any] | None = None) -> list:
+        self.calls.append((sql, parameters or {}))
+        if "JSONDynamicPathsWithTypes" in sql:
+            return self._discover_rows
+        if "uniqHLL12" in sql:
+            return self._stats_rows
+        if "ORDER BY rand()" in sql:
+            return self._sample_rows
+        return []
+
+
+class TestDiscoverPaths:
+    def test_basic_discovery_sql_and_result(self):
+        client = _RecordingClient(
+            discover_rows=[("user.id", "Int64"), ("user.email", "String")]
+        )
+        result = discover_paths(client, db="dfe", source="syslog", existing_columns=[])
+
+        sql, params = client.calls[0]
+        assert "FROM `dfe`.`syslog`" in sql
+        assert "JSONDynamicPathsWithTypes(assumeNotNull(_json))" in sql
+        assert "GROUP BY path, type" in sql
+        assert "WHERE" not in sql
+        assert params == {}
+
+        by_path = {d.path: d for d in result}
+        assert by_path["user.id"].types == ["Int64"]
+        assert by_path["user.id"].is_consistent is True
+        assert by_path["user.id"].column_type == "integer"
+        assert by_path["user.email"].suggested_column_name == "user_email"
+        assert by_path["user.email"].column_type == "string"
+        assert by_path["user.email"].copy_expr == "@copy: _json.user.email"
+
+    def test_match_filter_adds_where_clause(self):
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client,
+            db="dfe",
+            source="default",
+            existing_columns=[],
+            match_field="tags.collector.type",
+            match_value="syslog",
+        )
+        sql, params = client.calls[0]
+        assert "FROM `dfe`.`default`" in sql
+        assert (
+            "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+            in sql
+        )
+        assert params == {"match_value": "syslog"}
+
+    def test_paths_filter_adds_having(self):
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client, db="dfe", source="syslog", existing_columns=[], paths=["a", "b"]
+        )
+        sql, params = client.calls[0]
+        assert "HAVING path IN {paths:Array(String)}" in sql
+        assert params["paths"] == ["a", "b"]
+
+    def test_samples_query_ands_match_filter(self):
+        client = _RecordingClient(
+            discover_rows=[("a", "String")], sample_rows=[("x",), ("y",)]
+        )
+        result = discover_paths(
+            client,
+            db="dfe",
+            source="default",
+            existing_columns=[],
+            match_field="f",
+            match_value="v",
+            samples=2,
+        )
+        sample_sql, sample_params = client.calls[1]
+        assert "ORDER BY rand()" in sample_sql
+        assert "AND toString(assumeNotNull(_json).`f`) = {match_value:String}" in sample_sql
+        assert sample_params == {"n": 2, "match_value": "v"}
+        assert result[0].samples == ["x", "y"]
+
+    def test_stats_query_ands_match_filter(self):
+        client = _RecordingClient(
+            discover_rows=[("a", "String")], stats_rows=[(42.5, 7)]
+        )
+        result = discover_paths(
+            client,
+            db="dfe",
+            source="default",
+            existing_columns=[],
+            match_field="f",
+            match_value="v",
+            stats=True,
+        )
+        stats_sql, stats_params = client.calls[1]
+        assert "uniqHLL12" in stats_sql
+        assert "WHERE toString(assumeNotNull(_json).`f`) = {match_value:String}" in stats_sql
+        assert stats_params == {"match_value": "v"}
+        assert result[0].coverage_pct == 42.5
+        assert result[0].distinct_count == 7

@@ -55,6 +55,7 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaService,
 )
 from dfe_engine.settings import get_settings
+from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -148,34 +149,136 @@ class SchemaBuildResult(BaseModel):
 # ── JSON field promotion models ─────────────────────────────
 
 
+class DraftColumn(BaseModel):
+    """A ready-to-send meta-schema column derived from a discovered JSON path.
+
+    Shaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the
+    create-version endpoint) or a new meta-schema's version -- the UI sends these
+    verbatim, no field mapping. ``type`` is derived from the first observed
+    ClickHouse type; for a multi-type path (``is_consistent=false``) confirm it
+    before saving.
+    """
+
+    name: str = Field(
+        description=(
+            "Server-derived snake_case column name for the path. camelCase is split, "
+            "dots and non-identifier characters become underscores, a leading digit is "
+            "prefixed with 'f_', and a numeric suffix ('_2', '_3', ...) is added to avoid "
+            "colliding with an existing column name."
+        )
+    )
+    type: str = Field(
+        description=(
+            "DFE primitive type mapped from the first observed ClickHouse type "
+            "(e.g. string, integer, float, boolean, datetime, date, uuid, ip; compound or "
+            "unknown types fall back to 'json'). For a multi-type path this is a best-effort "
+            "guess from the first type -- check the enclosing 'is_consistent' before saving."
+        )
+    )
+    attribute: list[str] = Field(
+        default_factory=list,
+        description=(
+            "ClickHouse storage attributes for the column (e.g. 'nullable', "
+            "'lowcardinality'). Empty for a plain column."
+        ),
+    )
+    use_case: str | None = Field(
+        default=None,
+        description=(
+            "Index use case to generate for the column (dimension, range, bloom, "
+            "fulltext, text_search), or null for no index. Always null on a discovered "
+            "draft -- set it in the editor if you want an index."
+        ),
+    )
+    expr: str = Field(
+        description=(
+            "DFE directive used as the column's expression. A '@copy: _json.<path>' "
+            "directive tells dfe-loader to copy the value forward from the _json column "
+            "on ingest (e.g. '@copy: _json.user.email')."
+        )
+    )
+    comment: str | None = Field(
+        default=None, description="Human-readable column description (defaults to the source path)."
+    )
+
+
 class JsonPathInfo(BaseModel):
     """One JSON path discovered inside a source's ``_json`` column."""
 
-    path: str = Field(description="Dotted path inside the JSON column")
-    types: list[str] = Field(description="ClickHouse types observed for this path")
-    is_consistent: bool = Field(description="True when the path has exactly one type")
-    promoted_to: str | None = Field(
-        default=None, description="Existing column name if already promoted"
+    path: str = Field(
+        description="Dotted path to the field inside the _json column (e.g. 'user.email')."
     )
-    suggested_column_name: str = Field(description="Server-derived snake_case column name")
+    types: list[str] = Field(
+        description=(
+            "Distinct ClickHouse types observed for this path across the scanned rows, in "
+            "first-seen order. More than one entry means the field is stored as different "
+            "types in different rows (e.g. ['Int64', 'String'])."
+        )
+    )
+    is_consistent: bool = Field(
+        description=(
+            "True when the path has exactly one observed ClickHouse type (len(types) == 1). "
+            "False means the type varies row to row, so the derived 'column.type' is only a "
+            "best-effort guess from the first type and should be confirmed before promoting."
+        )
+    )
+    promoted_to: str | None = Field(
+        default=None,
+        description=(
+            "Name of the existing meta-schema column this path is already copied into (via a "
+            "'@copy' directive), or null if not yet promoted. Only ever populated when "
+            "discovering against a source that already has a meta_schema; always null while "
+            "discovering against the catch-all landing table."
+        ),
+    )
+    column: DraftColumn = Field(
+        description=(
+            "Ready-to-send meta-schema column derived from this path. Post it verbatim to the "
+            "create-meta-schema-version endpoint (no client-side type mapping needed)."
+        )
+    )
     coverage_pct: float | None = Field(
-        default=None, description="% rows where path is non-null (only with ?stats=true)"
+        default=None,
+        description=(
+            "Percentage of scanned rows (0-100) in which this path is present and non-null. "
+            "Only populated with '?stats=true'. Low coverage (e.g. 0.5%) flags a rare or "
+            "optional field you may not want to promote."
+        ),
     )
     distinct_count: int | None = Field(
-        default=None, description="Approx distinct values (only with ?stats=true)"
+        default=None,
+        description=(
+            "Approximate number of distinct values for this path -- a HyperLogLog estimate "
+            "(uniqHLL12), not an exact count. Only populated with '?stats=true'. Useful for "
+            "gauging cardinality, e.g. when choosing an index type."
+        ),
     )
     samples: list[str] | None = Field(
-        default=None, description="Random distinct example values (only with ?samples=N)"
+        default=None,
+        description=(
+            "Up to N random, distinct example values for this path, rendered as strings. "
+            "Only populated with '?samples=N'."
+        ),
     )
 
 
 class JsonPathsResponse(BaseModel):
     """Discovered JSON paths for a source."""
 
-    source_name: str
-    table: str = Field(description="Fully-qualified ClickHouse table queried")
-    json_column: str = Field(description="JSON column inspected (always _json)")
-    paths: list[JsonPathInfo]
+    source_name: str = Field(description="The source these paths were discovered for.")
+    table: str = Field(
+        description=(
+            "Fully-qualified ClickHouse table actually queried ('db.table'). The source's "
+            "own table when the selected version has a meta_schema, otherwise the shared "
+            "catch-all landing table."
+        )
+    )
+    json_column: str = Field(
+        description="Name of the JSON column inspected (always '_json')."
+    )
+    paths: list[JsonPathInfo] = Field(
+        description="One entry per distinct JSON path found in the column."
+    )
 
 
 class PromoteFieldRequest(BaseModel):
@@ -913,15 +1016,35 @@ async def build_schema(
 # ── JSON field promotion ────────────────────────────────────
 
 
+def _resolve_meta_schema(rel, source_name, schema_registry):
+    """Resolve a meta-schema reference: (canonical path, MetaSchema, current columns).
+
+    Raises:
+        HTTPException: 404 when the referenced meta-schema is missing.
+    """
+    from dfe_engine.schema.registry import SchemaNotFoundError, canonical_schema_path
+
+    canonical = canonical_schema_path(rel.removesuffix(".yaml"))
+    try:
+        meta = schema_registry.get_schema(canonical)
+    except SchemaNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Meta-schema '{canonical}' not found for source '{source_name}'",
+            },
+        ) from None
+    return canonical, meta, meta.versions[meta.current].columns
+
+
 def _resolve_source_meta_schema(source, schema_registry):
-    """Resolve a source's meta-schema: (canonical path, MetaSchema, current columns).
+    """Resolve a source's (deployed) meta-schema: (canonical path, MetaSchema, columns).
 
     Raises:
         HTTPException: 422 when the source has no meta_schema, 404 when the
         referenced meta-schema is missing.
     """
-    from dfe_engine.schema.registry import SchemaNotFoundError, canonical_schema_path
-
     rel = source.schema_config.meta_schema
     if not rel:
         raise HTTPException(
@@ -931,18 +1054,45 @@ def _resolve_source_meta_schema(source, schema_registry):
                 "message": f"Source '{source.source}' has no meta_schema configured",
             },
         )
-    canonical = canonical_schema_path(rel.removesuffix(".yaml"))
+    return _resolve_meta_schema(rel, source.source, schema_registry)
+
+
+def _discovery_target(source, ver, schema_registry):
+    """Resolve where to discover a source version's ``_json`` paths.
+
+    A version with a ``meta_schema`` owns its own table, so discovery targets
+    ``db.<source>`` with that schema's columns. Otherwise the version's data
+    still lives in the shared catch-all landing table, so discovery targets
+    ``db.<landing>`` filtered by the version's match rule.
+
+    Returns:
+        ``(target_table, match_field, match_value, existing_columns)``.
+    """
+    if ver.schema_config.meta_schema:
+        _canonical, _meta, columns = _resolve_meta_schema(
+            ver.schema_config.meta_schema, source.source, schema_registry
+        )
+        return source.table_name, None, None, columns
+    return get_settings().clickhouse.landing_table, ver.match.field, ver.match.value, []
+
+
+def _resolve_source_version(source, version, source_name):
+    """Resolve a source version snapshot (defaults to current).
+
+    Raises:
+        HTTPException: 404 when the requested version is not defined.
+    """
+    version_id = version or source.current
     try:
-        meta = schema_registry.get_schema(canonical)
-    except SchemaNotFoundError:
+        return version_id, source.version(version_id)
+    except ValueError:
         raise HTTPException(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Meta-schema '{canonical}' not found for source '{source.source}'",
+                "message": f"Version '{version_id}' not found for source '{source_name}'",
             },
         ) from None
-    return canonical, meta, meta.versions[meta.current].columns
 
 
 @router.get(
@@ -965,8 +1115,17 @@ async def discover_json_paths(
     paths: str | None = Query(
         None, description="Comma-separated paths to restrict discovery + sampling"
     ),
+    version: str | None = Query(
+        None, description="Source version to discover against (defaults to current)"
+    ),
 ) -> JsonPathsResponse:
     """Discover JSON paths inside a source's ``_json`` column.
+
+    Resolves the requested ``version`` (or the source's current version). If that
+    version defines a ``meta_schema`` the source owns its own table and discovery
+    runs against ``db.<source>``. Otherwise the source's data still lives in the
+    shared catch-all landing table, so discovery runs against ``db.<landing>``
+    filtered by the version's match rule.
 
     Returns one record per path with observed types, a suggested column name,
     and whether the path is already promoted. ``?samples=N`` adds random
@@ -986,7 +1145,10 @@ async def discover_json_paths(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         ) from None
 
-    _canonical, _meta, columns = _resolve_source_meta_schema(source, schema_registry)
+    _version_id, ver = _resolve_source_version(source, version, source_name)
+    target_table, match_field, match_value, columns = _discovery_target(
+        source, ver, schema_registry
+    )
 
     db = get_settings().clickhouse.database
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
@@ -995,8 +1157,10 @@ async def discover_json_paths(
         discovered = discover_paths(
             ch,
             db=db,
-            source=source.table_name,
+            source=target_table,
             existing_columns=columns,
+            match_field=match_field,
+            match_value=match_value,
             paths=path_filter,
             samples=samples,
             stats=stats,
@@ -1009,7 +1173,7 @@ async def discover_json_paths(
 
     return JsonPathsResponse(
         source_name=source_name,
-        table=f"{db}.{source.table_name}",
+        table=f"{db}.{target_table}",
         json_column=JSON_COLUMN,
         paths=[
             JsonPathInfo(
@@ -1017,7 +1181,13 @@ async def discover_json_paths(
                 types=d.types,
                 is_consistent=d.is_consistent,
                 promoted_to=d.promoted_to,
-                suggested_column_name=d.suggested_column_name,
+                column=DraftColumn(
+                    name=d.suggested_column_name,
+                    type=d.column_type or "json",
+                    attribute=d.column_attributes,
+                    expr=d.copy_expr,
+                    comment=f"Promoted from _json.{d.path}",
+                ),
                 coverage_pct=d.coverage_pct,
                 distinct_count=d.distinct_count,
                 samples=d.samples,

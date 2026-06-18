@@ -30,11 +30,13 @@ from dfe_engine.settings import (
     SchemasSettings,
     ServicesSettings,
     SourceSettings,
+    get_settings,
 )
 from dfe_engine.yaml_utils import yaml_dump
 
 PROMO_SOURCE = "promo_source"
 NOMETA_SOURCE = "nometa_source"
+VERSIONED_SOURCE = "versioned_src"
 SCHEMA_PATH = "meta/promo"
 
 
@@ -43,6 +45,20 @@ class _NoCallClient:
 
     def execute(self, *args: object, **kwargs: object):
         raise AssertionError("ClickHouse must not be queried on an explicit-data_type path")
+
+
+class _DiscoveryClient:
+    """ClickHouse stand-in returning canned discovery rows; records each query."""
+
+    def __init__(self, discover_rows: list[tuple[str, str]] | None = None) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._discover_rows = discover_rows or [("user.id", "Int64")]
+
+    def execute(self, sql: str, parameters: dict | None = None):
+        self.calls.append((sql, parameters or {}))
+        if "JSONDynamicPathsWithTypes" in sql:
+            return self._discover_rows
+        return []
 
 
 def make_api_settings(tmp_path: Path) -> DFESettings:
@@ -73,6 +89,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "source": PROMO_SOURCE,
             "display_name": "Promo Source",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": PROMO_SOURCE},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"meta_schema": "meta/promo.yaml", "engine": "MergeTree"},
         },
@@ -83,10 +100,31 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "source": NOMETA_SOURCE,
             "display_name": "No Meta Source",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": NOMETA_SOURCE},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         },
         sources_dir / f"{NOMETA_SOURCE}.yaml",
+    )
+    # Multi-version source: v1 lands in the catch-all (no meta_schema), v2 owns
+    # its own table (has a meta_schema). Current is v2.
+    yaml_dump(
+        {
+            "source": VERSIONED_SOURCE,
+            "display_name": "Versioned Source",
+            "enabled": True,
+            "match": {"field": "tags.collector.type", "value": VERSIONED_SOURCE},
+            "current": "2.0.0",
+            "versions": {
+                "1.0.0": {"date_time": "2026-01-01"},
+                "2.0.0": {
+                    "date_time": "2026-01-02",
+                    "header": {"type": "time_series", "version": "1.0.0"},
+                    "schema": {"meta_schema": "meta/promo.yaml", "engine": "MergeTree"},
+                },
+            },
+        },
+        sources_dir / f"{VERSIONED_SOURCE}.yaml",
     )
 
     services_dir = tmp_path / "services"
@@ -170,10 +208,68 @@ class TestDiscoverJsonPaths:
         resp = client.get("/api/v1/schemas/ghost/json-paths", headers=admin_headers)
         assert resp.status_code == 404
 
-    def test_source_without_meta_schema_422(self, client: TestClient, admin_headers):
+    def test_no_meta_schema_discovers_against_catchall(self, app, client, admin_headers):
+        db = get_settings().clickhouse.database
+        landing = get_settings().clickhouse.landing_table
+        ch = _DiscoveryClient([("user.id", "Int64")])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
         resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/json-paths", headers=admin_headers)
-        assert resp.status_code == 422
-        assert resp.json()["code"] == "no_meta_schema"
+        assert resp.status_code == 200
+        body = resp.json()
+        # No meta_schema -> discovery runs against the catch-all landing table.
+        assert body["table"] == f"{db}.{landing}"
+        path0 = body["paths"][0]
+        assert path0["path"] == "user.id"
+        # Ready-to-send column the editor posts to the create-version endpoint
+        # verbatim -- no client-side ClickHouse type mapping.
+        assert path0["column"]["name"] == "user_id"
+        assert path0["column"]["type"] == "integer"
+        assert path0["column"]["expr"] == "@copy: _json.user.id"
+        # Rows restricted to this source via its match rule.
+        sql, params = ch.calls[0]
+        assert f"FROM `{db}`.`{landing}`" in sql
+        assert (
+            "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+            in sql
+        )
+        assert params["match_value"] == NOMETA_SOURCE
+
+    def test_default_version_with_meta_schema_uses_own_table(self, app, client, admin_headers):
+        db = get_settings().clickhouse.database
+        ch = _DiscoveryClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        # VERSIONED_SOURCE current is v2.0.0, which has a meta_schema.
+        resp = client.get(f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["table"] == f"{db}.{VERSIONED_SOURCE}"
+        sql, _params = ch.calls[0]
+        assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
+        assert "WHERE" not in sql  # owns its table -> no match filter
+
+    def test_version_param_selects_catchall_version(self, app, client, admin_headers):
+        db = get_settings().clickhouse.database
+        landing = get_settings().clickhouse.landing_table
+        ch = _DiscoveryClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        # v1.0.0 has no meta_schema -> catch-all landing table.
+        resp = client.get(
+            f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths",
+            params={"version": "1.0.0"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["table"] == f"{db}.{landing}"
+        sql, params = ch.calls[0]
+        assert f"FROM `{db}`.`{landing}`" in sql
+        assert params["match_value"] == VERSIONED_SOURCE
+
+    def test_unknown_version_404(self, client: TestClient, admin_headers):
+        resp = client.get(
+            f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths",
+            params={"version": "9.9.9"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
 
 
 class TestPromoteField:
