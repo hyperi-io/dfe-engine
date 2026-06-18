@@ -34,7 +34,7 @@ def _get_task_manager(request: Request) -> TaskManager:
 @router.get(
     "",
     response_model=list[TaskInfo],
-    dependencies=[Depends(require_action(scopes_dict["tasks_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
 )
 async def list_tasks(
     request: Request,
@@ -49,7 +49,7 @@ async def list_tasks(
 @router.get(
     "/{task_id}",
     response_model=TaskInfo,
-    dependencies=[Depends(require_action(scopes_dict["tasks_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
 )
 async def get_task(
     request: Request,
@@ -70,7 +70,7 @@ async def get_task(
 @router.post(
     "/{task_id}/cancel",
     response_model=TaskInfo,
-    dependencies=[Depends(require_action(scopes_dict["tasks_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["task_write"]))],
 )
 async def cancel_task(
     request: Request,
@@ -94,7 +94,7 @@ async def cancel_task(
     "/{task_id}/stream",
     response_class=Response,
     include_in_schema=False,
-    dependencies=[Depends(require_action(scopes_dict["tasks_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["task_read"]))],
 )
 async def stream_task(
     request: Request,

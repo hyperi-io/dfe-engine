@@ -63,7 +63,7 @@ class SeedResponse(BaseModel):
 @router.get(
     "",
     response_model=PaginatedResponse[ServiceConfigSummary],
-    dependencies=[Depends(require_action(scopes_dict["services_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
 async def list_service_configs(
     user: CurrentUser,
@@ -92,7 +92,7 @@ async def list_service_configs(
 @router.get(
     "/{service}/{instance}",
     response_model=ServiceConfigDetail,
-    dependencies=[Depends(require_action(scopes_dict["services_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
 async def get_service_config(
     service: str,
@@ -119,7 +119,7 @@ async def get_service_config(
 
 @router.put(
     "/{service}/{instance}",
-    dependencies=[Depends(require_action(scopes_dict["services_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_write"]))],
 )
 async def save_service_config(
     service: str,
@@ -142,7 +142,7 @@ async def save_service_config(
 @router.delete(
     "/{service}/{instance}",
     status_code=204,
-    dependencies=[Depends(require_action(scopes_dict["services_delete"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_delete"]))],
 )
 async def delete_service_config(
     service: str,
@@ -171,7 +171,7 @@ async def delete_service_config(
 @router.post(
     "/{service}/{instance}/validate",
     response_model=ValidationResult,
-    dependencies=[Depends(require_action(scopes_dict["services_validate"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_validate"]))],
 )
 async def validate_service_config(
     service: str,
@@ -190,7 +190,7 @@ async def validate_service_config(
 @router.get(
     "/{service}/{instance}/history",
     response_model=list[ConfigHistoryEntry],
-    dependencies=[Depends(require_action(scopes_dict["services_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_read"]))],
 )
 async def get_service_config_history(
     service: str,
@@ -215,7 +215,7 @@ async def get_service_config_history(
 @router.post(
     "/seed",
     response_model=SeedResponse,
-    dependencies=[Depends(require_action(scopes_dict["services_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_write"]))],
 )
 async def seed_service_configs(user: CurrentUser, registry: ServiceConfigReg):
     """Seed built-in default service configs. Non-destructive."""

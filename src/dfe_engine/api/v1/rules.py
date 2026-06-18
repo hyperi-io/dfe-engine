@@ -88,7 +88,7 @@ class RuleCreateResponse(BaseModel):
     "",
     response_model=RuleCreateResponse,
     status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["rules_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 async def create_rule(
     body: RuleCreateRequest,
@@ -171,7 +171,7 @@ async def create_rule(
 @router.post(
     "/validate",
     response_model=SqlValidationResponse,
-    dependencies=[Depends(require_action(scopes_dict["rules_validate"]))],
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
 )
 async def validate_rule_sql(
     body: SqlValidationRequest,

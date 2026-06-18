@@ -76,7 +76,7 @@ class ManifestRefreshResponse(BaseModel):
 @router.get(
     "",
     response_model=list[SurfaceSummary],
-    dependencies=[Depends(require_action(scopes_dict["service_surfaces_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_surface_read"]))],
 )
 async def list_service_surfaces(
     user: CurrentUser,
@@ -99,7 +99,7 @@ async def list_service_surfaces(
 @router.get(
     "/{name}",
     response_model=ServiceSurface,
-    dependencies=[Depends(require_action(scopes_dict["service_surfaces_read"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_surface_read"]))],
 )
 async def get_service_surface(
     name: str,
@@ -122,7 +122,7 @@ async def get_service_surface(
 @router.post(
     "/{name}/metrics/refresh",
     response_model=ManifestRefreshResponse,
-    dependencies=[Depends(require_action(scopes_dict["service_surfaces_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["service_surface_write"]))],
 )
 async def refresh_service_manifest(
     name: str,

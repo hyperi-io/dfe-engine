@@ -135,7 +135,7 @@ class TestValidateDeploymentConfig:
         assert any("explicit resources" in w for w in result.warnings)
 
     @pytest.mark.parametrize("service", ["receiver", "loader", "archiver"])
-    def test_all_services_validate_defaults(self, service):
+    def test_all_service_validate_defaults(self, service):
         from dfe_engine.deployment.models import DEPLOY_CONFIG_CLASSES
 
         config_cls = DEPLOY_CONFIG_CLASSES[service]
