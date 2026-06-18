@@ -72,6 +72,8 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
             "sub": auth_ctx.user_id,
             "org_id": auth_ctx.org_id,
             "roles": auth_ctx.roles,
+            "groups": auth_ctx.groups,
+            "org_ids": auth_ctx.org_ids,
         },
         settings=settings,
     )
@@ -92,6 +94,8 @@ async def refresh_token(user: CurrentUser, settings: Settings):
             "sub": user.user_id,
             "org_id": user.org_id,
             "roles": user.roles,
+            "groups": user.groups,
+            "org_ids": user.org_ids,
         },
         settings=settings,
     )

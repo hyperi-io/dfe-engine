@@ -75,6 +75,7 @@ class TestMe:
         assert data["user_id"] == "admin"
         assert data["org_id"] == "test-org"
         assert "admin" in data["roles"]
+        assert "dfe-admins" in data["groups"]
 
     def test_me_no_token(self, client: TestClient):
         resp = client.get("/api/v1/auth/me")
