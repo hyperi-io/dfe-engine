@@ -26,6 +26,7 @@ from dfe_engine.api.pagination import (
     apply_sort,
 )
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
@@ -102,7 +103,7 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
 @router.get(
     "",
     response_model=PaginatedSchemaSummaryResponse,
-    dependencies=[Depends(require_action("schema:read"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def list_schemas(
     user: CurrentUser,
@@ -142,7 +143,7 @@ async def list_schemas(
 @router.get(
     "/definitions/{schema_path:path}/versions/columns",
     response_model=MetaSchemaGetResponse,
-    dependencies=[Depends(require_action("schema:read"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def get_meta_schema(
     schema_path: str,
@@ -250,7 +251,7 @@ async def get_meta_schema(
 @router.post(
     "/definitions/{schema_path:path}/versions",
     response_model=MetaSchemaVersionWriteResponse,
-    dependencies=[Depends(require_action("schema:write"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
     status_code=status.HTTP_201_CREATED,
 )
 async def add_meta_schema_version(
@@ -345,7 +346,7 @@ async def add_meta_schema_version(
 @router.post(
     "/definitions/{schema_path:path}",
     response_model=MetaSchema,
-    dependencies=[Depends(require_action("schema:write"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
     status_code=status.HTTP_201_CREATED,
 )
 async def create_meta_schema(
@@ -417,7 +418,7 @@ async def create_meta_schema(
 @router.patch(
     "/definitions/{schema_path:path}",
     response_model=MetaSchemaVersionWriteResponse,
-    dependencies=[Depends(require_action("schema:write"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
 )
 async def update_meta_schema(
     schema_path: str,
@@ -518,7 +519,7 @@ async def update_meta_schema(
 @router.delete(
     "/definitions/{schema_path:path}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_action("schema:delete"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_delete"]))],
 )
 async def delete_meta_schema(
     schema_path: str,
@@ -560,7 +561,7 @@ async def delete_meta_schema(
             ),
         },
     },
-    dependencies=[Depends(require_action("schema:read"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def elastic_converter(
     request: Request,

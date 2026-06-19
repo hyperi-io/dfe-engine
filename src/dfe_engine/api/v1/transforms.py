@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/transforms", tags=["Transforms"])
 
@@ -74,7 +75,7 @@ class TestResponse(BaseModel):
 @router.post(
     "/compile",
     response_model=CompileResponse,
-    dependencies=[Depends(require_action("transforms:compile"))],
+    dependencies=[Depends(require_action(scopes_dict["transform_compile"]))],
 )
 async def compile_transform(
     request: CompileRequest,
@@ -131,7 +132,7 @@ async def compile_transform(
 @router.post(
     "/test",
     response_model=TestResponse,
-    dependencies=[Depends(require_action("transforms:test"))],
+    dependencies=[Depends(require_action(scopes_dict["transform_test"]))],
 )
 async def test_transform(
     request: TestRequest,

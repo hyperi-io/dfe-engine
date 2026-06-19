@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, FieldMapReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.fieldmap.models import FieldMap
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
@@ -43,7 +44,7 @@ class SeedResponse(BaseModel):
 @router.get(
     "",
     response_model=PaginatedResponse[FieldMapSummary],
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
 async def list_field_maps(
     user: CurrentUser,
@@ -76,7 +77,7 @@ async def list_field_maps(
     "",
     status_code=201,
     response_model=FieldMap,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_write"]))],
 )
 async def create_field_map(
     body: FieldMap,
@@ -103,7 +104,7 @@ async def create_field_map(
 @router.get(
     "/{standard}",
     response_model=FieldMap,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
 async def get_default_field_map(standard: str, user: CurrentUser, registry: FieldMapReg):
     """Get the default field map for a standard (no source-specific overrides)."""
@@ -125,7 +126,7 @@ async def get_default_field_map(standard: str, user: CurrentUser, registry: Fiel
 @router.get(
     "/{standard}/{source}",
     response_model=FieldMap,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_read"]))],
 )
 async def get_source_field_map(
     standard: str, source: str, user: CurrentUser, registry: FieldMapReg
@@ -149,7 +150,7 @@ async def get_source_field_map(
 @router.delete(
     "/{standard}/{source}",
     status_code=204,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_delete"]))],
 )
 async def delete_source_field_map(
     standard: str, source: str, user: CurrentUser, registry: FieldMapReg
@@ -170,7 +171,7 @@ async def delete_source_field_map(
 @router.post(
     "/seed",
     response_model=SeedResponse,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["fieldmap_write"]))],
 )
 async def seed_field_maps(user: CurrentUser, registry: FieldMapReg):
     """Seed built-in default field maps. Non-destructive."""

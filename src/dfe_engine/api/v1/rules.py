@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/rules", tags=["Rules"])
 
@@ -87,7 +88,7 @@ class RuleCreateResponse(BaseModel):
     "",
     response_model=RuleCreateResponse,
     status_code=201,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 async def create_rule(
     body: RuleCreateRequest,
@@ -170,7 +171,7 @@ async def create_rule(
 @router.post(
     "/validate",
     response_model=SqlValidationResponse,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["rule_validate"]))],
 )
 async def validate_rule_sql(
     body: SqlValidationRequest,

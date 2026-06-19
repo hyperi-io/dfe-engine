@@ -45,6 +45,15 @@ def app_with_deployments(tmp_path):
 @pytest.fixture
 def deploy_client(app_with_deployments):
     with TestClient(app_with_deployments, raise_server_exceptions=False) as c:
+        account_store = app_with_deployments.state.account_store
+        group_store = app_with_deployments.state.group_store
+        if account_store.get("viewer") is None:
+            account_store.create("viewer", "test-viewer-pw", groups=["dfe-viewers"])
+            group_store.add_member("dfe-viewers", "viewer")
+        group_store.update(
+            "dfe-viewers",
+            roles=["infra_viewer", "data_analyst_viewer", "data_viewer"],
+        )
         yield c
 
 

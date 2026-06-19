@@ -64,6 +64,31 @@ class TestRefresh:
         resp = client.post("/api/v1/auth/refresh")
         assert resp.status_code == 401
 
+    def test_refresh_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert login.status_code == 200
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        disable = client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert disable.status_code == 200
+
+        resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+
 
 class TestMe:
     """GET /api/v1/auth/me"""
@@ -88,6 +113,67 @@ class TestMe:
         )
         assert resp.status_code == 401
 
+    def test_me_reflects_group_removal_without_relogin(
+        self, client: TestClient, admin_headers: dict, api_settings
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "me-live-group", "roles": ["admin"], "members": ["viewer"]},
+            headers=admin_headers,
+        )
+        token = create_access_token(
+            data={
+                "sub": "viewer",
+                "org_id": "test-org",
+                "roles": ["admin"],
+                "groups": ["me-live-group", "dfe-admins"],
+            },
+            settings=api_settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        before = client.get("/api/v1/auth/me", headers=headers)
+        assert "me-live-group" in before.json()["groups"]
+        assert "admin" in before.json()["roles"]
+
+        client.delete(
+            "/api/v1/auth/groups/me-live-group/members/viewer",
+            headers=admin_headers,
+        )
+
+        after = client.get("/api/v1/auth/me", headers=headers)
+        assert after.status_code == 200
+        data = after.json()
+        assert "me-live-group" not in data["groups"]
+        assert "admin" not in data["roles"]
+        assert "data_viewer" in data["roles"]
+
+    def test_me_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert login.status_code == 200
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+
+        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+
 
 class TestPermissions:
     """GET /api/v1/auth/permissions"""
@@ -103,5 +189,29 @@ class TestPermissions:
         resp = client.get("/api/v1/auth/permissions", headers=viewer_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert "config:read" in data["permissions"]
+        assert "infra_viewer" in data["roles"] or "data_analyst_viewer" in data["roles"]
+        assert "source:read" in data["permissions"]
         assert "config:write" not in data["permissions"]
+
+    def test_permissions_ignore_stale_jwt_roles(self, client: TestClient, api_settings):
+        """Roles in the JWT are not used; group membership is authoritative."""
+        from dfe_engine.api.deps import create_access_token
+
+        token = create_access_token(
+            data={
+                "sub": "viewer",
+                "org_id": "test-org",
+                "roles": ["admin"],
+                "groups": ["dfe-admins"],
+            },
+            settings=api_settings,
+        )
+        resp = client.get(
+            "/api/v1/auth/permissions",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "admin" not in data["roles"]
+        assert "data_viewer" in data["roles"]
+        assert "*" not in data["permissions"]

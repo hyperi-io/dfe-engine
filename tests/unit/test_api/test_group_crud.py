@@ -154,6 +154,52 @@ class TestUpdateGroup:
         assert resp.status_code == 200
         assert resp.json()["members"] == ["admin", "viewer"]
 
+    def test_update_members_syncs_account_groups(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "memsync-user", "password": "pw"},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/auth/groups",
+            json={
+                "name": "mem-sync-group",
+                "roles": ["data_viewer"],
+                "members": ["memsync-user"],
+            },
+            headers=admin_headers,
+        )
+        account = client.get("/api/v1/auth/accounts/memsync-user", headers=admin_headers)
+        assert "mem-sync-group" in account.json()["groups"]
+
+        resp = client.put(
+            "/api/v1/auth/groups/mem-sync-group",
+            json={"members": []},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        account = client.get("/api/v1/auth/accounts/memsync-user", headers=admin_headers)
+        assert account.json()["groups"] == []
+
+    def test_remove_member_syncs_account_groups(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "rm-sync-user", "password": "pw", "groups": ["rm-sync-group"]},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "rm-sync-group", "roles": ["data_viewer"], "members": ["rm-sync-user"]},
+            headers=admin_headers,
+        )
+        resp = client.delete(
+            "/api/v1/auth/groups/rm-sync-group/members/rm-sync-user",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        account = client.get("/api/v1/auth/accounts/rm-sync-user", headers=admin_headers)
+        assert account.json()["groups"] == []
+
     def test_update_nonexistent_returns_404(self, client, admin_headers):
         resp = client.put(
             "/api/v1/auth/groups/ghost",
@@ -276,6 +322,16 @@ class TestDeleteGroup:
         # Confirm it's gone
         resp = client.get("/api/v1/auth/groups/del-group", headers=admin_headers)
         assert resp.status_code == 404
+
+    def test_delete_group_with_members_returns_409(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "busy-group", "roles": ["data_viewer"], "members": ["admin"]},
+            headers=admin_headers,
+        )
+        resp = client.delete("/api/v1/auth/groups/busy-group", headers=admin_headers)
+        assert resp.status_code == 409
+        assert resp.json()["code"] == "conflict"
 
     def test_delete_nonexistent_returns_404(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/groups/ghost", headers=admin_headers)

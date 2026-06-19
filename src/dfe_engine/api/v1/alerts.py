@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import AlertDestStore, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
@@ -50,7 +51,7 @@ class AlertDestinationSummary(BaseModel):
 @router.get(
     "/destinations",
     response_model=PaginatedResponse[AlertDestinationSummary],
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
 async def list_destinations(
     user: CurrentUser,
@@ -86,7 +87,7 @@ async def list_destinations(
     "/destinations",
     response_model=AlertDestination,
     status_code=201,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
 )
 async def create_destination(
     body: AlertDestination,
@@ -110,7 +111,7 @@ async def create_destination(
 @router.get(
     "/destinations/{name}",
     response_model=AlertDestination,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
 async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
     """Get an alert destination by name."""
@@ -129,7 +130,7 @@ async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
 @router.put(
     "/destinations/{name}",
     response_model=AlertDestination,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["alert_write"]))],
 )
 async def update_destination(
     name: str,
@@ -147,7 +148,7 @@ async def update_destination(
 @router.delete(
     "/destinations/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["alert_delete"]))],
 )
 async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore):
     """Delete an alert destination."""

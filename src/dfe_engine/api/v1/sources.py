@@ -23,6 +23,7 @@ from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.settings import get_settings
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
@@ -143,7 +144,7 @@ class SchemaBuildResult(BaseModel):
 @router.get(
     "",
     response_model=PaginatedSourceSummaryResponse,
-    dependencies=[Depends(require_action("source:read"))],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def list_sources(
     user: CurrentUser,
@@ -185,7 +186,7 @@ async def list_sources(
             ),
         },
     },
-    dependencies=[Depends(require_action("source:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def create_source(
     body: SourceWriteRequest,
@@ -224,7 +225,7 @@ async def create_source(
 @router.get(
     "/{name}/versions",
     response_model=SourceVersionGetResponse,
-    dependencies=[Depends(require_action("source:read"))],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source_version(
     name: str,
@@ -276,7 +277,7 @@ async def get_source_version(
 @router.get(
     "/{name}/columns",
     response_model=PaginatedResponse[SchemaColumn],
-    dependencies=[Depends(require_action("source:read"))],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source_schema_columns(
     name: str,
@@ -347,7 +348,7 @@ async def get_source_schema_columns(
 @router.post(
     "/{name}/build",
     response_model=SchemaBuildResult,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def build_source_schema(
     name: str,
@@ -429,7 +430,7 @@ async def build_source_schema(
 @router.get(
     "/{name}",
     response_model=Source,
-    dependencies=[Depends(require_action("source:read"))],
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
     """Get a full source definition by name."""
@@ -457,7 +458,7 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
             "description": "Receiver match duplicates another enabled source",
         },
     },
-    dependencies=[Depends(require_action("source:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def update_source(
     name: str,
@@ -496,7 +497,7 @@ async def update_source(
 @router.delete(
     "/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("source:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_delete"]))],
 )
 async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
     """Delete a source by name."""
@@ -515,7 +516,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
 @router.post(
     "/bulk",
     response_model=BulkActionResponse,
-    dependencies=[Depends(require_action("source:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def bulk_action(
     body: BulkActionRequest,
@@ -556,7 +557,7 @@ async def bulk_action(
 @router.post(
     "/seed",
     response_model=SeedResponse,
-    dependencies=[Depends(require_action("source:write"))],
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
 )
 async def seed_sources(user: CurrentUser, registry: SourceReg):
     """Seed built-in default source definitions. Non-destructive (skips existing)."""
