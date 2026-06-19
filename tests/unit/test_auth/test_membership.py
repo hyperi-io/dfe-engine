@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.groups import GroupStore
-from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+from dfe_engine.auth.membership import (
+    sync_account_groups_for_membership_change,
+    sync_group_members_for_account_groups_change,
+)
 
 
 class TestSyncAccountGroupsForMembershipChange:
@@ -45,3 +48,29 @@ class TestSyncAccountGroupsForMembershipChange:
         sync_account_groups_for_membership_change(accounts, "ops", added=["alice"])
 
         assert accounts.get("alice").groups == ["ops"]
+
+
+class TestSyncGroupMembersForAccountGroupsChange:
+    def test_adds_member_to_group(self, tmp_path):
+        accounts = AccountStore(tmp_path / "accounts")
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("ops", roles=["viewer"])
+        accounts.create("alice", "secret", groups=["ops"])
+
+        sync_group_members_for_account_groups_change(groups, "alice", added=["ops"])
+
+        assert "alice" in groups.get("ops").members
+
+    def test_removes_member_from_group(self, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        groups.create("ops", roles=["viewer"])
+        groups.create("dev", roles=["viewer"])
+        groups.add_member("ops", "alice")
+
+        sync_group_members_for_account_groups_change(groups, "alice", removed=["ops"])
+
+        assert "alice" not in groups.get("ops").members
+
+    def test_skips_unknown_groups(self, tmp_path):
+        groups = GroupStore(tmp_path / "groups")
+        sync_group_members_for_account_groups_change(groups, "alice", added=["missing"])

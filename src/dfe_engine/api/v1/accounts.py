@@ -74,14 +74,21 @@ async def create_account(
 ):
     """Create a new local user account (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
+    group_store = request.app.state.group_store
     if store.get(body.username) is not None:
         raise HTTPException(
             status_code=409,
             detail={"code": "conflict", "message": f"Account '{body.username}' already exists"},
         )
     account = store.create(body.username, body.password, groups=body.groups)
+    sync_group_members_for_account_groups_change(
+        group_store,
+        body.username,
+        added=body.groups,
+    )
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
@@ -158,9 +165,12 @@ async def update_account(
 ):
     """Update account groups or enabled status (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(username)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
@@ -170,7 +180,18 @@ async def update_account(
         update_fields["groups"] = body.groups
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
-    account = store.update(username, **update_fields)
+    if body.groups is not None:
+        old_groups = set(existing.groups)
+        new_groups = set(body.groups)
+        account = store.update(username, **update_fields)
+        sync_group_members_for_account_groups_change(
+            group_store,
+            username,
+            added=new_groups - old_groups,
+            removed=old_groups - new_groups,
+        )
+    else:
+        account = store.update(username, **update_fields)
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,

@@ -81,11 +81,13 @@ def accounts_create(
         print_error(str(exc))
         raise typer.Exit(1) from exc
 
-    for group_name in group_list:
-        try:
-            group_store.add_member(group_name, username)
-        except KeyError:
-            print_warning(f"Group '{group_name}' not found — skipped")
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
+
+    sync_group_members_for_account_groups_change(
+        group_store,
+        username,
+        added=group_list,
+    )
 
     if generate_password:
         print_success(f"Account '{username}' created")

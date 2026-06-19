@@ -215,3 +215,33 @@ class TestPermissions:
         assert "admin" not in data["roles"]
         assert "data_viewer" in data["roles"]
         assert "*" not in data["permissions"]
+
+    def test_me_ignores_stale_jwt_when_account_has_no_groups(
+        self, client: TestClient, admin_headers: dict, api_settings
+    ):
+        from dfe_engine.api.deps import create_access_token
+
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "nogrp", "password": "pw", "groups": []},
+            headers=admin_headers,
+        )
+        token = create_access_token(
+            data={
+                "sub": "nogrp",
+                "org_id": "test-org",
+                "roles": ["admin"],
+                "groups": ["dfe-admins"],
+            },
+            settings=api_settings,
+        )
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["groups"] == []
+        assert data["roles"] == []
+        assert "admin" not in data["permissions"]
+        assert "*" not in data.get("permissions", [])
