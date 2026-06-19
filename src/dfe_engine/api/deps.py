@@ -262,6 +262,13 @@ def _groups_from_stores(request: Request, user_id: str) -> list[str]:
     return []
 
 
+def _has_local_account(request: Request, user_id: str) -> bool:
+    if user_id.startswith("apikey:"):
+        return False
+    account_store = getattr(request.app.state, "account_store", None)
+    return account_store is not None and account_store.get(user_id) is not None
+
+
 def resolve_live_roles_for_user(
     request: Request,
     user_id: str,
@@ -291,7 +298,7 @@ def resolve_live_roles_for_user(
         return roles
 
     groups = _groups_from_stores(request, user_id)
-    if not groups:
+    if not groups and not _has_local_account(request, user_id):
         groups = list(fallback_groups or [])
     if groups:
         resolved, _ = _resolve_roles_from_groups(groups, group_store)
@@ -318,6 +325,8 @@ def resolve_live_groups_for_user(
     groups = _groups_from_stores(request, user_id)
     if groups:
         return groups
+    if _has_local_account(request, user_id):
+        return []
     return list(fallback_groups or [])
 
 
