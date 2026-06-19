@@ -75,9 +75,12 @@ async def create_group(
     request: Request,
 ):
     """Create a new RBAC group (admin only)."""
+    from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
+    account_store: AccountStore = request.app.state.account_store
     if store.get(body.name) is not None:
         raise HTTPException(
             status_code=409,
@@ -88,6 +91,11 @@ async def create_group(
         roles=body.roles,
         description=body.description,
         members=body.members,
+    )
+    sync_account_groups_for_membership_change(
+        account_store,
+        group.name,
+        added=group.members,
     )
     return GroupResponse(
         name=group.name,
@@ -161,10 +169,14 @@ async def update_group(
     request: Request,
 ):
     """Update group roles, description, or members (admin only)."""
+    from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
-    if store.get(name) is None:
+    account_store: AccountStore = request.app.state.account_store
+    existing = store.get(name)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
@@ -182,7 +194,17 @@ async def update_group(
                 seen.add(username)
                 deduped.append(username)
         update_fields["members"] = deduped
-    group = store.update(name, **update_fields)
+        old_members = set(existing.members)
+        new_members = set(deduped)
+        group = store.update(name, **update_fields)
+        sync_account_groups_for_membership_change(
+            account_store,
+            name,
+            added=new_members - old_members,
+            removed=old_members - new_members,
+        )
+    else:
+        group = store.update(name, **update_fields)
     return GroupResponse(
         name=group.name,
         description=group.description,
@@ -204,15 +226,23 @@ async def add_member(
     request: Request,
 ):
     """Add a member to a group (admin only, idempotent)."""
+    from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
+    account_store: AccountStore = request.app.state.account_store
     if store.get(name) is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     store.add_member(name, body.username)
+    sync_account_groups_for_membership_change(
+        account_store,
+        name,
+        added=[body.username],
+    )
     group = store.get(name)
     return GroupResponse(
         name=group.name,
@@ -235,15 +265,23 @@ async def remove_member(
     request: Request,
 ):
     """Remove a member from a group (admin only)."""
+    from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
+    account_store: AccountStore = request.app.state.account_store
     if store.get(name) is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     store.remove_member(name, username)
+    sync_account_groups_for_membership_change(
+        account_store,
+        name,
+        removed=[username],
+    )
     group = store.get(name)
     return GroupResponse(
         name=group.name,
@@ -272,4 +310,10 @@ async def delete_group(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    store.delete(name)
+    try:
+        store.delete(name)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "conflict", "message": str(exc)},
+        ) from exc

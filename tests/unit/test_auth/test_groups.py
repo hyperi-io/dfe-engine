@@ -164,6 +164,13 @@ class TestGroupStoreDelete:
         with pytest.raises(KeyError, match="nonexistent"):
             store.delete("nonexistent")
 
+    def test_delete_with_members_raises_value_error(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        store.create("ops", roles=[])
+        store.add_member("ops", "alice")
+        with pytest.raises(ValueError, match="member"):
+            store.delete("ops")
+
 
 class TestGroupStoreAddMember:
     def test_add_member(self, tmp_path):

@@ -256,24 +256,30 @@ def groups_show(name: str) -> None:
 @groups_app.command("add-member")
 def groups_add_member(group: str, username: str) -> None:
     """Add a user to a group."""
-    _, group_store, _ = _get_stores()
+    account_store, group_store, _ = _get_stores()
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
     try:
         group_store.add_member(group, username)
     except KeyError as exc:
         print_error(str(exc))
         raise typer.Exit(1) from exc
+    sync_account_groups_for_membership_change(account_store, group, added=[username])
     print_success(f"Added '{username}' to group '{group}'")
 
 
 @groups_app.command("remove-member")
 def groups_remove_member(group: str, username: str) -> None:
     """Remove a user from a group."""
-    _, group_store, _ = _get_stores()
+    account_store, group_store, _ = _get_stores()
+    from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
     try:
         group_store.remove_member(group, username)
     except KeyError as exc:
         print_error(str(exc))
         raise typer.Exit(1) from exc
+    sync_account_groups_for_membership_change(account_store, group, removed=[username])
     print_success(f"Removed '{username}' from group '{group}'")
 
 
@@ -306,6 +312,9 @@ def groups_delete(
     try:
         group_store.delete(name)
     except KeyError as exc:
+        print_error(str(exc))
+        raise typer.Exit(1) from exc
+    except ValueError as exc:
         print_error(str(exc))
         raise typer.Exit(1) from exc
     print_success(f"Group '{name}' deleted")
