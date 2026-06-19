@@ -321,6 +321,29 @@ def resolve_live_groups_for_user(
     return list(fallback_groups or [])
 
 
+def require_local_account_enabled(request: Request, user_id: str) -> None:
+    """Reject JWT auth when the backing local account exists and is disabled.
+
+    Skips ``apikey:…`` subjects and usernames with no account record.
+    """
+    if user_id.startswith("apikey:"):
+        return
+
+    account_store = getattr(request.app.state, "account_store", None)
+    if account_store is None:
+        return
+
+    account = account_store.get(user_id)
+    if account is None or account.enabled:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"code": "unauthorized", "message": "Account disabled"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def get_current_user(request: Request) -> AuthContext:
     """Authenticate the request via one of four paths (checked in order).
 
@@ -423,12 +446,12 @@ async def get_current_user(request: Request) -> AuthContext:
             )
 
         jwt_user_id = payload.get("sub", "")
-        jwt_roles = payload.get("roles", [])
         jwt_groups = payload.get("groups")
         if jwt_groups is None:
             jwt_groups = _groups_for_local_account(request, jwt_user_id)
         elif not isinstance(jwt_groups, list):
             jwt_groups = []
+        require_local_account_enabled(request, jwt_user_id)
         live_roles = resolve_live_roles_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         audit_login_success(jwt_user_id, "jwt", client_ip, live_roles)

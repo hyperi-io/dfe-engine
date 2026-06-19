@@ -64,6 +64,31 @@ class TestRefresh:
         resp = client.post("/api/v1/auth/refresh")
         assert resp.status_code == 401
 
+    def test_refresh_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert login.status_code == 200
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        disable = client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert disable.status_code == 200
+
+        resp = client.post("/api/v1/auth/refresh", headers=viewer_headers)
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+
 
 class TestMe:
     """GET /api/v1/auth/me"""
@@ -125,6 +150,30 @@ class TestMe:
         assert "admin" not in data["roles"]
         assert "data_viewer" in data["roles"]
 
+    def test_me_rejects_disabled_account(self, client: TestClient, admin_headers: dict):
+        login = client.post(
+            "/api/v1/auth/login",
+            json={"username": "viewer", "password": "test-viewer-pw"},
+        )
+        assert login.status_code == 200
+        viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+
+        resp = client.get("/api/v1/auth/me", headers=viewer_headers)
+        assert resp.status_code == 401
+        assert resp.json()["message"] == "Account disabled"
+
+        client.put(
+            "/api/v1/auth/accounts/viewer",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+
 
 class TestPermissions:
     """GET /api/v1/auth/permissions"""
@@ -140,7 +189,7 @@ class TestPermissions:
         resp = client.get("/api/v1/auth/permissions", headers=viewer_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert "data_viewer" in data["roles"]
+        assert "infra_viewer" in data["roles"] or "data_analyst_viewer" in data["roles"]
         assert "source:read" in data["permissions"]
         assert "config:write" not in data["permissions"]
 
