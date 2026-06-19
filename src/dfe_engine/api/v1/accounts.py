@@ -183,7 +183,9 @@ async def update_account(
 @router.post(
     "/{username}/reset-password",
     status_code=200,
-    dependencies=[Depends(require_action(scopes_dict["account_write"]))],
+    dependencies=[
+        Depends(require_action(scopes_dict["accounts_reset_password"])),
+    ],
 )
 async def reset_password(
     username: str,
