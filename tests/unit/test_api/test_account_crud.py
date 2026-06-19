@@ -27,6 +27,9 @@ class TestCreateAccount:
         assert data["groups"] == ["dfe-viewers"]
         assert "password_hash" not in data
 
+        group = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers)
+        assert "newuser" in group.json()["members"]
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         client.post(
             "/api/v1/auth/accounts",
@@ -114,6 +117,29 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 200
         assert resp.json()["groups"] == ["dfe-analysts"]
+
+        group = client.get("/api/v1/auth/groups/dfe-analysts", headers=admin_headers)
+        assert "updatable" in group.json()["members"]
+
+    def test_update_groups_removes_from_old_group(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "grp-sync",
+                "password": "pw",
+                "groups": ["dfe-viewers"],
+            },
+            headers=admin_headers,
+        )
+        client.put(
+            "/api/v1/auth/accounts/grp-sync",
+            json={"groups": ["dfe-analysts"]},
+            headers=admin_headers,
+        )
+        viewers = client.get("/api/v1/auth/groups/dfe-viewers", headers=admin_headers)
+        analysts = client.get("/api/v1/auth/groups/dfe-analysts", headers=admin_headers)
+        assert "grp-sync" not in viewers.json()["members"]
+        assert "grp-sync" in analysts.json()["members"]
 
     def test_update_enabled(self, client, admin_headers):
         client.post(
