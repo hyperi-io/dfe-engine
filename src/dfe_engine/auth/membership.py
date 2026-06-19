@@ -6,13 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Synchronise account group lists when group membership changes."""
+"""Synchronise ``Account.groups`` and ``Group.members``."""
 
 from __future__ import annotations
 
 from collections.abc import Iterable
 
 from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.groups import GroupStore
 
 
 def sync_account_groups_for_membership_change(
@@ -40,3 +41,27 @@ def sync_account_groups_for_membership_change(
             username,
             groups=[g for g in account.groups if g != group_name],
         )
+
+
+def sync_group_members_for_account_groups_change(
+    group_store: GroupStore,
+    username: str,
+    *,
+    added: Iterable[str] = (),
+    removed: Iterable[str] = (),
+) -> None:
+    """Update ``Group.members`` after ``Account.groups`` changes.
+
+    Unknown groups are skipped (no error).
+    """
+    for group_name in added:
+        try:
+            group_store.add_member(group_name, username)
+        except KeyError:
+            continue
+
+    for group_name in removed:
+        try:
+            group_store.remove_member(group_name, username)
+        except KeyError:
+            continue
