@@ -16,10 +16,9 @@ from dfe_engine.auth.roles import RoleConfig
 account_groups_scopes = {
     "group_write": "group:write",
     "group_read": "group:read",
-    "group_update": "group:update",
+    "group_delete": "group:delete",
     "group_add_member": "group:add_member",
     "group_remove_member": "group:remove_member",
-    "group_delete": "group:delete",
 }
 
 accounts_scopes = {
@@ -44,6 +43,7 @@ cel_scopes = {
     "cel_check": "cel:check",
 }
 
+# Not used in API but required for UI & HyperDX
 dashboard_scopes = {"dashboard_read": "dashboard:read"}
 
 deployment_scopes = {
