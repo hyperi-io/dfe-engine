@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/sigma", tags=["sigma"])
@@ -91,12 +92,16 @@ def _source_not_found(source_name: str) -> HTTPException:
 # ── Endpoints ───────────────────────────────────────────────
 
 
-@router.get("/mappings/{source_name}", response_model=SourceMappingSummary)
+@router.get(
+    "/mappings/{source_name}",
+    response_model=SourceMappingSummary,
+    dependencies=[Depends(require_action(scopes_dict["sigma_read"]))],
+)
 async def get_field_mappings(
     source_name: str,
     request: Request,
     user: CurrentUser,
-    _auth: None = Depends(require_action("source:read")),
+    _auth: None = Depends(require_action(scopes_dict["sigma_read"])),
 ) -> SourceMappingSummary:
     """Get Sigma field mappings for a source."""
     mapper = _get_source_mapper(request)
@@ -112,13 +117,17 @@ async def get_field_mappings(
     )
 
 
-@router.post("/views/{source_name}", response_model=SigmaViewResult)
+@router.post(
+    "/views/{source_name}",
+    response_model=SigmaViewResult,
+    dependencies=[Depends(require_action(scopes_dict["sigma_write"]))],
+)
 async def generate_sigma_view(
     source_name: str,
     request: Request,
     user: CurrentUser,
     database: str = Query("default", description="Target database"),
-    _auth: None = Depends(require_action("config:write")),
+    _auth: None = Depends(require_action(scopes_dict["sigma_write"])),
 ) -> SigmaViewResult:
     """Generate Sigma view DDL for a source.
 
@@ -132,13 +141,17 @@ async def generate_sigma_view(
     return SigmaViewResult(source_name=source_name, ddl=ddl)
 
 
-@router.post("/views", response_model=list[SigmaViewResult])
+@router.post(
+    "/views",
+    response_model=list[SigmaViewResult],
+    dependencies=[Depends(require_action(scopes_dict["sigma_write"]))],
+)
 async def generate_all_sigma_views(
     request: Request,
     user: CurrentUser,
     database: str = Query("default", description="Target database"),
     enabled_only: bool = Query(True, description="Only generate for enabled sources"),
-    _auth: None = Depends(require_action("config:write")),
+    _auth: None = Depends(require_action(scopes_dict["sigma_write"])),
 ) -> list[SigmaViewResult]:
     """Generate Sigma view DDL for all sources."""
     mapper = _get_source_mapper(request)
@@ -146,14 +159,18 @@ async def generate_all_sigma_views(
     return [SigmaViewResult(source_name=src, ddl=ddl) for src, ddl in views.items()]
 
 
-@router.get("/logsource", response_model=list[LogsourceMatch])
+@router.get(
+    "/logsource",
+    response_model=list[LogsourceMatch],
+    dependencies=[Depends(require_action(scopes_dict["sigma_read"]))],
+)
 async def find_sources_for_logsource(
     request: Request,
     user: CurrentUser,
     product: str | None = Query(None),
     category: str | None = Query(None),
     service: str | None = Query(None),
-    _auth: None = Depends(require_action("source:read")),
+    _auth: None = Depends(require_action(scopes_dict["sigma_read"])),
 ) -> list[LogsourceMatch]:
     """Find sources matching a Sigma logsource selector."""
     mapper = _get_source_mapper(request)

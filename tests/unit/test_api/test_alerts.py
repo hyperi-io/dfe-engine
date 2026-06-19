@@ -189,7 +189,7 @@ class TestAlertDestinationsCRUD:
         viewer_headers = {"Authorization": f"Bearer {token}"}
 
         resp = alert_client.get("/api/v1/alerts/destinations", headers=viewer_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_viewer_write_forbidden(self, alert_client, sample_destination):
         from dfe_engine.api.deps import create_access_token

@@ -29,6 +29,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
@@ -169,7 +170,7 @@ def _get_registry(request: Request):
     "",
     response_model=ProviderResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
 )
 async def create_provider(
     body: CreateProviderRequest,
@@ -219,7 +220,7 @@ async def create_provider(
 @router.get(
     "",
     response_model=list[ProviderResponse],
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def list_providers(
     user: CurrentUser,
@@ -233,7 +234,7 @@ async def list_providers(
 @router.get(
     "/{name}",
     response_model=ProviderResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def get_provider(
     name: str,
@@ -254,7 +255,7 @@ async def get_provider(
 @router.put(
     "/{name}",
     response_model=ProviderResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
 )
 async def update_provider(
     name: str,
@@ -299,7 +300,7 @@ async def update_provider(
 @router.delete(
     "/{name}",
     response_model=DetachResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_delete"]))],
 )
 async def delete_provider(
     name: str,
@@ -343,7 +344,7 @@ async def delete_provider(
 @router.post(
     "/{name}/sync",
     response_model=SyncResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_write"]))],
 )
 async def sync_provider_groups(
     name: str,
@@ -375,7 +376,7 @@ async def sync_provider_groups(
 @router.get(
     "/{name}/test",
     response_model=TestResponse,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def test_provider(
     name: str,

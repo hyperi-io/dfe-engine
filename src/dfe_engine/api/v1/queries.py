@@ -24,6 +24,7 @@ from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
     QueryOptions,
     ViewDefinition,
@@ -95,7 +96,11 @@ ViewExec = Annotated[Any, Depends(_require_view_executor)]
 # ── View catalog ────────────────────────────────────────────
 
 
-@router.get("/views", response_model=list[ViewDefinition])
+@router.get(
+    "/views",
+    response_model=list[ViewDefinition],
+    dependencies=[Depends(require_action(scopes_dict["query_read"]))],
+)
 async def list_views(
     user: CurrentUser,
     executor: ViewExec,
@@ -105,7 +110,11 @@ async def list_views(
     return executor.list_views(namespace=namespace)
 
 
-@router.get("/views/namespaces", response_model=list[str])
+@router.get(
+    "/views/namespaces",
+    response_model=list[str],
+    dependencies=[Depends(require_action(scopes_dict["query_read"]))],
+)
 async def list_namespaces(
     user: CurrentUser,
     executor: ViewExec,
@@ -114,7 +123,11 @@ async def list_namespaces(
     return executor._catalog.get_namespaces()
 
 
-@router.get("/views/{label:path}", response_model=ViewDefinition)
+@router.get(
+    "/views/{label:path}",
+    response_model=ViewDefinition,
+    dependencies=[Depends(require_action(scopes_dict["query_read"]))],
+)
 async def get_view(
     label: str,
     user: CurrentUser,
@@ -133,13 +146,17 @@ async def get_view(
 # ── View execution ──────────────────────────────────────────
 
 
-@router.post("/views/{label:path}/execute", response_model=QueryResponse)
+@router.post(
+    "/views/{label:path}/execute",
+    response_model=QueryResponse,
+    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
+)
 async def execute_view(
     label: str,
     body: ViewExecuteRequest,
     user: CurrentUser,
     executor: ViewExec,
-    _auth: None = Depends(require_action("query:execute")),
+    _auth: None = Depends(require_action(scopes_dict["query_execute"])),
 ) -> QueryResponse:
     """Execute a parameterized view and return JSON results.
 
@@ -182,11 +199,15 @@ async def execute_view(
 # ── Raw query execution (absorbs query/endpoint.py) ────────
 
 
-@router.post("/raw", response_model=QueryResponse)
+@router.post(
+    "/raw",
+    response_model=QueryResponse,
+    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
+)
 async def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
-    _auth: None = Depends(require_action("query:execute")),
+    _auth: None = Depends(require_action(scopes_dict["query_execute"])),
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 

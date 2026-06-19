@@ -25,6 +25,7 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings
 
 # ── Settings ──────────────────────────────────────────────────
@@ -231,6 +232,118 @@ def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
     return list(account.groups) if account is not None else []
 
 
+def get_role_config(request: Request) -> RoleConfig:
+    """Load the current role definitions from disk (not a stale in-memory snapshot)."""
+    role_store = getattr(request.app.state, "role_store", None)
+    if role_store is not None:
+        try:
+            return role_store.load_config()
+        except FileNotFoundError:
+            pass
+    role_config = getattr(request.app.state, "role_config", None)
+    if role_config is not None:
+        return role_config
+    return RoleConfig.load_builtin()
+
+
+def _groups_from_stores(request: Request, user_id: str) -> list[str]:
+    """Group names from GroupStore membership and AccountStore (never JWT)."""
+    group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
+    if group_store is not None:
+        from_membership = sorted(g.name for g in group_store.list() if user_id in g.members)
+        if from_membership:
+            return from_membership
+
+    account_store = getattr(request.app.state, "account_store", None)
+    if account_store is not None:
+        account = account_store.get(user_id)
+        if account is not None:
+            return list(account.groups)
+    return []
+
+
+def resolve_live_roles_for_user(
+    request: Request,
+    user_id: str,
+    *,
+    fallback_groups: list[str] | None = None,
+) -> list[str]:
+    """Resolve roles from group membership and role mappings (ignores JWT role claims)."""
+    group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
+    if group_store is None:
+        return []
+
+    if user_id.startswith("apikey:"):
+        key_name = user_id.removeprefix("apikey:")
+        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
+        groups: list[str] = []
+        if api_key_store is not None:
+            key = api_key_store.get(key_name)
+            if key is not None:
+                groups = list(key.groups)
+        if not groups:
+            groups = list(fallback_groups or [])
+        roles, _ = _resolve_roles_from_groups(groups, group_store)
+        return roles
+
+    roles = group_store.resolve_roles_for_member(user_id)
+    if roles:
+        return roles
+
+    groups = _groups_from_stores(request, user_id)
+    if not groups:
+        groups = list(fallback_groups or [])
+    if groups:
+        resolved, _ = _resolve_roles_from_groups(groups, group_store)
+        return resolved
+    return []
+
+
+def resolve_live_groups_for_user(
+    request: Request,
+    user_id: str,
+    *,
+    fallback_groups: list[str] | None = None,
+) -> list[str]:
+    """Return current group names for a user from stores."""
+    if user_id.startswith("apikey:"):
+        key_name = user_id.removeprefix("apikey:")
+        api_key_store: APIKeyStore | None = getattr(request.app.state, "api_key_store", None)
+        if api_key_store is not None:
+            key = api_key_store.get(key_name)
+            if key is not None:
+                return list(key.groups)
+        return list(fallback_groups or [])
+
+    groups = _groups_from_stores(request, user_id)
+    if groups:
+        return groups
+    return list(fallback_groups or [])
+
+
+def require_local_account_enabled(request: Request, user_id: str) -> None:
+    """Reject JWT auth when the backing local account exists and is disabled.
+
+    Skips ``apikey:…`` subjects and usernames with no account record.
+    """
+    if user_id.startswith("apikey:"):
+        return
+
+    account_store = getattr(request.app.state, "account_store", None)
+    if account_store is None:
+        return
+
+    account = account_store.get(user_id)
+    if account is None or account.enabled:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"code": "unauthorized", "message": "Account disabled"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def get_current_user(request: Request) -> AuthContext:
     """Authenticate the request via one of four paths (checked in order).
 
@@ -333,19 +446,21 @@ async def get_current_user(request: Request) -> AuthContext:
             )
 
         jwt_user_id = payload.get("sub", "")
-        jwt_roles = payload.get("roles", [])
         jwt_groups = payload.get("groups")
         if jwt_groups is None:
             jwt_groups = _groups_for_local_account(request, jwt_user_id)
         elif not isinstance(jwt_groups, list):
             jwt_groups = []
-        audit_login_success(jwt_user_id, "jwt", client_ip, jwt_roles)
+        require_local_account_enabled(request, jwt_user_id)
+        live_roles = resolve_live_roles_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
+        live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
+        audit_login_success(jwt_user_id, "jwt", client_ip, live_roles)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
-            roles=jwt_roles,
+            roles=live_roles,
             org_ids=payload.get("org_ids", []),
-            groups=jwt_groups,
+            groups=live_groups,
             request_id=request_id,
             client_ip=client_ip,
             user_agent=user_agent,

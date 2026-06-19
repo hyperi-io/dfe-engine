@@ -15,9 +15,12 @@ from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
     create_access_token,
+    get_role_config,
+    require_local_account_enabled,
+    resolve_live_groups_for_user,
+    resolve_live_roles_for_user,
 )
 from dfe_engine.auth.local_provider import LocalAuthProvider
-from dfe_engine.auth.roles import RoleConfig
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -87,14 +90,17 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
 
 
 @router.post("/refresh", response_model=TokenResponse)
-async def refresh_token(user: CurrentUser, settings: Settings):
+async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
     """Refresh the current JWT token. Requires a valid existing token."""
+    require_local_account_enabled(request, user.user_id)
+    roles = resolve_live_roles_for_user(request, user.user_id, fallback_groups=user.groups)
+    groups = resolve_live_groups_for_user(request, user.user_id, fallback_groups=user.groups)
     token = create_access_token(
         data={
             "sub": user.user_id,
             "org_id": user.org_id,
-            "roles": user.roles,
-            "groups": user.groups,
+            "roles": roles,
+            "groups": groups,
             "org_ids": user.org_ids,
         },
         settings=settings,
@@ -104,14 +110,14 @@ async def refresh_token(user: CurrentUser, settings: Settings):
         access_token=token,
         expires_in=settings.api.jwt_expire_minutes * 60,
         user_id=user.user_id,
-        roles=user.roles,
+        roles=roles,
     )
 
 
 @router.get("/me", response_model=UserResponse)
 async def get_me(user: CurrentUser, request: Request):
     """Get the current authenticated user's info."""
-    role_config = getattr(request.app.state, "role_config", None) or RoleConfig.load_builtin()
+    role_config = get_role_config(request)
     permissions = sorted(role_config.resolve_permissions(user.roles))
     return UserResponse(
         org_id=user.org_id,
@@ -125,7 +131,7 @@ async def get_me(user: CurrentUser, request: Request):
 @router.get("/permissions", response_model=PermissionsResponse)
 async def get_permissions(user: CurrentUser, request: Request):
     """Get resolved permissions for the current user's roles."""
-    role_config = getattr(request.app.state, "role_config", None) or RoleConfig.load_builtin()
+    role_config = get_role_config(request)
     all_perms = role_config.resolve_permissions(user.roles)
 
     return PermissionsResponse(

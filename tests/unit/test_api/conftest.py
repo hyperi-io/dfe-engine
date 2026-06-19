@@ -88,7 +88,7 @@ def client(app, api_settings: DFESettings) -> TestClient:
             group_store.add_member("dfe-analysts", "operator")
             group_store.add_member("dfe-infra", "operator")
 
-        # Create viewer account (data_viewer)
+        # Create viewer account (read-only API tests via dfe-viewers group roles)
         if account_store.get("viewer") is None:
             account_store.create(
                 "viewer",
@@ -96,6 +96,10 @@ def client(app, api_settings: DFESettings) -> TestClient:
                 groups=["dfe-viewers"],
             )
             group_store.add_member("dfe-viewers", "viewer")
+        group_store.update(
+            "dfe-viewers",
+            roles=["infra_viewer", "data_analyst_viewer", "data_viewer"],
+        )
 
         yield c
 
@@ -113,14 +117,14 @@ def admin_token(api_settings: DFESettings) -> str:
 def viewer_token(api_settings: DFESettings) -> str:
     """JWT token for viewer user (read-only).
 
-    Uses infra_viewer (config:read) + data_analyst_viewer (source:read)
-    to cover all read-only API tests without granting write access.
+    Claims may be stale; get_current_user resolves roles from dfe-viewers membership.
     """
     return create_access_token(
         data={
             "sub": "viewer",
             "org_id": "test-org",
-            "roles": ["infra_viewer", "data_analyst_viewer"],
+            "roles": ["data_viewer"],
+            "groups": ["dfe-viewers"],
         },
         settings=api_settings,
     )

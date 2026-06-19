@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, DeploymentConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/deployments", tags=["Deployments"])
 
@@ -86,7 +87,7 @@ class SeedResponse(BaseModel):
 @router.get(
     "",
     response_model=PaginatedResponse[DeploymentSummary],
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_read"]))],
 )
 async def list_deployments(
     user: CurrentUser,
@@ -115,7 +116,7 @@ async def list_deployments(
 @router.get(
     "/{service}/{instance}",
     response_model=DeploymentConfigDetail,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_read"]))],
 )
 async def get_deployment(
     service: str,
@@ -142,7 +143,7 @@ async def get_deployment(
 
 @router.put(
     "/{service}/{instance}",
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_write"]))],
 )
 async def save_deployment(
     service: str,
@@ -165,7 +166,7 @@ async def save_deployment(
 @router.delete(
     "/{service}/{instance}",
     status_code=204,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_delete"]))],
 )
 async def delete_deployment(
     service: str,
@@ -193,7 +194,7 @@ async def delete_deployment(
 @router.post(
     "/{service}/{instance}/validate",
     response_model=ValidationResult,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_write"]))],
 )
 async def validate_deployment(
     service: str,
@@ -214,7 +215,7 @@ async def validate_deployment(
 @router.get(
     "/{service}/{instance}/history",
     response_model=list[DeploymentHistoryEntry],
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_read"]))],
 )
 async def get_deployment_history(
     service: str,
@@ -239,7 +240,7 @@ async def get_deployment_history(
 @router.post(
     "/{service}/{instance}/size/{size}",
     response_model=SizeResponse,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_write"]))],
 )
 async def apply_size(
     service: str,
@@ -292,7 +293,7 @@ async def apply_size(
 @router.post(
     "/seed",
     response_model=SeedResponse,
-    dependencies=[Depends(require_action("config:write"))],
+    dependencies=[Depends(require_action(scopes_dict["deployment_write"]))],
 )
 async def seed_deployments(user: CurrentUser, registry: DeploymentConfigReg):
     """Seed built-in default deployment configs. Non-destructive."""

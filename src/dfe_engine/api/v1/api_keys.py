@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/api-keys", tags=["API Keys"])
 
@@ -60,7 +61,7 @@ class APIKeyCreatedResponse(APIKeyResponse):
     "",
     response_model=APIKeyCreatedResponse,
     status_code=201,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["api_key_write"]))],
 )
 async def create_api_key(
     body: CreateAPIKeyRequest,
@@ -91,7 +92,7 @@ async def create_api_key(
 @router.get(
     "",
     response_model=list[APIKeyResponse],
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["api_key_read"]))],
 )
 async def list_api_keys(
     user: CurrentUser,
@@ -117,7 +118,7 @@ async def list_api_keys(
 @router.delete(
     "/{short_token}",
     status_code=204,
-    dependencies=[Depends(require_action("org:write"))],
+    dependencies=[Depends(require_action(scopes_dict["api_key_delete"]))],
 )
 async def revoke_api_key(
     short_token: str,

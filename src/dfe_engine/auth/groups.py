@@ -138,11 +138,16 @@ class GroupStore:
 
         Raises:
             KeyError: If the group does not exist.
+            ValueError: If the group still has members.
         """
-        path = self._path(name)
-        if not path.exists():
+        group = self._read(name)
+        if group is None:
             raise KeyError(f"Group '{name}' not found")
-        path.unlink()
+        if group.members:
+            raise ValueError(
+                f"Cannot delete group '{name}': remove all {len(group.members)} member(s) first"
+            )
+        self._path(name).unlink()
 
     def add_member(self, group_name: str, username: str) -> None:
         """Add a username to the group's member list (idempotent).

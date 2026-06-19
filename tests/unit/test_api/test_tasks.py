@@ -34,7 +34,7 @@ class TestTasksRouter:
         assert resp.json() == []
 
     def test_stream_nonexistent_returns_404(self, client, admin_headers):
-        resp = client.get("/api/v1/tasks/nonexistent-id/stream")
+        resp = client.get("/api/v1/tasks/nonexistent-id/stream", headers=admin_headers)
         assert resp.status_code == 404
 
 

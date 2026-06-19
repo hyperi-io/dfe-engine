@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
 
@@ -85,11 +86,15 @@ def _get_ch_client(request: Request):
 # ── Endpoints ───────────────────────────────────────────────
 
 
-@router.get("/databases", response_model=list[DatabaseInfo])
+@router.get(
+    "/databases",
+    response_model=list[DatabaseInfo],
+    dependencies=[Depends(require_action(scopes_dict["discovery_read"]))],
+)
 async def list_databases(
     request: Request,
     user: CurrentUser,
-    _auth: None = Depends(require_action("discovery:read")),
+    _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[DatabaseInfo]:
     """List all ClickHouse databases."""
     client = _get_ch_client(request)
@@ -104,13 +109,17 @@ async def list_databases(
         raise HTTPException(status_code=500, detail={"code": "query_error", "message": str(exc)})
 
 
-@router.get("/tables", response_model=list[TableInfo])
+@router.get(
+    "/tables",
+    response_model=list[TableInfo],
+    dependencies=[Depends(require_action(scopes_dict["discovery_read"]))],
+)
 async def list_tables(
     request: Request,
     user: CurrentUser,
     database: str = Query("default", description="Database to list tables from"),
     engine: str | None = Query(None, description="Filter by engine type"),
-    _auth: None = Depends(require_action("discovery:read")),
+    _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[TableInfo]:
     """List tables in a ClickHouse database."""
     client = _get_ch_client(request)
@@ -142,13 +151,17 @@ async def list_tables(
         raise HTTPException(status_code=500, detail={"code": "query_error", "message": str(exc)})
 
 
-@router.get("/tables/{table_name}/columns", response_model=list[ColumnInfo])
+@router.get(
+    "/tables/{table_name}/columns",
+    response_model=list[ColumnInfo],
+    dependencies=[Depends(require_action(scopes_dict["discovery_read"]))],
+)
 async def list_columns(
     table_name: str,
     request: Request,
     user: CurrentUser,
     database: str = Query("default", description="Database containing the table"),
-    _auth: None = Depends(require_action("discovery:read")),
+    _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[ColumnInfo]:
     """List columns for a specific table."""
     client = _get_ch_client(request)

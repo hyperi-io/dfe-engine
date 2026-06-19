@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/hunts", tags=["hunts"])
 
@@ -77,7 +78,11 @@ def _get_task_manager(request: Request) -> TaskManager:
 # ── Endpoints ───────────────────────────────────────────────
 
 
-@router.get("/status", response_model=HuntEngineStatus)
+@router.get(
+    "/status",
+    response_model=HuntEngineStatus,
+    dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
+)
 async def get_engine_status(
     request: Request,
     user: CurrentUser,
@@ -95,7 +100,11 @@ async def get_engine_status(
     )
 
 
-@router.get("", response_model=list[HuntSummary])
+@router.get(
+    "",
+    response_model=list[HuntSummary],
+    dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
+)
 async def list_hunts(
     request: Request,
     user: CurrentUser,
@@ -125,13 +134,14 @@ async def list_hunts(
     "/{name}/run",
     response_model=TriggerResponse,
     status_code=202,
+    dependencies=[Depends(require_action(scopes_dict["hunt_execute"]))],
 )
 async def trigger_hunt(
     name: str,
     body: TriggerRequest,
     request: Request,
     user: CurrentUser,
-    _auth: None = Depends(require_action("hunt:execute")),
+    _auth: None = Depends(require_action(scopes_dict["hunt_execute"])),
 ) -> TriggerResponse:
     """Trigger an ad-hoc hunt execution.
 

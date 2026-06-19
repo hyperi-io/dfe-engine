@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/system", tags=["System"])
 
@@ -54,7 +55,7 @@ async def get_version(user: CurrentUser):
 @router.get(
     "/settings",
     response_model=SettingsSummary,
-    dependencies=[Depends(require_action("config:read"))],
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
 )
 async def get_settings(user: CurrentUser, settings: Settings):
     """Get a redacted summary of current settings. No secrets exposed."""

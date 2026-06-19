@@ -31,9 +31,9 @@ class TestListServiceSurfaces:
         resp = client.get("/api/v1/service-surfaces")
         assert resp.status_code == 401
 
-    def test_list_viewer_allowed(self, client, viewer_headers):
+    def test_list_viewer_forbidden(self, client, viewer_headers):
         resp = client.get("/api/v1/service-surfaces", headers=viewer_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 class TestGetServiceSurface:
@@ -68,9 +68,9 @@ class TestGetServiceSurface:
         resp = client.get("/api/v1/service-surfaces/dfe-receiver")
         assert resp.status_code == 401
 
-    def test_get_viewer_allowed(self, client, viewer_headers):
+    def test_get_viewer_forbidden(self, client, viewer_headers):
         resp = client.get("/api/v1/service-surfaces/dfe-receiver", headers=viewer_headers)
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
 
 class TestRefreshManifest:

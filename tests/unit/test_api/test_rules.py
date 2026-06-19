@@ -22,13 +22,13 @@ class TestRulesValidate:
         )
         assert resp.status_code == 401
 
-    def test_validate_viewer_allowed(self, client, viewer_headers):
+    def test_validate_viewer_forbidden(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/rules/validate",
             json={"sql": "event_type = 'login'"},
             headers=viewer_headers,
         )
-        assert resp.status_code == 200
+        assert resp.status_code == 403
 
     def test_validate_missing_sql_field(self, client, admin_headers):
         resp = client.post(
