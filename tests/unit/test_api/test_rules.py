@@ -100,6 +100,20 @@ class TestRulesListAndDetail:
         assert resp.status_code == 200
         assert resp.json()["rule_id"] == rule_id
         assert resp.json()["name"] == "Test Rule"
+        assert resp.json()["sql_errors"] == []
+
+    def test_get_rule_detail_includes_sql_errors(self, client, admin_headers):
+        create = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(user_sql="INSERT INTO logs VALUES (1)"),
+            headers=admin_headers,
+        )
+        assert create.status_code == 201
+        rule_id = create.json()["rule"]["rule_id"]
+
+        resp = client.get(f"/api/v1/rules/{rule_id}", headers=admin_headers)
+        assert resp.status_code == 200
+        assert len(resp.json()["sql_errors"]) > 0
 
     def test_get_rule_not_found(self, client, admin_headers):
         resp = client.get("/api/v1/rules/does-not-exist", headers=admin_headers)

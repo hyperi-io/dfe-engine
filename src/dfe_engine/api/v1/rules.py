@@ -94,6 +94,7 @@ class RuleResponse(BaseModel):
     hunt_name: str | None = None
     source: str | None = None
     warnings: list[str] = Field(default_factory=list)
+    sql_errors: list[SqlValidationError] = Field(default_factory=list)
     created_at: str
 
 
@@ -242,7 +243,7 @@ async def validate_rule_sql(
     response_model=RuleResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
-async def get_rule(rule_id: str, user: CurrentUser, registry: RuleReg):
+async def get_rule(rule_id: str, user: CurrentUser, registry: RuleReg, settings: Settings):
     """Get a detection rule by ID."""
     try:
         rule = registry.get(rule_id)
@@ -251,7 +252,8 @@ async def get_rule(rule_id: str, user: CurrentUser, registry: RuleReg):
             status_code=404,
             detail={"code": "not_found", "message": f"Rule '{rule_id}' not found"},
         ) from None
-    return _rule_to_response(rule)
+    sql_errors = _sql_errors_for_original_sql(settings, rule.original_sql)
+    return _rule_to_response(rule, sql_errors=sql_errors)
 
 
 @router.put(
@@ -325,7 +327,17 @@ async def delete_rule(rule_id: str, user: CurrentUser, registry: RuleReg):
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _rule_to_response(rule) -> RuleResponse:
+def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[SqlValidationError]:
+    if not original_sql.strip():
+        return []
+    from dfe_engine.hunts.rule_creation_service import RuleCreationService
+    from dfe_engine.settings import get_clickhouse_config
+
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    return _map_sql_errors(service.validate_sql(original_sql))
+
+
+def _rule_to_response(rule, *, sql_errors: list[SqlValidationError] | None = None) -> RuleResponse:
     return RuleResponse(
         rule_id=rule.rule_id,
         name=rule.name,
@@ -338,8 +350,20 @@ def _rule_to_response(rule) -> RuleResponse:
         hunt_name=rule.hunt_name,
         source=rule.source,
         warnings=rule.warnings,
+        sql_errors=sql_errors or [],
         created_at=rule.created_at,
     )
+
+
+def _map_sql_errors(errors) -> list[SqlValidationError]:
+    return [
+        SqlValidationError(
+            message=e.message,
+            position=getattr(e, "position", None),
+            suggestion=getattr(e, "suggestion", None),
+        )
+        for e in errors
+    ]
 
 
 def _build_create_response(result, cost_window_minutes: int) -> RuleCreateResponse:
@@ -355,16 +379,10 @@ def _build_create_response(result, cost_window_minutes: int) -> RuleCreateRespon
             warnings=getattr(ce, "warnings", []),
         )
 
+    sql_errors = _map_sql_errors(result.sql_errors or [])
     return RuleCreateResponse(
-        rule=_rule_to_response(rule_data),
+        rule=_rule_to_response(rule_data, sql_errors=sql_errors),
         sanitize_summary=result.sanitize_summary or {},
-        sql_errors=[
-            SqlValidationError(
-                message=e.message,
-                position=getattr(e, "position", None),
-                suggestion=getattr(e, "suggestion", None),
-            )
-            for e in (result.sql_errors or [])
-        ],
+        sql_errors=sql_errors,
         cost_estimate=cost,
     )

@@ -10622,6 +10622,13 @@
             "type": "array",
             "title": "Warnings"
           },
+          "sql_errors": {
+            "items": {
+              "$ref": "#/components/schemas/SqlValidationError"
+            },
+            "type": "array",
+            "title": "Sql Errors"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
