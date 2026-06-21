@@ -98,7 +98,9 @@ role_scopes = {
 }
 
 rules_scopes = {
+    "rule_read": "rule:read",
     "rule_write": "rule:write",
+    "rule_delete": "rule:delete",
     "rule_validate": "rule:validate",
 }
 

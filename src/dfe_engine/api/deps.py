@@ -70,6 +70,11 @@ def bootstrap_registries(settings: DFESettings) -> None:
             field_maps_directory=settings.fieldmap.fieldmaps_dir
         )
 
+    if settings.hunts.rules_dir:
+        from dfe_engine.hunts.rule_registry import RuleRegistry
+
+        _registries["rules"] = RuleRegistry(rules_directory=settings.hunts.rules_dir)
+
     if settings.hunts.alert_destinations_dir:
         from hyperi_pylib.config import DirectoryConfigStore
 
@@ -181,12 +186,27 @@ def get_deployment_config_registry():
     return reg
 
 
+def get_rule_registry():
+    """FastAPI dependency: resolve RuleRegistry singleton."""
+    reg = _registries.get("rules")
+    if reg is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": "RuleRegistry not initialized — set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
+            },
+        )
+    return reg
+
+
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
 AlertDestStore = Annotated[Any, Depends(get_alert_destinations_store)]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
+RuleReg = Annotated[Any, Depends(get_rule_registry)]
 
 
 # ── ClickHouse client ─────────────────────────────────────────
