@@ -10720,21 +10720,22 @@
       "RuleUpdateRequest": {
         "properties": {
           "name": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Name",
-            "description": "Human-readable rule name"
+            "description": "Rule name; omitted to keep existing"
           },
           "severity": {
             "type": "string",
             "title": "Severity",
             "description": "low|medium|high|critical",
             "default": "medium"
-          },
-          "source_type": {
-            "type": "string",
-            "title": "Source Type",
-            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
-            "default": "raw"
           },
           "user_sql": {
             "type": "string",
@@ -10792,11 +10793,10 @@
         },
         "type": "object",
         "required": [
-          "name",
           "user_sql"
         ],
         "title": "RuleUpdateRequest",
-        "description": "Update an existing hunt rule (same shape as create)."
+        "description": "Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."
       },
       "SampleRecord": {
         "properties": {
