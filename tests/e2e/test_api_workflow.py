@@ -153,6 +153,7 @@ class TestSourceCRUDWorkflow:
             "display_name": "E2E Test Source",
             "description": "Created by E2E test",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": "e2e_test_source"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
@@ -196,6 +197,7 @@ class TestSourceCRUDWorkflow:
             "source": "dup_test",
             "display_name": "Dup",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": "dup_test"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
