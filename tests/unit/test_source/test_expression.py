@@ -187,6 +187,25 @@ class TestValidatorConfig:
         assert not result.valid
 
 
+class TestValidatorCopy:
+    """Test @copy directive validation (JSON field promotion)."""
+
+    def test_copy_path(self):
+        result = ExpressionValidator.validate("@copy: _json.user.email")
+        assert result.valid
+        assert result.directive == "copy"
+        assert result.copy_path == "_json.user.email"
+
+    def test_empty_copy(self):
+        result = ExpressionValidator.validate("@copy: ")
+        assert not result.valid
+
+    def test_copy_rejects_non_dotted_path(self):
+        result = ExpressionValidator.validate("@copy: _json[user]")
+        assert not result.valid
+        assert "dotted field reference" in result.errors[0]
+
+
 # ── Validator: validate_column_expr ─────────────────────────────
 
 
@@ -275,6 +294,9 @@ class TestBuilder:
     def test_config(self):
         assert ExpressionBuilder.config("routing.org_id_field") == "@config: routing.org_id_field"
 
+    def test_copy(self):
+        assert ExpressionBuilder.copy("_json.user.email") == "@copy: _json.user.email"
+
 
 class TestBuilderRoundTrip:
     """Test that built expressions validate correctly."""
@@ -305,6 +327,12 @@ class TestBuilderRoundTrip:
         assert result.captured_what == "raw_payload"
         assert result.cast_type == "JSON"
 
+    def test_copy_roundtrip(self):
+        expr = ExpressionBuilder.copy("_json.user.email")
+        result = ExpressionValidator.validate(expr)
+        assert result.valid
+        assert result.copy_path == "_json.user.email"
+
 
 # ── Autocomplete ────────────────────────────────────────────────
 
@@ -314,7 +342,7 @@ class TestAutocomplete:
 
     def test_list_directive_types(self):
         types = list_directive_types()
-        assert len(types) == 5
+        assert len(types) == 6
         names = {t["name"] for t in types}
         assert names == DIRECTIVES
         for t in types:

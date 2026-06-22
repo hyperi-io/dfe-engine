@@ -61,6 +61,7 @@ class TestCRUD:
             {
                 "source": "versioned_src",
                 "display_name": "Versioned",
+                "match": {"field": "tags.type", "value": "versioned"},
                 "schema": {"ttl_days": 30},
             }
         )
@@ -221,12 +222,6 @@ class TestMatchTable:
         table = registry.compile_match_table()
         assert len(table) == 1
         assert table[0]["source"] == "filebeat"
-
-    def test_compile_excludes_no_match(self, registry: SourceRegistry):
-        registry.save_source(Source(source="no_match_source"))
-
-        table = registry.compile_match_table()
-        assert len(table) == 0
 
 
 # ---------------------------------------------------------------------------
