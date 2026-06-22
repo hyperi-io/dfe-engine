@@ -24,12 +24,24 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import json
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+def _json_safe(value: Any) -> Any:
+    """Coerce task results so TaskInfo always serializes for OpenAPI responses."""
+    if value is None:
+        return None
+    try:
+        json.dumps(value)
+        return value
+    except TypeError:
+        return str(value)
 
 
 class TaskStatus(str, Enum):
@@ -84,7 +96,7 @@ class _Task:
             completed_at=self.completed_at,
             progress=self.progress,
             message=self.message,
-            result=self.result,
+            result=_json_safe(self.result),
             error=self.error,
         )
 
@@ -143,7 +155,7 @@ class TaskManager:
                 task._progress_event.set()
                 self._evict_completed()
 
-        task.asyncio_task = asyncio.create_task(_run())
+        task.asyncio_task = asyncio.get_running_loop().create_task(_run())
         return task.to_info()
 
     def get(self, task_id: str) -> TaskInfo | None:

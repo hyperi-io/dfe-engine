@@ -291,9 +291,7 @@ def discover_paths(
             copy_expr=ExpressionBuilder.copy(copy_cel_for_path(path)),
         )
         if samples:
-            item.samples = _fetch_samples(
-                client, table, path, samples, match_sql, match_params
-            )
+            item.samples = _fetch_samples(client, table, path, samples, match_sql, match_params)
         if stats:
             item.coverage_pct, item.distinct_count = _fetch_stats(
                 client, table, path, match_sql, match_params

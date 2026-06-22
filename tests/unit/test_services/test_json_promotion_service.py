@@ -503,9 +503,7 @@ class _RecordingClient:
 
 class TestDiscoverPaths:
     def test_basic_discovery_sql_and_result(self):
-        client = _RecordingClient(
-            discover_rows=[("user.id", "Int64"), ("user.email", "String")]
-        )
+        client = _RecordingClient(discover_rows=[("user.id", "Int64"), ("user.email", "String")])
         result = discover_paths(client, db="dfe", source="syslog", existing_columns=[])
 
         sql, params = client.calls[0]
@@ -543,17 +541,13 @@ class TestDiscoverPaths:
 
     def test_paths_filter_adds_having(self):
         client = _RecordingClient(discover_rows=[("a", "String")])
-        discover_paths(
-            client, db="dfe", source="syslog", existing_columns=[], paths=["a", "b"]
-        )
+        discover_paths(client, db="dfe", source="syslog", existing_columns=[], paths=["a", "b"])
         sql, params = client.calls[0]
         assert "HAVING path IN {paths:Array(String)}" in sql
         assert params["paths"] == ["a", "b"]
 
     def test_samples_query_ands_match_filter(self):
-        client = _RecordingClient(
-            discover_rows=[("a", "String")], sample_rows=[("x",), ("y",)]
-        )
+        client = _RecordingClient(discover_rows=[("a", "String")], sample_rows=[("x",), ("y",)])
         result = discover_paths(
             client,
             db="dfe",
@@ -570,9 +564,7 @@ class TestDiscoverPaths:
         assert result[0].samples == ["x", "y"]
 
     def test_stats_query_ands_match_filter(self):
-        client = _RecordingClient(
-            discover_rows=[("a", "String")], stats_rows=[(42.5, 7)]
-        )
+        client = _RecordingClient(discover_rows=[("a", "String")], stats_rows=[(42.5, 7)])
         result = discover_paths(
             client,
             db="dfe",

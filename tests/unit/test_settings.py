@@ -18,7 +18,7 @@ def _clean_settings():
 @pytest.fixture
 def config_dir(tmp_path):
     """Create a temporary config directory with expected subdirs."""
-    for subdir in ("services", "sources", "deployment", "hunts", "hunt-rules", "queries"):
+    for subdir in ("services", "sources", "deployment", "hunts", "hunt-rules", "rules", "queries"):
         (tmp_path / subdir).mkdir()
     return str(tmp_path)
 
@@ -67,6 +67,12 @@ class TestConfigDir:
         monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
         settings = load_settings()
         assert settings.hunts.rule_repo_dir == os.path.join(config_dir, "hunt-rules")
+
+    def test_config_dir_resolves_api_rules_dir(self, config_dir, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
+        monkeypatch.setenv("DFE_CONFIG_DIR", config_dir)
+        settings = load_settings()
+        assert settings.hunts.rules_dir == os.path.join(config_dir, "rules")
 
     def test_config_dir_resolves_query_dir(self, config_dir, monkeypatch):
         _clear_registry_path_env(monkeypatch)

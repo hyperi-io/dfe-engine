@@ -33,6 +33,7 @@ Hunts:
 - DFE_HUNT_LOG_PATH -> hunts.log_path
 - DFE_HUNTS_DIR -> hunts.hunt_dir
 - DFE_HUNTS_RULE_REPO_DIR -> hunts.rule_repo_dir
+- DFE_HUNTS_RULES_DIR -> hunts.rules_dir
 - DFE_HUNTS_NUM_THREADS -> hunts.num_threads
 - DFE_HUNTS_CHECKPOINT_DESTINATION -> hunts.checkpoint_destination
 - DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD -> hunts.checkpoint_timestamp_field
@@ -119,6 +120,10 @@ class HuntsSettings(BaseModel):
     )
     hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
     rule_repo_dir: str = Field(default="", description="Directory containing Jinja2 rule templates")
+    rules_dir: str = Field(
+        default="",
+        description="YAML directory for API-managed detection rules (DirectoryConfigStore SSoT)",
+    )
     num_threads: int = Field(default=1, description="Number of concurrent hunt threads")
     checkpoint_destination: str = Field(
         default="clickhouse", description="Checkpoint storage: 'clickhouse' or 'file'"
@@ -549,6 +554,8 @@ def _get_env_overrides() -> dict:
         overrides["hunts"]["hunt_dir"] = val
     if val := _get_env("DFE_HUNTS_RULE_REPO_DIR"):
         overrides["hunts"]["rule_repo_dir"] = val
+    if val := _get_env("DFE_HUNTS_RULES_DIR"):
+        overrides["hunts"]["rules_dir"] = val
     if val := _get_env("DFE_HUNTS_NUM_THREADS"):
         overrides["hunts"]["num_threads"] = int(val)
     if val := _get_env("DFE_HUNTS_CHECKPOINT_DESTINATION"):
@@ -732,6 +739,7 @@ def _get_env_overrides() -> dict:
             ("deployment", "config_dir"): "deployment",
             ("hunts", "hunt_dir"): "hunts",
             ("hunts", "rule_repo_dir"): "hunt-rules",
+            ("hunts", "rules_dir"): "rules",
             ("hunts", "alert_destinations_dir"): "alert-destinations",
             ("query", "yaml_dir"): "queries",
         }

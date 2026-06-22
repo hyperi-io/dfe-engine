@@ -3769,6 +3769,148 @@
       }
     },
     "/api/v1/rules": {
+      "get": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "List Rules",
+        "description": "List detection rules with pagination and search.",
+        "operationId": "list_rules_api_v1_rules_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity",
+              "title": "Search"
+            },
+            "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity"
+          },
+          {
+            "name": "severity",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by severity",
+              "title": "Severity"
+            },
+            "description": "Filter by severity"
+          },
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by source label",
+              "title": "Source"
+            },
+            "description": "Filter by source label"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_RuleSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
       "post": {
         "tags": [
           "Rules"
@@ -3777,14 +3919,14 @@
         "description": "Create a new hunt rule via RuleCreationService.\n\nThe service sanitizes the SQL, applies CEL\u2192SQL transpilation,\nvalidates column references, and optionally estimates query cost.",
         "operationId": "create_rule_api_v1_rules_post",
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RuleCreateRequest"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -3843,6 +3985,149 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rules/{rule_id}": {
+      "get": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Get Rule",
+        "description": "Get a detection rule by ID.",
+        "operationId": "get_rule_api_v1_rules__rule_id__get",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Update Rule",
+        "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).",
+        "operationId": "update_rule_api_v1_rules__rule_id__put",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleUpdateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Delete Rule",
+        "description": "Delete a detection rule.",
+        "operationId": "delete_rule_api_v1_rules__rule_id__delete",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -9149,6 +9434,72 @@
         ],
         "title": "PaginatedResponse[RoleResponse]"
       },
+      "PaginatedResponse_RuleSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RuleSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[RuleSummary]"
+      },
       "PaginatedResponse_ServiceConfigSummary_": {
         "properties": {
           "items": {
@@ -10271,6 +10622,13 @@
             "type": "array",
             "title": "Warnings"
           },
+          "sql_errors": {
+            "items": {
+              "$ref": "#/components/schemas/SqlValidationError"
+            },
+            "type": "array",
+            "title": "Sql Errors"
+          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -10286,6 +10644,159 @@
           "created_at"
         ],
         "title": "RuleResponse"
+      },
+      "RuleSummary": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "source_db": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Db"
+          },
+          "source_table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Table"
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "name",
+          "severity",
+          "created_at"
+        ],
+        "title": "RuleSummary"
+      },
+      "RuleUpdateRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Human-readable rule name"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "description": "low|medium|high|critical",
+            "default": "medium"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
+            "default": "raw"
+          },
+          "user_sql": {
+            "type": "string",
+            "title": "User Sql",
+            "description": "User-authored SQL WHERE fragment"
+          },
+          "cel_filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cel Filter",
+            "description": "CEL expression filter"
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name",
+            "description": "Parent hunt name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source label (e.g. windows_audit)"
+          },
+          "estimate_cost": {
+            "type": "boolean",
+            "title": "Estimate Cost",
+            "description": "Run EXPLAIN and estimate query cost",
+            "default": false
+          },
+          "cost_window_minutes": {
+            "type": "integer",
+            "title": "Cost Window Minutes",
+            "description": "Window in minutes for cost estimate",
+            "default": 60
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "user_sql"
+        ],
+        "title": "RuleUpdateRequest",
+        "description": "Update an existing hunt rule (same shape as create)."
       },
       "SampleRecord": {
         "properties": {
