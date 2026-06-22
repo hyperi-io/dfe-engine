@@ -92,10 +92,10 @@ class RuleRegistry:
             try:
                 from dulwich import porcelain as git
 
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-
-                yaml_path.unlink()
+                repo_root = Path(self._store._repo.path).resolve(strict=False)
+                yaml_abs = yaml_path.resolve(strict=False)
+                rel_path = str(yaml_abs.relative_to(repo_root))
+                yaml_abs.unlink(missing_ok=True)
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
@@ -103,11 +103,16 @@ class RuleRegistry:
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()
+            except ValueError:
+                logger.warning(
+                    f"Rules directory is outside git repo; deleting '{rule_id}' without git commit"
+                )
+                yaml_path.unlink(missing_ok=True)
             except Exception as e:
                 logger.error(f"Git delete failed for rule {rule_id}: {e}")
-                raise RuleRegistryError(f"Failed to delete rule '{rule_id}'") from e
+                yaml_path.unlink(missing_ok=True)
         else:
-            yaml_path.unlink()
+            yaml_path.unlink(missing_ok=True)
 
         with self._store._lock:
             self._store._cache.pop(rule_id, None)

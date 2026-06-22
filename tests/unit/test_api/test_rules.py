@@ -147,6 +147,27 @@ class TestRulesUpdateAndDelete:
         assert resp.json()["rule"]["name"] == "Updated Rule Name"
         assert resp.json()["rule"]["created_at"] == created_at
 
+    def test_update_rule_ignores_source_type(self, client, admin_headers):
+        create = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(),
+            headers=admin_headers,
+        )
+        rule_id = create.json()["rule"]["rule_id"]
+
+        resp = client.put(
+            f"/api/v1/rules/{rule_id}",
+            json={
+                "severity": "high",
+                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "source": "windows_audit",
+                "source_type": "",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["rule"]["source"] == "windows_audit"
+
     def test_delete_rule(self, client, admin_headers):
         create = client.post(
             "/api/v1/rules",

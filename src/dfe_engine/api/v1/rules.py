@@ -43,20 +43,18 @@ class RuleCreateRequest(BaseModel):
 
 
 class RuleUpdateRequest(BaseModel):
-    """Update an existing hunt rule (same shape as create)."""
+    """Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."""
 
-    name: str = Field(description="Human-readable rule name")
+    name: str | None = Field(default=None, description="Rule name; omitted to keep existing")
     severity: str = Field(default="medium", description="low|medium|high|critical")
-    source_type: str = Field(
-        default="raw",
-        description="'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
-    )
     user_sql: str = Field(description="User-authored SQL WHERE fragment")
     cel_filter: str | None = Field(default=None, description="CEL expression filter")
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
     estimate_cost: bool = Field(default=False, description="Run EXPLAIN and estimate query cost")
     cost_window_minutes: int = Field(default=60, description="Window in minutes for cost estimate")
+
+    model_config = {"extra": "ignore"}
 
 
 class SqlValidationRequest(BaseModel):
@@ -286,19 +284,24 @@ async def update_rule(
     from dfe_engine.settings import get_clickhouse_config
 
     service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    effective_name = body.name if body.name is not None else existing.name
+    effective_source = body.source if body.source is not None else existing.source
+    effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
     svc_request = SvcRequest(
-        name=body.name,
+        name=effective_name,
         severity=body.severity,
-        source_type=body.source_type,
+        source_type="raw",
         user_sql=body.user_sql,
         cel_filter=body.cel_filter,
-        hunt_name=body.hunt_name,
-        source=body.source,
+        hunt_name=effective_hunt,
+        source=effective_source,
         estimate_cost=body.estimate_cost,
         cost_window_minutes=body.cost_window_minutes,
     )
     result = service.create_rule(svc_request, rule_id)
-    updated = result.rule.model_copy(update={"created_at": existing.created_at})
+    updated = result.rule.model_copy(
+        update={"created_at": existing.created_at, "name": effective_name},
+    )
     registry.save(updated, created_by=user.user_id, description=f"rule: update {rule_id}")
     audit_resource_change(user.user_id, "rule", rule_id, "updated")
     return _build_create_response(
