@@ -1,27 +1,30 @@
 # Project:      dfe-engine
-# File:         .github/workflows/push-openapi-spec.yml
-# Purpose:      Generate OpenAPI spec and create PR to sync dfe-ui types package
+# File:         .github/workflows/sync-dfe-engine-types.yml
+# Purpose:      Sync OpenAPI spec and RBAC scope constants to dfe-ui types package
 #
-# Creates a PR with openapi.json to: https://github.com/hyperi-io/dfe-ui
-# Target path: packages/dfe-engine-types/openapi-spec/openapi.json
+# Creates a PR in: https://github.com/hyperi-io/dfe-ui
+# Target paths:
+#   packages/dfe-engine-types/specs/openapi.json
+#   packages/dfe-engine-types/scopes/index.ts
 #
 # Required secret: DFE_UI_TOKEN - PAT with PR open/close + push; must delete
 #   remote branches when superseding prior sync PRs (--delete-branch on close)
 # Optional var: DFE_UI_REPO - repo as owner/name (default: hyperi-io/dfe-ui)
 # Note: Git clone URLs require owner/name; numeric repo IDs are not supported.
 
-name: Sync OpenAPI spec
+name: Sync dfe-engine-types
 
 on:
   push:
     branches: ["main", "master"]
     paths:
       - "openapi-spec/openapi.json"
+      - "src/dfe_engine/auth/rbac_scopes/scope_constants.py"
   workflow_dispatch:
 
 jobs:
   push-to-dfe-ui:
-    name: Create PR with OpenAPI spec in dfe-ui
+    name: Create PR in dfe-ui (OpenAPI + RBAC scopes)
     permissions:
       pull-requests: write
       contents: read
@@ -38,7 +41,10 @@ jobs:
       - name: Enable Yarn via Corepack
         run: corepack enable && corepack prepare yarn@stable --activate
 
-      - name: Create PR with OpenAPI spec in dfe-ui
+      - name: Generate RBAC scope TypeScript constants
+        run: python3 rbac-scopes-spec/generate.py
+
+      - name: Create PR with dfe-engine-types sync in dfe-ui
         env:
           DFE_UI_TOKEN: ${{ secrets.DFE_UI_TOKEN }}
           DFE_UI_REPO: ${{ vars.DFE_UI_REPO || 'hyperi-io/dfe-ui' }}
@@ -48,37 +54,38 @@ jobs:
           git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git clone --depth 1 "https://x-access-token:${DFE_UI_TOKEN}@github.com/${DFE_UI_REPO}.git" dfe-ui
           cd dfe-ui
-          mkdir -p packages/dfe-engine-types/specs
+          mkdir -p packages/dfe-engine-types/specs packages/dfe-engine-types/scopes
           cp ../openapi-spec/openapi.json packages/dfe-engine-types/specs/openapi.json
+          cp ../rbac-scopes-spec/scopes/index.ts packages/dfe-engine-types/scopes/index.ts
           cd packages/dfe-engine-types && yarn install --immutable && yarn generate
           cd "$GITHUB_WORKSPACE/dfe-ui"
           git add packages/dfe-engine-types/
-          
+
           if git diff --staged --quiet; then
-            echo "OpenAPI spec unchanged, no PR needed"
+            echo "dfe-engine-types unchanged, no PR needed"
             exit 0
           fi
 
-          # Close any prior auto-sync PRs so only one OpenAPI sync PR is open at a time
+          # Close any prior auto-sync PRs so only one types sync PR is open at a time
           export GH_TOKEN="${DFE_UI_TOKEN}"
           while IFS= read -r pr_num; do
             [ -z "$pr_num" ] && continue
             gh pr close "$pr_num" --repo "${DFE_UI_REPO}" --delete-branch \
-              --comment "Superseded by newer OpenAPI sync from ${{ github.repository }}@${{ github.sha }}."
+              --comment "Superseded by newer dfe-engine-types sync from ${{ github.repository }}@${{ github.sha }}."
           # Pipe to system jq — do not use "gh ... --jq -r ..." (-r is parsed as gh flags, not jq -r)
           done < <(gh pr list --repo "${DFE_UI_REPO}" --state open --limit 100 --json number,headRefName \
-            | jq -r '.[] | select(.headRefName | startswith("sync-openapi-spec-")) | .number')
-          
-          BRANCH_NAME="sync-openapi-spec-$(echo ${{ github.sha }} | cut -c1-7)"
+            | jq -r '.[] | select(.headRefName | startswith("sync-dfe-engine-types-") or startswith("sync-openapi-spec-")) | .number')
+
+          BRANCH_NAME="sync-dfe-engine-types-$(echo ${{ github.sha }} | cut -c1-7)"
           git checkout -b "$BRANCH_NAME"
-          git commit -m "chore(dfe-engine-types): sync OpenAPI spec from dfe-engine
+          git commit -m "chore(dfe-engine-types): sync from dfe-engine
 
           Auto-generated from ${{ github.repository }}@${{ github.sha }}"
           git push origin "$BRANCH_NAME"
           gh pr create \
             --repo "${DFE_UI_REPO}" \
             --head "$BRANCH_NAME" \
-            --title "chore(dfe-engine-types): sync OpenAPI spec from dfe-engine" \
+            --title "chore(dfe-engine-types): sync from dfe-engine" \
             --body "Auto-generated from ${{ github.repository }}@${{ github.sha }}
 
-          This PR syncs the OpenAPI specification from the dfe-engine repository."
+          This PR syncs the OpenAPI specification and RBAC scope constants from the dfe-engine repository."

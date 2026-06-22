@@ -147,8 +147,9 @@ class PipelineBuilderController:
             if args_core_config:
                 default_dfe_config = {}
 
+        dfe_config: dict = {}
         if not args_build_core:
-            default_dfe_config.pop("ingestion_pipelines")
+            default_dfe_config.pop("ingestion_pipelines", None)
             logger.debug("Attempting to load DFE package configuration...")
             try:
                 dfe_config = _load_yaml_config(args_dfe_package_file_path)
@@ -159,8 +160,7 @@ class PipelineBuilderController:
                     f"Could not find the {args_dfe_package_file_path} file, see error: {error}",
                     exc_info=True,
                 )
-        else:
-            dfe_config = {}
+                dfe_config = {}
         dfe_config = merge_configs(default_yaml=default_dfe_config, override_yaml=dfe_config)
         ingestion_output_path = (
             args_ingestion_output_path

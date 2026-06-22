@@ -47,6 +47,19 @@ def e2e_settings(tmp_path: Path) -> DFESettings:
     services_dir.mkdir()
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
+    pipelines_out = tmp_path / "pipelines_out"
+    pipelines_out.mkdir()
+    templates_dir = tmp_path / "custom_templates"
+    templates_dir.mkdir()
+    (tmp_path / "dfe_package.yaml").write_text(
+        f"""global_settings:
+  output: {pipelines_out}
+  vector_files:
+    custom: {templates_dir}
+ingestion_pipelines: {{}}
+""",
+        encoding="utf-8",
+    )
 
     return DFESettings(
         config_dir=str(tmp_path),
@@ -140,6 +153,7 @@ class TestSourceCRUDWorkflow:
             "display_name": "E2E Test Source",
             "description": "Created by E2E test",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": "e2e_test_source"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
@@ -183,6 +197,7 @@ class TestSourceCRUDWorkflow:
             "source": "dup_test",
             "display_name": "Dup",
             "enabled": True,
+            "match": {"field": "tags.collector.type", "value": "dup_test"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
@@ -249,13 +264,18 @@ class TestTaskManagerWorkflow:
         )
         return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
-    def test_pipeline_build_task_lifecycle(self, e2e_client):
+    def test_pipeline_build_task_lifecycle(self, e2e_client, e2e_settings):
         headers = self._login(e2e_client)
+        config_dir = Path(e2e_settings.config_dir)
 
         # Trigger async pipeline build
         resp = e2e_client.post(
             "/api/v1/pipeline/build",
-            json={"build_core": False},
+            json={
+                "build_core": False,
+                "config_path": str(config_dir / "dfe_package.yaml"),
+                "output_path": str(config_dir / "pipelines_out"),
+            },
             headers=headers,
         )
         assert resp.status_code == 202
