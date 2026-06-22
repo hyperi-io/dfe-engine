@@ -60,7 +60,9 @@ def sources():
     return [
         _make_source("filebeat", match_field="agent.type", match_value="filebeat"),
         _make_source("syslog", match_field="tags.event.category", match_value="syslog"),
-        _make_source("crowdstrike_edr"),  # No match — SaaS fetcher source
+        _make_source(
+            "crowdstrike_edr", match_field="_source_fetcher", match_value="crowdstrike"
+        ),  # SaaS fetcher source — still carries a match
         _make_source("disabled_src", match_field="x", match_value="y", enabled=False),
     ]
 
@@ -136,17 +138,12 @@ class TestCompileReceiverRouting:
         assert config.source_routing is True
         assert config.default_topic == "unmatched"
 
-        # Only filebeat and syslog have match rules (disabled_src excluded)
-        assert len(config.source_match_table) == 2
+        # filebeat, syslog and crowdstrike_edr all carry a match (disabled_src excluded)
+        assert len(config.source_match_table) == 3
         topics = {r.topic for r in config.source_match_table}
         assert "filebeat_land" in topics
         assert "syslog_land" in topics
-
-    def test_excludes_sources_without_match(self, registry):
-        config = compile_receiver_routing(registry)
-        topics = {r.topic for r in config.source_match_table}
-        # crowdstrike_edr has no match rule
-        assert "crowdstrike_edr_land" not in topics
+        assert "crowdstrike_edr_land" in topics
 
     def test_excludes_disabled_sources(self, registry):
         config = compile_receiver_routing(registry)

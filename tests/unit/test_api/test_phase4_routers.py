@@ -135,8 +135,14 @@ class TestSchemasRouter:
             SchemasSettings,
             ServicesSettings,
             SourceSettings,
+            reset_settings,
         )
         from dfe_engine.yaml_utils import yaml_dump
+
+        # The columns route resolves schema files via the global settings
+        # singleton; reset it so this test's DFE_SCHEMAS_DIR is honoured even
+        # when an earlier test has already populated the cache.
+        reset_settings()
 
         schemas_root = tmp_path / "schemas"
         schemas_root.mkdir()
@@ -166,6 +172,7 @@ class TestSchemasRouter:
             {
                 "source": "cols_src",
                 "enabled": True,
+                "match": {"field": "tags.collector.type", "value": "cols_src"},
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -241,6 +248,7 @@ class TestSchemasRouter:
                 assert {"alpha", "beta", "gamma"}.issubset(names)
         finally:
             _registries.clear()
+            reset_settings()
 
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/sources/test/columns")

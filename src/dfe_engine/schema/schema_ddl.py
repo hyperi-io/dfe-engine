@@ -226,6 +226,22 @@ class DDLGenerator:
         col_def = self._column_def(column)
         return f"ALTER TABLE {cfg.db}.{table_name} MODIFY COLUMN {col_def};\n"
 
+    def generate_alter_add_index(
+        self,
+        table_name: str,
+        column: SchemaColumn,
+        config: DDLConfig | None = None,
+    ) -> str | None:
+        """Generate ALTER TABLE ADD INDEX for a column's use_case, or None.
+
+        Returns None when the column has no indexable use_case.
+        """
+        cfg = config or DDLConfig()
+        idx = self._index_def(column)
+        if not idx:
+            return None
+        return f"ALTER TABLE {cfg.db}.{table_name} ADD {idx};\n"
+
     # ── Standard Views ─────────────────────────────────────────────
 
     def generate_view(

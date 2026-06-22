@@ -150,6 +150,7 @@ def sample_source() -> dict:
         "display_name": "Test Source",
         "description": "A test data source",
         "enabled": True,
+        "match": {"field": "tags.collector.type", "value": "test_source"},
         "header": {"type": "time_series", "version": "1.0.0"},
         "schema_config": {"engine": "MergeTree"},
     }

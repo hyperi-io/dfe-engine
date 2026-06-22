@@ -299,28 +299,40 @@ class TestSource:
         assert s.topic_load is None
 
     def test_display_name_auto(self):
-        s = Source(source="crowdstrike_edr")
+        s = Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))
         assert s.display_name == "Crowdstrike Edr"
 
     def test_display_name_explicit(self):
-        s = Source(source="crowdstrike_edr", display_name="CrowdStrike EDR")
+        s = Source(
+            source="crowdstrike_edr",
+            display_name="CrowdStrike EDR",
+            match=SourceMatch(field="f", value="v"),
+        )
         assert s.display_name == "CrowdStrike EDR"
 
     def test_mapping_standards_default_empty(self):
-        s = Source(source="syslog")
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
         assert s.mapping_standards == []
 
     def test_mapping_standards_set(self):
-        s = Source(source="syslog", mapping_standards=["sigma", "ecs"])
+        s = Source(
+            source="syslog",
+            match=SourceMatch(field="f", value="v"),
+            mapping_standards=["sigma", "ecs"],
+        )
         assert s.mapping_standards == ["sigma", "ecs"]
 
     def test_mapping_standards_in_yaml_dict(self):
-        s = Source(source="syslog", mapping_standards=["sigma"])
+        s = Source(
+            source="syslog",
+            match=SourceMatch(field="f", value="v"),
+            mapping_standards=["sigma"],
+        )
         d = s.to_yaml_dict()
         assert d["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
 
     def test_mapping_standards_excluded_when_empty(self):
-        s = Source(source="syslog")
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
         d = s.to_yaml_dict()
         assert "mapping_standards" not in d["versions"]["1.0.0"]
 
@@ -333,7 +345,7 @@ class TestSource:
 class TestSourceNaming:
     def test_valid_names(self):
         for name in ["filebeat", "syslog", "crowdstrike_edr", "a", "x123_456"]:
-            s = Source(source=name)
+            s = Source(source=name, match=SourceMatch(field="f", value="v"))
             assert s.source == name
 
     def test_starts_with_digit(self):
@@ -357,7 +369,7 @@ class TestSourceNaming:
             Source(source="a" * 65)
 
     def test_max_length_ok(self):
-        s = Source(source="a" * 64)
+        s = Source(source="a" * 64, match=SourceMatch(field="f", value="v"))
         assert len(s.source) == 64
 
     def test_empty(self):
@@ -393,7 +405,7 @@ class TestSourceYaml:
         assert "current" in yaml_dict
 
     def test_excludes_none(self):
-        s = Source(source="syslog")
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
         yaml_dict = s.to_yaml_dict()
         assert "match" not in yaml_dict
         assert "transform" not in yaml_dict
@@ -430,6 +442,7 @@ class TestSourceVersion:
     def test_to_yaml_dict_omits_empty_containers(self):
         ver = SourceVersion(
             date_time="2026-06-10",
+            match=SourceMatch(field="f", value="v"),
             mapping_standards=[],
         )
         out = ver.to_yaml_dict()
@@ -458,6 +471,7 @@ class TestSourceWriteRequest:
             {
                 "source": "profile_pin",
                 "header": {"type": "common-header/minimal", "version": "1.1.0"},
+                "match": {"field": "f", "value": "v"},
                 "schema": {"engine": "MergeTree"},
             }
         )
@@ -492,17 +506,21 @@ class TestSourceWriteRequest:
                     "1.0.0": {
                         "date_time": "2026-01-01",
                         "header": {"type": "time_series", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
                         "schema": {},
                     },
                     "2.0.0": {
                         "date_time": "2026-01-02",
                         "header": {"type": "time_series", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
                         "schema": {},
                     },
                 },
             }
         )
-        write = SourceWriteRequest.model_validate({"schema": {"engine": "MergeTree"}})
+        write = SourceWriteRequest.model_validate(
+            {"match": {"field": "f", "value": "v"}, "schema": {"engine": "MergeTree"}}
+        )
         monkeypatch.setattr(
             "dfe_engine.source.models.next_major_source_version",
             lambda _versions: "2.0.0",
@@ -520,6 +538,7 @@ class TestSourceWriteRequest:
                     "1.0.0": {
                         "date_time": "2026-01-01",
                         "header": {"type": "time_series", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
                         "schema": {"ttl_days": 90},
                     }
                 },
@@ -529,6 +548,7 @@ class TestSourceWriteRequest:
             {
                 "enabled": True,
                 "description": "rev 2",
+                "match": {"field": "f", "value": "v"},
                 "schema": {"ttl_days": 30, "engine": "MergeTree"},
             }
         )
@@ -596,6 +616,7 @@ class TestSourceVersioning:
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         s = Source.model_validate(
@@ -626,6 +647,7 @@ class TestSourceVersioning:
                 "1.0.0": {
                     "date_time": "2026-06-10",
                     "header": {"type": "time_series", "version": "1.0.0"},
+                    "match": {"field": "f", "value": "v"},
                     "schema": {
                         "meta_schema": "meta/aws/cloudwatch_logs",
                         "meta_schema_version": "1.0.0",
@@ -649,7 +671,9 @@ class TestSourceVersioning:
         assert s.fetcher.poll_interval_secs == 10
 
     def test_legacy_flat_input_normalizes_to_versions(self):
-        s = Source.model_validate({"source": "syslog", "schema": {"ttl_days": 90}})
+        s = Source.model_validate(
+            {"source": "syslog", "match": {"field": "f", "value": "v"}, "schema": {"ttl_days": 90}}
+        )
         assert "1.0.0" in s.versions
         assert s.schema_config.ttl_days == 90
         assert s.current == "1.0.0"
@@ -657,7 +681,11 @@ class TestSourceVersioning:
 
     def test_legacy_flat_schema_config_key(self):
         s = Source.model_validate(
-            {"source": "syslog", "schema_config": {"ttl_days": 45, "engine": "MergeTree"}}
+            {
+                "source": "syslog",
+                "match": {"field": "f", "value": "v"},
+                "schema_config": {"ttl_days": 45, "engine": "MergeTree"},
+            }
         )
         assert s.schema_config.ttl_days == 45
 
@@ -665,6 +693,7 @@ class TestSourceVersioning:
         s = Source.model_validate(
             {
                 "source": "pull_src",
+                "match": {"field": "f", "value": "v"},
                 "field_mappings": ["ecs/custom"],
                 "fetcher": {"source_type": "m365"},
                 "sigma": {"taxonomy": "windows"},
@@ -681,6 +710,7 @@ class TestSourceVersioning:
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         s = Source.model_validate(
@@ -697,6 +727,7 @@ class TestSourceVersioning:
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "2.0.0"},
+            "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         s = Source.model_validate(
@@ -729,6 +760,7 @@ class TestSourceVersioning:
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         with pytest.raises(ValueError, match=r"current version '2\.0\.0'"):
@@ -745,6 +777,7 @@ class TestSourceVersioning:
         ver_body = {
             "date_time": "2026-01-01",
             "header": {"type": "time_series", "version": "1.0.0"},
+            "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         with pytest.raises(ValueError, match=r"deployed_version '9\.9\.9'"):
@@ -758,7 +791,7 @@ class TestSourceVersioning:
             )
 
     def test_version_lookup_unknown_id(self):
-        s = Source.model_validate({"source": "x"})
+        s = Source.model_validate({"source": "x", "match": {"field": "f", "value": "v"}})
         with pytest.raises(ValueError, match=r"Source version '9\.9\.9' is not defined"):
             s.version("9.9.9")
 
@@ -766,6 +799,7 @@ class TestSourceVersioning:
         s = Source.model_validate(
             {
                 "source": "with_xform",
+                "match": {"field": "f", "value": "v"},
                 "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
             }
         )
