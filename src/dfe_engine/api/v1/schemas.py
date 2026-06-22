@@ -274,9 +274,7 @@ class JsonPathsResponse(BaseModel):
             "catch-all landing table."
         )
     )
-    json_column: str = Field(
-        description="Name of the JSON column inspected (always '_json')."
-    )
+    json_column: str = Field(description="Name of the JSON column inspected (always '_json').")
     paths: list[JsonPathInfo] = Field(
         description="One entry per distinct JSON path found in the column."
     )
