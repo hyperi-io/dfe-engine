@@ -412,15 +412,24 @@ Override with `nullable` or `not_null` in the attribute list.
 
 ### Why nullable is not the default for everything
 
-ClickHouse stores `Nullable(T)` as two columns — the data column plus a
+ClickHouse stores `Nullable(T)` as two columns -- the data column plus a
 UInt8 bitmap tracking which rows are null. This **doubles storage** and
-**halves query speed** (measured: 229M rows/s → 98M rows/s on GROUP BY
-with Nullable(Int64)). The engine defaults ORDER BY columns and booleans
-to NOT NULL because null in these positions destroys index effectiveness
-and wastes storage for no benefit.
+**halves query speed** (measured: 229M rows/s -> 98M rows/s on GROUP BY
+with Nullable(Int64)). Booleans and `timestamp` are non-null by default
+for this reason.
+
+**Design decision: ORDER BY keys must not be Nullable.** ClickHouse
+refuses a Nullable column in a sorting key unless the merge-tree setting
+`allow_nullable_key = 1` is enabled, and even with it on a null in the
+sort key cripples index effectiveness. Rather than silently flip
+`allow_nullable_key` on -- or fail the whole table -- the engine drops any
+Nullable ORDER BY column from the sorting key and logs a warning. This
+applies to `LowCardinality(Nullable(T))` too. To keep a column in the
+ORDER BY, mark it `not_null` (or give it a DEFAULT, which also forces
+non-null).
 
 For payload columns where NULL genuinely means "not provided" (as opposed
-to empty string or zero), Nullable is correct. Don't fight it — just
+to empty string or zero), Nullable is correct. Don't fight it -- just
 keep it off your ORDER BY and high-filter columns.
 
 ### Examples

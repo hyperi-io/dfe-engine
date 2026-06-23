@@ -257,7 +257,7 @@ class SchemaBuilderV2:
             return SchemaLoader.load_profile(profile_name, version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile '{profile_name}' for source '{source_name}': {e}"
+                f"Failed to load profile {profile_name!r} for source {source_name!r}: {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
@@ -279,7 +279,7 @@ class SchemaBuilderV2:
                 )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
-                    f"Failed to load meta_schema for source '{source_name}': {e}"
+                    f"Failed to load meta_schema for source {source_name!r}: {e}"
                 ) from e
 
         if schema_cfg.derived_schema:

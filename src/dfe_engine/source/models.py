@@ -70,6 +70,10 @@ class SchemaColumn(BaseModel):
         default=None,
         description="Exact ClickHouse type — bypasses primitive mapping",
     )
+    codec: str | None = Field(
+        default=None,
+        description="Explicit CODEC contents, emitted verbatim - required to set a codec with ch_override",
+    )
 
     @field_validator("attribute", mode="before")
     @classmethod
@@ -90,7 +94,7 @@ class SchemaColumn(BaseModel):
 
         # Validate primitive
         if self.type not in registry.primitives and not self.ch_override:
-            errors.append(f"Column '{self.name}': unknown primitive '{self.type}'")
+            errors.append(f"Column {self.name!r}: unknown primitive {self.type!r}")
             return errors  # Can't validate further
 
         # Validate use_case↔primitive
@@ -98,21 +102,21 @@ class SchemaColumn(BaseModel):
             try:
                 registry.validate_use_case(self.type, self.use_case)
             except Exception as e:
-                errors.append(f"Column '{self.name}': {e}")
+                errors.append(f"Column {self.name!r}: {e}")
 
         # Validate attribute↔primitive
         for attr in self.attribute:
             try:
                 registry.validate_attribute(self.type, attr)
             except Exception as e:
-                errors.append(f"Column '{self.name}': {e}")
+                errors.append(f"Column {self.name!r}: {e}")
 
         # Validate ch_override
         if self.ch_override:
             try:
                 registry.validate_ch_override(self.ch_override)
             except Exception as e:
-                errors.append(f"Column '{self.name}': {e}")
+                errors.append(f"Column {self.name!r}: {e}")
 
         return errors
 
@@ -182,7 +186,7 @@ class SourceSchema(BaseModel):
     def _validate_engine(cls, v: str) -> str:
         valid = {"MergeTree", "ReplicatedMergeTree", "SharedMergeTree"}
         if v not in valid:
-            raise ValueError(f"Invalid engine '{v}'. Valid: {', '.join(sorted(valid))}")
+            raise ValueError(f"Invalid engine {v!r}. Valid: {', '.join(sorted(valid))}")
         return v
 
 
@@ -199,7 +203,7 @@ class SourceTransform(BaseModel):
     def _validate_engine(cls, v: str) -> str:
         valid = {"vector", "wasm"}
         if v not in valid:
-            raise ValueError(f"Invalid transform engine '{v}'. Valid: {', '.join(sorted(valid))}")
+            raise ValueError(f"Invalid transform engine {v!r}. Valid: {', '.join(sorted(valid))}")
         return v
 
 
@@ -512,10 +516,10 @@ class Source(BaseModel):
     def _validate_source_name(cls, v: str) -> str:
         """Enforce _source naming rules."""
         if len(v) > _SOURCE_MAX_LENGTH:
-            raise ValueError(f"Source name '{v}' exceeds max length of {_SOURCE_MAX_LENGTH}")
+            raise ValueError(f"Source name {v!r} exceeds max length of {_SOURCE_MAX_LENGTH}")
         if not _SOURCE_PATTERN.match(v):
             raise ValueError(
-                f"Source name '{v}' must match [a-z][a-z0-9_]* "
+                f"Source name {v!r} must match [a-z][a-z0-9_]* "
                 f"(lowercase alphanumeric + underscores, starts with letter)"
             )
         return v

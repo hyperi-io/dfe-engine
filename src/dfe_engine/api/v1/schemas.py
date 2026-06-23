@@ -444,7 +444,7 @@ async def get_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Schema '{schema_path}' not found",
+                "message": f"Schema {schema_path!r} not found",
             },
         )
     if version not in meta.versions:
@@ -452,7 +452,7 @@ async def get_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Version '{version}' not found for schema '{canonical_path}'",
+                "message": f"Version {version!r} not found for schema {canonical_path!r}",
             },
         )
     ver = meta.versions[version]
@@ -542,7 +542,7 @@ async def add_meta_schema_version(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Schema '{schema_path}' not found",
+                "message": f"Schema {schema_path!r} not found",
             },
         ) from None
     except SchemaValidationError as exc:
@@ -557,7 +557,7 @@ async def add_meta_schema_version(
 
     try:
         if registry.schema_version_exists(canonical_path, new_ver):
-            raise SchemaVersionError(f"Version '{new_ver}' already exists")
+            raise SchemaVersionError(f"Version {new_ver!r} already exists")
         col_dicts = [col.to_yaml_dict() for col in body.columns]
         SchemaManager.add_version(
             yaml_path,
@@ -699,7 +699,7 @@ async def update_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Schema '{schema_path}' not found",
+                "message": f"Schema {schema_path!r} not found",
             },
         )
 
@@ -716,7 +716,7 @@ async def update_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Version '{version}' not found for schema '{canonical_path}'",
+                "message": f"Version {version!r} not found for schema {canonical_path!r}",
             },
         )
 
@@ -781,7 +781,7 @@ async def delete_meta_schema(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Schema '{schema_path}' not found",
+                "message": f"Schema {schema_path!r} not found",
             },
         )
     try:
@@ -846,7 +846,10 @@ async def elastic_converter(
         ) from exc
 
 
-@router.get("/{source_name}/columns", response_model=list[SchemaColumn])
+@router.get(
+    "/{source_name}/columns",
+    response_model=PaginatedResponse[SchemaColumn],
+)
 async def get_schema_columns(
     source_name: str,
     request: Request,
@@ -856,9 +859,13 @@ async def get_schema_columns(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
+    pagination: PaginationParams = Depends(),
     _auth: None = Depends(require_action("source:read")),
-) -> list[SchemaColumn]:
-    """Get composed schema columns for a source version (profile + meta/derived/additional)."""
+) -> PaginatedResponse[SchemaColumn]:
+    """Get composed schema columns for a source version (profile + meta/derived/additional).
+
+    Use ``per_page=-1`` to return all columns in one page.
+    """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -867,7 +874,7 @@ async def get_schema_columns(
     except SourceNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
+            detail={"code": "not_found", "message": f"Source {source_name!r} not found"},
         )
 
     version_id = version or source.runtime_version_id()
@@ -886,7 +893,7 @@ async def get_schema_columns(
             status_code=404,
             detail={
                 "code": "no_schema",
-                "message": f"Source '{source_name}' version '{version_id}' has no schema configured",
+                "message": f"Source {source_name!r} version '{version_id}' has no schema configured",
             },
         )
 
@@ -903,7 +910,7 @@ async def get_schema_columns(
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
-    return [
+    all_columns = [
         SchemaColumn(
             name=col.name,
             type=col.type,
@@ -917,6 +924,11 @@ async def get_schema_columns(
         )
         for col in columns
     ]
+    return PaginatedResponse.from_list(
+        all_columns,
+        pagination.page,
+        pagination.per_page,
+    )
 
 
 @router.post("/{source_name}/build", response_model=SchemaBuildResult)
@@ -944,7 +956,7 @@ async def build_schema(
     except SourceNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
+            detail={"code": "not_found", "message": f"Source {source_name!r} not found"},
         )
 
     version_id = version or source.runtime_version_id()

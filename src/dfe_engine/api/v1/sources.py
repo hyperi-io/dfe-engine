@@ -210,7 +210,7 @@ async def create_source(
             status_code=409,
             detail={
                 "code": "conflict",
-                "message": f"Source '{name}' already exists",
+                "message": f"Source {name!r} already exists",
             },
         )
 
@@ -443,7 +443,7 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Source '{name}' not found",
+                "message": f"Source {name!r} not found",
             },
         )
     return source
@@ -474,7 +474,7 @@ async def update_source(
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Source '{name}' not found",
+                "message": f"Source {name!r} not found",
             },
         )
 
@@ -506,7 +506,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
             status_code=404,
             detail={
                 "code": "not_found",
-                "message": f"Source '{name}' not found",
+                "message": f"Source {name!r} not found",
             },
         )
     registry.delete_source(name)
@@ -529,7 +529,7 @@ async def bulk_action(
             status_code=422,
             detail={
                 "code": "validation_error",
-                "message": f"Unknown action '{body.action}'. Must be: enable, disable, delete",
+                "message": f"Unknown action {body.action!r}. Must be: enable, disable, delete",
             },
         )
 

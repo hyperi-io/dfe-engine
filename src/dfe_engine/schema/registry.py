@@ -1,4 +1,4 @@
-"""Meta schema Registry — CRUD management for meta schema definitions.
+"""Meta schema Registry - CRUD management for meta schema definitions.
 
 Backed by DirectoryConfigStore (YAML directory as SSoT).
 
@@ -28,6 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from dulwich import porcelain as git
+from dulwich.repo import InvalidUserIdentity, check_user_identity
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 from pydantic import ValidationError
@@ -51,7 +53,7 @@ class SchemaValidationError(SchemaError):
 def _schema_location(schema_path: str) -> tuple[str, str]:
     """Split a registry key into parent path and schema name (YAML stem)."""
     parts = [p for p in schema_path.replace("\\", "/").split("/") if p]
-    if not parts:
+    if not (parts):
         raise SchemaValidationError("Invalid empty schema path")
     if len(parts) == 1:
         return "", parts[0]
@@ -60,7 +62,7 @@ def _schema_location(schema_path: str) -> tuple[str, str]:
 
 def canonical_schema_path(schema_path: str) -> str:
     """Normalize a registry key (forward slashes, no empty segments)."""
-    parent, name = _schema_location(schema_path)
+    parent, name = _schema_location(schema_path=schema_path)
     return f"{parent}/{name}" if parent else name
 
 
@@ -107,8 +109,6 @@ class SchemaRegistry:
         git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
-        # Resolve so YAML paths and git.relative_to(repo_root) agree (relative
-        # DFE_SCHEMAS_DIR breaks delete_schema when pylib's repo root is absolute).
         self._directory = Path(schemas_directory).expanduser().resolve(strict=False)
         self._directory.mkdir(parents=True, exist_ok=True)
 
@@ -120,6 +120,82 @@ class SchemaRegistry:
             git_push=git_push,
         )
         self._store.start()
+
+    @staticmethod
+    def _draft_commit_message(
+        table: str, action: str, description: str | None, created_by: str | None
+    ) -> str:
+        """Build the git commit subject for a schema change."""
+        message = description or f"schema: {action} {table}"
+        if created_by:
+            message = f"{message} (by {created_by})"
+        return message
+
+    def _git_commit_and_push(
+        self, yaml_path: Path, commit_msg: str, created_by: str | None = None
+    ) -> None:
+        """Commit a schema file change and push to the remote when configured."""
+        self._store._git_commit(yaml_path, commit_msg, author=created_by)
+        if self._store._git_push:
+            self._store._git_push_remote()
+
+    def _git_delete(self, yaml_path: Path, commit_msg: str, created_by: str | None = None) -> None:
+        """Stage and commit a schema file deletion, pushing if configured."""
+        repo = self._store._repo
+        if repo is None:
+            yaml_path.unlink(missing_ok=True)
+            return
+        try:
+            repo_root = Path(repo.path).resolve(strict=False)
+            rel_path = str(yaml_path.resolve(strict=False).relative_to(repo_root))
+            yaml_path.unlink(missing_ok=True)
+            git.rm(repo, paths=[rel_path])
+            self._git_commit_and_push(
+                commit_msg=commit_msg, created_by=created_by, yaml_path=yaml_path
+            )
+        except (git.Error, ValueError, OSError) as e:
+            logger.error(f"Git delete failed: {e}")
+            yaml_path.unlink(missing_ok=True)
+
+    @staticmethod
+    def _table_name(path: str) -> str:
+        """Map path to a DirectoryConfigStore table name."""
+        return f"{path}"
+
+    def _validate_created_by(self, created_by: str | None) -> None:
+        """Reject a git author string that is not 'username <email>'."""
+        if not (self._store.is_git and created_by):
+            return
+        try:
+            check_user_identity(created_by.encode())
+        except InvalidUserIdentity as e:
+            raise SchemaValidationError(
+                f"Invalid 'created_by' identity (expected 'username <email>'): {created_by!r}"
+            ) from e
+
+    def _yaml_path(self, table: str) -> Path:
+        """Filesystem path for a schema table key (e.g. ``aws/cloudtrail`` -> ``.../aws/cloudtrail.yaml``).
+
+        Slashes (and backslashes, normalized to slashes) separate nested directories so keys like `acme/cloudtrail` and `contoso/cloudtrail` map to different files.
+        """
+        parts = [part for part in table.replace("\\", "/").split("/") if (part)]
+        if not (parts):
+            raise SchemaValidationError("Invalid empty schema path")
+        for segment in parts:
+            if segment in (".", ".."):
+                raise SchemaValidationError(f"Invalid schema path segment: {segment!r}")
+            if "\x00" in segment:
+                raise SchemaValidationError("Invalid schema path: null byte in segment")
+        if len(parts) == 1:
+            candidate = self._directory / f"{parts[0]}.yaml"
+        else:
+            candidate = self._directory.joinpath(*parts[:-1]) / f"{parts[-1]}.yaml"
+
+        base = self._directory.resolve(strict=False)
+        resolved = candidate.resolve(strict=False)
+        if not (resolved.is_relative_to(base)):
+            raise SchemaValidationError("Schema path escapes schemas directory")
+        return candidate
 
     @classmethod
     def get_instance(
@@ -133,7 +209,7 @@ class SchemaRegistry:
         """Get singleton registry instance."""
         if cls._instance is None:
             if schemas_directory is None:
-                raise SchemaError("schemas_directory is required on first call to get_instance()")
+                raise SchemaError("'schemas_directory' is required on first call to get_instance()")
             cls._instance = SchemaRegistry(
                 schemas_directory=schemas_directory,
                 writable=writable,
@@ -237,19 +313,7 @@ class SchemaRegistry:
         created_by: str | None = None,
         description: str | None = None,
     ) -> MetaSchema:
-        """Save a meta schema definition.
-
-        Args:
-            meta_schema: MetaSchema model or dict.
-            created_by: Username/identity.
-            description: Change description.
-
-        Returns:
-            Validated MetaSchema model.
-
-        Raises:
-            SchemaValidationError: Validation failed.
-        """
+        """Save a meta schema definition."""
         if isinstance(meta_schema, dict):
             table = str(meta_schema.get("path") or "")
             try:
@@ -257,31 +321,45 @@ class SchemaRegistry:
             except Exception as e:
                 raise SchemaValidationError(f"Invalid schema definition: {e}") from e
 
-        if not meta_schema.path:
-            raise SchemaValidationError("MetaSchema.path is required when saving")
+        if not (meta_schema.path):
+            raise SchemaValidationError("'MetaSchema.path' is required when saving")
+
+        self._validate_created_by(created_by=created_by)
 
         config_data = meta_schema.to_yaml_dict()
-        table = self._table_name(meta_schema.path)
+        table = self._table_name(path=meta_schema.path)
 
-        yaml_path = self._yaml_path(meta_schema.path)
+        yaml_path = self._yaml_path(table=meta_schema.path)
         yaml_path.parent.mkdir(parents=True, exist_ok=True)
 
-        yaml_dump(config_data, yaml_path)
+        yaml_dump(data=config_data, dest=yaml_path)
 
         # Git commit if git-aware
         if self._store.is_git:
-            commit_msg = description or f"schema: update {table}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
+            commit_msg = self._draft_commit_message(
+                action="update", created_by=created_by, description=description, table=table
+            )
+            self._git_commit_and_push(
+                commit_msg=commit_msg, created_by=created_by, yaml_path=yaml_path
+            )
 
         # Refresh cache
         self._store._refresh_all()
 
-        logger.info(f"Saved schema '{table}' → {yaml_path}")
+        logger.info(f"Saved schema {table!r} -> {yaml_path!r}")
         return meta_schema
+
+    def get_schema(self, path: str) -> MetaSchema:
+        """Get a meta schema."""
+        table = self._table_name(path)
+        config_data = self._store.get(table)
+        if config_data is None:
+            desc = f"{path}"
+            raise SchemaNotFoundError(f"Schema not found: {desc!r}")
+
+        schema = MetaSchema.model_validate(config_data)
+        schema.path = path
+        return schema
 
     def notify_schema_file_updated(
         self,
@@ -294,61 +372,41 @@ class SchemaRegistry:
         table = self._table_name(path)
         yaml_path = self._yaml_path(path)
         if not yaml_path.exists():
-            raise SchemaNotFoundError(f"Schema not found: '{path}'")
+            raise SchemaNotFoundError(f"Schema not found: {path!r}")
+
+        self._validate_created_by(created_by=created_by)
 
         if self._store.is_git:
-            commit_msg = description or f"schema: update {table}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
+            commit_msg = self._draft_commit_message(table, "update", description, created_by)
+            self._git_commit_and_push(yaml_path, commit_msg, created_by)
 
         self._store._refresh_all()
-        logger.info(f"Schema file updated '{table}' → {yaml_path}")
+        logger.info(f"Schema file updated {table!r} → {yaml_path}")
         return self.get_schema(path)
 
-    def delete_schema(self, path: str) -> None:
-        """Delete a meta schema.
-
-        Args:
-            path: Path to the schema YAML file.
-        """
+    def delete_schema(
+        self, path: str, *, description: str | None = None, created_by: str | None = None
+    ) -> None:
+        """Delete a meta schema."""
         table = self._table_name(path)
         yaml_path = self._yaml_path(path)
 
-        if not yaml_path.exists():
-            logger.warning(f"Schema file does not exist: {yaml_path}")
+        if not (yaml_path.exists()):
+            logger.warning(f"Schema file does not exist: {yaml_path!r}")
             return
 
-        if self._store.is_git and self._store._repo is not None:
-            try:
-                from dulwich import porcelain as git
+        self._validate_created_by(created_by=created_by)
 
-                repo_root = Path(self._store._repo.path).resolve(strict=False)
-                yaml_abs = yaml_path.resolve(strict=False)
-                rel_path = str(yaml_abs.relative_to(repo_root))
-                # Remove from disk first so dulwich can stage deletion when the
-                # index has staged-but-uncommitted changes (e.g. failed commit).
-                yaml_abs.unlink(missing_ok=True)
-                git.rm(self._store._repo, paths=[rel_path])
-                git.commit(
-                    self._store._repo,
-                    message=f"schema: delete {table}".encode(),
-                )
-                if self._store._git_push:
-                    self._store._git_push_remote()
-            except Exception as e:
-                logger.error(f"Git delete failed: {e}")
-                if yaml_path.exists():
-                    yaml_path.unlink(missing_ok=True)
+        if self._store.is_git:
+            commit_msg = self._draft_commit_message(table, "delete", description, created_by)
+            self._git_delete(yaml_path=yaml_path, commit_msg=commit_msg, created_by=created_by)
         else:
             yaml_path.unlink(missing_ok=True)
 
         with self._store._lock:
             self._store._cache.pop(table, None)
 
-        logger.info(f"Deleted schema '{table}'")
+        logger.info(f"Deleted schema {table!r}")
 
     def find_schema_at_location(self, schema_path: str) -> str | None:
         """Return an existing table key that occupies the same path location, if any.
@@ -387,7 +445,7 @@ class SchemaRegistry:
                 logger.error("Invalid schema '%s' (excluded from list): %s", table, e)
                 continue
             except Exception as e:
-                logger.error("Failed to load schema '%s' (excluded from list): %s", table, e)
+                logger.error(f"Failed to load schema {table!r}, (excluded from list): {e}")
                 continue
 
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
@@ -399,20 +457,16 @@ class SchemaRegistry:
             except OSError:
                 updated_at = ""
 
-            versions_map = schema.versions or {}
-            if schema.current and (cur_ver := versions_map.get(schema.current)):
-                n_columns = len(cur_ver.columns)
-            elif versions_map:
-                n_columns = len(next(iter(versions_map.values())).columns)
-            else:
-                n_columns = 0
+            # 'current' always names a real version; fall back to the first if it ever doesn't.
+            current_version = schema.versions.get(schema.current)
+            version = current_version or next(iter(schema.versions.values()))
 
             results.append(
                 {
                     "path": schema_rel,
                     "current": schema.current,
-                    "versions": list(versions_map.keys()),
-                    "column_count": n_columns,
+                    "versions": list(schema.versions.keys()),
+                    "column_count": len(version.columns),
                     "updated_at": updated_at,
                 }
             )
