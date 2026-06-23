@@ -521,14 +521,14 @@ class TestDiscoverPaths:
         assert by_path["user.email"].column_type == "string"
         assert by_path["user.email"].copy_expr == "@copy: _json.user.email"
 
-    def test_match_filter_adds_where_clause(self):
+    def test_json_match_field_targets_subcolumn(self):
         client = _RecordingClient(discover_rows=[("a", "String")])
         discover_paths(
             client,
             db="dfe",
             source="default",
             existing_columns=[],
-            match_field="tags.collector.type",
+            match_field="_json.tags.collector.type",
             match_value="syslog",
         )
         sql, params = client.calls[0]
@@ -538,6 +538,21 @@ class TestDiscoverPaths:
             in sql
         )
         assert params == {"match_value": "syslog"}
+
+    def test_bare_match_field_targets_real_column(self):
+        client = _RecordingClient(discover_rows=[("a", "String")])
+        discover_paths(
+            client,
+            db="dfe",
+            source="default",
+            existing_columns=[],
+            match_field="_org_id",
+            match_value="acme",
+        )
+        sql, params = client.calls[0]
+        assert "WHERE toString(`_org_id`) = {match_value:String}" in sql
+        assert "assumeNotNull(_json)" not in sql.split("WHERE", 1)[1]
+        assert params == {"match_value": "acme"}
 
     def test_paths_filter_adds_having(self):
         client = _RecordingClient(discover_rows=[("a", "String")])
@@ -553,7 +568,7 @@ class TestDiscoverPaths:
             db="dfe",
             source="default",
             existing_columns=[],
-            match_field="f",
+            match_field="_json.f",
             match_value="v",
             samples=2,
         )
@@ -570,7 +585,7 @@ class TestDiscoverPaths:
             db="dfe",
             source="default",
             existing_columns=[],
-            match_field="f",
+            match_field="_json.f",
             match_value="v",
             stats=True,
         )
