@@ -533,13 +533,14 @@ class HelmValuesCompiler:
         """Inject source routing and ClickHouse hosts into loader config."""
         from dfe_engine.services.source_routing import compile_loader_routing
 
-        routing = compile_loader_routing(self._source, db=self._env.clickhouse.database)
+        data_db = self._env.clickhouse.effective_data_database
+        routing = compile_loader_routing(self._source, db=data_db)
         config["routing"] = routing.model_dump(mode="json")
 
         # Inject ClickHouse hosts from environment
         if "clickhouse" in config:
             config["clickhouse"]["hosts"] = list(self._env.clickhouse.hosts)
-            config["clickhouse"]["database"] = self._env.clickhouse.database
+            config["clickhouse"]["database"] = data_db
             config["clickhouse"]["username"] = self._env.clickhouse.username
 
         return config

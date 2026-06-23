@@ -138,7 +138,14 @@ class SourceHeader(BaseModel):
 class SourceMatch(BaseModel):
     """Receiver match rule — how the receiver identifies this source."""
 
-    field: str = Field(..., description="JSON field to inspect")
+    field: str = Field(
+        ...,
+        description=(
+            "Field to match on. Prefix with '_json.' to match a path inside the "
+            "JSON column (e.g. '_json._source_fetcher'); a bare name matches a "
+            "real top-level column (e.g. '_org_id')."
+        ),
+    )
     value: str = Field(..., description="Expected value (exact match)")
 
 

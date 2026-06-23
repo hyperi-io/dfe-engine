@@ -89,7 +89,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "source": PROMO_SOURCE,
             "display_name": "Promo Source",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": PROMO_SOURCE},
+            "match": {"field": "_json.tags.collector.type", "value": PROMO_SOURCE},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"meta_schema": "meta/promo.yaml", "engine": "MergeTree"},
         },
@@ -100,7 +100,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "source": NOMETA_SOURCE,
             "display_name": "No Meta Source",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": NOMETA_SOURCE},
+            "match": {"field": "_json.tags.collector.type", "value": NOMETA_SOURCE},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         },
@@ -113,7 +113,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "source": VERSIONED_SOURCE,
             "display_name": "Versioned Source",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": VERSIONED_SOURCE},
+            "match": {"field": "_json.tags.collector.type", "value": VERSIONED_SOURCE},
             "current": "2.0.0",
             "versions": {
                 "1.0.0": {"date_time": "2026-01-01"},
@@ -209,7 +209,7 @@ class TestDiscoverJsonPaths:
         assert resp.status_code == 404
 
     def test_no_meta_schema_discovers_against_catchall(self, app, client, admin_headers):
-        db = get_settings().clickhouse.database
+        db = get_settings().clickhouse.effective_data_database
         landing = get_settings().clickhouse.landing_table
         ch = _DiscoveryClient([("user.id", "Int64")])
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
@@ -235,7 +235,7 @@ class TestDiscoverJsonPaths:
         assert params["match_value"] == NOMETA_SOURCE
 
     def test_default_version_with_meta_schema_uses_own_table(self, app, client, admin_headers):
-        db = get_settings().clickhouse.database
+        db = get_settings().clickhouse.effective_data_database
         ch = _DiscoveryClient()
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         # VERSIONED_SOURCE current is v2.0.0, which has a meta_schema.
@@ -247,7 +247,7 @@ class TestDiscoverJsonPaths:
         assert "WHERE" not in sql  # owns its table -> no match filter
 
     def test_version_param_selects_catchall_version(self, app, client, admin_headers):
-        db = get_settings().clickhouse.database
+        db = get_settings().clickhouse.effective_data_database
         landing = get_settings().clickhouse.landing_table
         ch = _DiscoveryClient()
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
