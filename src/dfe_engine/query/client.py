@@ -134,13 +134,16 @@ class QueryClient:
                 settings = get_settings()
                 qv = settings.query_views
 
+                # `target` selects the connection (auth db); catalog/executor
+                # qualify view + table lookups against the data database.
                 adapter = ClickHouseAdapter(target=settings.clickhouse.database)
                 restricted_client = adapter.get_restricted_client()
                 admin_client = adapter.manager.get_clickhouse_client()
+                data_db = settings.clickhouse.effective_data_database
 
                 catalog = ViewCatalog(
                     client=admin_client,
-                    database=settings.clickhouse.database,
+                    database=data_db,
                     cache_ttl=qv.catalog_cache_ttl,
                     view_prefix=qv.view_prefix,
                 )
@@ -148,7 +151,7 @@ class QueryClient:
                 self._view_executor = ViewExecutor(
                     restricted_client=restricted_client,
                     catalog=catalog,
-                    database=settings.clickhouse.database,
+                    database=data_db,
                     default_limit=qv.default_limit,
                     max_limit=qv.max_limit,
                     default_timeout=qv.default_timeout,

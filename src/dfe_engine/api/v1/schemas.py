@@ -1149,7 +1149,7 @@ async def discover_json_paths(
         source, ver, schema_registry
     )
 
-    db = get_settings().clickhouse.database
+    db = get_settings().clickhouse.effective_data_database
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
     try:
@@ -1252,7 +1252,7 @@ async def promote_field(
         for p in raw_paths
     ]
 
-    db = get_settings().clickhouse.database
+    db = get_settings().clickhouse.effective_data_database
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}

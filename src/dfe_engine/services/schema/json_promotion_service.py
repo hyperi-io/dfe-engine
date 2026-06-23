@@ -199,21 +199,39 @@ def _json_subcolumn(path: str) -> str:
     return f"assumeNotNull({JSON_COLUMN}).`{path}`"
 
 
+def _match_accessor(match_field: str) -> str:
+    """SQL accessor for a source match field.
+
+    A field prefixed with ``_json.`` names a path *inside* the JSON column and
+    resolves to a subcolumn (the ``_json.`` is the column, not part of the
+    path). Any other field names a real top-level table column and is referenced
+    directly, so a match can target a column that lives outside the JSON object
+    (e.g. ``_org_id``). Rejects backticks either way to keep it injection-safe.
+    """
+    prefix = f"{JSON_COLUMN}."
+    if match_field.startswith(prefix):
+        return _json_subcolumn(match_field[len(prefix) :])
+    if "`" in match_field:
+        raise JsonPromotionError(f"Illegal match field: {match_field!r}")
+    return f"`{match_field}`"
+
+
 def _match_condition(
     match_field: str | None, match_value: str | None
 ) -> tuple[str, dict[str, Any]]:
     """SQL boolean condition + params restricting rows to one source's match rule.
 
     Returns ``("", {})`` when no match is supplied (the source owns its whole
-    table). Otherwise compares the ``_json`` subcolumn for ``match_field`` to
-    ``match_value`` as a string -- used when discovering against the shared
-    catch-all landing table, where a source's rows are identified by its match.
-    The value is parameterised (injection-safe); the field goes through
-    ``_json_subcolumn`` which rejects backticks.
+    table). Otherwise compares ``match_field`` to ``match_value`` as a string --
+    used when discovering against the shared catch-all landing table, where a
+    source's rows are identified by its match. ``match_field`` is resolved by
+    ``_match_accessor``: ``_json.<path>`` targets a JSON subcolumn, a bare name
+    targets a real column. The value is parameterised (injection-safe); the
+    field goes through ``_match_accessor`` which rejects backticks.
     """
     if not (match_field and match_value):
         return "", {}
-    sub = _json_subcolumn(match_field)
+    sub = _match_accessor(match_field)
     return f"toString({sub}) = {{match_value:String}}", {"match_value": match_value}
 
 

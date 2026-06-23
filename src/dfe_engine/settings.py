@@ -23,6 +23,7 @@ ClickHouse:
 - DFE_CLICKHOUSE_USERNAME (legacy: CLICKHOUSE_USER) -> clickhouse.username
 - DFE_CLICKHOUSE_PASSWORD (legacy: CLICKHOUSE_PASSWORD) -> clickhouse.password
 - DFE_CLICKHOUSE_DATABASE (legacy: CLICKHOUSE_DATABASE) -> clickhouse.database
+- DFE_CLICKHOUSE_DATA_DATABASE (legacy: CLICKHOUSE_DATA_DATABASE) -> clickhouse.data_database
 - DFE_CLICKHOUSE_LANDING_TABLE (legacy: CLICKHOUSE_LANDING_TABLE) -> clickhouse.landing_table
 - DFE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
@@ -99,7 +100,19 @@ class ClickHouseSettings(BaseModel):
     port: int = Field(default=9000)
     username: str = Field(default="default")
     password: str = Field(default="")
-    database: str = Field(default="default")
+    database: str = Field(
+        default="default",
+        description="Database the client connection authenticates against (its default db)",
+    )
+    data_database: str = Field(
+        default="",
+        description=(
+            "Database where DFE data tables live (landing table, per-source tables). "
+            "Falls back to `database` when empty. Lets the connection authenticate "
+            "against one database while DFE tables are qualified against another -- "
+            "read it via `effective_data_database`, never directly."
+        ),
+    )
     landing_table: str = Field(
         default="default",
         description="Catch-all table where un-split source data lands (db.landing_table)",
@@ -108,6 +121,17 @@ class ClickHouseSettings(BaseModel):
     verify: bool = Field(default=False)
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
+
+    @property
+    def effective_data_database(self) -> str:
+        """Database to qualify DFE table references with.
+
+        Returns ``data_database`` when set, else the connection ``database``.
+        Use this anywhere a query names a DFE table as ``db.table`` (discovery,
+        promotion, query-views, loader routing) so the connection's default
+        database and the data tables' database can diverge.
+        """
+        return self.data_database or self.database
 
 
 class HuntsSettings(BaseModel):
@@ -536,6 +560,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["password"] = val
     if val := _get_env("DFE_CLICKHOUSE_DATABASE", "CLICKHOUSE_DATABASE"):
         overrides["clickhouse"]["database"] = val
+    if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
+        overrides["clickhouse"]["data_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
         overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
