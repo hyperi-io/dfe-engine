@@ -161,7 +161,7 @@ def _apply_modifications(
             before = len(cols)
             cols = [c for c in cols if c.get("name") != name]
             if len(cols) == before:
-                raise SchemaVersionError(f"Column '{name}' not found for removal")
+                raise SchemaVersionError(f"Column {name!r} not found for removal")
 
         elif action == "update":
             name = mod.get("name")
@@ -175,11 +175,11 @@ def _apply_modifications(
                     found = True
                     break
             if not found:
-                raise SchemaVersionError(f"Column '{name}' not found for update")
+                raise SchemaVersionError(f"Column {name!r} not found for update")
 
         else:
             raise SchemaVersionError(
-                f"Unknown modification action: '{action}'. Valid: add, remove, update"
+                f"Unknown modification action: {action!r}. Valid: add, remove, update"
             )
     return cols
 
@@ -205,7 +205,7 @@ class SchemaManager:
         if current not in versions:
             available = ", ".join(sorted(versions.keys())) or "(none)"
             raise SchemaVersionError(
-                f"Version '{current}' not found in {p}. Available: {available}"
+                f"Version {current!r} not found in {p}. Available: {available}"
             )
 
         data["current"] = current
@@ -226,12 +226,12 @@ class SchemaManager:
         if version not in versions:
             available = ", ".join(sorted(versions.keys())) or "(none)"
             raise SchemaVersionError(
-                f"Version '{version}' not found in {p}. Available: {available}"
+                f"Version {version!r} not found in {p}. Available: {available}"
             )
 
         entry = versions[version]
         if not isinstance(entry, dict):
-            raise SchemaLoadError(f"Version entry for '{version}' must be a mapping: {p}")
+            raise SchemaLoadError(f"Version entry for {version!r} must be a mapping: {p}")
         entry["summary"] = summary
         yaml_dump(data, p)
 
@@ -243,7 +243,7 @@ class SchemaManager:
             try:
                 _validate_columns(col_dicts)
             except SchemaVersionError as exc:
-                raise SchemaVersionError(f"Version '{version}': {exc}") from exc
+                raise SchemaVersionError(f"Version {version!r}: {exc}") from exc
 
     @staticmethod
     def add_version(
@@ -284,7 +284,7 @@ class SchemaManager:
 
         versions = data.setdefault("versions", {})
         if new_version in versions:
-            raise SchemaVersionError(f"Version '{new_version}' already exists in {p}")
+            raise SchemaVersionError(f"Version {new_version!r} already exists in {p}")
 
         col_dicts = _normalise_columns(columns)
         if not col_dicts:
@@ -345,7 +345,7 @@ class SchemaManager:
 
         versions = data.get("versions", {})
         if new_version in versions:
-            raise SchemaVersionError(f"Version '{new_version}' already exists in {p}")
+            raise SchemaVersionError(f"Version {new_version!r} already exists in {p}")
 
         # Resolve source version
         src_ver = source_version or data.get("current")
@@ -354,7 +354,7 @@ class SchemaManager:
         if src_ver not in versions:
             available = ", ".join(sorted(versions.keys())) or "(none)"
             raise SchemaVersionError(
-                f"Source version '{src_ver}' not found in {p}. Available: {available}"
+                f"Source version {src_ver!r} not found in {p}. Available: {available}"
             )
 
         # Deep-copy source columns
