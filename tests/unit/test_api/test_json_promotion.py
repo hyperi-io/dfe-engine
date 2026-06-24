@@ -61,6 +61,23 @@ class _DiscoveryClient:
         return []
 
 
+class _SampleClient:
+    """ClickHouse stand-in returning canned sample rows; records each query."""
+
+    def __init__(
+        self,
+        columns: list[str] | None = None,
+        rows: list[tuple] | None = None,
+    ) -> None:
+        self.calls: list[tuple[str, dict]] = []
+        self._columns = columns or ["_json"]
+        self._rows = rows or [({"user": {"id": 1}},)]
+
+    def query_rows(self, sql: str, parameters: dict | None = None):
+        self.calls.append((sql, parameters or {}))
+        return self._columns, self._rows
+
+
 def make_api_settings(tmp_path: Path) -> DFESettings:
     """DFESettings wired with a seeded meta-schema and two sources."""
     schemas_root = tmp_path / "schemas"
@@ -266,6 +283,81 @@ class TestDiscoverJsonPaths:
     def test_unknown_version_404(self, client: TestClient, admin_headers):
         resp = client.get(
             f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths",
+            params={"version": "9.9.9"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+
+class TestSampleRows:
+    def test_requires_auth(self, client: TestClient):
+        resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows")
+        assert resp.status_code == 401
+
+    def test_unknown_source_404(self, client: TestClient, admin_headers):
+        resp = client.get("/api/v1/schemas/ghost/sample-rows", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_no_meta_schema_filters_by_match(self, app, client, admin_headers):
+        db = get_settings().clickhouse.effective_data_database
+        landing = get_settings().clickhouse.landing_table
+        ch = _SampleClient(columns=["_json"], rows=[({"user": {"id": 1}},)])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(f"/api/v1/schemas/{NOMETA_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        # No meta_schema -> sample the catch-all landing table, scoped by match.
+        assert body["table"] == f"{db}.{landing}"
+        assert body["match_field"] == "_json.tags.collector.type"
+        assert body["match_value"] == NOMETA_SOURCE
+        assert body["columns"] == ["_json"]
+        assert body["rows"] == [{"_json": {"user": {"id": 1}}}]
+        sql, params = ch.calls[0]
+        assert f"FROM `{db}`.`{landing}`" in sql
+        assert (
+            "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+            in sql
+        )
+        assert params["match_value"] == NOMETA_SOURCE
+
+    def test_meta_schema_version_samples_whole_table(self, app, client, admin_headers):
+        db = get_settings().clickhouse.effective_data_database
+        ch = _SampleClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        # VERSIONED_SOURCE current is v2.0.0, which owns its own table.
+        resp = client.get(f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["table"] == f"{db}.{VERSIONED_SOURCE}"
+        assert body["match_field"] is None
+        assert body["match_value"] is None
+        sql, _params = ch.calls[0]
+        assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
+        assert "WHERE" not in sql
+
+    def test_limit_param_is_passed_through(self, app, client, admin_headers):
+        ch = _SampleClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(
+            f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows",
+            params={"limit": 5},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        _sql, params = ch.calls[0]
+        assert params["limit"] == 5
+
+    def test_limit_out_of_range_422(self, client: TestClient, admin_headers):
+        resp = client.get(
+            f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows",
+            params={"limit": 0},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_unknown_version_404(self, client: TestClient, admin_headers):
+        resp = client.get(
+            f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows",
             params={"version": "9.9.9"},
             headers=admin_headers,
         )

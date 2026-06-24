@@ -22,6 +22,7 @@ from dfe_engine.services.schema.json_promotion_service import (
     promoted_paths,
     promotion_preview_ddl,
     qualified_table,
+    sample_rows,
     suggested_column_name,
 )
 from dfe_engine.source.type_registry import TypeRegistry
@@ -595,3 +596,70 @@ class TestDiscoverPaths:
         assert stats_params == {"match_value": "v"}
         assert result[0].coverage_pct == 42.5
         assert result[0].distinct_count == 7
+
+
+# ── sample_rows (SQL building) ───────────────────────────────
+
+
+class _SampleRowsClient:
+    """Fake ClickHouse client exposing ``query_rows``; records each call."""
+
+    def __init__(
+        self,
+        columns: list[str] | None = None,
+        rows: list[tuple] | None = None,
+    ) -> None:
+        self.calls: list[tuple[str, dict[str, Any]]] = []
+        self._columns = columns or []
+        self._rows = rows or []
+
+    def query_rows(
+        self, sql: str, parameters: dict[str, Any] | None = None
+    ) -> tuple[list[str], list[tuple]]:
+        self.calls.append((sql, parameters or {}))
+        return self._columns, self._rows
+
+
+class TestSampleRows:
+    def test_whole_table_sql_and_row_assembly(self):
+        client = _SampleRowsClient(
+            columns=["_org_id", "_json"],
+            rows=[("acme", {"a": 1}), ("acme", {"a": 2})],
+        )
+        columns, rows = sample_rows(client, db="dfe", source="syslog", limit=5)
+
+        sql, params = client.calls[0]
+        assert "SELECT * FROM `dfe`.`syslog`" in sql
+        assert "ORDER BY rand() LIMIT {limit:UInt32}" in sql
+        assert "WHERE" not in sql
+        assert params == {"limit": 5}
+
+        assert columns == ["_org_id", "_json"]
+        assert rows == [
+            {"_org_id": "acme", "_json": {"a": 1}},
+            {"_org_id": "acme", "_json": {"a": 2}},
+        ]
+
+    def test_match_filter_ands_into_where(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        sample_rows(
+            client,
+            db="dfe",
+            source="default",
+            match_field="_json.tags.collector.type",
+            match_value="syslog",
+            limit=10,
+        )
+        sql, params = client.calls[0]
+        assert "FROM `dfe`.`default`" in sql
+        assert (
+            "WHERE toString(assumeNotNull(_json).`tags.collector.type`) = {match_value:String}"
+            in sql
+        )
+        assert params == {"limit": 10, "match_value": "syslog"}
+
+    def test_empty_result_still_returns_columns(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        columns, rows = sample_rows(client, db="dfe", source="syslog")
+        assert columns == ["_json"]
+        assert rows == []

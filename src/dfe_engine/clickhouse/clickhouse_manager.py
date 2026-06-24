@@ -36,6 +36,17 @@ class ClickHouseClientWrapper:
     def __init__(self, client: Client):
         self._client = client
 
+    def query_rows(self, query: str, *args, **kwargs):
+        """Run a SELECT and return ``(column_names, result_rows)``.
+
+        ``execute()`` discards column names (it only yields ``result_rows``),
+        which is fine for scalar/aggregate reads but loses the shape needed to
+        assemble row dicts. Use this when the caller needs to map values back to
+        their columns (e.g. sampling whole rows).
+        """
+        result = self._client.query(query, *args, **kwargs)
+        return list(result.column_names), result.result_rows
+
     def execute(self, query: str, *args, **kwargs):
         """
         Execute a query, routing to command() or query() based on query type.
