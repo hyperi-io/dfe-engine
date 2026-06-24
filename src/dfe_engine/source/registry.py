@@ -162,7 +162,7 @@ class SourceRegistry:
         """
         config_data = self._store.get(source_name)
         if config_data is None:
-            raise SourceNotFoundError(f"Source not found: '{source_name}'")
+            raise SourceNotFoundError(f"Source not found: {source_name!r}")
 
         return Source.model_validate(config_data)
 
@@ -216,7 +216,7 @@ class SourceRegistry:
         # Force cache refresh
         self._store._refresh_all()
 
-        logger.info(f"Saved source '{source.source}' → {yaml_path}")
+        logger.info(f"Saved source {source.source!r} → {yaml_path}")
         return source
 
     def create_source_from_write(
@@ -301,7 +301,7 @@ class SourceRegistry:
         with self._store._lock:
             self._store._cache.pop(source_name, None)
 
-        logger.info(f"Deleted source '{source_name}'")
+        logger.info(f"Deleted source {source_name!r}")
 
     def list_sources(self, enabled_only: bool = False) -> list[dict[str, Any]]:
         """List all source definitions.
@@ -321,7 +321,7 @@ class SourceRegistry:
             try:
                 source = Source.model_validate(config_data)
             except Exception:
-                logger.warning(f"Failed to parse source '{table}', skipping")
+                logger.warning(f"Failed to parse source {table!r}, skipping")
                 continue
 
             if enabled_only and not source.enabled:
@@ -373,7 +373,7 @@ class SourceRegistry:
                     continue
                 sources.append(source)
             except Exception:
-                logger.warning(f"Failed to parse source '{table}', skipping")
+                logger.warning(f"Failed to parse source {table!r}, skipping")
 
         return sources
 
@@ -509,7 +509,7 @@ class SourceRegistry:
 
             source_name = resource.name.removesuffix(".yaml")
             if not overwrite and self.source_exists(source_name):
-                logger.debug(f"Built-in source '{source_name}' already exists, skipping")
+                logger.debug(f"Built-in source {source_name!r} already exists, skipping")
                 continue
 
             try:
@@ -519,7 +519,7 @@ class SourceRegistry:
                 count += 1
                 logger.info(f"Seeded built-in source: {source_name}")
             except Exception as e:
-                logger.warning(f"Failed to seed source '{source_name}': {e}")
+                logger.warning(f"Failed to seed source {source_name!r}: {e}")
 
         if count > 0:
             self._store._refresh_all()

@@ -61,7 +61,7 @@ class TestSchemaRegistryCRUD:
         registry.save_schema(ms)
         loaded = registry.get_schema("aws/cloudtrail")
         assert loaded.current == "1"
-        assert loaded.path is None
+        assert loaded.path == "aws/cloudtrail"
 
     def test_save_flat_table_key(self, registry):
         ms = _minimal_meta("standalone")
@@ -116,7 +116,7 @@ class TestSchemaRegistryCRUD:
         )
         registry._store._refresh_all()
         assert registry.get_schema_current_version("meta/m365/alerts") == "2.0.0"
-        with pytest.raises(pydantic.ValidationError, match="must define at least one column"):
+        with pytest.raises(pydantic.ValidationError, match="must contain at least 1 element"):
             registry.get_schema("meta/m365/alerts")
 
     def test_list_schemas_metadata(self, registry):
@@ -255,6 +255,12 @@ class TestSchemaRegistryCoverage:
     def test_save_schema_git_commit_with_author_and_push(self, tmp_path, monkeypatch):
         monkeypatch.chdir(tmp_path)
         Repo.init(str(tmp_path))
+        repo = Repo(str(tmp_path))
+        config = repo.get_config()
+        config.set((b"user",), b"name", b"username")
+        config.set((b"user",), b"email", b"user@email.com")
+        config.write_to_path()
+        repo.close()
         schemas = tmp_path / "schemas"
         schemas.mkdir()
         SchemaRegistry.reset_instance()
@@ -266,7 +272,9 @@ class TestSchemaRegistryCoverage:
         )
         try:
             ms = _minimal_meta("svc/widget")
-            reg.save_schema(ms, created_by="alice", description="audit")
+            reg.save_schema(
+                ms, created_by="username <user@email.com>", description="audit"
+            )
             assert reg.get_schema("svc/widget").current == "1"
         finally:
             reg.close()
@@ -298,7 +306,7 @@ class TestSchemaRegistryCoverage:
             monkeypatch.setattr(
                 dulwich_porcelain,
                 "rm",
-                lambda *a, **k: (_ for _ in ()).throw(RuntimeError("rm boom")),
+                lambda *a, **k: (_ for _ in ()).throw(dulwich_porcelain.Error("rm boom")),
             )
             reg.delete_schema("x/y")
             assert not yaml_file.exists()
@@ -375,11 +383,11 @@ class TestSchemaRegistryCoverage:
         assert "invalid_meta" not in paths
         assert "good/meta" in paths
 
-    def test_list_schemas_column_count_fallback_when_current_unset(self, registry):
-        """Listing uses the first version's columns when ``current`` is empty."""
+    def test_list_schemas_column_count_uses_current_version_columns(self, registry):
+        """Listing reports the column count of the schema's current version."""
         ms = MetaSchema(
             path="orphan/v",
-            current="",
+            current="1",
             versions={
                 "1": SchemaVersion(
                     date="2026-01-01",
@@ -397,16 +405,16 @@ class TestSchemaRegistryCoverage:
         row = next(r for r in rows if r["path"] == "orphan/v")
         assert row["column_count"] == 2
 
-    def test_list_schemas_column_count_zero_empty_versions(self, registry):
-        ms = MetaSchema(
-            path="empty/vers",
-            current="",
-            versions={},
-        )
-        registry.save_schema(ms)
-        rows = registry.list_schemas()
-        row = next(r for r in rows if r["path"] == "empty/vers")
-        assert row["column_count"] == 0
+    def test_schema_with_empty_versions_is_rejected(self):
+        """A schema with no versions is rejected at construction (never listed)."""
+        with pytest.raises(
+            pydantic.ValidationError, match="'versions' must contain at least 1 element"
+        ):
+            MetaSchema(
+                path="empty/vers",
+                current="1",
+                versions={},
+            )
 
     def test_list_schemas_skips_current_not_in_versions(self, registry, schemas_dir):
         """Invalid on-disk YAML (current missing from versions) is excluded from list."""
@@ -430,8 +438,7 @@ class TestSchemaRegistryCoverage:
         def busted_stat(self, *args, **kwargs):
             if self.name == "break.yaml" and self.parent.name == "stat":
                 n_seen["c"] += 1
-                if n_seen["c"] >= 2:
-                    raise OSError("stat denied")
+                raise OSError("stat denied")
             return orig_stat(self, *args, **kwargs)
 
         monkeypatch.setattr(Path, "stat", busted_stat)

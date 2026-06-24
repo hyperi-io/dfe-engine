@@ -22,7 +22,7 @@ Usage:
     columns = loader.load_meta_schema("/path/to/meta_schema.yaml")
     columns = loader.apply_derived_schema(columns, "/path/to/derived.yaml")
     columns = loader.apply_additional_fields(columns, "/path/to/additional.yaml")
-    header = loader.load_profile("timeseries", version="1.0.0")
+    header = loader.load_profile("timeseries", profile_version="1.0.0")
     full = loader.compose(header, columns)
 """
 
@@ -39,6 +39,7 @@ from dfe_engine.yaml_utils import yaml_load
 
 # Submodule location relative to project root.
 _SUBMODULE_COMMON_HEADER = "schemas/common-header"
+_SUBMODULE_HUNTS = "schemas/hunts"
 _SUBMODULE_ROOT = "schemas"
 
 # Bundled profiles inside the package (fallback).
@@ -56,6 +57,29 @@ def _find_project_root() -> Path | None:
             break
         current = parent
     return None
+
+
+def _resolve_hunts_schemas_dir() -> Path:
+    """Resolve the hunts schemas directory.
+
+    Order: DFE_SCHEMAS_DIR env var → submodule → bundled.
+    """
+    # 1. Env var override
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        candidate = Path(env_dir) / "hunts"
+        if candidate.is_dir():
+            return candidate
+
+    # 2. Submodule (relative to project root)
+    root = _find_project_root()
+    if root:
+        candidate = root / _SUBMODULE_HUNTS
+        if candidate.is_dir():
+            return candidate
+
+    # 3. Bundled fallback
+    return _BUNDLED_PROFILES_DIR
 
 
 def _resolve_profiles_dir() -> Path:
@@ -205,11 +229,11 @@ def _extract_version_columns(data: dict[str, Any], version: str, path: Path) -> 
     if version not in versions:
         available = ", ".join(sorted(versions.keys())) or "(none)"
         raise SchemaLoadError(
-            f"Version '{version}' not found in {path}. Available versions: {available}"
+            f"Version {version!r} not found in {path}. Available versions: {available}"
         )
     ver_entry = versions[version]
     if not isinstance(ver_entry, dict) or "columns" not in ver_entry:
-        raise SchemaLoadError(f"Version '{version}' in {path} must contain a 'columns' key")
+        raise SchemaLoadError(f"Version {version!r} in {path} must contain a 'columns' key")
     return ver_entry["columns"]
 
 
@@ -307,7 +331,7 @@ class SchemaLoader:
                 columns.append(SchemaColumn.model_validate(col_data))
             except Exception as e:
                 name = col_data.get("name", f"index {i}")
-                raise SchemaLoadError(f"Invalid column '{name}' in {path}: {e}") from e
+                raise SchemaLoadError(f"Invalid column {name!r} in {path}: {e}") from e
 
         return columns
 
@@ -350,7 +374,7 @@ class SchemaLoader:
         profile_name: str,
         profiles_dir: str | Path | None = None,
         *,
-        version: str | None = None,
+        profile_version: str | None = None,
     ) -> list[SchemaColumn]:
         """Load a common header profile YAML.
 
@@ -380,9 +404,9 @@ class SchemaLoader:
         profile_path = _resolve_profile_yaml_path(profile_name, profiles_dir)
 
         if not profile_path.exists():
-            raise SchemaLoadError(f"Profile '{profile_name}' not found at {profile_path}")
+            raise SchemaLoadError(f"Profile {profile_name!r} not found at {profile_path}")
 
-        return SchemaLoader.load_columns(profile_path, version=version)
+        return SchemaLoader.load_columns(profile_path, version=profile_version)
 
     # -----------------------------------------------------------------
     # Composition
@@ -492,7 +516,7 @@ class SchemaLoader:
             # Check for duplicate names
             normalized = col.name.replace(".", "_").replace("-", "_")
             if normalized in seen_names:
-                errors.append(f"Duplicate column name: '{col.name}'")
+                errors.append(f"Duplicate column name: {col.name!r}")
             seen_names.add(normalized)
 
             # Validate against type registry
@@ -528,7 +552,7 @@ class SchemaLoader:
 
         for override in overrides:
             if override.name in base_map:
-                logger.debug(f"Overriding column '{override.name}'")
+                logger.debug(f"Overriding column {override.name!r}")
             base_map[override.name] = override
 
         # Preserve original order: base columns first (possibly overridden),
