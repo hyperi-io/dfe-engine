@@ -8923,15 +8923,6 @@
             "minItems": 1,
             "title": "Customers"
           },
-          "rules": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Rules",
-            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
-          },
           "customer_filters": {
             "anyOf": [
               {
@@ -8987,6 +8978,15 @@
               }
             ],
             "title": "Explain Queries"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules",
+            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
           },
           "hunt_id": {
             "type": "string",
@@ -9056,15 +9056,6 @@
             "minItems": 1,
             "title": "Customers"
           },
-          "rules": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Rules",
-            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
-          },
           "customer_filters": {
             "anyOf": [
               {
@@ -9124,6 +9115,14 @@
           "hunt_id": {
             "type": "string",
             "title": "Hunt Id"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/HuntRuleEntry"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules"
           }
         },
         "type": "object",
@@ -9132,11 +9131,11 @@
           "cron",
           "global_target_table_name",
           "customers",
-          "rules",
-          "hunt_id"
+          "hunt_id",
+          "rules"
         ],
         "title": "HuntDetailResponse",
-        "description": "Full hunt configuration (same shape as create/update bodies)."
+        "description": "Full hunt configuration returned from GET/create/update."
       },
       "HuntEngineStatus": {
         "properties": {
@@ -9164,6 +9163,53 @@
         ],
         "title": "HuntEngineStatus",
         "description": "Current state of the background hunt scheduler."
+      },
+      "HuntRuleEntry": {
+        "properties": {
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "target_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Table Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "initial_checkpoint_lookback_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Checkpoint Lookback Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_name"
+        ],
+        "title": "HuntRuleEntry",
+        "description": "Per-rule hunt configuration as stored in YAML."
       },
       "HuntSummary": {
         "properties": {
@@ -9282,15 +9328,6 @@
             "minItems": 1,
             "title": "Customers"
           },
-          "rules": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array",
-            "minItems": 1,
-            "title": "Rules",
-            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
-          },
           "customer_filters": {
             "anyOf": [
               {
@@ -9346,6 +9383,15 @@
               }
             ],
             "title": "Explain Queries"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules",
+            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
           }
         },
         "type": "object",
@@ -9357,7 +9403,7 @@
           "rules"
         ],
         "title": "HuntWriteRequest",
-        "description": "Hunt scheduler YAML payload (without ``hunt_id``)."
+        "description": "Hunt scheduler payload for create/update (without ``hunt_id``)."
       },
       "JsonPathInfo": {
         "properties": {

@@ -125,7 +125,7 @@ class TestHuntsRouter:
 
         detail = client.get("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert detail.status_code == 200
-        assert detail.json()["rules"][0] == "win_account_a_common_activities"
+        assert detail.json()["rules"][0]["rule_name"] == "win_account_a_common_activities"
 
         listed = client.get("/api/v1/hunts", headers=admin_headers)
         assert listed.status_code == 200

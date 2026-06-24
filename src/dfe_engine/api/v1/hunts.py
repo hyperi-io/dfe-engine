@@ -33,18 +33,19 @@ from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 _HUNT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
-def _rule_names_from_stored(rules: Any) -> list[str]:
+def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
+    """Normalize on-disk hunt ``rules`` for ``HuntRuleEntry`` parsing."""
     if not isinstance(rules, list):
         return []
-    names: list[str] = []
+    out: list[dict[str, Any]] = []
     for entry in rules:
         if isinstance(entry, str):
-            names.append(entry)
+            out.append({"rule_name": entry})
         elif isinstance(entry, dict):
             name = entry.get("rule_name")
             if isinstance(name, str) and name:
-                names.append(name)
-    return names
+                out.append(dict(entry))
+    return out
 
 
 def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
@@ -78,8 +79,17 @@ class HuntSummary(BaseModel):
     target_table: str = Field(default="")
 
 
-class HuntWriteRequest(BaseModel):
-    """Hunt scheduler YAML payload (without ``hunt_id``)."""
+class HuntRuleEntry(BaseModel):
+    """Per-rule hunt configuration as stored in YAML."""
+
+    rule_name: str
+    target_table_name: str | None = None
+    source: str | None = None
+    initial_checkpoint_lookback_minutes: int | None = None
+
+
+class _HuntConfigFields(BaseModel):
+    """Shared hunt config fields (write and detail differ on ``rules``)."""
 
     name: str = Field(description="Display name used by the hunt engine")
     cron: str | list[str] = Field(description="Cron expression or list of expressions")
@@ -87,15 +97,20 @@ class HuntWriteRequest(BaseModel):
     global_target_table_name: str
     global_source_table_name: str | None = None
     customers: list[str] = Field(min_length=1)
-    rules: list[str] = Field(
-        min_length=1,
-        description="Hunt rule template names (``{name}.jinja2`` under the rule repo)",
-    )
     customer_filters: dict[str, Any] | None = None
     checkpoint_timestamp_field: str | None = None
     scheduling_mode: str | None = None
     min_interval_seconds: int | None = None
     explain_queries: bool | None = None
+
+
+class HuntWriteRequest(_HuntConfigFields):
+    """Hunt scheduler payload for create/update (without ``hunt_id``)."""
+
+    rules: list[str] = Field(
+        min_length=1,
+        description="Hunt rule template names (``{name}.jinja2`` under the rule repo)",
+    )
 
     @field_validator("rules", mode="before")
     @classmethod
@@ -124,19 +139,20 @@ class HuntWriteRequest(BaseModel):
         return data
 
 
-class HuntDetailResponse(HuntWriteRequest):
-    """Full hunt configuration (same shape as create/update bodies)."""
+class HuntDetailResponse(_HuntConfigFields):
+    """Full hunt configuration returned from GET/create/update."""
 
     hunt_id: str
+    rules: list[HuntRuleEntry] = Field(min_length=1)
 
     @classmethod
     def from_stored_config(cls, hunt_id: str, config: dict[str, Any]) -> HuntDetailResponse:
         payload = dict(config)
-        payload["rules"] = _rule_names_from_stored(payload.get("rules"))
+        payload["rules"] = _rules_from_stored(payload.get("rules"))
         return cls.model_validate({"hunt_id": hunt_id, **payload})
 
 
-class HuntCreateRequest(HuntDetailResponse):
+class HuntCreateRequest(HuntWriteRequest):
     hunt_id: str = Field(description="Stable id / YAML filename stem: [a-z][a-z0-9_]*")
 
     @field_validator("hunt_id")
