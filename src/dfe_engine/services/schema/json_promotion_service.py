@@ -373,6 +373,51 @@ def _fetch_stats(
     )
 
 
+# ── Row sampling (I/O) ───────────────────────────────────────────────
+
+
+def sample_rows(
+    client: Any,
+    *,
+    db: str,
+    source: str,
+    match_field: str | None = None,
+    match_value: str | None = None,
+    limit: int = 10,
+) -> tuple[list[str], list[dict[str, Any]]]:
+    """Random sample rows from ``db.source``, scoped to a source's match rule.
+
+    When ``match_field``/``match_value`` are supplied, rows are restricted to a
+    single source's match rule -- used to sample the shared catch-all landing
+    table where a source's rows are identified by its match. Without them, the
+    whole table is sampled. Intended for inspecting real data while authoring a
+    match condition or CEL before any path is promoted.
+
+    Returns ``(column_names, rows)`` where each row is a ``column -> value``
+    mapping. ``column_names`` is returned even when no rows match, so callers
+    still learn the table shape.
+
+    Raises:
+        JsonPromotionError: when the underlying ClickHouse query fails (e.g. the
+            source table does not exist yet).
+    """
+    table = qualified_table(db, source)
+    match_sql, match_params = _match_condition(match_field, match_value)
+    sql = f"SELECT * FROM {table} "
+    if match_sql:
+        sql += f"WHERE {match_sql} "
+    sql += "ORDER BY rand() LIMIT {limit:UInt32}"
+    params: dict[str, Any] = {"limit": limit, **match_params}
+
+    try:
+        columns, rows = client.query_rows(sql, parameters=params)
+    except Exception as exc:
+        raise JsonPromotionError(f"Row sampling failed: {exc}") from exc
+
+    records = [dict(zip(columns, row, strict=True)) for row in rows]
+    return list(columns), records
+
+
 # ── Column building (pure) ───────────────────────────────────────────
 
 
