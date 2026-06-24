@@ -299,7 +299,8 @@ class SampleRowsResponse(BaseModel):
         ),
     )
     match_value: str | None = Field(
-        default=None, description="Match value rows were filtered on, or null for a whole-table sample."
+        default=None,
+        description="Match value rows were filtered on, or null for a whole-table sample.",
     )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(

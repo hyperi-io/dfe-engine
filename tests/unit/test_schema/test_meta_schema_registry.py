@@ -272,9 +272,7 @@ class TestSchemaRegistryCoverage:
         )
         try:
             ms = _minimal_meta("svc/widget")
-            reg.save_schema(
-                ms, created_by="username <user@email.com>", description="audit"
-            )
+            reg.save_schema(ms, created_by="username <user@email.com>", description="audit")
             assert reg.get_schema("svc/widget").current == "1"
         finally:
             reg.close()
