@@ -441,6 +441,35 @@ class HyperDXSettings(BaseModel):
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
 
 
+class GitopsSettings(BaseModel):
+    """Deploy-specific gitops repo the engine renders artifacts into.
+
+    Disabled by default. When enabled, the engine clones/pulls repo_url (or uses
+    an existing local_path), writes rendered artifacts, commits only on change,
+    and pushes when push=True. Secrets never go here -- only declarative config
+    Argo consumes.
+
+    Environment variables (DFE_GITOPS_ prefix):
+    - DFE_GITOPS_ENABLED -> gitops.enabled
+    - DFE_GITOPS_REPO_URL -> gitops.repo_url
+    - DFE_GITOPS_BRANCH -> gitops.branch
+    - DFE_GITOPS_LOCAL_PATH -> gitops.local_path
+    - DFE_GITOPS_PUSH -> gitops.push
+    - DFE_GITOPS_USERNAME / DFE_GITOPS_TOKEN -> HTTPS push auth
+    - DFE_GITOPS_AUTHOR_NAME / DFE_GITOPS_AUTHOR_EMAIL -> commit identity
+    """
+
+    enabled: bool = Field(default=False, description="Enable gitops publishing")
+    repo_url: str = Field(default="", description="Deploy repo URL (empty = local-only)")
+    branch: str = Field(default="main", description="Branch to commit/push")
+    local_path: str = Field(default="", description="Working clone path")
+    push: bool = Field(default=True, description="Push after commit")
+    username: str = Field(default="", description="HTTPS push username")
+    token: str = Field(default="", description="HTTPS push token/password")
+    author_name: str = Field(default="dfe-engine", description="Commit author name")
+    author_email: str = Field(default="dfe-engine@hyperi.io", description="Commit author email")
+
+
 class APISettings(BaseModel):
     """API server settings.
 
@@ -514,6 +543,7 @@ class DFESettings(BaseModel):
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
+    gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
 
 
@@ -546,6 +576,7 @@ def _get_env_overrides() -> dict:
         "helm": {},
         "auth": {},
         "hyperdx": {},
+        "gitops": {},
         "api": {},
     }
 
@@ -734,6 +765,26 @@ def _get_env_overrides() -> dict:
         overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
         overrides["hyperdx"]["api_key_env"] = val
+
+    # Gitops settings
+    if val := _get_env("DFE_GITOPS_ENABLED"):
+        overrides["gitops"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_GITOPS_REPO_URL"):
+        overrides["gitops"]["repo_url"] = val
+    if val := _get_env("DFE_GITOPS_BRANCH"):
+        overrides["gitops"]["branch"] = val
+    if val := _get_env("DFE_GITOPS_LOCAL_PATH"):
+        overrides["gitops"]["local_path"] = val
+    if val := _get_env("DFE_GITOPS_PUSH"):
+        overrides["gitops"]["push"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_GITOPS_USERNAME"):
+        overrides["gitops"]["username"] = val
+    if val := _get_env("DFE_GITOPS_TOKEN"):
+        overrides["gitops"]["token"] = val
+    if val := _get_env("DFE_GITOPS_AUTHOR_NAME"):
+        overrides["gitops"]["author_name"] = val
+    if val := _get_env("DFE_GITOPS_AUTHOR_EMAIL"):
+        overrides["gitops"]["author_email"] = val
 
     # API settings
     if val := _get_env("DFE_API_HOST"):

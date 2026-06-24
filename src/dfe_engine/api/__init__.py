@@ -46,8 +46,10 @@ class _DfeApiApp:
 
             def register_commands(self, app) -> None:
                 from dfe_engine.cli import register_auth_commands
+                from dfe_engine.cli.gitops import register_gitops_commands
 
                 register_auth_commands(app)
+                register_gitops_commands(app)
 
             def run_service(self, config) -> None:
                 # Delegate to async

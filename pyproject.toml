@@ -37,6 +37,8 @@ dependencies = [
     "pyparsing>=3.3.2",
     "platformdirs>=4.9.2",
     "psutil>=7.2.2",
+    # Git (deploy-repo gitops bridge) -- same lib pylib uses internally
+    "dulwich>=1.2.6",
     # Authentication
     "bcrypt>=5.0.0",
     # Alerting / notifications
