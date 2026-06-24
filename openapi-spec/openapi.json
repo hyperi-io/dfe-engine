@@ -3790,10 +3790,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity",
+              "description": "Case-insensitive search in name, display_name, source, hunt_name, severity",
               "title": "Search"
             },
-            "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity"
+            "description": "Case-insensitive search in name, display_name, source, hunt_name, severity"
           },
           {
             "name": "severity",
@@ -3844,10 +3844,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)",
+              "description": "Sort field (name, display_name, severity, source, hunt_name, created_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)"
+            "description": "Sort field (name, display_name, severity, source, hunt_name, created_at)"
           },
           {
             "name": "sort_order",
@@ -4004,22 +4004,22 @@
         ]
       }
     },
-    "/api/v1/rules/{rule_id}": {
+    "/api/v1/rules/{name}": {
       "get": {
         "tags": [
           "Rules"
         ],
         "summary": "Get Rule",
-        "description": "Get a detection rule by ID.",
-        "operationId": "get_rule_api_v1_rules__rule_id__get",
+        "description": "Get a detection rule by file name.",
+        "operationId": "get_rule_api_v1_rules__name__get",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -4057,15 +4057,15 @@
         ],
         "summary": "Update Rule",
         "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).",
-        "operationId": "update_rule_api_v1_rules__rule_id__put",
+        "operationId": "update_rule_api_v1_rules__name__put",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -4113,15 +4113,15 @@
         ],
         "summary": "Delete Rule",
         "description": "Delete a detection rule.",
-        "operationId": "delete_rule_api_v1_rules__rule_id__delete",
+        "operationId": "delete_rule_api_v1_rules__name__delete",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -11355,22 +11355,23 @@
       },
       "RuleCreateRequest": {
         "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Human-readable rule name"
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on create)"
           },
           "severity": {
             "type": "string",
             "title": "Severity",
             "description": "low|medium|high|critical",
             "default": "medium"
-          },
-          "source_type": {
-            "type": "string",
-            "title": "Source Type",
-            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
-            "default": "raw"
           },
           "user_sql": {
             "type": "string",
@@ -11424,12 +11425,23 @@
             "title": "Cost Window Minutes",
             "description": "Window in minutes for cost estimate",
             "default": 60
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Rule file name (YAML stem); must be unique"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
+            "default": "raw"
           }
         },
         "type": "object",
         "required": [
-          "name",
-          "user_sql"
+          "user_sql",
+          "name"
         ],
         "title": "RuleCreateRequest",
         "description": "Create a hunt rule via RuleCreationService."
@@ -11470,13 +11482,15 @@
       },
       "RuleResponse": {
         "properties": {
-          "rule_id": {
-            "type": "string",
-            "title": "Rule Id"
-          },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Rule file name (YAML stem)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable rule label"
           },
           "severity": {
             "type": "string",
@@ -11566,8 +11580,8 @@
         },
         "type": "object",
         "required": [
-          "rule_id",
           "name",
+          "display_name",
           "severity",
           "where_clause",
           "original_sql",
@@ -11577,13 +11591,14 @@
       },
       "RuleSummary": {
         "properties": {
-          "rule_id": {
-            "type": "string",
-            "title": "Rule Id"
-          },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Rule file name (YAML stem)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
           },
           "severity": {
             "type": "string",
@@ -11640,8 +11655,8 @@
         },
         "type": "object",
         "required": [
-          "rule_id",
           "name",
+          "display_name",
           "severity",
           "created_at"
         ],
@@ -11649,7 +11664,7 @@
       },
       "RuleUpdateRequest": {
         "properties": {
-          "name": {
+          "display_name": {
             "anyOf": [
               {
                 "type": "string"
@@ -11658,8 +11673,8 @@
                 "type": "null"
               }
             ],
-            "title": "Name",
-            "description": "Rule name; omitted to keep existing"
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on create)"
           },
           "severity": {
             "type": "string",

@@ -2,22 +2,27 @@
 
 GET    /api/v1/rules              → Paginated list (search)
 POST   /api/v1/rules              → Create rule via RuleCreationService
-GET    /api/v1/rules/{rule_id}    → Rule detail
-PUT    /api/v1/rules/{rule_id}    → Update rule
-DELETE /api/v1/rules/{rule_id}    → Delete rule
+GET    /api/v1/rules/{name}    → Rule detail
+PUT    /api/v1/rules/{name}    → Update rule
+DELETE /api/v1/rules/{name}    → Delete rule
 POST   /api/v1/rules/validate     → Validate SQL/CEL without creating
 """
 
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.hunt_config_registry import default_display_name
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
+
+_RULE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 router = APIRouter(prefix="/rules", tags=["Rules"])
 
@@ -25,34 +30,42 @@ router = APIRouter(prefix="/rules", tags=["Rules"])
 # ── Request/response models ───────────────────────────────────
 
 
-class RuleCreateRequest(BaseModel):
+class _RuleWriteFields(BaseModel):
+    display_name: str | None = Field(
+        default=None,
+        description="Human-readable label (defaults from ``name`` when omitted on create)",
+    )
+    severity: str = Field(default="medium", description="low|medium|high|critical")
+    user_sql: str = Field(description="User-authored SQL WHERE fragment")
+    cel_filter: str | None = Field(default=None, description="CEL expression filter")
+    hunt_name: str | None = Field(default=None, description="Parent hunt name")
+    source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
+    estimate_cost: bool = Field(default=False, description="Run EXPLAIN and estimate query cost")
+    cost_window_minutes: int = Field(default=60, description="Window in minutes for cost estimate")
+
+
+class RuleCreateRequest(_RuleWriteFields):
     """Create a hunt rule via RuleCreationService."""
 
-    name: str = Field(description="Human-readable rule name")
-    severity: str = Field(default="medium", description="low|medium|high|critical")
+    name: str = Field(description="Rule file name (YAML stem); must be unique")
+
     source_type: str = Field(
         default="raw",
         description="'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
     )
-    user_sql: str = Field(description="User-authored SQL WHERE fragment")
-    cel_filter: str | None = Field(default=None, description="CEL expression filter")
-    hunt_name: str | None = Field(default=None, description="Parent hunt name")
-    source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
-    estimate_cost: bool = Field(default=False, description="Run EXPLAIN and estimate query cost")
-    cost_window_minutes: int = Field(default=60, description="Window in minutes for cost estimate")
+
+    @field_validator("name")
+    @classmethod
+    def _validate_rule_name(cls, v: str) -> str:
+        if not _RULE_NAME_PATTERN.match(v):
+            raise ValueError(
+                f"Rule name '{v}' must match /^[a-zA-Z0-9_-]+$/ (letters, digits, _, -)"
+            )
+        return v
 
 
-class RuleUpdateRequest(BaseModel):
+class RuleUpdateRequest(_RuleWriteFields):
     """Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."""
-
-    name: str | None = Field(default=None, description="Rule name; omitted to keep existing")
-    severity: str = Field(default="medium", description="low|medium|high|critical")
-    user_sql: str = Field(description="User-authored SQL WHERE fragment")
-    cel_filter: str | None = Field(default=None, description="CEL expression filter")
-    hunt_name: str | None = Field(default=None, description="Parent hunt name")
-    source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
-    estimate_cost: bool = Field(default=False, description="Run EXPLAIN and estimate query cost")
-    cost_window_minutes: int = Field(default=60, description="Window in minutes for cost estimate")
 
     model_config = {"extra": "ignore"}
 
@@ -81,8 +94,8 @@ class CostEstimate(BaseModel):
 
 
 class RuleResponse(BaseModel):
-    rule_id: str
-    name: str
+    name: str = Field(description="Rule file name (YAML stem)")
+    display_name: str = Field(description="Human-readable rule label")
     severity: str
     source_db: str | None = None
     source_table: str | None = None
@@ -97,8 +110,8 @@ class RuleResponse(BaseModel):
 
 
 class RuleSummary(BaseModel):
-    rule_id: str
-    name: str
+    name: str = Field(description="Rule file name (YAML stem)")
+    display_name: str
     severity: str
     source: str | None = None
     source_db: str | None = None
@@ -128,13 +141,13 @@ async def list_rules(
     pagination: PaginationParams = Depends(),
     search: str | None = Query(
         None,
-        description="Case-insensitive search in rule_id, name, source, hunt_name, severity",
+        description="Case-insensitive search in name, display_name, source, hunt_name, severity",
     ),
     severity: str | None = Query(None, description="Filter by severity"),
     source: str | None = Query(None, description="Filter by source label"),
     sort_by: str | None = Query(
         None,
-        description="Sort field (rule_id, name, severity, source, hunt_name, created_at)",
+        description="Sort field (name, display_name, severity, source, hunt_name, created_at)",
     ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -147,7 +160,7 @@ async def list_rules(
     if source is not None:
         raw = [row for row in raw if row.get("source") == source]
 
-    raw = apply_search(raw, search, ["rule_id", "name", "source", "hunt_name", "severity"])
+    raw = apply_search(raw, search, ["name", "display_name", "source", "hunt_name", "severity"])
     raw = apply_sort(raw, sort_by, sort_order)
 
     summaries = [RuleSummary.model_validate(row) for row in raw]
@@ -171,8 +184,6 @@ async def create_rule(
     The service sanitizes the SQL, applies CEL→SQL transpilation,
     validates column references, and optionally estimates query cost.
     """
-    import uuid
-
     from dfe_engine.hunts.rule_creation_service import (
         RuleCreateRequest as SvcRequest,
     )
@@ -181,11 +192,19 @@ async def create_rule(
     )
     from dfe_engine.settings import get_clickhouse_config
 
+    if registry.name_exists(body.name):
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "conflict", "message": f"Rule '{body.name}' already exists"},
+        )
+
     service = RuleCreationService(ch_config=get_clickhouse_config(settings))
-    rule_id = str(uuid.uuid4())
+    display = (
+        body.display_name if body.display_name is not None else default_display_name(body.name)
+    )
 
     svc_request = SvcRequest(
-        name=body.name,
+        name=display,
         severity=body.severity,
         source_type=body.source_type,
         user_sql=body.user_sql,
@@ -196,10 +215,10 @@ async def create_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
 
-    result = service.create_rule(svc_request, rule_id)
-    registry.save(result.rule, created_by=user.user_id, description=f"rule: create {rule_id}")
+    result = service.create_rule(svc_request, body.name)
+    registry.save(result.rule, created_by=user.user_id, description=f"rule: create {body.name}")
 
-    audit_resource_change(user.user_id, "rule", rule_id, "created")
+    audit_resource_change(user.user_id, "rule", body.name, "created")
     return _build_create_response(result, body.cost_window_minutes)
 
 
@@ -237,30 +256,30 @@ async def validate_rule_sql(
 
 
 @router.get(
-    "/{rule_id}",
+    "/{name}",
     response_model=RuleResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_read"]))],
 )
-async def get_rule(rule_id: str, user: CurrentUser, registry: RuleReg, settings: Settings):
-    """Get a detection rule by ID."""
+async def get_rule(name: str, user: CurrentUser, registry: RuleReg, settings: Settings):
+    """Get a detection rule by file name."""
     try:
-        rule = registry.get(rule_id)
+        rule = registry.get(name)
     except RuleNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{rule_id}' not found"},
+            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
         ) from None
     sql_errors = _sql_errors_for_original_sql(settings, rule.original_sql)
     return _rule_to_response(rule, sql_errors=sql_errors)
 
 
 @router.put(
-    "/{rule_id}",
+    "/{name}",
     response_model=RuleCreateResponse,
     dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
 )
 async def update_rule(
-    rule_id: str,
+    name: str,
     body: RuleUpdateRequest,
     user: CurrentUser,
     settings: Settings,
@@ -268,11 +287,11 @@ async def update_rule(
 ):
     """Replace a detection rule (re-runs creation pipeline, preserves created_at)."""
     try:
-        existing = registry.get(rule_id)
+        existing = registry.get(name)
     except RuleNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{rule_id}' not found"},
+            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
         ) from None
 
     from dfe_engine.hunts.rule_creation_service import (
@@ -284,11 +303,11 @@ async def update_rule(
     from dfe_engine.settings import get_clickhouse_config
 
     service = RuleCreationService(ch_config=get_clickhouse_config(settings))
-    effective_name = body.name if body.name is not None else existing.name
+    effective_display = body.display_name if body.display_name is not None else existing.name
     effective_source = body.source if body.source is not None else existing.source
     effective_hunt = body.hunt_name if body.hunt_name is not None else existing.hunt_name
     svc_request = SvcRequest(
-        name=effective_name,
+        name=effective_display,
         severity=body.severity,
         source_type="raw",
         user_sql=body.user_sql,
@@ -298,12 +317,12 @@ async def update_rule(
         estimate_cost=body.estimate_cost,
         cost_window_minutes=body.cost_window_minutes,
     )
-    result = service.create_rule(svc_request, rule_id)
+    result = service.create_rule(svc_request, name)
     updated = result.rule.model_copy(
-        update={"created_at": existing.created_at, "name": effective_name},
+        update={"created_at": existing.created_at, "name": effective_display},
     )
-    registry.save(updated, created_by=user.user_id, description=f"rule: update {rule_id}")
-    audit_resource_change(user.user_id, "rule", rule_id, "updated")
+    registry.save(updated, created_by=user.user_id, description=f"rule: update {name}")
+    audit_resource_change(user.user_id, "rule", name, "updated")
     return _build_create_response(
         result.model_copy(update={"rule": updated}),
         body.cost_window_minutes,
@@ -311,20 +330,20 @@ async def update_rule(
 
 
 @router.delete(
-    "/{rule_id}",
+    "/{name}",
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["rule_delete"]))],
 )
-async def delete_rule(rule_id: str, user: CurrentUser, registry: RuleReg):
+async def delete_rule(name: str, user: CurrentUser, registry: RuleReg):
     """Delete a detection rule."""
     try:
-        registry.delete(rule_id)
+        registry.delete(name)
     except RuleNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Rule '{rule_id}' not found"},
+            detail={"code": "not_found", "message": f"Rule '{name}' not found"},
         ) from None
-    audit_resource_change(user.user_id, "rule", rule_id, "deleted")
+    audit_resource_change(user.user_id, "rule", name, "deleted")
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -342,8 +361,8 @@ def _sql_errors_for_original_sql(settings: Settings, original_sql: str) -> list[
 
 def _rule_to_response(rule, *, sql_errors: list[SqlValidationError] | None = None) -> RuleResponse:
     return RuleResponse(
-        rule_id=rule.rule_id,
-        name=rule.name,
+        name=rule.rule_id,
+        display_name=rule.name,
         severity=rule.severity,
         source_db=rule.source_db,
         source_table=rule.source_table,
