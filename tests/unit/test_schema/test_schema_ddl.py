@@ -59,7 +59,18 @@ class TestGenerateCreateTable:
 
     def test_header_comment(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("test_table", _basic_columns())
-        assert ddl.startswith("-- HyperI DFE test_table ")
+        assert ddl.startswith("-- ===")
+        assert "-- DFE Schema DDL: test_table" in ddl
+
+    def test_no_generated_at_header_by_default(self, gen: DDLGenerator):
+        ddl = gen.generate_create_table("t", _basic_columns())
+        assert "-- Generated at:" not in ddl
+
+    def test_generated_at_header_when_provided(self, gen: DDLGenerator):
+        ddl = gen.generate_create_table(
+            "t", _basic_columns(), generated_time="2026-01-02 03:04:05 UTC"
+        )
+        assert "-- Generated at: 2026-01-02 03:04:05 UTC" in ddl
 
     def test_column_definitions(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
@@ -98,8 +109,17 @@ class TestGenerateCreateTable:
 
     def test_order_by(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
-        assert "ORDER BY (`_timestamp_load`, `_timestamp`, `_org_id`)" in ddl
-        assert "PRIMARY KEY (`_timestamp_load`, `_timestamp`, `_org_id`)" in ddl
+        assert "ORDER BY (`_timestamp_load`)" in ddl
+        assert "PRIMARY KEY (`_timestamp_load`)" in ddl
+
+    def test_order_by_keeps_not_null_columns(self, gen: DDLGenerator):
+        cols = [
+            _col(name="a", type="string", attribute=["not_null"], order=0),
+            _col(name="b", type="integer", attribute=["not_null"], order=1),
+        ]
+        ddl = gen.generate_create_table("t", cols)
+        assert "ORDER BY (`a`, `b`)" in ddl
+        assert "PRIMARY KEY (`a`, `b`)" in ddl
 
     def test_order_by_empty(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
@@ -134,9 +154,9 @@ class TestGenerateCreateTable:
         assert "SAMPLE BY cityHash64(_timestamp_load)" in ddl
 
     def test_table_comment(self, gen: DDLGenerator):
-        cfg = DDLConfig(profile="timeseries", profile_version="1.0.0")
+        cfg = DDLConfig(profile_name="timeseries", profile_version="1.0.0", schema_version="2")
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "@schema_version: 2" in ddl
+        assert "@t_version: 2" in ddl
         assert "@profile: timeseries" in ddl
         assert "@profile_version: 1.0.0" in ddl
 
@@ -147,7 +167,7 @@ class TestGenerateCreateTable:
 
     def test_projection(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
-        assert "PROJECTION timestamp_optimized (SELECT * ORDER BY `_timestamp`)" in ddl
+        assert "PROJECTION _timestamp_optimized (SELECT * ORDER BY `_timestamp`)" in ddl
 
     def test_projection_skipped_when_column_missing(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string")]
@@ -268,7 +288,7 @@ class TestComments:
     def test_expr_and_comment_combined(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", expr="@source: user_id", comment="User identifier")]
         ddl = gen.generate_create_table("t", cols)
-        assert "COMMENT '@source: user_id — User identifier'" in ddl
+        assert "COMMENT '@source: user_id - User identifier'" in ddl
 
     def test_column_comment_escaped(self, gen: DDLGenerator):
         cols = [_col(name="x", type="string", comment="it's a test")]
@@ -433,16 +453,16 @@ class TestDDLConfig:
         assert cfg.index_granularity == 2048
         assert cfg.ttl_only_drop_parts is True
         assert cfg.cluster is None
-        assert cfg.schema_version == "2"
+        assert cfg.schema_version is None
 
     def test_custom_config(self):
         cfg = DDLConfig(
             db="analytics",
             engine="SharedMergeTree",
             ttl_days=365,
-            profile="minimal",
+            profile_name="minimal",
         )
         assert cfg.db == "analytics"
         assert cfg.engine == "SharedMergeTree"
         assert cfg.ttl_days == 365
-        assert cfg.profile == "minimal"
+        assert cfg.profile_name == "minimal"

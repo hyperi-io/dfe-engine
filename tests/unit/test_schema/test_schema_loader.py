@@ -150,7 +150,7 @@ class TestLoadProfile:
         assert "_source" not in names
 
     def test_load_minimal_registry_path(self):
-        columns = SchemaLoader.load_profile("common-header/minimal", version="1.0.0")
+        columns = SchemaLoader.load_profile("common-header/minimal", profile_version="1.0.0")
         names = [c.name for c in columns]
         assert "_json" in names
         assert "_uuid" in names
@@ -715,7 +715,7 @@ class TestVersionTree:
         assert [c.name for c in cols] == ["a", "b"]
 
         # Pin to 1.0.0: only a
-        cols = SchemaLoader.load_profile("test_profile", profiles_dir=tmp_path, version="1.0.0")
+        cols = SchemaLoader.load_profile("test_profile", profiles_dir=tmp_path, profile_version="1.0.0")
         assert [c.name for c in cols] == ["a"]
 
     def test_shipped_profiles_have_version_tree(self):
