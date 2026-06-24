@@ -121,11 +121,11 @@ class TestHuntsRouter:
         assert create.status_code == 201
         body = create.json()
         assert body["hunt_id"] == "api_test_hunt"
-        assert body["config"]["name"] == "API Test Hunt"
+        assert body["name"] == "API Test Hunt"
 
         detail = client.get("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert detail.status_code == 200
-        assert detail.json()["config"]["rules"][0]["rule_name"] == "win_account_a_common_activities"
+        assert detail.json()["rules"][0]["rule_name"] == "win_account_a_common_activities"
 
         listed = client.get("/api/v1/hunts", headers=admin_headers)
         assert listed.status_code == 200
@@ -145,7 +145,7 @@ class TestHuntsRouter:
             headers=admin_headers,
         )
         assert updated.status_code == 200
-        assert updated.json()["config"]["name"] == "API Test Hunt Updated"
+        assert updated.json()["name"] == "API Test Hunt Updated"
 
         deleted = client.delete("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert deleted.status_code == 204

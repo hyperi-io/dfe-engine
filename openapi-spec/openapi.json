@@ -9006,23 +9006,135 @@
       },
       "HuntDetailResponse": {
         "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Display name used by the hunt engine"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Cron",
+            "description": "Cron expression or list of expressions"
+          },
+          "log_buffer": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Log Buffer",
+            "default": 60
+          },
+          "global_target_table_name": {
+            "type": "string",
+            "title": "Global Target Table Name"
+          },
+          "global_source_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Source Table Name"
+          },
+          "customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Customers"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/HuntRuleEntry"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules"
+          },
+          "customer_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Filters"
+          },
+          "checkpoint_timestamp_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Timestamp Field"
+          },
+          "scheduling_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduling Mode"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "explain_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain Queries"
+          },
           "hunt_id": {
             "type": "string",
             "title": "Hunt Id"
-          },
-          "config": {
-            "additionalProperties": true,
-            "type": "object",
-            "title": "Config"
           }
         },
         "type": "object",
         "required": [
-          "hunt_id",
-          "config"
+          "name",
+          "cron",
+          "global_target_table_name",
+          "customers",
+          "rules",
+          "hunt_id"
         ],
         "title": "HuntDetailResponse",
-        "description": "Full hunt configuration document."
+        "description": "Full hunt configuration (same shape as create/update bodies)."
       },
       "HuntEngineStatus": {
         "properties": {

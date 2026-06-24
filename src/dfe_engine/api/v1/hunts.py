@@ -59,13 +59,6 @@ class HuntSummary(BaseModel):
     target_table: str = Field(default="")
 
 
-class HuntDetailResponse(BaseModel):
-    """Full hunt configuration document."""
-
-    hunt_id: str
-    config: dict[str, Any]
-
-
 class HuntRuleEntry(BaseModel):
     rule_name: str
     target_table_name: str | None = None
@@ -90,12 +83,22 @@ class HuntWriteRequest(BaseModel):
     explain_queries: bool | None = None
 
     def to_config_dict(self) -> dict[str, Any]:
-        data = self.model_dump(exclude_none=True)
+        data = self.model_dump(exclude_none=True, exclude={"hunt_id"})
         data["rules"] = [r.model_dump(exclude_none=True) for r in self.rules]
         return data
 
 
-class HuntCreateRequest(HuntWriteRequest):
+class HuntDetailResponse(HuntWriteRequest):
+    """Full hunt configuration (same shape as create/update bodies)."""
+
+    hunt_id: str
+
+    @classmethod
+    def from_stored_config(cls, hunt_id: str, config: dict[str, Any]) -> HuntDetailResponse:
+        return cls.model_validate({"hunt_id": hunt_id, **config})
+
+
+class HuntCreateRequest(HuntDetailResponse):
     hunt_id: str = Field(description="Stable id / YAML filename stem: [a-z][a-z0-9_]*")
 
     @field_validator("hunt_id")
@@ -249,7 +252,7 @@ async def create_hunt(
         description=f"hunt: create {body.hunt_id}",
     )
     audit_resource_change(user.user_id, "hunt", body.hunt_id, "created")
-    return HuntDetailResponse(hunt_id=body.hunt_id, config=config)
+    return HuntDetailResponse.from_stored_config(body.hunt_id, config)
 
 
 @router.get(
@@ -270,7 +273,7 @@ async def get_hunt(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{hunt_id}' not found"},
         ) from None
-    return HuntDetailResponse(hunt_id=hunt_id, config=config)
+    return HuntDetailResponse.from_stored_config(hunt_id, config)
 
 
 @router.put(
@@ -301,7 +304,7 @@ async def update_hunt(
         description=f"hunt: update {hunt_id}",
     )
     audit_resource_change(user.user_id, "hunt", hunt_id, "updated")
-    return HuntDetailResponse(hunt_id=hunt_id, config=config)
+    return HuntDetailResponse.from_stored_config(hunt_id, config)
 
 
 @router.delete(
