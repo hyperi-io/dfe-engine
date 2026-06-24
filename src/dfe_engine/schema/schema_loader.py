@@ -22,7 +22,7 @@ Usage:
     columns = loader.load_meta_schema("/path/to/meta_schema.yaml")
     columns = loader.apply_derived_schema(columns, "/path/to/derived.yaml")
     columns = loader.apply_additional_fields(columns, "/path/to/additional.yaml")
-    header = loader.load_profile("timeseries", version="1.0.0")
+    header = loader.load_profile("timeseries", profile_version="1.0.0")
     full = loader.compose(header, columns)
 """
 
