@@ -4767,10 +4767,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive search in hunt_id, name, customers, rules, source_table, target_table",
+              "description": "Case-insensitive search in name, display_name, customers, rules, source_table, target_table",
               "title": "Search"
             },
-            "description": "Case-insensitive search in hunt_id, name, customers, rules, source_table, target_table"
+            "description": "Case-insensitive search in name, display_name, customers, rules, source_table, target_table"
           },
           {
             "name": "sort_by",
@@ -4785,10 +4785,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (hunt_id, name, source_table, target_table)",
+              "description": "Sort field (name, display_name, source_table, target_table)",
               "title": "Sort By"
             },
-            "description": "Sort field (hunt_id, name, source_table, target_table)"
+            "description": "Sort field (name, display_name, source_table, target_table)"
           },
           {
             "name": "sort_order",
@@ -4898,22 +4898,22 @@
         ]
       }
     },
-    "/api/v1/hunts/{hunt_id}": {
+    "/api/v1/hunts/{name}": {
       "get": {
         "tags": [
           "hunts"
         ],
         "summary": "Get Hunt",
-        "description": "Get full hunt configuration by id.",
-        "operationId": "get_hunt_api_v1_hunts__hunt_id__get",
+        "description": "Get full hunt configuration by file name.",
+        "operationId": "get_hunt_api_v1_hunts__name__get",
         "parameters": [
           {
-            "name": "hunt_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Hunt Id"
+              "title": "Name"
             }
           }
         ],
@@ -4951,15 +4951,15 @@
         ],
         "summary": "Update Hunt",
         "description": "Replace an existing hunt configuration.",
-        "operationId": "update_hunt_api_v1_hunts__hunt_id__put",
+        "operationId": "update_hunt_api_v1_hunts__name__put",
         "parameters": [
           {
-            "name": "hunt_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Hunt Id"
+              "title": "Name"
             }
           }
         ],
@@ -5007,15 +5007,15 @@
         ],
         "summary": "Delete Hunt",
         "description": "Delete a hunt configuration.",
-        "operationId": "delete_hunt_api_v1_hunts__hunt_id__delete",
+        "operationId": "delete_hunt_api_v1_hunts__name__delete",
         "parameters": [
           {
-            "name": "hunt_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Hunt Id"
+              "title": "Name"
             }
           }
         ],
@@ -5041,22 +5041,22 @@
         ]
       }
     },
-    "/api/v1/hunts/{hunt_id}/run": {
+    "/api/v1/hunts/{name}/run": {
       "post": {
         "tags": [
           "hunts"
         ],
         "summary": "Trigger Hunt",
         "description": "Trigger an ad-hoc hunt execution.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``\nor streamed via ``GET /tasks/{task_id}/stream``.",
-        "operationId": "trigger_hunt_api_v1_hunts__hunt_id__run_post",
+        "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {
-            "name": "hunt_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Hunt Id"
+              "title": "Name"
             }
           }
         ],
@@ -8874,10 +8874,17 @@
       },
       "HuntCreateRequest": {
         "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Display name used by the hunt engine"
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on write)"
           },
           "cron": {
             "anyOf": [
@@ -8988,29 +8995,28 @@
             "title": "Rules",
             "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
           },
-          "hunt_id": {
+          "name": {
             "type": "string",
-            "title": "Hunt Id",
-            "description": "Stable id / YAML filename stem: [a-z][a-z0-9_]*"
+            "title": "Name",
+            "description": "Hunt file name (YAML stem); must be unique"
           }
         },
         "type": "object",
         "required": [
-          "name",
           "cron",
           "global_target_table_name",
           "customers",
           "rules",
-          "hunt_id"
+          "name"
         ],
         "title": "HuntCreateRequest"
       },
       "HuntDetailResponse": {
         "properties": {
-          "name": {
+          "display_name": {
             "type": "string",
-            "title": "Name",
-            "description": "Display name used by the hunt engine"
+            "title": "Display Name",
+            "description": "Resolved human-readable label"
           },
           "cron": {
             "anyOf": [
@@ -9112,9 +9118,10 @@
             ],
             "title": "Explain Queries"
           },
-          "hunt_id": {
+          "name": {
             "type": "string",
-            "title": "Hunt Id"
+            "title": "Name",
+            "description": "Hunt file name (YAML stem)"
           },
           "rules": {
             "items": {
@@ -9127,11 +9134,11 @@
         },
         "type": "object",
         "required": [
-          "name",
+          "display_name",
           "cron",
           "global_target_table_name",
           "customers",
-          "hunt_id",
+          "name",
           "rules"
         ],
         "title": "HuntDetailResponse",
@@ -9213,14 +9220,15 @@
       },
       "HuntSummary": {
         "properties": {
-          "hunt_id": {
-            "type": "string",
-            "title": "Hunt Id",
-            "description": "Stable hunt identifier (YAML filename stem)"
-          },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Hunt file name (YAML stem, unique)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable hunt label"
           },
           "customer": {
             "type": "string",
@@ -9271,18 +9279,25 @@
         },
         "type": "object",
         "required": [
-          "hunt_id",
-          "name"
+          "name",
+          "display_name"
         ],
         "title": "HuntSummary",
         "description": "Summary of a configured hunt."
       },
       "HuntWriteRequest": {
         "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Display name used by the hunt engine"
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on write)"
           },
           "cron": {
             "anyOf": [
@@ -9396,14 +9411,13 @@
         },
         "type": "object",
         "required": [
-          "name",
           "cron",
           "global_target_table_name",
           "customers",
           "rules"
         ],
         "title": "HuntWriteRequest",
-        "description": "Hunt scheduler payload for create/update (without ``hunt_id``)."
+        "description": "Hunt scheduler payload for create/update (without hunt file ``name``)."
       },
       "JsonPathInfo": {
         "properties": {

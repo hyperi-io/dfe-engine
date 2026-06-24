@@ -61,16 +61,16 @@ class TestHuntsRouter:
 
     def test_list_search_and_pagination(self, client, admin_headers):
         payload_a = {
-            "hunt_id": "alpha_hunt",
-            "name": "Alpha Windows Hunt",
+            "name": "alpha_hunt",
+            "display_name": "Alpha Windows Hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["org_a"],
             "rules": ["alpha_rule"],
         }
         payload_b = {
-            "hunt_id": "beta_hunt",
-            "name": "Beta Linux Hunt",
+            "name": "beta_hunt",
+            "display_name": "Beta Linux Hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["org_b"],
@@ -90,18 +90,18 @@ class TestHuntsRouter:
         )
         assert search.status_code == 200
         assert search.json()["total"] == 1
-        assert search.json()["items"][0]["hunt_id"] == "alpha_hunt"
+        assert search.json()["items"][0]["name"] == "alpha_hunt"
 
         page = client.get(
             "/api/v1/hunts",
-            params={"page": 1, "per_page": 1, "sort_by": "hunt_id", "sort_order": "asc"},
+            params={"page": 1, "per_page": 1, "sort_by": "name", "sort_order": "asc"},
             headers=admin_headers,
         )
         assert page.status_code == 200
         body = page.json()
         assert body["total"] == 2
         assert len(body["items"]) == 1
-        assert body["items"][0]["hunt_id"] == "alpha_hunt"
+        assert body["items"][0]["name"] == "alpha_hunt"
         assert body["next_page"] == 2
 
         client.delete("/api/v1/hunts/alpha_hunt", headers=admin_headers)
@@ -109,8 +109,8 @@ class TestHuntsRouter:
 
     def test_create_get_update_delete_hunt(self, client, admin_headers):
         payload = {
-            "hunt_id": "api_test_hunt",
-            "name": "API Test Hunt",
+            "name": "api_test_hunt",
+            "display_name": "API Test Hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
             "global_source_table_name": "logs_nxlog",
@@ -120,8 +120,8 @@ class TestHuntsRouter:
         create = client.post("/api/v1/hunts", json=payload, headers=admin_headers)
         assert create.status_code == 201
         body = create.json()
-        assert body["hunt_id"] == "api_test_hunt"
-        assert body["name"] == "API Test Hunt"
+        assert body["name"] == "api_test_hunt"
+        assert body["display_name"] == "API Test Hunt"
 
         detail = client.get("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert detail.status_code == 200
@@ -129,11 +129,11 @@ class TestHuntsRouter:
 
         listed = client.get("/api/v1/hunts", headers=admin_headers)
         assert listed.status_code == 200
-        ids = [h["hunt_id"] for h in listed.json()["items"]]
+        ids = [h["name"] for h in listed.json()["items"]]
         assert "api_test_hunt" in ids
 
         update_payload = {
-            "name": "API Test Hunt Updated",
+            "display_name": "API Test Hunt Updated",
             "cron": "*/5 * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["test-org"],
@@ -145,7 +145,7 @@ class TestHuntsRouter:
             headers=admin_headers,
         )
         assert updated.status_code == 200
-        assert updated.json()["name"] == "API Test Hunt Updated"
+        assert updated.json()["display_name"] == "API Test Hunt Updated"
 
         deleted = client.delete("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert deleted.status_code == 204
@@ -155,8 +155,7 @@ class TestHuntsRouter:
 
     def test_create_duplicate_returns_409(self, client, admin_headers):
         payload = {
-            "hunt_id": "dup_hunt",
-            "name": "Dup",
+            "name": "dup_hunt",
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
@@ -167,10 +166,37 @@ class TestHuntsRouter:
         assert dup.status_code == 409
         client.delete("/api/v1/hunts/dup_hunt", headers=admin_headers)
 
-    def test_create_invalid_hunt_id_returns_422(self, client, admin_headers):
+    def test_create_duplicate_name_case_insensitive_returns_409(self, client, admin_headers):
+        first = {
+            "name": "MyHunt",
+            "cron": "* * * * *",
+            "global_target_table_name": "t",
+            "customers": ["c"],
+            "rules": ["r"],
+        }
+        assert client.post("/api/v1/hunts", json=first, headers=admin_headers).status_code == 201
+        second = {**first, "name": "myhunt"}
+        dup = client.post("/api/v1/hunts", json=second, headers=admin_headers)
+        assert dup.status_code == 409
+        client.delete("/api/v1/hunts/MyHunt", headers=admin_headers)
+
+    def test_create_default_display_name_when_omitted(self, client, admin_headers):
         payload = {
-            "hunt_id": "Bad-Id",
-            "name": "Bad",
+            "name": "api_test_hunt",
+            "cron": "* * * * *",
+            "global_target_table_name": "logs_alerts",
+            "customers": ["c"],
+            "rules": ["r"],
+        }
+        resp = client.post("/api/v1/hunts", json=payload, headers=admin_headers)
+        assert resp.status_code == 201
+        assert resp.json()["display_name"] == "Api test hunt"
+        client.delete("/api/v1/hunts/api_test_hunt", headers=admin_headers)
+
+    def test_create_invalid_hunt_name_returns_422(self, client, admin_headers):
+        payload = {
+            "name": "bad/id",
+            "display_name": "Bad",
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
@@ -181,8 +207,8 @@ class TestHuntsRouter:
 
     def test_viewer_cannot_create_hunt(self, client, viewer_headers):
         payload = {
-            "hunt_id": "viewer_hunt",
-            "name": "Viewer",
+            "name": "viewer_hunt",
+            "display_name": "Viewer",
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
@@ -277,9 +303,8 @@ class TestPipelineRouter:
             if detail.status_code == 200:
                 break
             time.sleep(0.05)
-        assert detail is not None and detail.status_code == 200, (
-            detail.text if detail else "no response"
-        )
+        assert detail is not None, "no response"
+        assert detail.status_code == 200, detail.text
         assert detail.json()["kind"] == "pipeline:build"
 
     def test_requires_auth(self, client):

@@ -28,9 +28,13 @@ from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply
 from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
+from dfe_engine.hunts.hunt_config_registry import (
+    HuntConfigNotFoundError,
+    default_display_name,
+    resolve_display_name,
+)
 
-_HUNT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
+_HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
 
 def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
@@ -69,8 +73,8 @@ class HuntEngineStatus(BaseModel):
 class HuntSummary(BaseModel):
     """Summary of a configured hunt."""
 
-    hunt_id: str = Field(description="Stable hunt identifier (YAML filename stem)")
-    name: str
+    name: str = Field(description="Hunt file name (YAML stem, unique)")
+    display_name: str = Field(description="Human-readable hunt label")
     customer: str = Field(default="", description="First customer in config (legacy summary field)")
     customers: list[str] = Field(default_factory=list)
     cron: str | list[str] = Field(default="", description="Cron schedule expression(s)")
@@ -91,7 +95,10 @@ class HuntRuleEntry(BaseModel):
 class _HuntConfigFields(BaseModel):
     """Shared hunt config fields (write and detail differ on ``rules``)."""
 
-    name: str = Field(description="Display name used by the hunt engine")
+    display_name: str | None = Field(
+        default=None,
+        description="Human-readable label (defaults from ``name`` when omitted on write)",
+    )
     cron: str | list[str] = Field(description="Cron expression or list of expressions")
     log_buffer: int = Field(default=60, ge=1)
     global_target_table_name: str
@@ -105,7 +112,7 @@ class _HuntConfigFields(BaseModel):
 
 
 class HuntWriteRequest(_HuntConfigFields):
-    """Hunt scheduler payload for create/update (without ``hunt_id``)."""
+    """Hunt scheduler payload for create/update (without hunt file ``name``)."""
 
     rules: list[str] = Field(
         min_length=1,
@@ -133,8 +140,12 @@ class HuntWriteRequest(_HuntConfigFields):
             raise ValueError("rule names must be non-empty strings")
         return cleaned
 
-    def to_config_dict(self) -> dict[str, Any]:
-        data = self.model_dump(exclude_none=True, exclude={"hunt_id"})
+    def to_config_dict(self, *, hunt_name: str) -> dict[str, Any]:
+        display = (
+            self.display_name if self.display_name is not None else default_display_name(hunt_name)
+        )
+        data = self.model_dump(exclude_none=True, exclude={"display_name"})
+        data["display_name"] = display
         data["rules"] = _rules_to_yaml(self.rules)
         return data
 
@@ -142,24 +153,28 @@ class HuntWriteRequest(_HuntConfigFields):
 class HuntDetailResponse(_HuntConfigFields):
     """Full hunt configuration returned from GET/create/update."""
 
-    hunt_id: str
+    name: str = Field(description="Hunt file name (YAML stem)")
+    display_name: str = Field(description="Resolved human-readable label")
     rules: list[HuntRuleEntry] = Field(min_length=1)
 
     @classmethod
-    def from_stored_config(cls, hunt_id: str, config: dict[str, Any]) -> HuntDetailResponse:
-        payload = dict(config)
-        payload["rules"] = _rules_from_stored(payload.get("rules"))
-        return cls.model_validate({"hunt_id": hunt_id, **payload})
+    def from_stored_config(cls, name: str, config: dict[str, Any]) -> HuntDetailResponse:
+        payload = {k: v for k, v in config.items() if k not in ("hunt_id", "name")}
+        payload["rules"] = _rules_from_stored(config.get("rules"))
+        payload["display_name"] = resolve_display_name(config, name)
+        return cls.model_validate({"name": name, **payload})
 
 
 class HuntCreateRequest(HuntWriteRequest):
-    hunt_id: str = Field(description="Stable id / YAML filename stem: [a-z][a-z0-9_]*")
+    name: str = Field(description="Hunt file name (YAML stem); must be unique")
 
-    @field_validator("hunt_id")
+    @field_validator("name")
     @classmethod
-    def _validate_hunt_id(cls, v: str) -> str:
-        if not _HUNT_ID_PATTERN.match(v):
-            raise ValueError(f"Hunt id '{v}' must match [a-z][a-z0-9_]*")
+    def _validate_hunt_name(cls, v: str) -> str:
+        if not _HUNT_NAME_PATTERN.match(v):
+            raise ValueError(
+                f"Hunt name '{v}' must match /^[a-zA-Z0-9_-]+$/ (letters, digits, _, -)"
+            )
         return v
 
 
@@ -187,18 +202,18 @@ def _get_task_manager(request: Request) -> TaskManager:
     return request.app.state.task_manager
 
 
-def _hunt_display_name_matches(hunt: Any, hunt_id: str) -> bool:
-    """Match engine ``Hunt`` instance to registry ``hunt_id`` or display name."""
-    if hunt.name == hunt_id:
+def _hunt_display_name_matches(hunt: Any, hunt_name: str) -> bool:
+    """Match engine ``Hunt`` instance to registry file name or display label."""
+    if hunt.name == hunt_name:
         return True
-    return hunt.name.replace(" ", "_") == hunt_id
+    return hunt.name.replace(" ", "_") == hunt_name
 
 
 def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
     customers = row.get("customers") or []
     return HuntSummary(
-        hunt_id=row["hunt_id"],
         name=row["name"],
+        display_name=row["display_name"],
         customer=customers[0] if customers else "",
         customers=customers,
         cron=row.get("cron", ""),
@@ -208,17 +223,17 @@ def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
     )
 
 
-def _find_engine_hunt(engine: Any, hunt_id: str, registry: HuntConfigReg | None):
-    display_name = hunt_id
+def _find_engine_hunt(engine: Any, hunt_name: str, registry: HuntConfigReg | None):
+    display_name = hunt_name
     if registry is not None:
         try:
-            display_name = registry.get(hunt_id).get("name", hunt_id)
+            display_name = resolve_display_name(registry.get(hunt_name), hunt_name)
         except HuntConfigNotFoundError:
             pass
 
     for cron_job in engine._cron_jobs:
         for hunt in cron_job.hunts:
-            if hunt.name == display_name or _hunt_display_name_matches(hunt, hunt_id):
+            if hunt.name == display_name or _hunt_display_name_matches(hunt, hunt_name):
                 return hunt
     return None
 
@@ -260,12 +275,13 @@ async def list_hunts(
     search: str | None = Query(
         None,
         description=(
-            "Case-insensitive search in hunt_id, name, customers, rules, source_table, target_table"
+            "Case-insensitive search in name, display_name, customers, rules, "
+            "source_table, target_table"
         ),
     ),
     sort_by: str | None = Query(
         None,
-        description="Sort field (hunt_id, name, source_table, target_table)",
+        description="Sort field (name, display_name, source_table, target_table)",
     ),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ) -> PaginatedResponse[HuntSummary]:
@@ -274,7 +290,7 @@ async def list_hunts(
     raw = apply_search(
         raw,
         search,
-        ["hunt_id", "name", "customers", "rules", "source_table", "target_table"],
+        ["name", "display_name", "customers", "rules", "source_table", "target_table"],
     )
     raw = apply_sort(raw, sort_by, sort_order)
     summaries = [_hunt_row_to_summary(row) for row in raw]
@@ -293,103 +309,103 @@ async def create_hunt(
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML."""
-    if registry.exists(body.hunt_id):
+    if registry.name_exists(body.name):
         raise HTTPException(
             status_code=409,
-            detail={"code": "conflict", "message": f"Hunt '{body.hunt_id}' already exists"},
+            detail={"code": "conflict", "message": f"Hunt '{body.name}' already exists"},
         )
-    config = body.to_config_dict()
+    config = body.to_config_dict(hunt_name=body.name)
     registry.save(
-        body.hunt_id,
+        body.name,
         config,
         created_by=user.user_id,
-        description=f"hunt: create {body.hunt_id}",
+        description=f"hunt: create {body.name}",
     )
-    audit_resource_change(user.user_id, "hunt", body.hunt_id, "created")
-    return HuntDetailResponse.from_stored_config(body.hunt_id, config)
+    audit_resource_change(user.user_id, "hunt", body.name, "created")
+    return HuntDetailResponse.from_stored_config(body.name, config)
 
 
 @router.get(
-    "/{hunt_id}",
+    "/{name}",
     response_model=HuntDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
 )
 async def get_hunt(
-    hunt_id: str,
+    name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
-    """Get full hunt configuration by id."""
+    """Get full hunt configuration by file name."""
     try:
-        config = registry.get(hunt_id)
+        config = registry.get(name)
     except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_id}' not found"},
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
-    return HuntDetailResponse.from_stored_config(hunt_id, config)
+    return HuntDetailResponse.from_stored_config(name, config)
 
 
 @router.put(
-    "/{hunt_id}",
+    "/{name}",
     response_model=HuntDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["hunt_write"]))],
 )
 async def update_hunt(
-    hunt_id: str,
+    name: str,
     body: HuntWriteRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration."""
     try:
-        registry.get(hunt_id)
+        registry.get(name)
     except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_id}' not found"},
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
 
-    config = body.to_config_dict()
+    config = body.to_config_dict(hunt_name=name)
     registry.save(
-        hunt_id,
+        name,
         config,
         created_by=user.user_id,
-        description=f"hunt: update {hunt_id}",
+        description=f"hunt: update {name}",
     )
-    audit_resource_change(user.user_id, "hunt", hunt_id, "updated")
-    return HuntDetailResponse.from_stored_config(hunt_id, config)
+    audit_resource_change(user.user_id, "hunt", name, "updated")
+    return HuntDetailResponse.from_stored_config(name, config)
 
 
 @router.delete(
-    "/{hunt_id}",
+    "/{name}",
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["hunt_delete"]))],
 )
 async def delete_hunt(
-    hunt_id: str,
+    name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
 ):
     """Delete a hunt configuration."""
     try:
-        registry.delete(hunt_id)
+        registry.delete(name)
     except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_id}' not found"},
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
-    audit_resource_change(user.user_id, "hunt", hunt_id, "deleted")
+    audit_resource_change(user.user_id, "hunt", name, "deleted")
 
 
 @router.post(
-    "/{hunt_id}/run",
+    "/{name}/run",
     response_model=TriggerResponse,
     status_code=202,
     dependencies=[Depends(require_action(scopes_dict["hunt_execute"]))],
 )
 async def trigger_hunt(
-    hunt_id: str,
+    name: str,
     body: TriggerRequest,
     request: Request,
     user: CurrentUser,
@@ -407,11 +423,11 @@ async def trigger_hunt(
             detail={"code": "not_configured", "message": "Hunt engine not running"},
         )
 
-    target_hunt = _find_engine_hunt(engine, hunt_id, registry)
+    target_hunt = _find_engine_hunt(engine, name, registry)
     if target_hunt is None:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{hunt_id}' not found in scheduler"},
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found in scheduler"},
         )
 
     manager = _get_task_manager(request)
@@ -422,7 +438,7 @@ async def trigger_hunt(
         body.customer,
     )
 
-    audit_resource_change(user.user_id, "hunt", hunt_id, "executed")
+    audit_resource_change(user.user_id, "hunt", name, "executed")
     return TriggerResponse(task_id=task_info.id, hunt_name=target_hunt.name)
 
 
