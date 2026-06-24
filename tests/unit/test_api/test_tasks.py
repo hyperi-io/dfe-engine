@@ -66,7 +66,7 @@ class TestHuntsRouter:
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["org_a"],
-            "rules": [{"rule_name": "alpha_rule"}],
+            "rules": ["alpha_rule"],
         }
         payload_b = {
             "hunt_id": "beta_hunt",
@@ -74,7 +74,7 @@ class TestHuntsRouter:
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["org_b"],
-            "rules": [{"rule_name": "beta_rule"}],
+            "rules": ["beta_rule"],
         }
         assert (
             client.post("/api/v1/hunts", json=payload_a, headers=admin_headers).status_code == 201
@@ -115,7 +115,7 @@ class TestHuntsRouter:
             "global_target_table_name": "logs_alerts",
             "global_source_table_name": "logs_nxlog",
             "customers": ["test-org"],
-            "rules": [{"rule_name": "win_account_a_common_activities"}],
+            "rules": ["win_account_a_common_activities"],
         }
         create = client.post("/api/v1/hunts", json=payload, headers=admin_headers)
         assert create.status_code == 201
@@ -125,7 +125,7 @@ class TestHuntsRouter:
 
         detail = client.get("/api/v1/hunts/api_test_hunt", headers=admin_headers)
         assert detail.status_code == 200
-        assert detail.json()["rules"][0]["rule_name"] == "win_account_a_common_activities"
+        assert detail.json()["rules"][0] == "win_account_a_common_activities"
 
         listed = client.get("/api/v1/hunts", headers=admin_headers)
         assert listed.status_code == 200
@@ -137,7 +137,7 @@ class TestHuntsRouter:
             "cron": "*/5 * * * *",
             "global_target_table_name": "logs_alerts",
             "customers": ["test-org"],
-            "rules": [{"rule_name": "other_rule"}],
+            "rules": ["other_rule"],
         }
         updated = client.put(
             "/api/v1/hunts/api_test_hunt",
@@ -160,7 +160,7 @@ class TestHuntsRouter:
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
-            "rules": [{"rule_name": "r"}],
+            "rules": ["r"],
         }
         assert client.post("/api/v1/hunts", json=payload, headers=admin_headers).status_code == 201
         dup = client.post("/api/v1/hunts", json=payload, headers=admin_headers)
@@ -174,7 +174,7 @@ class TestHuntsRouter:
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
-            "rules": [{"rule_name": "r"}],
+            "rules": ["r"],
         }
         resp = client.post("/api/v1/hunts", json=payload, headers=admin_headers)
         assert resp.status_code == 422
@@ -186,7 +186,7 @@ class TestHuntsRouter:
             "cron": "* * * * *",
             "global_target_table_name": "t",
             "customers": ["c"],
-            "rules": [{"rule_name": "r"}],
+            "rules": ["r"],
         }
         resp = client.post("/api/v1/hunts", json=payload, headers=viewer_headers)
         assert resp.status_code == 403

@@ -32,6 +32,25 @@ from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
 _HUNT_ID_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
+
+def _rule_names_from_stored(rules: Any) -> list[str]:
+    if not isinstance(rules, list):
+        return []
+    names: list[str] = []
+    for entry in rules:
+        if isinstance(entry, str):
+            names.append(entry)
+        elif isinstance(entry, dict):
+            name = entry.get("rule_name")
+            if isinstance(name, str) and name:
+                names.append(name)
+    return names
+
+
+def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
+    return [{"rule_name": name} for name in rule_names]
+
+
 router = APIRouter(prefix="/hunts", tags=["hunts"])
 
 
@@ -59,13 +78,6 @@ class HuntSummary(BaseModel):
     target_table: str = Field(default="")
 
 
-class HuntRuleEntry(BaseModel):
-    rule_name: str
-    target_table_name: str | None = None
-    source: str | None = None
-    initial_checkpoint_lookback_minutes: int | None = None
-
-
 class HuntWriteRequest(BaseModel):
     """Hunt scheduler YAML payload (without ``hunt_id``)."""
 
@@ -75,16 +87,40 @@ class HuntWriteRequest(BaseModel):
     global_target_table_name: str
     global_source_table_name: str | None = None
     customers: list[str] = Field(min_length=1)
-    rules: list[HuntRuleEntry] = Field(min_length=1)
+    rules: list[str] = Field(
+        min_length=1,
+        description="Hunt rule template names (``{name}.jinja2`` under the rule repo)",
+    )
     customer_filters: dict[str, Any] | None = None
     checkpoint_timestamp_field: str | None = None
     scheduling_mode: str | None = None
     min_interval_seconds: int | None = None
     explain_queries: bool | None = None
 
+    @field_validator("rules", mode="before")
+    @classmethod
+    def _rules_must_be_names(cls, v: Any) -> Any:
+        if not isinstance(v, list):
+            return v
+        for item in v:
+            if isinstance(item, dict):
+                raise ValueError(
+                    "rules must be a list of rule name strings, not rule objects "
+                    "(edit hunt YAML directly for per-rule overrides)"
+                )
+        return v
+
+    @field_validator("rules")
+    @classmethod
+    def _rules_non_empty_names(cls, v: list[str]) -> list[str]:
+        cleaned = [name.strip() for name in v]
+        if any(not name for name in cleaned):
+            raise ValueError("rule names must be non-empty strings")
+        return cleaned
+
     def to_config_dict(self) -> dict[str, Any]:
         data = self.model_dump(exclude_none=True, exclude={"hunt_id"})
-        data["rules"] = [r.model_dump(exclude_none=True) for r in self.rules]
+        data["rules"] = _rules_to_yaml(self.rules)
         return data
 
 
@@ -95,7 +131,9 @@ class HuntDetailResponse(HuntWriteRequest):
 
     @classmethod
     def from_stored_config(cls, hunt_id: str, config: dict[str, Any]) -> HuntDetailResponse:
-        return cls.model_validate({"hunt_id": hunt_id, **config})
+        payload = dict(config)
+        payload["rules"] = _rule_names_from_stored(payload.get("rules"))
+        return cls.model_validate({"hunt_id": hunt_id, **payload})
 
 
 class HuntCreateRequest(HuntDetailResponse):
