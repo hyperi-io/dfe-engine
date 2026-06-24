@@ -14,7 +14,7 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
@@ -277,6 +277,33 @@ class JsonPathsResponse(BaseModel):
     json_column: str = Field(description="Name of the JSON column inspected (always '_json').")
     paths: list[JsonPathInfo] = Field(
         description="One entry per distinct JSON path found in the column."
+    )
+
+
+class SampleRowsResponse(BaseModel):
+    """Random sample rows for a source, scoped to its match rule."""
+
+    source_name: str = Field(description="The source these rows were sampled for.")
+    table: str = Field(
+        description=(
+            "Fully-qualified ClickHouse table actually sampled ('db.table'). The source's "
+            "own table when the selected version has a meta_schema, otherwise the shared "
+            "catch-all landing table."
+        )
+    )
+    match_field: str | None = Field(
+        default=None,
+        description=(
+            "Match field rows were filtered on, or null when the source owns its own table "
+            "(whole-table sample)."
+        ),
+    )
+    match_value: str | None = Field(
+        default=None, description="Match value rows were filtered on, or null for a whole-table sample."
+    )
+    columns: list[str] = Field(description="Column names present in the sampled rows.")
+    rows: list[dict[str, Any]] = Field(
+        description="Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
     )
 
 
@@ -1205,6 +1232,79 @@ async def discover_json_paths(
             )
             for d in discovered
         ],
+    )
+
+
+@router.get(
+    "/{source_name}/sample-rows",
+    response_model=SampleRowsResponse,
+    dependencies=[Depends(require_action("schema:read"))],
+)
+async def sample_source_rows(
+    source_name: str,
+    user: CurrentUser,
+    source_registry: SourceReg,
+    schema_registry: SchemaReg,
+    ch: ClickHouseClient,
+    limit: int = Query(10, ge=1, le=100, description="Number of random rows to sample"),
+    version: str | None = Query(
+        None, description="Source version to sample against (defaults to current)"
+    ),
+) -> SampleRowsResponse:
+    """Return random sample rows for a source, scoped to its match rule.
+
+    Resolves the requested ``version`` (or the source's current version). A
+    version with a ``meta_schema`` owns its own table, so sampling runs against
+    ``db.<source>`` unfiltered. Otherwise the version's data still lives in the
+    shared catch-all landing table, so sampling runs against ``db.<landing>``
+    filtered by the version's match rule.
+
+    Intended for inspecting real data while authoring a match condition or CEL
+    before promoting any JSON path -- a row-level companion to the per-path
+    ``?samples=N`` on ``/json-paths``.
+    """
+    from dfe_engine.services.schema.json_promotion_service import (
+        JsonPromotionError,
+        sample_rows,
+    )
+
+    try:
+        source = source_registry.get_source(source_name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
+        ) from None
+
+    _version_id, ver = _resolve_source_version(source, version, source_name)
+    target_table, match_field, match_value, _columns = _discovery_target(
+        source, ver, schema_registry
+    )
+
+    db = get_settings().clickhouse.effective_data_database
+
+    try:
+        columns, rows = sample_rows(
+            ch,
+            db=db,
+            source=target_table,
+            match_field=match_field,
+            match_value=match_value,
+            limit=limit,
+        )
+    except JsonPromotionError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "sample_failed", "message": str(exc)},
+        ) from exc
+
+    return SampleRowsResponse(
+        source_name=source_name,
+        table=f"{db}.{target_table}",
+        match_field=match_field,
+        match_value=match_value,
+        columns=columns,
+        rows=rows,
     )
 
 
