@@ -121,6 +121,9 @@ class ClickHouseSettings(BaseModel):
     verify: bool = Field(default=False)
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
+    # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
+    # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
+    topology: str = Field(default="single")
 
     @property
     def effective_data_database(self) -> str:
@@ -603,6 +606,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_min"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
         overrides["clickhouse"]["connections_max"] = int(val)
+    if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
+        overrides["clickhouse"]["topology"] = val
 
     # Hunts settings
     if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):

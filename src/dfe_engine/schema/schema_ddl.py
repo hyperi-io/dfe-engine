@@ -38,6 +38,9 @@ class DDLConfig:
 
     db: str = "{db}"
     engine: str = "MergeTree"
+    # ClickHouse topology: "single" -> MergeTree (standalone, no Keeper);
+    # "replicated" -> ReplicatedMergeTree (cluster mode, Keeper-coordinated).
+    topology: str = "single"
     ttl_days: int | None = 90
     ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp", "_timestamp_load"])
     partition_column: str = "_timestamp_load"
@@ -144,8 +147,13 @@ class DDLGenerator:
         body_lines = self._body_lines(columns, cfg)
         lines.append(",\n".join(body_lines))
 
-        # Close columns, ENGINE
-        lines.append(f")\nENGINE = {cfg.engine}()")
+        # Close columns, ENGINE (topology-aware)
+        if cfg.topology == "replicated":
+            zk_path = f"/clickhouse/tables/{{shard}}/{cfg.db}/{table_name}"
+            engine_clause = f"Replicated{cfg.engine}('{zk_path}', '{{replica}}')"
+        else:
+            engine_clause = f"{cfg.engine}()"
+        lines.append(f")\nENGINE = {engine_clause}")
 
         # PARTITION BY
         if any(column for column in columns if column.name == cfg.partition_column):

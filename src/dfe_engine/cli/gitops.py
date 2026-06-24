@@ -66,12 +66,12 @@ def _build_compilation(settings: DFESettings):
     return compiler.compile_all(), env.name
 
 
-def _render_ddl() -> dict[str, str]:
+def _render_ddl(topology: str = "single") -> dict[str, str]:
     """Render bundled DDL; non-fatal if schema generation fails."""
     try:
         from dfe_engine.schema.ddl_writer import DDLFileWriter
 
-        return DDLFileWriter().generate_all()
+        return DDLFileWriter(topology=topology).generate_all()
     except Exception as exc:  # DDL is optional in the artifact set
         print_warning(f"Skipping DDL render: {exc}")
         return {}
@@ -98,7 +98,9 @@ def publish() -> None:
     for warn in result.warnings:
         print_warning(warn)
 
-    artifacts = collect_deploy_artifacts(result, environment=environment, ddl=_render_ddl())
+    artifacts = collect_deploy_artifacts(
+        result, environment=environment, ddl=_render_ddl(settings.clickhouse.topology)
+    )
 
     # Engine is the OIDC SSoT: render Envoy oidc-values.yaml from the provider
     # registry into the deploy repo (the envoy app pulls it via $values).
