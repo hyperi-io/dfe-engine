@@ -100,6 +100,20 @@ def publish() -> None:
 
     artifacts = collect_deploy_artifacts(result, environment=environment, ddl=_render_ddl())
 
+    # Engine is the OIDC SSoT: render Envoy oidc-values.yaml from the provider
+    # registry into the deploy repo (the envoy app pulls it via $values).
+    if settings.auth.oidc.providers_dir:
+        from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
+        from dfe_engine.gitops import (
+            ENVOY_OIDC_VALUES_PATH,
+            build_oidc_providers,
+            render_envoy_oidc_values,
+        )
+
+        oidc_registry = OIDCProviderRegistry(settings.auth.oidc.providers_dir)
+        providers = build_oidc_providers(oidc_registry)
+        artifacts[ENVOY_OIDC_VALUES_PATH] = render_envoy_oidc_values(providers)
+
     repo = GitopsRepo(
         local_path=gitops.local_path,
         repo_url=gitops.repo_url,

@@ -118,14 +118,41 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
+    # Org ClickHouse provisioning (opt-in via DFE_ORG_PROVISIONING_ENABLED).
+    # Default-off so startup is unaffected; fully non-fatal when enabled.
+    ch_provisioner = None
+    if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
+        try:
+            from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+            from dfe_engine.connections.reconciler import Reconciler
+            from dfe_engine.orgs.ch_provisioner import OrgChProvisioner
+
+            ch_cfg = {
+                "ch_host": settings.clickhouse.host,
+                "ch_port": settings.clickhouse.port,
+                "ch_username": settings.clickhouse.username,
+                "ch_password": settings.clickhouse.password,
+                "ch_secure": settings.clickhouse.secure,
+                "ch_verify": settings.clickhouse.verify,
+            }
+            admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
+            ch_provisioner = OrgChProvisioner(ch_client=admin_client)
+            # Ensure static CH users + tenant row policies exist (non-fatal).
+            Reconciler(admin_client, conn_config).reconcile()
+            logger.info("Org CH provisioning enabled")
+        except Exception:
+            logger.exception("Org CH provisioning setup failed; continuing without it")
+            ch_provisioner = None
+
     # Bootstrap org lifecycle manager
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 
     hdx_client = getattr(app.state, "hyperdx_client", None)
     app.state.org_lifecycle = OrgLifecycleManager(
         registry=app.state.org_registry,
-        ch_provisioner=None,  # Wired when CH admin client available
+        ch_provisioner=ch_provisioner,
         hyperdx_client=hdx_client,
+        connection_config=conn_config,
     )
 
     # Bootstrap JIT provisioner

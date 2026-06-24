@@ -41,6 +41,7 @@ from dfe_engine.orgs.models import Org
 from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
+    from dfe_engine.connections.config import ConnectionConfig
     from dfe_engine.hyperdx.client import HyperDXClient
     from dfe_engine.orgs.ch_provisioner import OrgChProvisioner
 
@@ -57,10 +58,12 @@ class OrgLifecycleManager:
         registry: OrgRegistry,
         ch_provisioner: OrgChProvisioner | None = None,
         hyperdx_client: HyperDXClient | None = None,
+        connection_config: ConnectionConfig | None = None,
     ) -> None:
         self._registry = registry
         self._ch = ch_provisioner
         self._hdx = hyperdx_client
+        self._conn_config = connection_config
 
     # ------------------------------------------------------------------
     # Public API
@@ -252,6 +255,30 @@ class OrgLifecycleManager:
         if team_id:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
             update_kwargs: dict[str, object] = {"hyperdx_team_id": team_id}
+
+            # Attach the tenant_reader ClickHouse connection to the new team so
+            # the org's HyperDX can query its data (non-fatal).
+            if self._conn_config is not None:
+                conn = self._conn_config.connections.get("tenant_reader")
+                if conn is not None:
+                    import os
+
+                    try:
+                        await self._hdx.create_connection(
+                            team_id=team_id,
+                            name="tenant_reader",
+                            host=conn.host,
+                            port=conn.port,
+                            database=conn.database,
+                            user=conn.user,
+                            password=os.environ.get(conn.password_env, ""),
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            "HyperDX connection create failed",
+                            org_name=org.name,
+                            error=str(exc),
+                        )
 
             # Retrieve the team's own API key so we can invite members later.
             # The env var name follows the same convention as ch_password_env.
