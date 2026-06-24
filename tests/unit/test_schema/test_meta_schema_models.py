@@ -84,10 +84,10 @@ class TestMetaSchema:
         assert col["name"] == "event_id"
 
     def test_schema_column_rejects_empty_name(self):
-        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+        with pytest.raises(pydantic.ValidationError, match="'name' must be a non-empty string"):
             SchemaColumn(name="", type="string")
 
-        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+        with pytest.raises(pydantic.ValidationError, match="'name' must be a non-empty string"):
             SchemaColumn(name="   ", type="string")
 
     def test_schema_column_rejects_empty_name_in_meta_schema(self, cloudtrail_like_yaml: dict):
@@ -100,10 +100,10 @@ class TestMetaSchema:
                 }
             },
         }
-        with pytest.raises(pydantic.ValidationError, match="name must be a non-empty string"):
+        with pytest.raises(pydantic.ValidationError, match="'name' must be a non-empty string"):
             MetaSchema.model_validate(bad)
 
-    def test_historical_version_may_omit_columns_only_for_common_header_legacy(self):
+    def test_every_version_must_define_columns_even_after_legacy_coercion(self):
         stub_yaml = {
             "current": "1.1.0",
             "versions": {
@@ -125,16 +125,20 @@ class TestMetaSchema:
         with pytest.raises(pydantic.ValidationError, match="columns"):
             MetaSchema.model_validate(stub_yaml)
 
-        ms = MetaSchema.model_validate(
-            coerce_common_header_legacy_versions("common-header/minimal", stub_yaml)
-        )
-        assert ms.versions["1.0.0"].columns == []
-        assert len(ms.versions["1.1.0"].columns) == 1
+        # Legacy coercion fills missing columns with [], but the NonEmptyList
+        # validator on SchemaVersion.columns now rejects empty columns on every
+        # version - including coerced legacy stubs.
+        with pytest.raises(
+            pydantic.ValidationError, match="'columns' must contain at least 1 element"
+        ):
+            MetaSchema.model_validate(
+                coerce_common_header_legacy_versions("common-header/minimal", stub_yaml)
+            )
 
     def test_current_version_must_have_columns(self):
         with pytest.raises(
             pydantic.ValidationError,
-            match=r"current version '1\.0\.0' must define at least one column",
+            match=r"'columns' must contain at least 1 element",
         ):
             MetaSchema.model_validate(
                 coerce_common_header_legacy_versions(
@@ -155,7 +159,7 @@ class TestMetaSchema:
     def test_meta_path_rejects_empty_columns_on_current(self):
         with pytest.raises(
             pydantic.ValidationError,
-            match=r"current version '2\.0\.0' must define at least one column",
+            match=r"'columns' must contain at least 1 element",
         ):
             MetaSchema.model_validate(
                 {
@@ -220,14 +224,14 @@ class TestSchemaSummaryTree:
                 name="aws/cloudtrail",
                 current="1",
                 versions=["1"],
-                updated_at="",
+                updated_at="2026-01-01T00:00:00Z",
                 column_count=3,
             ),
             SchemaSummaryObject(
                 name="azure/activity_log",
                 current="2",
                 versions=["2"],
-                updated_at="",
+                updated_at="2026-01-01T00:00:00Z",
                 column_count=1,
             ),
         ]
@@ -242,8 +246,8 @@ class TestSchemaSummaryTree:
                 name="aws/sub/logs",
                 current="1",
                 versions=["1"],
-                updated_at="",
-                column_count=0,
+                updated_at="2026-01-01T00:00:00Z",
+                column_count=1,
             )
         ]
         tree = SchemaSummary.from_paths(objs, path=lambda o: o.name)
@@ -259,8 +263,8 @@ class TestSchemaSummaryTree:
                 name="///",
                 current="1",
                 versions=["1"],
-                updated_at="",
-                column_count=0,
+                updated_at="2026-01-01T00:00:00Z",
+                column_count=1,
             )
         ]
         tree = SchemaSummary.from_paths(objs, path=lambda o: o.name)
@@ -275,15 +279,15 @@ class TestPaginatedSchemaSummaryResponse:
                 name="a/first",
                 current="1",
                 versions=["1"],
-                updated_at="",
-                column_count=0,
+                updated_at="2026-01-01T00:00:00Z",
+                column_count=1,
             ),
             SchemaSummaryObject(
                 name="b/second",
                 current="1",
                 versions=["1"],
-                updated_at="",
-                column_count=0,
+                updated_at="2026-01-01T00:00:00Z",
+                column_count=1,
             ),
         ]
         resp = PaginatedSchemaSummaryResponse.from_summaries(objs, page=1, per_page=1)

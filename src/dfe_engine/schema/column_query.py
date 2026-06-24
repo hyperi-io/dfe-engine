@@ -18,23 +18,6 @@ COLUMN_FILTER_FIELDS: tuple[str, ...] = (
 SEARCHABLE_COLUMN_ALIASES: dict[str, str] = {"type_filter": "type"}
 
 
-def _normalize_searchable_columns(searchable_columns: list[str] | None) -> list[str] | None:
-    if not searchable_columns:
-        return None
-    normalized: list[str] = []
-    for field in searchable_columns:
-        canonical = SEARCHABLE_COLUMN_ALIASES.get(field, field)
-        if canonical not in COLUMN_FILTER_FIELDS:
-            allowed = ", ".join((*COLUMN_FILTER_FIELDS, "type_filter"))
-            raise ValueError(f"Invalid searchable_columns entry '{field}'; allowed: {allowed}")
-        normalized.append(canonical)
-    return normalized
-
-
-def _field_value(col: SchemaColumn, field: str) -> Any:
-    return getattr(col, field)
-
-
 def _field_as_search_text(value: Any) -> str:
     if value is None:
         return ""
@@ -43,9 +26,8 @@ def _field_as_search_text(value: Any) -> str:
     return str(value)
 
 
-def _matches_field_filter(col: SchemaColumn, field: str, filter_value: str) -> bool:
-    text = _field_as_search_text(_field_value(col, field))
-    return filter_value.casefold() in text.casefold()
+def _field_value(col: SchemaColumn, field: str) -> Any:
+    return getattr(col, field)
 
 
 def _matched_search_fields(
@@ -55,8 +37,26 @@ def _matched_search_fields(
     return [
         field
         for field in searchable_columns
-        if q in _field_as_search_text(_field_value(col, field)).casefold()
+        if q in _field_as_search_text(value=_field_value(col=col, field=field)).casefold()
     ]
+
+
+def _matches_field_filter(col: SchemaColumn, field: str, filter_value: str) -> bool:
+    text = _field_as_search_text(value=_field_value(col=col, field=field))
+    return filter_value.casefold() in text.casefold()
+
+
+def _normalize_searchable_columns(searchable_columns: list[str] | None) -> list[str] | None:
+    if not (searchable_columns):
+        return None
+    normalized: list[str] = []
+    for field in searchable_columns:
+        canonical = SEARCHABLE_COLUMN_ALIASES.get(field, field)
+        if canonical not in COLUMN_FILTER_FIELDS:
+            allowed = ", ".join((*COLUMN_FILTER_FIELDS, "type_filter"))
+            raise ValueError(f"Invalid searchable_columns entry {field!r}. Allowed: {allowed}")
+        normalized.append(canonical)
+    return normalized
 
 
 def filter_columns(
@@ -84,9 +84,9 @@ def filter_columns(
     for field, filt in field_filters.items():
         if filt is None:
             continue
-        result = [c for c in result if _matches_field_filter(c, field, filt)]
+        result = [c for c in result if _matches_field_filter(col=c, field=field, filter_value=filt)]
 
-    explicit_searchable = _normalize_searchable_columns(searchable_columns)
+    explicit_searchable = _normalize_searchable_columns(searchable_columns=searchable_columns)
     search_fields = (
         list(COLUMN_FILTER_FIELDS) if explicit_searchable is None else explicit_searchable
     )
@@ -94,7 +94,9 @@ def filter_columns(
     if search:
         filtered: list[SchemaColumn] = []
         for col in result:
-            matched = _matched_search_fields(col, search, search_fields)
+            matched = _matched_search_fields(
+                col=col, query=search, searchable_columns=search_fields
+            )
             if matched:
                 filtered.append(col.model_copy(update={"matched_searchable": matched}))
         return filtered

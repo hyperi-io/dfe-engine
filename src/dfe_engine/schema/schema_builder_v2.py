@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -126,7 +127,12 @@ class SchemaBuilderV2:
                 logger.warning(f"Schema validation: {err}")
 
         ddl_config = self._build_ddl_config_for_snapshot(snap)
-        create_ddl = self._ddl_gen.generate_create_table(source.table_name, columns, ddl_config)
+        create_ddl = self._ddl_gen.generate_create_table(
+            source.table_name,
+            columns,
+            ddl_config,
+            generated_time=datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M:%S UTC"),
+        )
 
         sigma_ddl = None
         if snap.sigma and snap.sigma.custom_mappings:
@@ -254,10 +260,10 @@ class SchemaBuilderV2:
         profile_name = snap.header.type
         profile_version = snap.header.version
         try:
-            return SchemaLoader.load_profile(profile_name, version=profile_version)
+            return SchemaLoader.load_profile(profile_name, profile_version=profile_version)
         except SchemaLoadError as e:
             raise SchemaBuildError(
-                f"Failed to load profile '{profile_name}' for source '{source_name}': {e}"
+                f"Failed to load profile {profile_name!r} for source {source_name!r}: {e}"
             ) from e
 
     def _load_source_columns(self, source: Source) -> list[SchemaColumn]:
@@ -279,7 +285,7 @@ class SchemaBuilderV2:
                 )
             except SchemaLoadError as e:
                 raise SchemaBuildError(
-                    f"Failed to load meta_schema for source '{source_name}': {e}"
+                    f"Failed to load meta_schema for source {source_name!r}: {e}"
                 ) from e
 
         if schema_cfg.derived_schema:
@@ -310,6 +316,6 @@ class SchemaBuilderV2:
         return DDLConfig(
             engine=schema_cfg.engine,
             ttl_days=schema_cfg.ttl_days,
-            profile=snap.header.type,
+            profile_name=snap.header.type,
             profile_version=snap.header.version,
         )

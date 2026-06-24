@@ -1,4 +1,4 @@
-"""Meta schema model — Pydantic model for standard-to-DFE meta schema.
+"""Meta schema model - Pydantic model for standard-to-DFE meta schema.
 
 A MetaSchema defines the columns for a ClickHouse table.
 
@@ -11,11 +11,56 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from collections.abc import Sized
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
+
+
+def _reject_empty_str(value: Any, info: ValidationInfo) -> Any:
+    """Reject blank strings before core validation - used on Literals."""
+    if isinstance(value, str) and not (value.strip()):
+        raise ValueError(f"{info.field_name!r} must be a non-empty string")
+    return value
+
+
+def _require_non_empty[Collection: Sized](value: Collection, info: ValidationInfo) -> Collection:
+    """Reject empty collections (list, dict, etc.)."""
+    if len(value) == 0:
+        raise ValueError(f"{info.field_name!r} must contain at least 1 element")
+    return value
+
+
+def _require_non_empty_str(value: str, info: ValidationInfo) -> str:
+    """Reject blank/whitespace-only strings (runs after core str coercion)."""
+    if not (value.strip()):
+        raise ValueError(f"{info.field_name!r} must be a non-empty string")
+    return value
+
+
+def _require_positive_int(value: int, info: ValidationInfo) -> int:
+    """Rejects zero and non-positive integers."""
+    if value <= 0:
+        raise ValueError(f"{info.field_name!r} must be a value greater than '0'")
+    return value
+
+
+# Reusable field types - centralise the validators so each model just annotates.
+type NonEmptyDict[Key, Value] = Annotated[dict[Key, Value], AfterValidator(_require_non_empty)]
+type NonEmptyList[Element] = Annotated[list[Element], AfterValidator(_require_non_empty)]
+NonEmptyStr = Annotated[str, AfterValidator(_require_non_empty_str)]
+PositiveInt = Annotated[int, AfterValidator(_require_positive_int)]
 
 
 class SchemaColumn(BaseModel):
@@ -23,8 +68,8 @@ class SchemaColumn(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
 
-    name: str = Field(..., description="Name of the column")
-    type: str = Field(..., description="Type of the column")
+    name: NonEmptyStr = Field(..., description="Name of the column")
+    type: NonEmptyStr = Field(..., description="Type of the column")
     attribute: list[str] | None = Field(default=None, description="Attributes of the column")
     use_case: str | None = Field(default=None, description="Use case of the column")
     expr: str | None = Field(default=None, description="Expression for the column")
@@ -51,34 +96,18 @@ class SchemaColumn(BaseModel):
             return None
         return value
 
-    @field_validator("name", mode="after")
-    @classmethod
-    def _name_non_empty(cls, value: str) -> str:
-        if not value.strip():
-            raise ValueError("name must be a non-empty string")
-        return value
-
     def to_yaml_dict(self) -> dict[str, Any]:
-        """Serialize for YAML persistence (omits None; omits empty optional strings)."""
-        raw = self.model_dump(mode="python", exclude_none=True, exclude={"matched_searchable"})
-        optional_empty_omit = frozenset({"use_case", "expr", "comment"})
-        out: dict[str, Any] = {}
-        for key, value in raw.items():
-            if key in optional_empty_omit and value == "":
-                continue
-            if key == "attribute" and value == []:
-                continue
-            out[key] = value
-        return out
+        """Serialize for YAML persistence."""
+        return self.model_dump(mode="python", exclude_none=True, exclude={"matched_searchable"})
 
 
 class SchemaVersion(BaseModel):
     """A version in the schema."""
 
-    date: str = Field(..., description="Date of the version")
-    type: str = Field(..., description="Type of the version")
-    summary: str = Field(..., description="Summary of the version")
-    columns: list[SchemaColumn] = Field(..., description="List of columns in the version")
+    date: NonEmptyStr = Field(..., description="Date of the version")
+    type: NonEmptyStr = Field(..., description="Type of the version")
+    summary: NonEmptyStr = Field(..., description="Summary of the version")
+    columns: NonEmptyList[SchemaColumn] = Field(..., description="List of columns in the version")
 
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence."""
@@ -86,7 +115,7 @@ class SchemaVersion(BaseModel):
             "date": self.date,
             "type": self.type,
             "summary": self.summary,
-            "columns": [col.to_yaml_dict() for col in self.columns],
+            "columns": [column.to_yaml_dict() for column in self.columns],
         }
 
 
@@ -97,8 +126,7 @@ class SchemaVersionGet(BaseModel):
     type: str = Field(..., description="Type of the version")
     summary: str = Field(..., description="Summary of the version")
     columns: PaginatedResponse[SchemaColumn] = Field(
-        ...,
-        description="Paginated columns for this version",
+        ..., description="Paginated columns for this version"
     )
 
 
@@ -106,19 +134,12 @@ class MetaSchemaGetResponse(BaseModel):
     """Meta-schema definition for a single requested version."""
 
     current: str = Field(..., description="Current version of the schema")
-    selected: str = Field(
-        ...,
-        description="Version id requested via query parameter",
-    )
+    selected: str = Field(..., description="Version id requested via query parameter")
     version: SchemaVersionGet = Field(
-        ...,
-        description="Metadata and paginated columns for ``selected``",
+        ..., description="Metadata and paginated columns for ``selected``"
     )
     path: str = Field(..., description="Registry path (e.g. aws/cloudtrail)")
-    versions: list[str] = Field(
-        ...,
-        description="All version identifiers defined on this schema",
-    )
+    versions: list[str] = Field(..., description="All version identifiers defined on this schema")
 
 
 class MetaSchema(BaseModel):
@@ -132,8 +153,8 @@ class MetaSchema(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    current: str = Field(..., description="Current version of the schema")
-    versions: dict[str, SchemaVersion] = Field(
+    current: NonEmptyStr = Field(..., description="Current version of the schema")
+    versions: NonEmptyDict[str, SchemaVersion] = Field(
         ..., description="Dictionary of versions and their metadata"
     )
     path: str | None = Field(
@@ -180,7 +201,7 @@ class MetaSchemaUpdateRequest(BaseModel):
     @model_validator(mode="after")
     def _at_least_one_change(self) -> MetaSchemaUpdateRequest:
         if self.current is None and self.summary is None:
-            raise ValueError("At least one of current or summary is required")
+            raise ValueError("At least one of 'current' or 'summary' is required")
         return self
 
 
@@ -189,7 +210,10 @@ class MetaSchemaAddVersionRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    type: Literal["model", "addition", "revision"] = Field(
+    type: Annotated[
+        Literal["model", "addition", "revision"],
+        BeforeValidator(_reject_empty_str),
+    ] = Field(
         ...,
         description="Change category (semver bump from current)",
     )
@@ -197,7 +221,7 @@ class MetaSchemaAddVersionRequest(BaseModel):
         default=None,
         description="Human-readable summary stored on the new version",
     )
-    columns: list[SchemaColumn] = Field(
+    columns: NonEmptyList[SchemaColumn] = Field(
         ...,
         min_length=1,
         description="Complete column snapshot for the new version (at least one column)",
@@ -236,11 +260,11 @@ class SchemaSummaryObject(BaseModel):
         column_count: Number of columns in the schema.
     """
 
-    name: str = Field(description="Name of the schema")
-    current: str = Field(description="Current version of the schema")
-    versions: list[str] = Field(description="List of versions")
-    updated_at: str = Field(description="Last updated timestamp")
-    column_count: int = Field(description="Number of columns in the schema")
+    name: NonEmptyStr = Field(..., description="Name of the schema")
+    current: NonEmptyStr = Field(..., description="Current version of the schema")
+    versions: NonEmptyList[NonEmptyStr] = Field(..., description="List of versions")
+    updated_at: NonEmptyStr = Field(..., description="Last updated timestamp")
+    column_count: PositiveInt = Field(..., description="Number of columns in the schema")
 
 
 PathTree[SchemaSummaryObject].model_rebuild()
