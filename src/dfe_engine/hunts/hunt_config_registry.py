@@ -186,3 +186,7 @@ class HuntConfigRegistry:
                 }
             )
         return results
+
+    def hunt_names_referencing_rule(self, rule_name: str) -> list[str]:
+        """Hunt config file stems whose ``rules`` list includes ``rule_name``."""
+        return [row["name"] for row in self.list_hunts() if rule_name in (row.get("rules") or [])]

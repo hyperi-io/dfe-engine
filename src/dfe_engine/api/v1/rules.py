@@ -15,7 +15,7 @@ import re
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
-from dfe_engine.api.deps import CurrentUser, RuleReg, Settings, require_action
+from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -334,8 +334,20 @@ async def update_rule(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["rule_delete"]))],
 )
-async def delete_rule(name: str, user: CurrentUser, registry: RuleReg):
+async def delete_rule(
+    name: str, user: CurrentUser, registry: RuleReg, hunt_registry: HuntConfigReg
+):
     """Delete a detection rule."""
+    used_by = hunt_registry.hunt_names_referencing_rule(name)
+    if used_by:
+        hunts = ", ".join(sorted(used_by))
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": f"Rule '{name}' is referenced by hunt(s): {hunts}",
+            },
+        )
     try:
         registry.delete(name)
     except RuleNotFoundError:

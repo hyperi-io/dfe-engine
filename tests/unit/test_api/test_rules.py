@@ -186,6 +186,38 @@ class TestRulesUpdateAndDelete:
         get_resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert get_resp.status_code == 404
 
+    def test_delete_blocked_when_referenced_by_hunt(self, client, admin_headers):
+        rule_name = "hunt_linked_rule"
+        create = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name=rule_name),
+            headers=admin_headers,
+        )
+        assert create.status_code == 201
+
+        hunt_payload = {
+            "name": "rule_guard_hunt",
+            "cron": "* * * * *",
+            "global_target_table_name": "logs_alerts",
+            "customers": ["org_a"],
+            "rules": [rule_name],
+        }
+        assert (
+            client.post("/api/v1/hunts", json=hunt_payload, headers=admin_headers).status_code
+            == 201
+        )
+
+        delete = client.delete(f"/api/v1/rules/{rule_name}", headers=admin_headers)
+        assert delete.status_code == 409
+        body = delete.json()
+        assert body["code"] == "conflict"
+        assert rule_name in body["message"]
+        assert "rule_guard_hunt" in body["message"]
+
+        assert client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers).status_code == 200
+        client.delete("/api/v1/hunts/rule_guard_hunt", headers=admin_headers)
+        assert client.delete(f"/api/v1/rules/{rule_name}", headers=admin_headers).status_code == 204
+
     def test_delete_requires_delete_permission(self, client, viewer_headers, admin_headers):
         create = client.post(
             "/api/v1/rules",
