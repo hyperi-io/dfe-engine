@@ -18,7 +18,7 @@ from __future__ import annotations
 import pytest
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseClientWrapper
-from dfe_engine.services.schema.json_promotion_service import discover_paths
+from dfe_engine.services.schema.json_promotion_service import discover_paths, sample_rows
 
 pytestmark = pytest.mark.integration
 
@@ -94,3 +94,17 @@ class TestDiscoverPathsIntegration:
     def test_paths_filter_narrows(self, seeded_table, clickhouse_client):
         by_path = _by_path(seeded_table, clickhouse_client, paths=["user.email"])
         assert set(by_path) == {"user.email"}
+
+
+class TestSampleRowsIntegration:
+    def test_samples_whole_table(self, seeded_table, clickhouse_client):
+        wrapped = ClickHouseClientWrapper(clickhouse_client)
+        columns, rows = sample_rows(wrapped, db=seeded_table, source=TABLE, limit=3)
+        assert columns == ["_json"]
+        assert 1 <= len(rows) <= 3
+        assert all("_json" in row for row in rows)
+
+    def test_limit_caps_row_count(self, seeded_table, clickhouse_client):
+        wrapped = ClickHouseClientWrapper(clickhouse_client)
+        _columns, rows = sample_rows(wrapped, db=seeded_table, source=TABLE, limit=2)
+        assert len(rows) == 2
