@@ -3790,10 +3790,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity",
+              "description": "Case-insensitive search in name, display_name, source, hunt_name, severity",
               "title": "Search"
             },
-            "description": "Case-insensitive search in rule_id, name, source, hunt_name, severity"
+            "description": "Case-insensitive search in name, display_name, source, hunt_name, severity"
           },
           {
             "name": "severity",
@@ -3844,10 +3844,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)",
+              "description": "Sort field (name, display_name, severity, source, hunt_name, created_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (rule_id, name, severity, source, hunt_name, created_at)"
+            "description": "Sort field (name, display_name, severity, source, hunt_name, created_at)"
           },
           {
             "name": "sort_order",
@@ -4004,22 +4004,22 @@
         ]
       }
     },
-    "/api/v1/rules/{rule_id}": {
+    "/api/v1/rules/{name}": {
       "get": {
         "tags": [
           "Rules"
         ],
         "summary": "Get Rule",
-        "description": "Get a detection rule by ID.",
-        "operationId": "get_rule_api_v1_rules__rule_id__get",
+        "description": "Get a detection rule by file name.",
+        "operationId": "get_rule_api_v1_rules__name__get",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -4057,15 +4057,15 @@
         ],
         "summary": "Update Rule",
         "description": "Replace a detection rule (re-runs creation pipeline, preserves created_at).",
-        "operationId": "update_rule_api_v1_rules__rule_id__put",
+        "operationId": "update_rule_api_v1_rules__name__put",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -4113,15 +4113,15 @@
         ],
         "summary": "Delete Rule",
         "description": "Delete a detection rule.",
-        "operationId": "delete_rule_api_v1_rules__rule_id__delete",
+        "operationId": "delete_rule_api_v1_rules__name__delete",
         "parameters": [
           {
-            "name": "rule_id",
+            "name": "name",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "title": "Rule Id"
+              "title": "Name"
             }
           }
         ],
@@ -4173,6 +4173,24 @@
               "title": "Search"
             },
             "description": "Search in name/description"
+          },
+          {
+            "name": "hunt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Hunt file name (YAML stem); only destinations referenced in that hunt's alerts",
+              "title": "Hunt"
+            },
+            "description": "Hunt file name (YAML stem); only destinations referenced in that hunt's alerts"
           },
           {
             "name": "sort_by",
@@ -4751,19 +4769,284 @@
           "hunts"
         ],
         "summary": "List Hunts",
-        "description": "List all configured hunts across all schedulers.",
+        "description": "List persisted hunt configurations with pagination and search.",
         "operationId": "list_hunts_api_v1_hunts_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Case-insensitive search in name, display_name, customers, rules, source_table, target_table",
+              "title": "Search"
+            },
+            "description": "Case-insensitive search in name, display_name, customers, rules, source_table, target_table"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, display_name, source_table, target_table)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, display_name, source_table, target_table)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/HuntSummary"
-                  },
-                  "type": "array",
-                  "title": "Response List Hunts Api V1 Hunts Get"
+                  "$ref": "#/components/schemas/PaginatedResponse_HuntSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Create Hunt",
+        "description": "Create a new hunt configuration YAML.",
+        "operationId": "create_hunt_api_v1_hunts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HuntCreateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuntDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/hunts/{name}": {
+      "get": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Get Hunt",
+        "description": "Get full hunt configuration by file name.",
+        "operationId": "get_hunt_api_v1_hunts__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuntDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Update Hunt",
+        "description": "Replace an existing hunt configuration.",
+        "operationId": "update_hunt_api_v1_hunts__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HuntWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuntDetailResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "hunts"
+        ],
+        "summary": "Delete Hunt",
+        "description": "Delete a hunt configuration.",
+        "operationId": "delete_hunt_api_v1_hunts__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -7131,6 +7414,18 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name",
+            "description": "Hunt file stem when this destination is owned by a hunt (set via API)"
           }
         },
         "type": "object",
@@ -8607,6 +8902,278 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "HuntCreateRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on write)"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Cron",
+            "description": "Cron expression or list of expressions"
+          },
+          "log_buffer": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Log Buffer",
+            "default": 60
+          },
+          "global_target_table_name": {
+            "type": "string",
+            "title": "Global Target Table Name"
+          },
+          "global_source_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Source Table Name"
+          },
+          "customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Customers"
+          },
+          "customer_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Filters"
+          },
+          "checkpoint_timestamp_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Timestamp Field"
+          },
+          "scheduling_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduling Mode"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "explain_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain Queries"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules",
+            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Hunt file name (YAML stem); must be unique"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cron",
+          "global_target_table_name",
+          "customers",
+          "rules",
+          "name"
+        ],
+        "title": "HuntCreateRequest"
+      },
+      "HuntDetailResponse": {
+        "properties": {
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Resolved human-readable label"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Cron",
+            "description": "Cron expression or list of expressions"
+          },
+          "log_buffer": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Log Buffer",
+            "default": 60
+          },
+          "global_target_table_name": {
+            "type": "string",
+            "title": "Global Target Table Name"
+          },
+          "global_source_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Source Table Name"
+          },
+          "customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Customers"
+          },
+          "customer_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Filters"
+          },
+          "checkpoint_timestamp_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Timestamp Field"
+          },
+          "scheduling_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduling Mode"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "explain_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain Queries"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Hunt file name (YAML stem)"
+          },
+          "rules": {
+            "items": {
+              "$ref": "#/components/schemas/HuntRuleEntry"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules"
+          }
+        },
+        "type": "object",
+        "required": [
+          "display_name",
+          "cron",
+          "global_target_table_name",
+          "customers",
+          "name",
+          "rules"
+        ],
+        "title": "HuntDetailResponse",
+        "description": "Full hunt configuration returned from GET/create/update."
+      },
       "HuntEngineStatus": {
         "properties": {
           "running": {
@@ -8634,20 +9201,93 @@
         "title": "HuntEngineStatus",
         "description": "Current state of the background hunt scheduler."
       },
+      "HuntRuleEntry": {
+        "properties": {
+          "rule_name": {
+            "type": "string",
+            "title": "Rule Name"
+          },
+          "target_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Table Name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "initial_checkpoint_lookback_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Checkpoint Lookback Minutes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_name"
+        ],
+        "title": "HuntRuleEntry",
+        "description": "Per-rule hunt configuration as stored in YAML."
+      },
       "HuntSummary": {
         "properties": {
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Hunt file name (YAML stem, unique)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable hunt label"
           },
           "customer": {
             "type": "string",
-            "title": "Customer"
+            "title": "Customer",
+            "description": "First customer in config (legacy summary field)",
+            "default": ""
+          },
+          "customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Customers"
           },
           "cron": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
             "title": "Cron",
-            "description": "Cron schedule expression"
+            "description": "Cron schedule expression(s)",
+            "default": ""
           },
           "rules": {
             "items": {
@@ -8670,11 +9310,144 @@
         "type": "object",
         "required": [
           "name",
-          "customer",
-          "cron"
+          "display_name"
         ],
         "title": "HuntSummary",
         "description": "Summary of a configured hunt."
+      },
+      "HuntWriteRequest": {
+        "properties": {
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on write)"
+          },
+          "cron": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            ],
+            "title": "Cron",
+            "description": "Cron expression or list of expressions"
+          },
+          "log_buffer": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Log Buffer",
+            "default": 60
+          },
+          "global_target_table_name": {
+            "type": "string",
+            "title": "Global Target Table Name"
+          },
+          "global_source_table_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Global Source Table Name"
+          },
+          "customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Customers"
+          },
+          "customer_filters": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Customer Filters"
+          },
+          "checkpoint_timestamp_field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Timestamp Field"
+          },
+          "scheduling_mode": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduling Mode"
+          },
+          "min_interval_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Interval Seconds"
+          },
+          "explain_queries": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Explain Queries"
+          },
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "minItems": 1,
+            "title": "Rules",
+            "description": "Hunt rule template names (``{name}.jinja2`` under the rule repo)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cron",
+          "global_target_table_name",
+          "customers",
+          "rules"
+        ],
+        "title": "HuntWriteRequest",
+        "description": "Hunt scheduler payload for create/update (without hunt file ``name``)."
       },
       "JsonPathInfo": {
         "properties": {
@@ -9488,6 +10261,72 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
+      },
+      "PaginatedResponse_HuntSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/HuntSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[HuntSummary]"
       },
       "PaginatedResponse_RoleResponse_": {
         "properties": {
@@ -10546,22 +11385,23 @@
       },
       "RuleCreateRequest": {
         "properties": {
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Human-readable rule name"
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on create)"
           },
           "severity": {
             "type": "string",
             "title": "Severity",
             "description": "low|medium|high|critical",
             "default": "medium"
-          },
-          "source_type": {
-            "type": "string",
-            "title": "Source Type",
-            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
-            "default": "raw"
           },
           "user_sql": {
             "type": "string",
@@ -10615,12 +11455,23 @@
             "title": "Cost Window Minutes",
             "description": "Window in minutes for cost estimate",
             "default": 60
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Rule file name (YAML stem); must be unique"
+          },
+          "source_type": {
+            "type": "string",
+            "title": "Source Type",
+            "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
+            "default": "raw"
           }
         },
         "type": "object",
         "required": [
-          "name",
-          "user_sql"
+          "user_sql",
+          "name"
         ],
         "title": "RuleCreateRequest",
         "description": "Create a hunt rule via RuleCreationService."
@@ -10661,13 +11512,15 @@
       },
       "RuleResponse": {
         "properties": {
-          "rule_id": {
-            "type": "string",
-            "title": "Rule Id"
-          },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Rule file name (YAML stem)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable rule label"
           },
           "severity": {
             "type": "string",
@@ -10757,8 +11610,8 @@
         },
         "type": "object",
         "required": [
-          "rule_id",
           "name",
+          "display_name",
           "severity",
           "where_clause",
           "original_sql",
@@ -10768,13 +11621,14 @@
       },
       "RuleSummary": {
         "properties": {
-          "rule_id": {
-            "type": "string",
-            "title": "Rule Id"
-          },
           "name": {
             "type": "string",
-            "title": "Name"
+            "title": "Name",
+            "description": "Rule file name (YAML stem)"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
           },
           "severity": {
             "type": "string",
@@ -10831,8 +11685,8 @@
         },
         "type": "object",
         "required": [
-          "rule_id",
           "name",
+          "display_name",
           "severity",
           "created_at"
         ],
@@ -10840,7 +11694,7 @@
       },
       "RuleUpdateRequest": {
         "properties": {
-          "name": {
+          "display_name": {
             "anyOf": [
               {
                 "type": "string"
@@ -10849,8 +11703,8 @@
                 "type": "null"
               }
             ],
-            "title": "Name",
-            "description": "Rule name; omitted to keep existing"
+            "title": "Display Name",
+            "description": "Human-readable label (defaults from ``name`` when omitted on create)"
           },
           "severity": {
             "type": "string",
@@ -12721,7 +13575,7 @@
           "hunt_name": {
             "type": "string",
             "title": "Hunt Name",
-            "description": "Name of the triggered hunt"
+            "description": "Display name of the triggered hunt"
           }
         },
         "type": "object",

@@ -3,7 +3,8 @@
 
 def _sample_create_payload(**overrides):
     payload = {
-        "name": "Test Rule",
+        "name": "test_rule",
+        "display_name": "Test Rule",
         "severity": "high",
         "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
         "source": "windows_audit",
@@ -52,7 +53,7 @@ class TestRulesValidate:
 
 
 class TestRulesListAndDetail:
-    """GET /api/v1/rules and GET /api/v1/rules/{rule_id}."""
+    """GET /api/v1/rules and GET /api/v1/rules/{name}."""
 
     def test_list_empty(self, client, admin_headers):
         resp = client.get("/api/v1/rules", headers=admin_headers)
@@ -64,11 +65,11 @@ class TestRulesListAndDetail:
     def test_list_after_create_with_search(self, client, admin_headers):
         create = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(name="Brute Force Rule"),
+            json=_sample_create_payload(name="brute_force", display_name="Brute Force Rule"),
             headers=admin_headers,
         )
         assert create.status_code == 201
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
         resp = client.get(
             "/api/v1/rules",
@@ -78,7 +79,7 @@ class TestRulesListAndDetail:
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
-        assert data["items"][0]["rule_id"] == rule_id
+        assert data["items"][0]["name"] == rule_name
 
         miss = client.get(
             "/api/v1/rules",
@@ -94,24 +95,26 @@ class TestRulesListAndDetail:
             headers=admin_headers,
         )
         assert create.status_code == 201
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
-        resp = client.get(f"/api/v1/rules/{rule_id}", headers=admin_headers)
+        resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json()["rule_id"] == rule_id
-        assert resp.json()["name"] == "Test Rule"
+        assert resp.json()["name"] == rule_name
+        assert resp.json()["display_name"] == "Test Rule"
         assert resp.json()["sql_errors"] == []
 
     def test_get_rule_detail_includes_sql_errors(self, client, admin_headers):
         create = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(user_sql="INSERT INTO logs VALUES (1)"),
+            json=_sample_create_payload(
+                name="bad_sql_rule", user_sql="INSERT INTO logs VALUES (1)"
+            ),
             headers=admin_headers,
         )
         assert create.status_code == 201
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
-        resp = client.get(f"/api/v1/rules/{rule_id}", headers=admin_headers)
+        resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert resp.status_code == 200
         assert len(resp.json()["sql_errors"]) > 0
 
@@ -126,7 +129,7 @@ class TestRulesListAndDetail:
 
 
 class TestRulesUpdateAndDelete:
-    """PUT and DELETE /api/v1/rules/{rule_id}."""
+    """PUT and DELETE /api/v1/rules/{name}."""
 
     def test_update_rule(self, client, admin_headers):
         create = client.post(
@@ -135,28 +138,28 @@ class TestRulesUpdateAndDelete:
             headers=admin_headers,
         )
         assert create.status_code == 201
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
         created_at = create.json()["rule"]["created_at"]
 
         resp = client.put(
-            f"/api/v1/rules/{rule_id}",
-            json=_sample_create_payload(name="Updated Rule Name"),
+            f"/api/v1/rules/{rule_name}",
+            json=_sample_create_payload(display_name="Updated Rule Name"),
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["rule"]["name"] == "Updated Rule Name"
+        assert resp.json()["rule"]["display_name"] == "Updated Rule Name"
         assert resp.json()["rule"]["created_at"] == created_at
 
     def test_update_rule_ignores_source_type(self, client, admin_headers):
         create = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(),
+            json=_sample_create_payload(name="src_type_rule"),
             headers=admin_headers,
         )
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
         resp = client.put(
-            f"/api/v1/rules/{rule_id}",
+            f"/api/v1/rules/{rule_name}",
             json={
                 "severity": "high",
                 "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
@@ -171,27 +174,59 @@ class TestRulesUpdateAndDelete:
     def test_delete_rule(self, client, admin_headers):
         create = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(),
+            json=_sample_create_payload(name="delete_me"),
             headers=admin_headers,
         )
         assert create.status_code == 201
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
-        delete = client.delete(f"/api/v1/rules/{rule_id}", headers=admin_headers)
+        delete = client.delete(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert delete.status_code == 204
 
-        get_resp = client.get(f"/api/v1/rules/{rule_id}", headers=admin_headers)
+        get_resp = client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers)
         assert get_resp.status_code == 404
+
+    def test_delete_blocked_when_referenced_by_hunt(self, client, admin_headers):
+        rule_name = "hunt_linked_rule"
+        create = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name=rule_name),
+            headers=admin_headers,
+        )
+        assert create.status_code == 201
+
+        hunt_payload = {
+            "name": "rule_guard_hunt",
+            "cron": "* * * * *",
+            "global_target_table_name": "logs_alerts",
+            "customers": ["org_a"],
+            "rules": [rule_name],
+        }
+        assert (
+            client.post("/api/v1/hunts", json=hunt_payload, headers=admin_headers).status_code
+            == 201
+        )
+
+        delete = client.delete(f"/api/v1/rules/{rule_name}", headers=admin_headers)
+        assert delete.status_code == 409
+        body = delete.json()
+        assert body["code"] == "conflict"
+        assert rule_name in body["message"]
+        assert "rule_guard_hunt" in body["message"]
+
+        assert client.get(f"/api/v1/rules/{rule_name}", headers=admin_headers).status_code == 200
+        client.delete("/api/v1/hunts/rule_guard_hunt", headers=admin_headers)
+        assert client.delete(f"/api/v1/rules/{rule_name}", headers=admin_headers).status_code == 204
 
     def test_delete_requires_delete_permission(self, client, viewer_headers, admin_headers):
         create = client.post(
             "/api/v1/rules",
-            json=_sample_create_payload(),
+            json=_sample_create_payload(name="viewer_del_test"),
             headers=admin_headers,
         )
-        rule_id = create.json()["rule"]["rule_id"]
+        rule_name = create.json()["rule"]["name"]
 
-        resp = client.delete(f"/api/v1/rules/{rule_id}", headers=viewer_headers)
+        resp = client.delete(f"/api/v1/rules/{rule_name}", headers=viewer_headers)
         assert resp.status_code == 403
 
 
@@ -207,15 +242,50 @@ class TestRulesCreate:
         assert resp.status_code == 201
         data = resp.json()
         assert "rule" in data
-        assert data["rule"]["name"] == "Test Rule"
+        assert data["rule"]["display_name"] == "Test Rule"
+        assert data["rule"]["name"] == "test_rule"
         assert data["rule"]["severity"] == "high"
-        assert "rule_id" in data["rule"]
+
+    def test_create_default_display_name(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json={
+                "name": "my_rule",
+                "severity": "high",
+                "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
+                "source": "windows_audit",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["rule"]["display_name"] == "My rule"
+
+    def test_create_duplicate_name_returns_409(self, client, admin_headers):
+        payload = _sample_create_payload(name="dup_rule")
+        assert client.post("/api/v1/rules", json=payload, headers=admin_headers).status_code == 201
+        dup = client.post("/api/v1/rules", json=payload, headers=admin_headers)
+        assert dup.status_code == 409
+
+    def test_create_duplicate_name_case_insensitive_returns_409(self, client, admin_headers):
+        first = _sample_create_payload(name="MyRule")
+        assert client.post("/api/v1/rules", json=first, headers=admin_headers).status_code == 201
+        second = _sample_create_payload(name="myrule")
+        dup = client.post("/api/v1/rules", json=second, headers=admin_headers)
+        assert dup.status_code == 409
+
+    def test_create_invalid_name_returns_422(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules",
+            json=_sample_create_payload(name="bad/name"),
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
 
     def test_create_requires_write_permission(self, client, viewer_headers):
         resp = client.post(
             "/api/v1/rules",
             json={
-                "name": "Test Rule",
+                "name": "viewer_rule",
                 "severity": "low",
                 "user_sql": "event_type = 'login'",
             },
@@ -226,7 +296,7 @@ class TestRulesCreate:
     def test_create_missing_required_fields(self, client, admin_headers):
         resp = client.post(
             "/api/v1/rules",
-            json={"severity": "high"},  # Missing name + user_sql
+            json={"severity": "high"},
             headers=admin_headers,
         )
         assert resp.status_code == 422
