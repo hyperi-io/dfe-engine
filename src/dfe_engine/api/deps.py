@@ -441,6 +441,7 @@ async def get_current_user(request: Request) -> AuthContext:
     oidc_subject = request.headers.get("X-Oidc-Subject")
     if oidc_subject:
         group_store: GroupStore = request.app.state.group_store
+        oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
         roles, org_ids = _resolve_roles_from_groups(groups, group_store)
@@ -457,6 +458,7 @@ async def get_current_user(request: Request) -> AuthContext:
 
         return AuthContext(
             user_id=oidc_subject,
+            email=oidc_email,
             roles=roles,
             groups=groups,
             org_ids=org_ids,
@@ -523,6 +525,7 @@ async def get_current_user(request: Request) -> AuthContext:
             )
 
         jwt_user_id = payload.get("sub", "")
+        jwt_email = payload.get("email") or None
         jwt_groups = payload.get("groups")
         if jwt_groups is None:
             jwt_groups = _groups_for_local_account(request, jwt_user_id)
@@ -535,6 +538,7 @@ async def get_current_user(request: Request) -> AuthContext:
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
+            email=jwt_email,
             roles=live_roles,
             org_ids=payload.get("org_ids", []),
             groups=live_groups,

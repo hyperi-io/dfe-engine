@@ -9,6 +9,8 @@ import pytest
 from dulwich import porcelain as dulwich_porcelain
 from dulwich.repo import Repo
 
+from dfe_engine.auth.models import AuthContext
+from dfe_engine.git_identity import COMMITTER_IDENTITY, git_author
 from dfe_engine.schema.models import MetaSchema, SchemaColumn, SchemaVersion
 from dfe_engine.schema.registry import (
     SchemaError,
@@ -274,6 +276,46 @@ class TestSchemaRegistryCoverage:
             ms = _minimal_meta("svc/widget")
             reg.save_schema(ms, created_by="username <user@email.com>", description="audit")
             assert reg.get_schema("svc/widget").current == "1"
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_emailless_identity_commits_with_split_author_and_committer(self, tmp_path):
+        # Real repo with NO user.identity configured -- the scenario that used to
+        # 422 ("Invalid 'created_by' identity") for a bare 'admin'. The API now
+        # passes git_author(user), so the placeholder identity authors the commit
+        # while the engine is recorded as committer.
+        Repo.init(str(tmp_path))
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
+        try:
+            author = git_author(AuthContext(user_id="admin"))
+            reg.save_schema(_minimal_meta("svc/widget"), created_by=author)
+            repo = Repo(str(tmp_path))
+            head = repo[repo.head()]
+            repo.close()
+            assert head.author == b"admin <admin@dfe.local>"
+            assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
+        finally:
+            reg.close()
+            SchemaRegistry.reset_instance()
+
+    def test_oidc_email_identity_authors_commit(self, tmp_path):
+        Repo.init(str(tmp_path))
+        schemas = tmp_path / "schemas"
+        schemas.mkdir()
+        SchemaRegistry.reset_instance()
+        reg = SchemaRegistry(schemas_directory=schemas, writable=True, refresh_interval=0)
+        try:
+            author = git_author(AuthContext(user_id="alice", email="alice@corp.com"))
+            reg.save_schema(_minimal_meta("svc/widget"), created_by=author)
+            repo = Repo(str(tmp_path))
+            head = repo[repo.head()]
+            repo.close()
+            assert head.author == b"alice <alice@corp.com>"
+            assert head.committer == COMMITTER_IDENTITY.encode("utf-8")
         finally:
             reg.close()
             SchemaRegistry.reset_instance()

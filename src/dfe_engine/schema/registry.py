@@ -34,6 +34,7 @@ from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 from pydantic import ValidationError
 
+from dfe_engine.git_identity import commit_file
 from dfe_engine.schema.models import MetaSchema
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -135,7 +136,7 @@ class SchemaRegistry:
         self, yaml_path: Path, commit_msg: str, created_by: str | None = None
     ) -> None:
         """Commit a schema file change and push to the remote when configured."""
-        self._store._git_commit(yaml_path, commit_msg, author=created_by)
+        commit_file(self._store, yaml_path, commit_msg, author=created_by)
         if self._store._git_push:
             self._store._git_push_remote()
 

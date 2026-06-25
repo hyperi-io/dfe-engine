@@ -12,6 +12,7 @@ from typing import Any
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
+from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.hunts.hunt_config_registry import (
     resolve_display_name,
     strip_identity_fields_from_yaml,
@@ -101,7 +102,7 @@ class RuleRegistry:
             commit_msg = description or f"rule: update {rule.rule_id}"
             if created_by:
                 commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
+            commit_file(self._store, yaml_path, commit_msg, author=created_by)
             if self._store._git_push:
                 self._store._git_push_remote()
 
@@ -126,7 +127,9 @@ class RuleRegistry:
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
-                    message=f"rule: delete {name}".encode(),
+                    author=COMMITTER_IDENTITY.encode("utf-8"),
+                    committer=COMMITTER_IDENTITY.encode("utf-8"),
+                    message=f"rule: delete {rule_id}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()

@@ -19,6 +19,7 @@ from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, r
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 from dfe_engine.hunts.hunt_config_registry import default_display_name
 from dfe_engine.hunts.rule_registry import RuleNotFoundError
 
@@ -215,8 +216,8 @@ async def create_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
 
-    result = service.create_rule(svc_request, body.name)
-    registry.save(result.rule, created_by=user.user_id, description=f"rule: create {body.name}")
+    result = service.create_rule(svc_request, rule_id)
+    registry.save(result.rule, created_by=git_author(user), description=f"rule: create {rule_id}")
 
     audit_resource_change(user.user_id, "rule", body.name, "created")
     return _build_create_response(result, body.cost_window_minutes)
@@ -321,8 +322,8 @@ async def update_rule(
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
-    registry.save(updated, created_by=user.user_id, description=f"rule: update {name}")
-    audit_resource_change(user.user_id, "rule", name, "updated")
+    registry.save(updated, created_by=git_author(user), description=f"rule: update {rule_id}")
+    audit_resource_change(user.user_id, "rule", rule_id, "updated")
     return _build_create_response(
         result.model_copy(update={"rule": updated}),
         body.cost_window_minutes,
