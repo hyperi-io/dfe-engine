@@ -23,11 +23,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from dfe_engine.api.deps import CurrentUser, HuntConfigReg, require_action
+from dfe_engine.api.deps import CurrentUser, HuntConfigReg, OptionalAlertDestStore, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
     default_display_name,
@@ -386,15 +387,19 @@ async def delete_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
+    alert_store: OptionalAlertDestStore,
 ):
     """Delete a hunt configuration."""
     try:
-        registry.delete(name)
+        registry.get(name)
     except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
+    if alert_store is not None:
+        delete_destinations_owned_by_hunt(alert_store, name)
+    registry.delete(name)
     audit_resource_change(user.user_id, "hunt", name, "deleted")
 
 

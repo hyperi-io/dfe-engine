@@ -88,6 +88,102 @@ class TestAlertDestinationsList:
 
 
 class TestAlertDestinationsCRUD:
+    def test_create_with_hunt_name_links_hunt(
+        self, alert_client, alert_admin_headers, sample_destination
+    ):
+        from dfe_engine.api.deps import _registries
+
+        hunt_registry = _registries["hunt_configs"]
+        hunt_registry.save(
+            "owned_hunt",
+            {
+                "display_name": "Owned",
+                "cron": "* * * * *",
+                "log_buffer": 60,
+                "global_target_table_name": "logs_alerts",
+                "customers": ["org_a"],
+                "rules": [{"rule_name": "r1"}],
+            },
+        )
+
+        payload = {**sample_destination, "hunt_name": "owned_hunt"}
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json=payload,
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["hunt_name"] == "owned_hunt"
+
+        hunt = hunt_registry.get("owned_hunt")
+        assert "slack-alerts" in hunt["alerts"]["destinations"]
+
+        filtered = alert_client.get(
+            "/api/v1/alerts/destinations",
+            params={"hunt": "owned_hunt"},
+            headers=alert_admin_headers,
+        )
+        assert filtered.json()["total"] == 1
+
+        assert (
+            alert_client.delete("/api/v1/hunts/owned_hunt", headers=alert_admin_headers).status_code
+            == 204
+        )
+
+    def test_create_with_unknown_hunt_returns_404(
+        self, alert_client, alert_admin_headers, sample_destination
+    ):
+        payload = {**sample_destination, "hunt_name": "no_such_hunt"}
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json=payload,
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "not_found"
+
+    def test_delete_hunt_deletes_owned_destinations(self, alert_client, alert_admin_headers):
+        from dfe_engine.api.deps import _registries
+
+        hunt_registry = _registries["hunt_configs"]
+        hunt_registry.save(
+            "cascade_hunt",
+            {
+                "display_name": "Cascade",
+                "cron": "* * * * *",
+                "log_buffer": 60,
+                "global_target_table_name": "logs_alerts",
+                "customers": ["org_a"],
+                "rules": [{"rule_name": "r1"}],
+            },
+        )
+
+        dest = {
+            "name": "hunt-owned-slack",
+            "url": "slack://T00000000/B00000000/X0000000000000000000000/",
+            "hunt_name": "cascade_hunt",
+        }
+        assert (
+            alert_client.post(
+                "/api/v1/alerts/destinations", json=dest, headers=alert_admin_headers
+            ).status_code
+            == 201
+        )
+
+        assert (
+            alert_client.delete(
+                "/api/v1/hunts/cascade_hunt", headers=alert_admin_headers
+            ).status_code
+            == 204
+        )
+
+        assert (
+            alert_client.get(
+                "/api/v1/alerts/destinations/hunt-owned-slack", headers=alert_admin_headers
+            ).status_code
+            == 404
+        )
+
     def test_create_destination(self, alert_client, alert_admin_headers, sample_destination):
         resp = alert_client.post(
             "/api/v1/alerts/destinations",

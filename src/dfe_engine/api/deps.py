@@ -178,6 +178,11 @@ def get_alert_destinations_store():
     return store
 
 
+def get_alert_destinations_store_optional():
+    """Optional alert destinations store (for hunt delete cascade)."""
+    return _registries.get("alert_destinations")
+
+
 def get_deployment_config_registry():
     """FastAPI dependency: resolve DeploymentConfigRegistry singleton."""
     reg = _registries.get("deployment")
@@ -226,6 +231,7 @@ SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
 AlertDestStore = Annotated[Any, Depends(get_alert_destinations_store)]
+OptionalAlertDestStore = Annotated[Any | None, Depends(get_alert_destinations_store_optional)]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]

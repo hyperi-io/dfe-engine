@@ -7414,6 +7414,18 @@
             "type": "boolean",
             "title": "Enabled",
             "default": true
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name",
+            "description": "Hunt file stem when this destination is owned by a hunt (set via API)"
           }
         },
         "type": "object",

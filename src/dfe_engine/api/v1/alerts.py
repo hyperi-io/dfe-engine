@@ -23,12 +23,17 @@ from dfe_engine.api.deps import AlertDestStore, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.alert_hunt_link import (
+    ALERT_DEST_DATA_KEY,
+    add_destination_to_hunt,
+    require_hunt,
+)
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 # DirectoryConfigStore key used within each destination's YAML file
-_DATA_KEY = "data"
+_DATA_KEY = ALERT_DEST_DATA_KEY
 
 
 def _get_hunt_config_registry_optional() -> Any | None:
@@ -48,6 +53,10 @@ class AlertDestination(BaseModel):
     url: str = Field(description="Apprise notification URL (slack://, mailto://, etc.)")
     description: str = Field(default="", description="Human-readable description")
     enabled: bool = Field(default=True)
+    hunt_name: str | None = Field(
+        default=None,
+        description="Hunt file stem when this destination is owned by a hunt (set via API)",
+    )
 
 
 class AlertDestinationSummary(BaseModel):
@@ -128,6 +137,7 @@ async def create_destination(
     body: AlertDestination,
     user: CurrentUser,
     store: AlertDestStore,
+    hunt_registry: OptionalHuntConfigReg,
 ):
     """Create an alert destination."""
     if store.get(body.name, _DATA_KEY) is not None:
@@ -138,9 +148,13 @@ async def create_destination(
                 "message": f"Alert destination '{body.name}' already exists",
             },
         )
-    _write_destination(store, body)
+    if body.hunt_name is not None:
+        _ensure_hunt_for_link(hunt_registry, body.hunt_name)
+    _write_destination(store, body, hunt_name=body.hunt_name)
+    if body.hunt_name is not None and hunt_registry is not None:
+        add_destination_to_hunt(hunt_registry, body.hunt_name, body.name)
     audit_resource_change(user.user_id, "alert_destination", body.name, "created")
-    return body
+    return _destination_from_store(body.name, store.get(body.name, _DATA_KEY) or {})
 
 
 @router.get(
@@ -159,7 +173,7 @@ async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
                 "message": f"Alert destination '{name}' not found",
             },
         )
-    return AlertDestination(name=name, **data)
+    return _destination_from_store(name, data)
 
 
 @router.put(
@@ -172,12 +186,28 @@ async def update_destination(
     body: AlertDestination,
     user: CurrentUser,
     store: AlertDestStore,
+    hunt_registry: OptionalHuntConfigReg,
 ):
     """Update an alert destination."""
+    existing = store.get(name, _DATA_KEY)
+    if existing is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Alert destination '{name}' not found",
+            },
+        )
     body.name = name
-    _write_destination(store, body)
+    hunt_to_link = body.hunt_name
+    if hunt_to_link is not None:
+        _ensure_hunt_for_link(hunt_registry, hunt_to_link)
+    stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.get("hunt_name")
+    _write_destination(store, body, hunt_name=stored_hunt_name)
+    if hunt_to_link is not None and hunt_registry is not None:
+        add_destination_to_hunt(hunt_registry, hunt_to_link, name)
     audit_resource_change(user.user_id, "alert_destination", name, "updated")
-    return body
+    return _destination_from_store(name, store.get(name, _DATA_KEY) or {})
 
 
 @router.delete(
@@ -202,17 +232,49 @@ async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _write_destination(store, dest: AlertDestination) -> None:
+def _write_destination(
+    store,
+    dest: AlertDestination,
+    *,
+    hunt_name: str | None = None,
+) -> None:
     """Write destination as a single "data" key within its YAML table."""
-    store.set(
-        dest.name,
-        _DATA_KEY,
-        {
-            "url": dest.url,
-            "description": dest.description,
-            "enabled": dest.enabled,
-        },
+    payload: dict[str, Any] = {
+        "url": dest.url,
+        "description": dest.description,
+        "enabled": dest.enabled,
+    }
+    if hunt_name is not None:
+        payload["hunt_name"] = hunt_name
+    store.set(dest.name, _DATA_KEY, payload)
+
+
+def _destination_from_store(name: str, data: dict[str, Any]) -> AlertDestination:
+    return AlertDestination(
+        name=name,
+        url=data.get("url", ""),
+        description=data.get("description", ""),
+        enabled=data.get("enabled", True),
+        hunt_name=data.get("hunt_name"),
     )
+
+
+def _ensure_hunt_for_link(hunt_registry: Any | None, hunt_name: str) -> None:
+    if hunt_registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": "Hunt config registry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+            },
+        )
+    try:
+        require_hunt(hunt_registry, hunt_name)
+    except HuntConfigNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Hunt '{hunt_name}' not found"},
+        ) from None
 
 
 def _url_scheme(url: str) -> str:
