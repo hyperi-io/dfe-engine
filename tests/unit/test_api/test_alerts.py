@@ -184,6 +184,60 @@ class TestAlertDestinationsCRUD:
             == 404
         )
 
+    def test_delete_hunt_keeps_destination_shared_across_hunts(
+        self, alert_client, alert_admin_headers
+    ):
+        from dfe_engine.api.deps import _registries
+
+        hunt_registry = _registries["hunt_configs"]
+        for hunt_name in ("hunt_a", "hunt_b"):
+            hunt_registry.save(
+                hunt_name,
+                {
+                    "display_name": hunt_name,
+                    "cron": "* * * * *",
+                    "log_buffer": 60,
+                    "global_target_table_name": "logs_alerts",
+                    "customers": ["org_a"],
+                    "rules": [{"rule_name": "r1"}],
+                    "alerts": {"destinations": ["shared-slack"]},
+                },
+            )
+
+        dest = {
+            "name": "shared-slack",
+            "url": "slack://T00000000/B00000000/X0000000000000000000000/",
+            "hunt_name": "hunt_a",
+        }
+        assert (
+            alert_client.post(
+                "/api/v1/alerts/destinations", json=dest, headers=alert_admin_headers
+            ).status_code
+            == 201
+        )
+
+        assert (
+            alert_client.delete("/api/v1/hunts/hunt_a", headers=alert_admin_headers).status_code
+            == 204
+        )
+
+        assert (
+            alert_client.get(
+                "/api/v1/alerts/destinations/shared-slack", headers=alert_admin_headers
+            ).status_code
+            == 200
+        )
+        assert (
+            alert_client.get(
+                "/api/v1/alerts/destinations/shared-slack", headers=alert_admin_headers
+            )
+            .json()
+            .get("hunt_name")
+            is None
+        )
+
+        hunt_registry.delete("hunt_b")
+
     def test_create_destination(self, alert_client, alert_admin_headers, sample_destination):
         resp = alert_client.post(
             "/api/v1/alerts/destinations",

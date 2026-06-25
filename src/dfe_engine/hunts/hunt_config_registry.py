@@ -205,3 +205,14 @@ class HuntConfigRegistry:
     def hunt_names_referencing_rule(self, rule_name: str) -> list[str]:
         """Hunt config file stems whose ``rules`` list includes ``rule_name``."""
         return [row["name"] for row in self.list_hunts() if rule_name in (row.get("rules") or [])]
+
+    def hunt_names_referencing_destination(self, destination_name: str) -> list[str]:
+        """Hunt configs whose ``alerts.destinations`` includes ``destination_name``."""
+        names: list[str] = []
+        for hunt_name in self._store.list_tables():
+            config_data = self._store.get(hunt_name)
+            if config_data is None:
+                continue
+            if destination_name in alert_destination_names_from_config(config_data):
+                names.append(hunt_name)
+        return names

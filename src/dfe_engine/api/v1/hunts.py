@@ -398,7 +398,7 @@ async def delete_hunt(
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
     if alert_store is not None:
-        delete_destinations_owned_by_hunt(alert_store, name)
+        delete_destinations_owned_by_hunt(alert_store, registry, name)
     registry.delete(name)
     audit_resource_change(user.user_id, "hunt", name, "deleted")
 
