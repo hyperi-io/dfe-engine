@@ -18,6 +18,7 @@ from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.fieldmap.models import FieldMap
+from dfe_engine.git_identity import git_author
 
 router = APIRouter(prefix="/field-maps", tags=["Field Maps"])
 
@@ -88,7 +89,7 @@ async def create_field_map(
     from dfe_engine.fieldmap.registry import FieldMapValidationError
 
     try:
-        fm = registry.save_map(body, created_by=user.user_id)
+        fm = registry.save_map(body, created_by=git_author(user))
     except FieldMapValidationError as e:
         raise HTTPException(
             status_code=422,
