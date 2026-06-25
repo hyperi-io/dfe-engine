@@ -22,6 +22,7 @@ from hyperi_pylib.logger import logger
 
 from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config
+from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.services.plugins import deployment_classes, valid_services
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -177,7 +178,7 @@ class DeploymentConfigRegistry:
             commit_msg = description or f"deploy: update {service}/{instance}"
             if created_by:
                 commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
+            commit_file(self._store, yaml_path, commit_msg, author=created_by)
             if self._store._git_push:
                 self._store._git_push_remote()
 
@@ -204,6 +205,8 @@ class DeploymentConfigRegistry:
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
+                    author=COMMITTER_IDENTITY.encode("utf-8"),
+                    committer=COMMITTER_IDENTITY.encode("utf-8"),
                     message=f"deploy: delete {service}/{instance}".encode(),
                 )
                 if self._store._git_push:

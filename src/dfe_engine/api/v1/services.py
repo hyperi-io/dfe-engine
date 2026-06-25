@@ -20,6 +20,7 @@ from dfe_engine.api.deps import CurrentUser, ServiceConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 
 router = APIRouter(prefix="/services", tags=["Services"])
 
@@ -133,7 +134,7 @@ async def save_service_config(
         service=service,
         config=body,
         instance=instance,
-        created_by=user.user_id,
+        created_by=git_author(user),
     )
     audit_resource_change(user.user_id, "service_config", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}

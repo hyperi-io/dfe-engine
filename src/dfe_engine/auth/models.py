@@ -31,6 +31,11 @@ class AuthContext(BaseModel):
 
     org_id: str = Field(default="default", description="Primary tenant org ID")
     user_id: str = Field(..., description="User ID")
+    email: str | None = Field(
+        default=None,
+        description="User email (from OIDC/JWT claim) for git author attribution; "
+        "None for local accounts, API keys, and dev mode",
+    )
     roles: list[str] = Field(default_factory=list)
     org_ids: list[str] = Field(
         default_factory=list, description="Org IDs for customer-scoped roles"

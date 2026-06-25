@@ -25,6 +25,7 @@ from dfe_engine.api.deps import CurrentUser, DeploymentConfigReg, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 
 router = APIRouter(prefix="/deployments", tags=["Deployments"])
 
@@ -157,7 +158,7 @@ async def save_deployment(
         service=service,
         config=body,
         instance=instance,
-        created_by=user.user_id,
+        created_by=git_author(user),
     )
     audit_resource_change(user.user_id, "deployment", f"{service}/{instance}", "updated")
     return {"service": service, "instance": instance, "message": "saved"}
@@ -270,7 +271,7 @@ async def apply_size(
             service=service,
             instance=instance,
             size=size,
-            created_by=user.user_id,
+            created_by=git_author(user),
         )
     except (ValueError, KeyError) as e:
         raise HTTPException(
