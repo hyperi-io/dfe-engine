@@ -144,9 +144,7 @@ class TestSyncCreatesNewGroups:
         groups = [GroupInfo(id="g1", name="admins", email="admins@example.com")]
         adapter = FakeAdapter(api_provider, groups)
 
-        asyncio.run(
-            sync_provider("test-sso", provider_registry, group_store, adapter=adapter)
-        )
+        asyncio.run(sync_provider("test-sso", provider_registry, group_store, adapter=adapter))
 
         # Use email as key: admins@example.com -> admins-example.com
         created = group_store.get("admins-example.com")

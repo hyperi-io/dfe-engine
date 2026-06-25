@@ -22,6 +22,7 @@ Covers:
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 import pytest
@@ -282,10 +283,16 @@ class TestTaskManagerWorkflow:
         task_id = resp.json()["task_id"]
         assert task_id
 
-        # Poll task status
-        resp = e2e_client.get(f"/api/v1/tasks/{task_id}", headers=headers)
-        assert resp.status_code == 200
-        data = resp.json()
+        # Poll task status (background task may finish slightly after 202)
+        data = None
+        for _ in range(20):
+            resp = e2e_client.get(f"/api/v1/tasks/{task_id}", headers=headers)
+            if resp.status_code == 200:
+                data = resp.json()
+                break
+            assert resp.status_code != 404, resp.text
+            time.sleep(0.05)
+        assert data is not None, f"GET /tasks/{task_id} failed: {resp.status_code} {resp.text}"
         assert data["id"] == task_id
         assert data["kind"] == "pipeline:build"
         # Task may be pending, running, completed, or failed

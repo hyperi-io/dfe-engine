@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 
 import pytest
 
@@ -46,6 +47,22 @@ class TestTaskSubmitAndGet:
         assert result.status == TaskStatus.COMPLETED
         assert result.result == {"answer": 42}
         assert result.progress == 100
+
+    @pytest.mark.asyncio
+    async def test_non_json_serializable_result_is_coerced(self, manager: TaskManager):
+        from datetime import UTC, datetime
+        from pathlib import Path
+
+        async def weird_result(*, task):
+            return {"path": Path("/tmp"), "at": datetime.now(UTC)}
+
+        info = manager.submit("test:weird", weird_result)
+        await asyncio.sleep(0.1)
+
+        result = manager.get(info.id)
+        assert result is not None
+        assert result.status == TaskStatus.COMPLETED
+        json.dumps(result.model_dump(mode="json"))
 
     @pytest.mark.asyncio
     async def test_task_failure_records_error(self, manager: TaskManager):
