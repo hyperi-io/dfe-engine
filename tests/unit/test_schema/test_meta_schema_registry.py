@@ -472,16 +472,27 @@ class TestSchemaRegistryCoverage:
 
     def test_list_schemas_updated_at_empty_on_stat_failure(self, registry, monkeypatch):
         registry.save_schema(_minimal_meta("stat/break"))
-        orig_stat = Path.stat
-        n_seen = {"c": 0}
+        orig_yaml_path = registry._yaml_path
 
-        def busted_stat(self, *args, **kwargs):
-            if self.name == "break.yaml" and self.parent.name == "stat":
-                n_seen["c"] += 1
+        class _StatDeniedPath:
+            """Delegate to a real path but fail ``stat()`` (list_schemas updated_at only)."""
+
+            def __init__(self, path: Path) -> None:
+                self._path = path
+
+            def stat(self, *args, **kwargs):
                 raise OSError("stat denied")
-            return orig_stat(self, *args, **kwargs)
 
-        monkeypatch.setattr(Path, "stat", busted_stat)
+            def __getattr__(self, name: str):
+                return getattr(self._path, name)
+
+        def yaml_path_with_stat_failure(table: str) -> Path:
+            path = orig_yaml_path(table)
+            if table == "stat/break":
+                return _StatDeniedPath(path)  # type: ignore[return-value]
+            return path
+
+        monkeypatch.setattr(registry, "_yaml_path", yaml_path_with_stat_failure)
         rows = registry.list_schemas()
         row = next(r for r in rows if r["path"] == "stat/break")
         assert row["updated_at"] == ""

@@ -32,6 +32,8 @@ def api_settings(tmp_path: Path) -> DFESettings:
     services_dir.mkdir()
     rules_dir = tmp_path / "rules"
     rules_dir.mkdir()
+    hunts_dir = tmp_path / "hunts"
+    hunts_dir.mkdir()
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
 
@@ -39,7 +41,7 @@ def api_settings(tmp_path: Path) -> DFESettings:
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
-        hunts=HuntsSettings(rules_dir=str(rules_dir)),
+        hunts=HuntsSettings(rules_dir=str(rules_dir), hunt_dir=str(hunts_dir)),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(auth_dir),

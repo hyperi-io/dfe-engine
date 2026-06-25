@@ -715,7 +715,9 @@ class TestVersionTree:
         assert [c.name for c in cols] == ["a", "b"]
 
         # Pin to 1.0.0: only a
-        cols = SchemaLoader.load_profile("test_profile", profiles_dir=tmp_path, profile_version="1.0.0")
+        cols = SchemaLoader.load_profile(
+            "test_profile", profiles_dir=tmp_path, profile_version="1.0.0"
+        )
         assert [c.name for c in cols] == ["a"]
 
     def test_shipped_profiles_have_version_tree(self):
