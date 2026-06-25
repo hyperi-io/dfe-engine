@@ -15,6 +15,7 @@ from ..yaml_utils import YAMLError, yaml_load
 from .alert import AlertDestinationRegistry, build_alert_config
 from .alert_grouping import AlertGroupingConfig
 from .hunt import Hunt
+from .hunt_config_registry import resolve_display_name
 from .job import JobScheduler
 from .validator import HuntValidator
 
@@ -218,6 +219,7 @@ class CronJob:
                         rule_repo_dir,
                         self.checkpoint_timestamp_field,
                     )
+                    config_name = os.path.splitext(filename)[0]
                     await self.process_hunt(
                         hunt_data,
                         env,
@@ -225,6 +227,7 @@ class CronJob:
                         checkpoint_destination,
                         hunt_directory,
                         thread_tracking_file_path,
+                        config_name=config_name,
                     )
                     number_of_hunts += 1
                 except ValueError as ve:
@@ -242,6 +245,8 @@ class CronJob:
         checkpoint_destination: str,
         hunt_directory: str,
         thread_tracking_file_path: str,
+        *,
+        config_name: str = "hunt",
     ):
         """
         Processes hunt data, creating a Hunt instance and scheduling it for multiple cron expressions and customers.
@@ -288,6 +293,7 @@ class CronJob:
                     scheduling_mode=hunt_scheduling_mode,
                     min_interval_seconds=hunt_min_interval,
                     explain_queries=hunt_explain,
+                    config_name=config_name,
                 )
 
     def _parse_cron_config(self, cron_config) -> list:
@@ -361,6 +367,7 @@ class CronJob:
         scheduling_mode: str = "cron",
         min_interval_seconds: int = 0,
         explain_queries: bool = False,
+        config_name: str = "hunt",
     ) -> None:
         """Schedule a hunt for a specific customer with even load spreading."""
         logger.debug(
@@ -397,7 +404,7 @@ class CronJob:
             log_buffer=hunt_data["log_buffer"],
             customer=customer,
             rules=hunt_data["rules"],
-            name=hunt_data["name"],
+            name=resolve_display_name(hunt_data, config_name),
             global_source_table_name=hunt_data["global_source_table_name"],
             global_target_table_name=hunt_data["global_target_table_name"],
             hunt_log_path=self.hunt_log_path,

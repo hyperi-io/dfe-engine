@@ -267,26 +267,6 @@ class SchemaRegistry:
     # CRUD
     # -----------------------------------------------------------------
 
-    def get_schema(self, path: str) -> MetaSchema:
-        """Get a meta schema.
-
-        Args:
-            path: Path to the schema YAML file.
-
-        Returns:
-            MetaSchema model.
-
-        Raises:
-            SchemaNotFoundError: Schema not found.
-        """
-        table = self._table_name(path)
-        config_data = self._store.get(table)
-        if config_data is None:
-            desc = f"{path}"
-            raise SchemaNotFoundError(f"Schema not found: '{desc}'")
-
-        return self._parse_meta_schema(table, config_data)
-
     def get_schema_current_version(self, path: str) -> str:
         """Return ``current`` from cached YAML without full MetaSchema validation."""
         table = self._table_name(path)

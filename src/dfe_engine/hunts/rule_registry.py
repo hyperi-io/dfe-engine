@@ -1,7 +1,7 @@
 """Rule Registry — CRUD for hunt detection rules (API-persisted YAML).
 
 Separate from ``hunts.rule_repo_dir`` (Jinja2 templates for scheduled hunts).
-Each rule is stored as ``{rule_id}.yaml`` under ``hunts.rules_dir``.
+Each rule is stored as ``{name}.yaml`` under ``hunts.rules_dir``.
 """
 
 from __future__ import annotations
@@ -12,8 +12,28 @@ from typing import Any
 from hyperi_pylib.config import DirectoryConfigStore
 from hyperi_pylib.logger import logger
 
+from dfe_engine.hunts.hunt_config_registry import (
+    resolve_display_name,
+    strip_identity_fields_from_yaml,
+)
 from dfe_engine.hunts.rule_model import Rule
 from dfe_engine.yaml_utils import yaml_dump
+
+
+def _rule_to_yaml_dict(rule: Rule) -> dict[str, Any]:
+    data = rule.model_dump()
+    data.pop("rule_id", None)
+    display = data.pop("name")
+    data["display_name"] = display
+    return data
+
+
+def _rule_from_stored(name: str, config: dict[str, Any]) -> Rule:
+    display = resolve_display_name(config, name)
+    payload = strip_identity_fields_from_yaml(config)
+    payload["rule_id"] = name
+    payload["name"] = display
+    return Rule.model_validate(payload)
 
 
 class RuleRegistryError(Exception):
@@ -51,14 +71,21 @@ class RuleRegistry:
         if hasattr(self._store, "stop"):
             self._store.stop()
 
-    def exists(self, rule_id: str) -> bool:
-        return self._store.get(rule_id) is not None
+    def exists(self, name: str) -> bool:
+        return self._store.get(name) is not None
 
-    def get(self, rule_id: str) -> Rule:
-        config_data = self._store.get(rule_id)
+    def name_exists(self, name: str) -> bool:
+        """True if a rule file stem is taken (exact or case-insensitive)."""
+        if self.exists(name):
+            return True
+        key = name.casefold()
+        return any(table.casefold() == key for table in self._store.list_tables())
+
+    def get(self, name: str) -> Rule:
+        config_data = self._store.get(name)
         if config_data is None:
-            raise RuleNotFoundError(f"Rule not found: '{rule_id}'")
-        return Rule.model_validate(config_data)
+            raise RuleNotFoundError(f"Rule not found: '{name}'")
+        return _rule_from_stored(name, dict(config_data))
 
     def save(
         self,
@@ -68,7 +95,7 @@ class RuleRegistry:
         description: str | None = None,
     ) -> Rule:
         yaml_path = self._rules_directory / f"{rule.rule_id}.yaml"
-        yaml_dump(rule.model_dump(), yaml_path)
+        yaml_dump(_rule_to_yaml_dict(rule), yaml_path)
 
         if self._store.is_git:
             commit_msg = description or f"rule: update {rule.rule_id}"
@@ -82,11 +109,11 @@ class RuleRegistry:
         logger.info(f"Saved rule '{rule.rule_id}' → {yaml_path}")
         return rule
 
-    def delete(self, rule_id: str) -> None:
-        yaml_path = self._rules_directory / f"{rule_id}.yaml"
+    def delete(self, name: str) -> None:
+        yaml_path = self._rules_directory / f"{name}.yaml"
 
         if not yaml_path.exists():
-            raise RuleNotFoundError(f"Rule not found: '{rule_id}'")
+            raise RuleNotFoundError(f"Rule not found: '{name}'")
 
         if self._store.is_git and self._store._repo is not None:
             try:
@@ -99,25 +126,25 @@ class RuleRegistry:
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
-                    message=f"rule: delete {rule_id}".encode(),
+                    message=f"rule: delete {name}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()
             except ValueError:
                 logger.warning(
-                    f"Rules directory is outside git repo; deleting '{rule_id}' without git commit"
+                    f"Rules directory is outside git repo; deleting '{name}' without git commit"
                 )
                 yaml_path.unlink(missing_ok=True)
             except Exception as e:
-                logger.error(f"Git delete failed for rule {rule_id}: {e}")
+                logger.error(f"Git delete failed for rule {name}: {e}")
                 yaml_path.unlink(missing_ok=True)
         else:
             yaml_path.unlink(missing_ok=True)
 
         with self._store._lock:
-            self._store._cache.pop(rule_id, None)
+            self._store._cache.pop(name, None)
 
-        logger.info(f"Deleted rule '{rule_id}'")
+        logger.info(f"Deleted rule '{name}'")
 
     def list_rules(self) -> list[dict[str, Any]]:
         """Return metadata dicts for all stored rules."""
@@ -127,14 +154,14 @@ class RuleRegistry:
             if config_data is None:
                 continue
             try:
-                rule = Rule.model_validate(config_data)
+                rule = _rule_from_stored(table, dict(config_data))
             except Exception:
                 logger.warning(f"Failed to parse rule '{table}', skipping")
                 continue
             results.append(
                 {
-                    "rule_id": rule.rule_id,
-                    "name": rule.name,
+                    "name": table,
+                    "display_name": rule.name,
                     "severity": rule.severity,
                     "source": rule.source,
                     "source_db": rule.source_db,

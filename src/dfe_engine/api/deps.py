@@ -75,6 +75,13 @@ def bootstrap_registries(settings: DFESettings) -> None:
 
         _registries["rules"] = RuleRegistry(rules_directory=settings.hunts.rules_dir)
 
+    if settings.hunts.hunt_dir:
+        from dfe_engine.hunts.hunt_config_registry import HuntConfigRegistry
+
+        hunt_dir = settings.hunts.hunt_dir.split(",")[0].strip()
+        if hunt_dir:
+            _registries["hunt_configs"] = HuntConfigRegistry(hunts_directory=hunt_dir)
+
     if settings.hunts.alert_destinations_dir:
         from hyperi_pylib.config import DirectoryConfigStore
 
@@ -171,6 +178,11 @@ def get_alert_destinations_store():
     return store
 
 
+def get_alert_destinations_store_optional():
+    """Optional alert destinations store (for hunt delete cascade)."""
+    return _registries.get("alert_destinations")
+
+
 def get_deployment_config_registry():
     """FastAPI dependency: resolve DeploymentConfigRegistry singleton."""
     reg = _registries.get("deployment")
@@ -200,13 +212,29 @@ def get_rule_registry():
     return reg
 
 
+def get_hunt_config_registry():
+    """FastAPI dependency: resolve HuntConfigRegistry singleton."""
+    reg = _registries.get("hunt_configs")
+    if reg is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "not_configured",
+                "message": "HuntConfigRegistry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+            },
+        )
+    return reg
+
+
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
 AlertDestStore = Annotated[Any, Depends(get_alert_destinations_store)]
+OptionalAlertDestStore = Annotated[Any | None, Depends(get_alert_destinations_store_optional)]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
+HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]
 
 
 # ── ClickHouse client ─────────────────────────────────────────

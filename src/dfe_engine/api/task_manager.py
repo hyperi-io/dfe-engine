@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from enum import Enum
 from typing import Any
 
@@ -37,6 +37,22 @@ def _json_safe(value: Any) -> Any:
     """Coerce task results so TaskInfo always serializes for OpenAPI responses."""
     if value is None:
         return None
+    if isinstance(value, (str, int, bool)):
+        return value
+    if isinstance(value, float):
+        if value != value or value in (float("inf"), float("-inf")):  # nan/inf
+            return str(value)
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, (bytes, bytearray)):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
     try:
         json.dumps(value)
         return value
@@ -87,18 +103,21 @@ class _Task:
         self._progress_event = asyncio.Event()
 
     def to_info(self) -> TaskInfo:
-        return TaskInfo(
-            id=self.id,
-            kind=self.kind,
-            status=self.status,
-            created_at=self.created_at,
-            started_at=self.started_at,
-            completed_at=self.completed_at,
-            progress=self.progress,
-            message=self.message,
-            result=_json_safe(self.result),
-            error=self.error,
-        )
+        payload = {
+            "id": self.id,
+            "kind": self.kind,
+            "status": self.status,
+            "created_at": self.created_at,
+            "started_at": self.started_at,
+            "completed_at": self.completed_at,
+            "progress": max(0, min(100, int(self.progress))),
+            "message": self.message,
+            "result": _json_safe(self.result),
+            "error": self.error,
+        }
+        # Round-trip so FastAPI response validation never sees non-JSON types.
+        payload = json.loads(json.dumps(payload, default=str))
+        return TaskInfo.model_validate(payload)
 
     def set_progress(self, progress: int, message: str = "") -> None:
         self.progress = min(progress, 100)
