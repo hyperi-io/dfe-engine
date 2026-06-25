@@ -36,6 +36,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
@@ -299,7 +300,8 @@ class SampleRowsResponse(BaseModel):
         ),
     )
     match_value: str | None = Field(
-        default=None, description="Match value rows were filtered on, or null for a whole-table sample."
+        default=None,
+        description="Match value rows were filtered on, or null for a whole-table sample.",
     )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
@@ -609,7 +611,7 @@ async def add_meta_schema_version(
     saved = registry.notify_schema_file_updated(
         canonical_path,
         description=description,
-        created_by=user.user_id,
+        created_by=git_author(user),
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return meta_schema_version_write_response(saved, path=canonical_path)
@@ -676,7 +678,7 @@ async def create_meta_schema(
     try:
         saved = registry.save_schema(
             to_save,
-            created_by=user.user_id,
+            created_by=git_author(user),
         )
     except SchemaValidationError as exc:
         raise HTTPException(
@@ -782,7 +784,7 @@ async def update_meta_schema(
     saved = registry.notify_schema_file_updated(
         canonical_path,
         description=description,
-        created_by=user.user_id,
+        created_by=git_author(user),
     )
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "updated")
     return meta_schema_version_write_response(saved, path=canonical_path)
@@ -1471,7 +1473,7 @@ async def promote_field(
 
     description = f"schema: {canonical} (promote {len(new_columns)} JSON field(s))"
     schema_registry.notify_schema_file_updated(
-        canonical, description=description, created_by=user.user_id
+        canonical, description=description, created_by=git_author(user)
     )
     audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
 

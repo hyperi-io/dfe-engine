@@ -24,6 +24,7 @@ from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConfli
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.git_identity import git_author
 from dfe_engine.settings import get_settings
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
@@ -215,7 +216,7 @@ async def create_source(
         )
 
     try:
-        source = registry.create_source_from_write(body, created_by=user.user_id)
+        source = registry.create_source_from_write(body, created_by=git_author(user))
     except SourceValidationError as e:
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "created")
@@ -479,7 +480,7 @@ async def update_source(
         )
 
     try:
-        source = registry.update_source_from_write(name, body, created_by=user.user_id)
+        source = registry.update_source_from_write(name, body, created_by=git_author(user))
     except SourceNotFoundError:
         raise HTTPException(
             status_code=404,
@@ -543,7 +544,7 @@ async def bulk_action(
             else:
                 source = registry.get_source(name)
                 source.enabled = body.action == "enable"
-                registry.save_source(source, created_by=user.user_id)
+                registry.save_source(source, created_by=git_author(user))
             succeeded.append(name)
         except Exception as e:
             failed.append({"source": name, "error": str(e)})
