@@ -46,6 +46,17 @@ def strip_identity_fields_from_yaml(config: dict[str, Any]) -> dict[str, Any]:
     return data
 
 
+def alert_destination_names_from_config(config: dict[str, Any]) -> list[str]:
+    """Named alert destinations referenced in hunt YAML ``alerts.destinations``."""
+    alerts = config.get("alerts")
+    if not isinstance(alerts, dict):
+        return []
+    destinations = alerts.get("destinations", [])
+    if not isinstance(destinations, list):
+        return []
+    return [name for name in destinations if isinstance(name, str) and name]
+
+
 class HuntConfigRegistryError(Exception):
     """Base exception for hunt config registry errors."""
 
@@ -96,6 +107,10 @@ class HuntConfigRegistry:
         if config_data is None:
             raise HuntConfigNotFoundError(f"Hunt not found: '{name}'")
         return dict(config_data)
+
+    def alert_destination_names_for_hunt(self, hunt_name: str) -> list[str]:
+        """Destination names listed under ``alerts.destinations`` for a hunt config."""
+        return alert_destination_names_from_config(self.get(hunt_name))
 
     def save(
         self,

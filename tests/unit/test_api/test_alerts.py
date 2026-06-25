@@ -20,12 +20,17 @@ def app_with_alerts(tmp_path):
 
     alert_dir = tmp_path / "alert-destinations"
     alert_dir.mkdir()
+    hunts_dir = tmp_path / "hunts"
+    hunts_dir.mkdir()
 
     settings = DFESettings(
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
-        hunts=HuntsSettings(alert_destinations_dir=str(alert_dir)),
+        hunts=HuntsSettings(
+            alert_destinations_dir=str(alert_dir),
+            hunt_dir=str(hunts_dir),
+        ),
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
@@ -106,6 +111,57 @@ class TestAlertDestinationsCRUD:
         assert data["total"] == 1
         assert data["items"][0]["name"] == "slack-alerts"
         assert data["items"][0]["url_scheme"] == "slack"
+
+    def test_list_filter_by_hunt(self, alert_client, alert_admin_headers, sample_destination):
+        from dfe_engine.api.deps import _registries
+
+        other = {
+            "name": "pagerduty-oncall",
+            "url": "pagerduty://integration-key",
+            "description": "On-call",
+            "enabled": True,
+        }
+        for dest in (sample_destination, other):
+            alert_client.post(
+                "/api/v1/alerts/destinations",
+                json=dest,
+                headers=alert_admin_headers,
+            )
+
+        hunt_registry = _registries["hunt_configs"]
+        hunt_registry.save(
+            "alert_filter_hunt",
+            {
+                "display_name": "Alert filter hunt",
+                "cron": "* * * * *",
+                "log_buffer": 60,
+                "global_target_table_name": "logs_alerts",
+                "customers": ["org_a"],
+                "rules": [{"rule_name": "some_rule"}],
+                "alerts": {"destinations": ["slack-alerts"]},
+            },
+        )
+
+        resp = alert_client.get(
+            "/api/v1/alerts/destinations",
+            params={"hunt": "alert_filter_hunt"},
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["name"] == "slack-alerts"
+
+        hunt_registry.delete("alert_filter_hunt")
+
+    def test_list_filter_by_hunt_not_found(self, alert_client, alert_admin_headers):
+        resp = alert_client.get(
+            "/api/v1/alerts/destinations",
+            params={"hunt": "missing_hunt"},
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "not_found"
 
     def test_get_destination(self, alert_client, alert_admin_headers, sample_destination):
         alert_client.post(

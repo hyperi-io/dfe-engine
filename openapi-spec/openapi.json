@@ -4175,6 +4175,24 @@
             "description": "Search in name/description"
           },
           {
+            "name": "hunt",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Hunt file name (YAML stem); only destinations referenced in that hunt's alerts",
+              "title": "Hunt"
+            },
+            "description": "Hunt file name (YAML stem); only destinations referenced in that hunt's alerts"
+          },
+          {
             "name": "sort_by",
             "in": "query",
             "required": false,

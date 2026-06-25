@@ -14,6 +14,8 @@ DELETE /api/v1/alerts/destinations/{name}     → Delete destination
 
 from __future__ import annotations
 
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
@@ -21,11 +23,21 @@ from dfe_engine.api.deps import AlertDestStore, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
 
 # DirectoryConfigStore key used within each destination's YAML file
 _DATA_KEY = "data"
+
+
+def _get_hunt_config_registry_optional() -> Any | None:
+    from dfe_engine.api.deps import _registries
+
+    return _registries.get("hunt_configs")
+
+
+OptionalHuntConfigReg = Annotated[Any | None, Depends(_get_hunt_config_registry_optional)]
 
 
 # ── Models ────────────────────────────────────────────────────
@@ -56,8 +68,13 @@ class AlertDestinationSummary(BaseModel):
 async def list_destinations(
     user: CurrentUser,
     store: AlertDestStore,
+    hunt_registry: OptionalHuntConfigReg,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in name/description"),
+    hunt: str | None = Query(
+        None,
+        description="Hunt file name (YAML stem); only destinations referenced in that hunt's alerts",
+    ),
     sort_by: str | None = Query(None, description="Sort field (name, enabled)"),
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
@@ -67,6 +84,24 @@ async def list_destinations(
         data = store.get(name, _DATA_KEY)
         if data is not None:  # Skip deleted (empty) tables
             raw.append({"name": name, **data})
+
+    if hunt is not None:
+        if hunt_registry is None:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "not_configured",
+                    "message": "Hunt config registry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+                },
+            )
+        try:
+            allowed = set(hunt_registry.alert_destination_names_for_hunt(hunt))
+        except HuntConfigNotFoundError:
+            raise HTTPException(
+                status_code=404,
+                detail={"code": "not_found", "message": f"Hunt '{hunt}' not found"},
+            ) from None
+        raw = [item for item in raw if item.get("name") in allowed]
 
     raw = apply_search(raw, search, ["name", "description"])
     raw = apply_sort(raw, sort_by, sort_order)
