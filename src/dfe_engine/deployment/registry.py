@@ -17,8 +17,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.config import DirectoryConfigStore
-from hyperi_pylib.logger import logger
+from scalo.config import DirectoryConfigStore
+from scalo.logger import logger
 
 from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config

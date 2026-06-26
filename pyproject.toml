@@ -8,8 +8,8 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    # hyperi-pylib for logging and common utilities
-    "hyperi-pylib[expression,http]>=2.28.5",
+    # scalo (Apache-2.0 rename/continuation of hyperi-pylib) for logging + common utils
+    "scalo[expression,http]>=2.29.0",
     # Data processing
     "pandas>=3.0.1",
     "numpy>=2.4.2",

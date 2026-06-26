@@ -18,8 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
 

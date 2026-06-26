@@ -32,7 +32,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_load

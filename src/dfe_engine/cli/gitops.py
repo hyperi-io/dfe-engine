@@ -17,8 +17,8 @@ applies them -- the engine needs only git-write. Disabled unless
 from __future__ import annotations
 
 import typer
-from hyperi_pylib.cli import Typer
-from hyperi_pylib.cli.output import (
+from scalo.cli import Typer
+from scalo.cli.output import (
     print_error,
     print_info,
     print_success,

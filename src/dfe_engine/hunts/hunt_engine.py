@@ -17,7 +17,7 @@ import asyncio
 import os
 import threading
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from ..settings import DFESettings, get_clickhouse_config, get_settings
 

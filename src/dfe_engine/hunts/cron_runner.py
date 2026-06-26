@@ -4,8 +4,8 @@ import threading
 import time
 from datetime import UTC, datetime
 
-from hyperi_pylib.logger import logger
 from jinja2 import Environment, FileSystemLoader
+from scalo.logger import logger
 
 from ..settings import get_settings
 from .cron_job import CronJob

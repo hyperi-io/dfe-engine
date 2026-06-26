@@ -24,7 +24,7 @@ class _DfeApiApp:
     env_prefix = "DFE_API"
 
     def _make_app(self):
-        from hyperi_pylib.cli import DfeApp, VersionInfo
+        from scalo.cli import DfeApp, VersionInfo
 
         class DfeApiApp(DfeApp):
             name = "dfe-api"

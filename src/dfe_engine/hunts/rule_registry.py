@@ -9,8 +9,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.config import DirectoryConfigStore
-from hyperi_pylib.logger import logger
+from scalo.config import DirectoryConfigStore
+from scalo.logger import logger
 
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.hunts.hunt_config_registry import (
@@ -129,7 +129,7 @@ class RuleRegistry:
                     self._store._repo,
                     author=COMMITTER_IDENTITY.encode("utf-8"),
                     committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"rule: delete {rule_id}".encode(),
+                    message=f"rule: delete {name}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()

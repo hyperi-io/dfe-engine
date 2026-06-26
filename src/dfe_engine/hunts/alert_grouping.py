@@ -32,8 +32,8 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime, timedelta
 
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 # ── Duration Parser ──────────────────────────────────────────────
 

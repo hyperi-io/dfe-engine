@@ -12,7 +12,7 @@ import re
 import time
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.query.models import ViewDefinition, ViewParameter
 

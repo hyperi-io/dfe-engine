@@ -35,10 +35,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from dulwich import porcelain as git
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 if TYPE_CHECKING:
-    from hyperi_pylib.config import DirectoryConfigStore
+    from scalo.config import DirectoryConfigStore
 
     from dfe_engine.auth.models import AuthContext
 

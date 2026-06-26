@@ -26,7 +26,7 @@ import importlib.resources
 import shutil
 from pathlib import Path
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.api_keys import APIKeyStore

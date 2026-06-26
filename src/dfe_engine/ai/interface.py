@@ -36,8 +36,8 @@ from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Any
 
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 # ── Enums ──────────────────────────────────────────────────
 

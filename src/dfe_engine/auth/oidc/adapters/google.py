@@ -13,7 +13,7 @@ import json
 import os
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider

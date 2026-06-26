@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine import __version__
 from dfe_engine.source.models import SchemaColumn

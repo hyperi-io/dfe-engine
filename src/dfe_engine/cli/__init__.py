@@ -25,8 +25,8 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
-from hyperi_pylib.cli import Typer
-from hyperi_pylib.cli.output import (
+from scalo.cli import Typer
+from scalo.cli.output import (
     print_error,
     print_info,
     print_success,

@@ -70,7 +70,7 @@ class TestGitAuthor:
 
 class TestCommitFile:
     def test_records_split_author_and_committer(self, tmp_path):
-        from hyperi_pylib.config import DirectoryConfigStore
+        from scalo.config import DirectoryConfigStore
 
         Repo.init(str(tmp_path))
         store = DirectoryConfigStore(directory=tmp_path, writable=True)
@@ -89,7 +89,7 @@ class TestCommitFile:
             store.stop()
 
     def test_non_git_store_is_noop(self, tmp_path):
-        from hyperi_pylib.config import DirectoryConfigStore
+        from scalo.config import DirectoryConfigStore
 
         store = DirectoryConfigStore(directory=tmp_path, writable=True)
         store.start()

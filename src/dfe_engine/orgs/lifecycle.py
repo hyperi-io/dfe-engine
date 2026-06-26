@@ -28,7 +28,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.audit import (
     audit_org_ch_failed,

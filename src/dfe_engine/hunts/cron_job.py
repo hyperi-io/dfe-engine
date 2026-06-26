@@ -8,8 +8,8 @@ from datetime import UTC, datetime
 from functools import partial
 
 import croniter
-from hyperi_pylib.logger import logger
 from jinja2 import Environment
+from scalo.logger import logger
 
 from ..yaml_utils import YAMLError, yaml_load
 from .alert import AlertDestinationRegistry, build_alert_config

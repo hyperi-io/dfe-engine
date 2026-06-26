@@ -19,8 +19,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
 from fastapi.routing import APIRoute
-from hyperi_pylib.health import HealthManager, create_health_router
-from hyperi_pylib.logger import logger
+from scalo.health import HealthManager, create_health_router
+from scalo.logger import logger
 
 from dfe_engine.settings import DFESettings, load_settings
 
@@ -239,7 +239,7 @@ def create_app(
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
-        # hyperi_pylib health router uses `-> JSONResponse` with
+        # scalo health router uses `-> JSONResponse` with
         # `from __future__ import annotations`, which breaks Pydantic OpenAPI
         # generation (unresolved ForwardRef). Strip response models for
         # /health/* only while building the schema (see openapi-spec/generate.py).

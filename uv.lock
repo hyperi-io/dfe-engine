@@ -626,7 +626,6 @@ dependencies = [
     { name = "google-api-python-client" },
     { name = "google-auth" },
     { name = "httpx" },
-    { name = "hyperi-pylib", extra = ["expression", "http"] },
     { name = "jinja2" },
     { name = "msal" },
     { name = "numpy" },
@@ -641,6 +640,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "requests" },
     { name = "ruamel-yaml" },
+    { name = "scalo", extra = ["expression", "http"] },
     { name = "sse-starlette" },
     { name = "tabulate" },
     { name = "urllib3" },
@@ -680,7 +680,6 @@ requires-dist = [
     { name = "google-api-python-client", specifier = ">=2.170.0" },
     { name = "google-auth", specifier = ">=2.38.0" },
     { name = "httpx", specifier = ">=0.28.1" },
-    { name = "hyperi-pylib", extras = ["expression", "http"], specifier = ">=2.28.5" },
     { name = "jinja2", specifier = ">=3.1.6" },
     { name = "msal", specifier = ">=1.32.0" },
     { name = "numpy", specifier = ">=2.4.2" },
@@ -695,6 +694,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.28" },
     { name = "requests", specifier = ">=2.33.0" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
+    { name = "scalo", extras = ["expression", "http"], specifier = ">=2.29.0" },
     { name = "sse-starlette", specifier = ">=3.3.2" },
     { name = "tabulate", specifier = ">=0.9.0" },
     { name = "urllib3", specifier = ">=2.7.0" },
@@ -973,41 +973,6 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/b1/df/48c586a5fe32a0f01324ee087459e112ebb7224f646c0b5023f5e79e9956/httpx-0.28.1.tar.gz", hash = "sha256:75e98c5f16b0f35b567856f597f06ff2270a374470a5c2392242528e3e3e42fc", size = 141406, upload-time = "2024-12-06T15:37:23.222Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/2a/39/e50c7c3a983047577ee07d2a9e53faf5a69493943ec3f6a384bdc792deb2/httpx-0.28.1-py3-none-any.whl", hash = "sha256:d909fcccc110f8c7faf814ca82a9a4d816bc5a6dbfea25d6591d6985b8ba59ad", size = 73517, upload-time = "2024-12-06T15:37:21.509Z" },
-]
-
-[[package]]
-name = "hyperi-pylib"
-version = "2.28.5"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "anyio" },
-    { name = "asyncer" },
-    { name = "detect-secrets" },
-    { name = "dulwich" },
-    { name = "dynaconf" },
-    { name = "loguru" },
-    { name = "mergedeep" },
-    { name = "phonenumbers" },
-    { name = "python-dotenv" },
-    { name = "python-stdnum" },
-    { name = "pyyaml" },
-    { name = "regex" },
-    { name = "tomli-w" },
-    { name = "typer" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/b0/a49bdc6749058a702132b1f898601baa57ca5e8d40f5dbb5152fe0901437/hyperi_pylib-2.28.5.tar.gz", hash = "sha256:9ea23280f07770b1117bcdce641c6983e6c28e5d76e18f62ab1ad13c26143079", size = 291034, upload-time = "2026-06-02T04:16:25.988Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/41/26/a1c7a8c6cba9158a9b262591860fd05771a8f4fd5f905e9adc5748aa7d29/hyperi_pylib-2.28.5-py3-none-any.whl", hash = "sha256:318fcf8ee95e46e9af0973c685c6ea8d5ab21c1a93b2605398d398c5890f32c0", size = 364599, upload-time = "2026-06-02T04:16:27.46Z" },
-]
-
-[package.optional-dependencies]
-expression = [
-    { name = "common-expression-language" },
-]
-http = [
-    { name = "httpx" },
-    { name = "purgatory" },
-    { name = "stamina" },
 ]
 
 [[package]]
@@ -2084,6 +2049,41 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/05/04/74127fc843314818edfa81b5540e26dd537353b123a4edc563109d8f17dd/s3transfer-0.16.0.tar.gz", hash = "sha256:8e990f13268025792229cd52fa10cb7163744bf56e719e0b9cb925ab79abf920", size = 153827, upload-time = "2025-12-01T02:30:59.114Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/fc/51/727abb13f44c1fcf6d145979e1535a35794db0f6e450a0cb46aa24732fe2/s3transfer-0.16.0-py3-none-any.whl", hash = "sha256:18e25d66fed509e3868dc1572b3f427ff947dd2c56f844a5bf09481ad3f3b2fe", size = 86830, upload-time = "2025-12-01T02:30:57.729Z" },
+]
+
+[[package]]
+name = "scalo"
+version = "2.29.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "anyio" },
+    { name = "asyncer" },
+    { name = "detect-secrets" },
+    { name = "dulwich" },
+    { name = "dynaconf" },
+    { name = "loguru" },
+    { name = "mergedeep" },
+    { name = "phonenumbers" },
+    { name = "python-dotenv" },
+    { name = "python-stdnum" },
+    { name = "pyyaml" },
+    { name = "regex" },
+    { name = "tomli-w" },
+    { name = "typer" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/95/fa/1c51201b081107339e286e3840b5c8b68557548168503ad4288263510256/scalo-2.29.0.tar.gz", hash = "sha256:d0392e42d82392d6cd78c3d28483f76fd18aa0c836640efcd7e66b2bafd9f95f", size = 270253, upload-time = "2026-06-25T01:21:45.79Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f6/8f/fac9e9c735496decf1a49d7c337c3a36ca102794afcc475e5aaa8f25b3eb/scalo-2.29.0-py3-none-any.whl", hash = "sha256:74f9e9499d48432204c6964882d6df705c80b5fda19b204f487d36b7e42fd41a", size = 337126, upload-time = "2026-06-25T01:21:44.319Z" },
+]
+
+[package.optional-dependencies]
+expression = [
+    { name = "common-expression-language" },
+]
+http = [
+    { name = "httpx" },
+    { name = "purgatory" },
+    { name = "stamina" },
 ]
 
 [[package]]

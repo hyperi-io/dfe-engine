@@ -2,7 +2,7 @@ import asyncio
 import os
 
 import pytest
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.hunts.cron_runner import CronRunner
 from dfe_engine.settings import get_settings

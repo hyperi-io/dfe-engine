@@ -5,8 +5,8 @@ import warnings
 from pathlib import Path
 
 import pytest
-from hyperi_pylib.logger import logger
 from jinja2 import Environment, FileSystemLoader
+from scalo.logger import logger
 
 from dfe_engine.hunts.hunt import Hunt
 
@@ -28,9 +28,9 @@ def template_dir_filters() -> Path:
     rule_template_path = template_path / "multi_line_rule.jinja2"
     rule_template_path.write_text(
         textwrap.dedent("""
-        INSERT INTO {{ org_id }}.{{ target_table_name }} 
-        SELECT * FROM {{ org_id }}.{{ source_table_name }} 
-        WHERE {timestamp_condition} 
+        INSERT INTO {{ org_id }}.{{ target_table_name }}
+        SELECT * FROM {{ org_id }}.{{ source_table_name }}
+        WHERE {timestamp_condition}
         AND {customer_filters}
     """)
     )
@@ -95,9 +95,9 @@ def template_dir_filters() -> Path:
     rule_template_path = template_path / "multiline_comment_filter1.jinja2"
     rule_template_path.write_text(
         textwrap.dedent("""
-        INSERT INTO {{ org_id }}.{{ target_table_name }} 
+        INSERT INTO {{ org_id }}.{{ target_table_name }}
         SELECT * FROM {{ org_id }}.{{ source_table_name }}
-        WHERE {timestamp_condition} 
+        WHERE {timestamp_condition}
         AND (
             /* This is a multi-line comment
                that spans multiple lines and contains
@@ -113,9 +113,9 @@ def template_dir_filters() -> Path:
     rule_template_path = template_path / "multiline_comment_filter2.jinja2"
     rule_template_path.write_text(
         textwrap.dedent("""
-        INSERT INTO {{ org_id }}.{{ target_table_name }} 
+        INSERT INTO {{ org_id }}.{{ target_table_name }}
         SELECT * FROM {{ org_id }}.{{ source_table_name }}
-        WHERE {timestamp_condition} 
+        WHERE {timestamp_condition}
         AND (
             /* This is a multi-line comment
             that spans multiple lines  */
@@ -336,7 +336,7 @@ def test_multiline_filter_clause_with_comments(
     OR field2='value2'
     /* comment here */
     OR field3='value3'
-    -- comment here 
+    -- comment here
     """
 
     customer_filters = {org_id: {"rules": [{"name": rule_name, "filter_clause": multiline_filter}]}}

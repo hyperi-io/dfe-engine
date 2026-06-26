@@ -18,7 +18,7 @@ import re
 import secrets
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 
 class OrgChProvisioner:

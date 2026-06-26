@@ -1,5 +1,5 @@
-from hyperi_pylib.logger import logger
 from pydantic import StrictStr
+from scalo.logger import logger
 
 from .clickhouse_manager import ClickHouseManager
 

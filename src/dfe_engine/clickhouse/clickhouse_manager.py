@@ -17,7 +17,7 @@ from typing import Annotated
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from ..settings import get_settings
 

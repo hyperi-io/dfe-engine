@@ -33,7 +33,7 @@ import uuid
 from pathlib import Path
 
 import pytest
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 # Load .env file if present (before any other imports that might use settings)
 try:

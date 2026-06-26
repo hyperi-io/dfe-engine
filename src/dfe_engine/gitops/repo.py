@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from dulwich import porcelain
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 
 @dataclass

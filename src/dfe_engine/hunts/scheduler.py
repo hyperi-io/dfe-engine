@@ -2,7 +2,7 @@ import asyncio
 import os
 from concurrent.futures import ThreadPoolExecutor
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from .cron_runner import CronRunner
 

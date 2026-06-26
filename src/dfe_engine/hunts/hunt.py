@@ -3,8 +3,8 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from hyperi_pylib.logger import logger
 from jinja2 import Environment
+from scalo.logger import logger
 
 from ..clickhouse.clickhouse_manager import ClickHouseManager
 from .checkpoint import HuntCheckpointManager

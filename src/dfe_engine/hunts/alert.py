@@ -35,14 +35,14 @@ from pathlib import Path
 from typing import Any
 
 import apprise
-from hyperi_pylib.expression import (
+from pydantic import BaseModel, Field, field_validator
+from scalo.expression import (
     evaluate_condition,
 )
-from hyperi_pylib.expression import (
+from scalo.expression import (
     validate as validate_expression,
 )
-from hyperi_pylib.logger import logger
-from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 # ── Destination Registry ──────────────────────────────────────────
 
@@ -83,7 +83,7 @@ class AlertDestinationRegistry:
             dir_path = Path(directory)
             dir_path.mkdir(parents=True, exist_ok=True)
             try:
-                from hyperi_pylib.config import DirectoryConfigStore
+                from scalo.config import DirectoryConfigStore
 
                 self._store = DirectoryConfigStore(
                     directory=str(dir_path),

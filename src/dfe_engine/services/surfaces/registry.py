@@ -21,7 +21,7 @@ from __future__ import annotations
 import importlib.resources
 from pathlib import Path
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.services.surfaces.models import ServiceSurface
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -126,7 +126,7 @@ class SurfaceRegistry:
             return surface
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient() as client:
                 response = await client.get(surface.manifest_url)

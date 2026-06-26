@@ -58,7 +58,7 @@ class TestContractWellFormed:
 
     def test_contract_round_trips_through_json(self) -> None:
         """Contract must serialise to JSON and back without losing fidelity."""
-        from hyperi_pylib.deployment import DeploymentContract
+        from scalo.deployment import DeploymentContract
 
         original = engine_deployment_contract()
         as_json = original.to_json()
@@ -75,7 +75,7 @@ class TestArtefactGeneration:
     """pylib generators emit non-empty, well-formed artefacts."""
 
     def test_runtime_stage_includes_contract_points(self) -> None:
-        from hyperi_pylib.deployment import generate_runtime_stage
+        from scalo.deployment import generate_runtime_stage
 
         contract = engine_deployment_contract()
         stage = generate_runtime_stage(contract)
@@ -86,7 +86,7 @@ class TestArtefactGeneration:
         assert 'org.opencontainers.image.title="dfe-engine"' in stage
 
     def test_container_manifest_is_valid_json(self) -> None:
-        from hyperi_pylib.deployment import generate_container_manifest
+        from scalo.deployment import generate_container_manifest
 
         contract = engine_deployment_contract()
         manifest = json.loads(generate_container_manifest(contract))
@@ -98,7 +98,7 @@ class TestArtefactGeneration:
         assert manifest["cmd"] == contract.entrypoint_args
 
     def test_argocd_application_is_valid_yaml(self) -> None:
-        from hyperi_pylib.deployment import (
+        from scalo.deployment import (
             ArgocdConfig,
             argocd_repo_url_from_cascade,
             generate_argocd_application,
@@ -121,7 +121,7 @@ class TestArtefactGeneration:
         assert sync["automated"]["selfHeal"] is True
 
     def test_chart_generation_creates_expected_files(self, tmp_path: Path) -> None:
-        from hyperi_pylib.deployment import generate_chart
+        from scalo.deployment import generate_chart
 
         contract = engine_deployment_contract()
         generate_chart(contract, tmp_path)
@@ -138,7 +138,7 @@ class TestArtefactGeneration:
             assert (tmp_path / "templates" / template).exists(), f"missing {template}"
 
     def test_chart_values_reference_correct_image(self, tmp_path: Path) -> None:
-        from hyperi_pylib.deployment import generate_chart
+        from scalo.deployment import generate_chart
 
         contract = engine_deployment_contract()
         generate_chart(contract, tmp_path)
@@ -161,13 +161,13 @@ class TestCommittedArtefactDrift:
     """
 
     def test_committed_dockerfile_matches_contract(self) -> None:
-        from hyperi_pylib.deployment import validate_dockerfile
+        from scalo.deployment import validate_dockerfile
 
         mismatches = validate_dockerfile(engine_deployment_contract(), PROJECT_ROOT / "Dockerfile")
         assert mismatches == [], f"committed Dockerfile drifted from contract: {mismatches}"
 
     def test_committed_chart_matches_contract(self) -> None:
-        from hyperi_pylib.deployment import validate_helm_values
+        from scalo.deployment import validate_helm_values
 
         mismatches = validate_helm_values(engine_deployment_contract(), PROJECT_ROOT / "chart")
         assert mismatches == [], f"committed chart values drifted from contract: {mismatches}"
@@ -184,7 +184,7 @@ class TestCommittedArtefactDrift:
 
 def test_artefact_generation_is_deterministic(tmp_path: Path) -> None:
     """Generating twice produces byte-identical output."""
-    from hyperi_pylib.deployment import (
+    from scalo.deployment import (
         ArgocdConfig,
         generate_argocd_application,
         generate_container_manifest,

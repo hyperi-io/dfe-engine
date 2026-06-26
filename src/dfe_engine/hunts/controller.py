@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 from tabulate import tabulate
 
 from ..settings import get_settings

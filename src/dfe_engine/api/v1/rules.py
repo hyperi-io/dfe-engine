@@ -216,8 +216,8 @@ async def create_rule(
         cost_window_minutes=body.cost_window_minutes,
     )
 
-    result = service.create_rule(svc_request, rule_id)
-    registry.save(result.rule, created_by=git_author(user), description=f"rule: create {rule_id}")
+    result = service.create_rule(svc_request, body.name)
+    registry.save(result.rule, created_by=git_author(user), description=f"rule: create {body.name}")
 
     audit_resource_change(user.user_id, "rule", body.name, "created")
     return _build_create_response(result, body.cost_window_minutes)
@@ -322,8 +322,8 @@ async def update_rule(
     updated = result.rule.model_copy(
         update={"created_at": existing.created_at, "name": effective_display},
     )
-    registry.save(updated, created_by=git_author(user), description=f"rule: update {rule_id}")
-    audit_resource_change(user.user_id, "rule", rule_id, "updated")
+    registry.save(updated, created_by=git_author(user), description=f"rule: update {name}")
+    audit_resource_change(user.user_id, "rule", name, "updated")
     return _build_create_response(
         result.model_copy(update={"rule": updated}),
         body.cost_window_minutes,
