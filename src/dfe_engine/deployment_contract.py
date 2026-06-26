@@ -56,7 +56,7 @@ def engine_deployment_contract() -> DeploymentContract:
             metrics_path="/metrics",
         ),
         env_prefix="DFE",
-        metric_prefix="engine",
+        metric_prefix="dfe",
         config_mount_path="/etc/dfe/config",
         image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.12",
