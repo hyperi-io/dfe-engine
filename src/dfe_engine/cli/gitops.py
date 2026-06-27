@@ -98,9 +98,7 @@ def publish() -> None:
     for warn in result.warnings:
         print_warning(warn)
 
-    artifacts = collect_deploy_artifacts(
-        result, environment=environment, ddl=_render_ddl(settings.clickhouse.topology)
-    )
+    artifacts = collect_deploy_artifacts(result, ddl=_render_ddl(settings.clickhouse.topology))
 
     # Engine is the OIDC SSoT: render Envoy oidc-values.yaml from the provider
     # registry into the deploy repo (the envoy app pulls it via $values).

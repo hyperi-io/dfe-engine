@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         gitops/artifacts.py
-#  Purpose:      Map compiled artifacts to deploy-repo relative paths (pure)
+#  Purpose:      Map compiled overlay values to deploy-repo relative paths (pure)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -9,43 +9,45 @@
 """Map compiled artifacts to deploy-repo relative paths.
 
 Pure (no I/O): turns a :class:`CompilationResult` (+ optional rendered DDL) into
-a ``{repo_relative_path: content}`` dict that :class:`GitopsRepo` commits. The
-layout mirrors what the dfe-infra Argo apps expect to consume.
+a ``{repo_relative_path: content}`` dict that :class:`GitopsRepo` commits.
+
+The engine writes ONLY the OVERLAY into the deploy repo -- per-service-instance
+Helm values (consumed by dfe-infra's ApplicationSets via Argo multi-source
+``$values``) and DDL. It does NOT author Argo Application/AppProject/RBAC: that is
+dfe-infra's deployment machinery (the appsets + the git-generator fan out per
+values file). Values are dumped with ``exclude_none`` so omitted fields (e.g. a
+KEDA ``triggers: None``) do not clobber the base chart's defaults on merge.
 """
 
 from __future__ import annotations
 
-from dfe_engine.helm.models import CompilationResult
+from dfe_engine.helm.models import CompilationResult, HelmServiceValues
 from dfe_engine.yaml_utils import yaml_dump_string
 
 
 def collect_deploy_artifacts(
     result: CompilationResult,
     *,
-    environment: str,
     ddl: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Return ``{repo_relative_path: content}`` for the deploy repo.
 
     Args:
-        result: Compiled Helm/Argo artifacts from ``HelmValuesCompiler``.
-        environment: Environment name (used in the AppProject filename).
+        result: Compiled overlay values from ``HelmValuesCompiler``.
         ddl: Optional ``{table_name: sql}`` from ``DDLFileWriter.generate_all()``.
 
     Returns:
-        Mapping of repo-relative path to file content.
+        Mapping of repo-relative path to file content (values/ + ddl/ only).
     """
     artifacts: dict[str, str] = {}
 
-    artifacts[f"argocd/appproject-{environment}.yaml"] = yaml_dump_string(result.argo_appproject)
-    for app in result.argo_applications:
-        name = app["metadata"]["name"]
-        artifacts[f"argocd/applications/{name}.yaml"] = yaml_dump_string(app)
-
-    artifacts["argocd/rbac/argocd-rbac-policy.csv"] = result.argo_rbac_csv
-
     for key, values in result.helm_values.items():
-        artifacts[f"values/{key}-values.yaml"] = yaml_dump_string(values.model_dump())
+        if isinstance(values, HelmServiceValues):
+            content = values.model_dump(mode="json", exclude_none=True)
+        else:
+            # External (Mode 2 / BYO chart) component: raw values dict, passthrough.
+            content = values
+        artifacts[f"values/{key}-values.yaml"] = yaml_dump_string(content)
 
     for name, sql in (ddl or {}).items():
         artifacts[f"ddl/{name}.sql"] = sql
