@@ -106,6 +106,19 @@ def qualified_table(db: str, source: str) -> str:
     return f"`{db}`.`{source}`"
 
 
+def clickhouse_table_exists(client: Any, db: str, table: str) -> bool:
+    """Return whether ``db.table`` is present in ClickHouse."""
+    try:
+        rows = client.execute(
+            "SELECT 1 FROM system.tables "
+            "WHERE database = {db:String} AND name = {tbl:String} LIMIT 1",
+            parameters={"db": db, "tbl": table},
+        )
+        return bool(rows)
+    except Exception:
+        return False
+
+
 def copy_cel_for_path(path: str) -> str:
     """CEL path expression that reads ``path`` from the JSON column."""
     return f"{JSON_COLUMN}.{path}"

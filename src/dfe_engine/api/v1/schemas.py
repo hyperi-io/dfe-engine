@@ -1097,24 +1097,36 @@ def _resolve_source_meta_schema(source, schema_registry):
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
-def _discovery_target(source, ver, schema_registry):
+def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
     A version with a ``meta_schema`` owns its own table, so discovery targets
-    ``db.<source>`` with that schema's columns. Otherwise the version's data
-    still lives in the shared catch-all landing table, so discovery targets
-    ``db.<landing>`` filtered by the version's match rule.
+    ``db.<source>`` with that schema's columns when that table exists in
+    ClickHouse. If the dedicated table is not materialized yet, discovery falls
+    back to ``db.<landing>`` filtered by the version's match rule (same as a
+    version without ``meta_schema``). When ``ch``/``db`` are omitted, a version
+    with ``meta_schema`` always targets ``db.<source>``.
 
     Returns:
         ``(target_table, match_field, match_value, existing_columns)``.
     """
-    ver_schema = ver.effective_schema()
-    if ver_schema.meta_schema:
+    from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
+
+    landing = get_settings().clickhouse.landing_table
+    match_field, match_value = ver.match.field, ver.match.value
+    if ver.effective_schema().meta_schema:
         _canonical, _meta, columns = _resolve_meta_schema(
-            ver_schema.meta_schema, source.source, schema_registry
+            ver.effective_schema().meta_schema, source.source, schema_registry
         )
-        return source.table_name, None, None, columns
-    return get_settings().clickhouse.landing_table, ver.match.field, ver.match.value, []
+        target_table = source.table_name
+        if (
+            ch is not None
+            and db is not None
+            and not clickhouse_table_exists(ch, db, target_table)
+        ):
+            return landing, match_field, match_value, columns
+        return target_table, None, None, columns
+    return landing, match_field, match_value, []
 
 
 def _resolve_source_version(source, version, source_name):
@@ -1187,11 +1199,11 @@ async def discover_json_paths(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
+    db = get_settings().clickhouse.effective_data_database
     target_table, match_field, match_value, columns = _discovery_target(
-        source, ver, schema_registry
+        source, ver, schema_registry, ch=ch, db=db
     )
 
-    db = get_settings().clickhouse.effective_data_database
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
     try:
@@ -1280,11 +1292,10 @@ async def sample_source_rows(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
-    target_table, match_field, match_value, _columns = _discovery_target(
-        source, ver, schema_registry
-    )
-
     db = get_settings().clickhouse.effective_data_database
+    target_table, match_field, match_value, _columns = _discovery_target(
+        source, ver, schema_registry, ch=ch, db=db
+    )
 
     try:
         columns, rows = sample_rows(
@@ -1368,6 +1379,10 @@ async def promote_field(
     ]
 
     db = get_settings().clickhouse.effective_data_database
+    _version_id, ver = _resolve_source_version(source, None, source_name)
+    target_table, match_field, match_value, _ = _discovery_target(
+        source, ver, schema_registry, ch=ch, db=db
+    )
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}
@@ -1376,8 +1391,10 @@ async def promote_field(
             discovered = discover_paths(
                 ch,
                 db=db,
-                source=source.table_name,
+                source=target_table,
                 existing_columns=columns,
+                match_field=match_field,
+                match_value=match_value,
                 paths=[r.json_path for r in requests],
             )
         except JsonPromotionError as exc:
