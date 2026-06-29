@@ -1119,11 +1119,7 @@ def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
         target_table = source.table_name
-        if (
-            ch is not None
-            and db is not None
-            and not clickhouse_table_exists(ch, db, target_table)
-        ):
+        if ch is not None and db is not None and not clickhouse_table_exists(ch, db, target_table):
             return landing, match_field, match_value, columns
         return target_table, None, None, columns
     return landing, match_field, match_value, []

@@ -65,7 +65,11 @@ class _DiscoveryClient:
         if "system.tables" in sql:
             db = (parameters or {}).get("db")
             tbl = (parameters or {}).get("tbl")
-            return [(1,)] if db is not None and tbl is not None and (db, tbl) in self._existing_tables else []
+            return (
+                [(1,)]
+                if db is not None and tbl is not None and (db, tbl) in self._existing_tables
+                else []
+            )
         if "JSONDynamicPathsWithTypes" in sql:
             return self._discover_rows
         return []
@@ -91,7 +95,11 @@ class _SampleClient:
         if "system.tables" in sql:
             db = (parameters or {}).get("db")
             tbl = (parameters or {}).get("tbl")
-            return [(1,)] if db is not None and tbl is not None and (db, tbl) in self._existing_tables else []
+            return (
+                [(1,)]
+                if db is not None and tbl is not None and (db, tbl) in self._existing_tables
+                else []
+            )
         return []
 
     def query_rows(self, sql: str, parameters: dict | None = None):
@@ -280,9 +288,7 @@ class TestDiscoverJsonPaths:
         resp = client.get(f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["table"] == f"{db}.{VERSIONED_SOURCE}"
-        sql, _params = next(
-            (sql, p) for sql, p in ch.calls if "JSONDynamicPathsWithTypes" in sql
-        )
+        sql, _params = next((sql, p) for sql, p in ch.calls if "JSONDynamicPathsWithTypes" in sql)
         assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
         assert "WHERE" not in sql  # owns its table -> no match filter
 
@@ -354,7 +360,9 @@ class TestSampleRows:
         assert body["table"] == f"{db}.{VERSIONED_SOURCE}"
         assert body["match_field"] is None
         assert body["match_value"] is None
-        sql, _params = next((sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *"))
+        sql, _params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
         assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
         assert "WHERE" not in sql
 
@@ -368,7 +376,9 @@ class TestSampleRows:
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        _sql, params = next((sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *"))
+        _sql, params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
         assert params["limit"] == 5
 
     def test_limit_out_of_range_422(self, client: TestClient, admin_headers):

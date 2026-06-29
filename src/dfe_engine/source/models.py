@@ -259,7 +259,7 @@ class SourceVersion(BaseModel):
     date_time: str = Field(..., description="Version creation date (YYYY-MM-DD)")
     header: SourceHeader | None = Field(
         default=None,
-        description="Common schema header configuration (None when the version did not author one)",
+        description="Common schema header configuration (optional; applied at DDL compose time)",
     )
     schema_config: SourceSchema | None = Field(
         default=None,
@@ -388,7 +388,7 @@ class SourceWriteRequest(BaseModel):
         return SourceVersion(
             date_time=date.today().isoformat(),
             header=self.header,
-            schema_config=self.schema_config,
+            schema_config=self.schema_config or SourceSchema(),
             mapping_standards=self.mapping_standards or [],
             sigma=self.sigma,
             field_mappings=self.field_mappings,
@@ -423,6 +423,8 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
     snapshot = write.to_version_snapshot()
     if write.transform is None and existing.transform is not None:
         snapshot = snapshot.model_copy(update={"transform": existing.transform})
+    if write.header is None:
+        snapshot = snapshot.model_copy(update={"header": existing.version(existing.current).header})
 
     merged_versions = dict(existing.versions)
     merged_versions[new_version_id] = snapshot

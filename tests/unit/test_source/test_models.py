@@ -250,7 +250,7 @@ class TestSource:
         assert s.source == "syslog"
         assert s.enabled is True
         assert s.display_name == "Syslog"
-        assert s.header.type == "time_series"
+        assert s.header is None
         assert s.schema_config.engine == "MergeTree"
 
     def test_full(self):
@@ -480,6 +480,19 @@ class TestSourceWriteRequest:
         assert src.versions["1.0.0"].header.version == "1.1.0"
         assert src.current == "1.0.0"
         assert src.deployed_version is None
+
+    def test_create_without_header_leaves_header_unset(self):
+        write = SourceWriteRequest.model_validate(
+            {
+                "source": "no_header",
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "MergeTree"},
+            }
+        )
+        src = source_from_write(write, source_name="no_header")
+        ver = src.versions["1.0.0"]
+        assert ver.header is None
+        assert "header" not in ver.to_yaml_dict()
 
     def test_next_major_source_version(self):
         assert next_major_source_version({}) == "1.0.0"
