@@ -134,7 +134,9 @@ async def set_var(
             detail={
                 "code": "conflict",
                 "message": str(exc),
-                "context": {"current": exc.current, "head": exc.head},
+                # non-reserved keys become the ErrorResponse.context (current vs theirs)
+                "current": exc.current,
+                "head": exc.head,
             },
         ) from exc
     audit_resource_change(

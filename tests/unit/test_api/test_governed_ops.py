@@ -121,3 +121,130 @@ class TestTier2Actions:
 def test_governed_ops_requires_auth(client, path):
     # no auth header -> 401
     assert client.get(path).status_code == 401
+
+
+def _scoped_headers(app, api_settings, *, username, role, permissions):
+    """Create a role+group+account with exactly these perms; return auth headers."""
+    from dfe_engine.api.deps import create_access_token
+
+    role_store = app.state.role_store
+    group_store = app.state.group_store
+    account_store = app.state.account_store
+    if role_store.get(role) is None:
+        role_store.create(role, description="test", permissions=permissions)
+    app.state.role_config = role_store.load_config()
+    gname = f"grp-{username}"
+    try:
+        group_store.create(gname, roles=[role])
+    except ValueError:
+        group_store.update(gname, roles=[role])
+    if account_store.get(username) is None:
+        account_store.create(username, "pw-12345", groups=[gname])
+    group_store.add_member(gname, username)
+    token = create_access_token(
+        data={"sub": username, "org_id": "test-org", "roles": [role], "groups": [gname]},
+        settings=api_settings,
+    )
+    return {"Authorization": f"Bearer {token}"}
+
+
+def _action_doc():
+    return {
+        "name": "scale-receiver",
+        "description": "scale",
+        "required_action": "action:invoke:scale-receiver",
+        "changes": [
+            {"cls": "helmvars", "name": "receiver-default", "path": "keda.maxReplicas", "value": 9}
+        ],
+    }
+
+
+class TestPerActionRBAC:
+    def test_reader_can_list_but_not_invoke(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        _wire_gitcrud(app, tmp_path)
+        client.post("/api/v1/governance/admin/actions", json=_action_doc(), headers=admin_headers)
+        reader = _scoped_headers(
+            app,
+            api_settings,
+            username="govreader",
+            role="gov-reader",
+            permissions=["governance:read"],
+        )
+        # can see actions (governance:read)
+        assert client.get("/api/v1/governance/actions", headers=reader).status_code == 200
+        # cannot invoke (lacks action:invoke:scale-receiver) -> 403
+        denied = client.post("/api/v1/governance/actions/scale-receiver/invoke", headers=reader)
+        assert denied.status_code == 403
+
+    def test_scoped_invoker_can_invoke(self, client, app, api_settings, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        client.post("/api/v1/governance/admin/actions", json=_action_doc(), headers=admin_headers)
+        scaler = _scoped_headers(
+            app,
+            api_settings,
+            username="scaler",
+            role="scaler",
+            permissions=["governance:read", "action:invoke:scale-receiver"],
+        )
+        ok = client.post("/api/v1/governance/actions/scale-receiver/invoke", headers=scaler)
+        assert ok.status_code == 200, ok.text
+        assert ok.json()["changed"] is True
+
+
+class TestRouterConcurrency:
+    def test_stale_if_match_returns_409(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        url = "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas"
+        r1 = client.put(url, json={"value": 1}, headers=admin_headers)
+        sha1 = r1.json()["commit_sha"]
+        # advance HEAD with a fresh write
+        client.put(url, json={"value": 2}, headers=admin_headers)
+        # now sha1 is stale
+        conflict = client.put(url, json={"value": 3}, headers={**admin_headers, "If-Match": sha1})
+        assert conflict.status_code == 409
+        assert conflict.json()["code"] == "conflict"
+        assert "current" in conflict.json()["context"]
+
+
+class TestRouterProtected:
+    def test_writer_without_override_blocked_by_policy(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        _wire_gitcrud(app, tmp_path)
+        # admin defines a protected-var policy
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["helmvars:*:keda.maxReplicas"]},
+            headers=admin_headers,
+        )
+        writer = _scoped_headers(
+            app,
+            api_settings,
+            username="writer",
+            role="helm-writer",
+            permissions=["helmvars:read", "helmvars:write"],  # NO helmvars:override
+        )
+        resp = client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 5},
+            headers=writer,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["code"] == "protected_var"
+
+    def test_admin_override_bypasses_policy(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        client.post(
+            "/api/v1/governance/admin/policies",
+            json={"name": "lock", "protected": ["helmvars:*:keda.maxReplicas"]},
+            headers=admin_headers,
+        )
+        # admin has '*' -> helmvars:override -> allowed through
+        resp = client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 5},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text

@@ -110,6 +110,52 @@ def test_invoke_blocked_by_protected_policy_is_atomic(store, crud):
         crud.get("helmvars", "receiver-default")
 
 
+def test_invoke_multi_file_is_atomic_one_commit(store, crud):
+    # action touches TWO different files -> single commit, both applied
+    action = ActionDef(
+        name="scale-both",
+        description="scale receiver + loader",
+        required_action="action:invoke:scale-both",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path="keda.maxReplicas", value=10),
+            VarChange(cls="helmvars", name="loader-default", path="keda.maxReplicas", value=5),
+        ],
+    )
+    store.save(action, actor="admin")
+    res = store.invoke("scale-both", actor="bob")
+    assert res.changed is True
+    assert crud.get("helmvars", "receiver-default")["keda"]["maxReplicas"] == 10
+    assert crud.get("helmvars", "loader-default")["keda"]["maxReplicas"] == 5
+
+
+def test_invoke_multi_file_protected_aborts_both(store, crud):
+    # lock loader's var; the receiver change must NOT land either (atomic abort)
+    crud.put(
+        _POLICY_CLASS,
+        "lock-loader",
+        ProtectedPolicy(
+            name="lock-loader", protected=["helmvars:loader-default:keda.maxReplicas"]
+        ).model_dump(),
+        actor="admin",
+    )
+    action = ActionDef(
+        name="scale-both",
+        description="x",
+        required_action="action:invoke:scale-both",
+        changes=[
+            VarChange(cls="helmvars", name="receiver-default", path="keda.maxReplicas", value=10),
+            VarChange(cls="helmvars", name="loader-default", path="keda.maxReplicas", value=5),
+        ],
+    )
+    store.save(action, actor="admin")
+    with pytest.raises(ProtectedVarError):
+        store.invoke("scale-both", actor="bob", policy=PolicyStore(crud))
+    from dfe_engine.gitcrud import ResourceNotFoundError
+
+    with pytest.raises(ResourceNotFoundError):
+        crud.get("helmvars", "receiver-default")
+
+
 def test_invoke_protected_allowed_with_override(store, crud):
     crud.put(
         _POLICY_CLASS,
