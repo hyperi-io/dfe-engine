@@ -39,6 +39,26 @@ These constraints shape every decision below. Read them first.
    domain DFE owns, an account/creds, optionally a deploy-repo URL + network
    ranges) and the deployment layers do the rest with sensible defaults.
 
+6. **ClickHouse is the only operational store.** Configuration lives in git
+   (principle 2); all operational, load-bearing state lives in ClickHouse -- events,
+   detection results, alerts, and transient runtime state such as hunt watermarks
+   and leases. The other databases you see in a deployment -- PostgreSQL, ferretdb,
+   Valkey/Redis -- are HyperDX's own dependencies or UI/control-plane CONVENIENCE
+   stores; DFE never puts operational state in them, so none of them is load-bearing
+   for DFE. ClickHouse is not an OLTP engine, but the engine's operational load is
+   tiny -- a handful of small writes a minute -- and CH is the one resilient store
+   present in every deployment, from a single dfe-docker container to a multi-pod
+   cluster. Using it for all non-gitops state keeps coordination uniform and adds no
+   k8s-only dependency, so non-k8s deploys behave identically. Reference it via
+   `effective_data_database` (the `dfe` database in a normal deploy), never a
+   hardcoded name.
+
+7. **A commit is not a deployment.** The engine commits to git, but it does NOT
+   assume the change is live. In most orgs an approval or merge step (a PR review,
+   a promotion gate -- org-specific and varied) sits between the commit and Argo.
+   So the engine reports back what it committed; it never claims the change is
+   applied. See "Governed Ops" below.
+
 ---
 
 ## Governed Ops (the operating model)
@@ -68,10 +88,46 @@ change, a "rollback" is a git revert, and a "sync" is simply the commit. Curated
 operators), while raw class-level CRUD is reserved for administrators. Every change
 is audited and carries the actor, the permission used, and the resulting commit.
 
-The unified Governed Ops API surface is being rolled out in DFE 2.2; the model and
-its principles (YAML+git source of truth, engine as control plane) already describe
-how the engine operates today. Commit conventions for this path are in
-docs/GITOPS-COMMIT-STANDARD.md.
+The Governed Ops API is the engine's control surface: `GitCrud` (the generic
+YAML-in-git engine), the governance layer (curated actions, protected-var policies,
+gitops-sourced RBAC), and the routers under `/api/v1/{helm,governance,config}`. The
+full design, with worked examples, is in docs/GOVERNED-OPS-DESIGN.md; commit
+conventions are in docs/GITOPS-COMMIT-STANDARD.md.
+
+---
+
+## The control pyramid
+
+DFE is built in four layers, each a narrower, more-guarded window onto the one
+below. The API is the single control plane: every control-plane function lives
+there, and the CLI and UI only ever consume it. They never reach past it to the
+infrastructure, and the API never reaches past git to the cluster.
+
+```mermaid
+block-beta
+  columns 7
+  space:3 ui["UI"]:1 space:3
+  space:2 cli["CLI"]:3 space:2
+  space:1 api["API - dfe-engine"]:5 space:1
+  infra["Infrastructure + config files - helm, argo, terraform, k8s"]:7
+  ui --> api
+  cli --> api
+  api --> infra
+```
+
+- **Infrastructure + config files** (the base) -- the running system and its
+  desired state in git: Helm charts, Argo applications, Terraform, raw k8s.
+- **API -- dfe-engine** -- where ALL control-plane functions are performed. Every
+  change is made here, as a governed commit to the base. Nothing below is touched
+  by hand in normal operation.
+- **CLI** -- exposes as much of the API as practical, without a lot of coding pain
+  for the edge cases. It ONLY consumes the API.
+- **UI** -- the well-trodden, higher-value, user-friendly 80/20 functions. It also
+  only consumes the API.
+
+Narrower as you go up: fewer functions, higher value, more guard-rails. The base is
+everything that CAN be configured; each layer above curates what is worth exposing
+and to whom.
 
 ---
 

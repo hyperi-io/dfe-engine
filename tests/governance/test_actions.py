@@ -32,6 +32,7 @@ def crud(tmp_path):
             ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
             ResourceClass("actions", "governance/actions", rbac_prefix="governance"),
             ResourceClass("policies", "governance/policies", rbac_prefix="governance"),
+            ResourceClass("roles", "governance/rbac/roles", rbac_prefix="governance"),
         ]
     )
     return GitCrud(repo, registry)
@@ -48,7 +49,7 @@ def _scale_action():
         description="Scale the receiver",
         required_action="action:invoke:scale-receiver",
         changes=[
-            VarChange(cls="helmvars", name="receiver-default", path="replicaCount", value=3),
+            VarChange(cls="helmvars", name="receiver-default", path="keda.minReplicas", value=3),
             VarChange(cls="helmvars", name="receiver-default", path="keda.maxReplicas", value=10),
         ],
     )
@@ -70,12 +71,12 @@ def test_invoke_applies_all_changes_in_one_commit(store, crud):
     assert res.changed is True
     assert res.commit_sha
     doc = crud.get("helmvars", "receiver-default")
-    assert doc["replicaCount"] == 3
+    assert doc["keda"]["minReplicas"] == 3
     assert doc["keda"]["maxReplicas"] == 10
     # diff captured old (None) -> new
     by_path = {d["path"]: d for d in res.diff}
-    assert by_path["replicaCount"]["old"] is None
-    assert by_path["replicaCount"]["new"] == 3
+    assert by_path["keda.minReplicas"]["old"] is None
+    assert by_path["keda.minReplicas"]["new"] == 3
 
 
 def test_dry_run_does_not_commit(store, crud):
@@ -92,11 +93,11 @@ def test_dry_run_does_not_commit(store, crud):
 
 
 def test_invoke_blocked_by_protected_policy_is_atomic(store, crud):
-    # lock replicaCount on every helmvars resource
+    # lock keda.minReplicas on every helmvars resource
     crud.put(
         _POLICY_CLASS,
         "lockdown",
-        ProtectedPolicy(name="lockdown", protected=["helmvars:*:replicaCount"]).model_dump(),
+        ProtectedPolicy(name="lockdown", protected=["helmvars:*:keda.minReplicas"]).model_dump(),
         actor="admin",
     )
     store.save(_scale_action(), actor="admin")
@@ -108,6 +109,42 @@ def test_invoke_blocked_by_protected_policy_is_atomic(store, crud):
 
     with pytest.raises(ResourceNotFoundError):
         crud.get("helmvars", "receiver-default")
+
+
+def test_action_cannot_change_governance_class(store, crud):
+    # SECURITY: an action that writes RBAC (governance class) is privilege escalation
+    evil = ActionDef(
+        name="escalate",
+        description="sneaky",
+        required_action="action:invoke:escalate",
+        changes=[VarChange(cls="roles", name="admin", path="permissions", value=["*"])],
+    )
+    store.save(evil, actor="admin")
+    from dfe_engine.governance import ActionForbiddenError
+
+    with pytest.raises(ActionForbiddenError):
+        store.invoke("escalate", actor="bob")
+    # nothing was written
+    from dfe_engine.gitcrud import ResourceNotFoundError
+
+    with pytest.raises(ResourceNotFoundError):
+        crud.get("roles", "admin")
+
+
+def test_action_change_rejected_by_commit_validators(store, crud):
+    # an action cannot smuggle in a controller-owned field or a floating image
+    from dfe_engine.gitcrud.commit_policy import CommitPolicyError
+
+    bad = ActionDef(
+        name="bad-scale",
+        description="x",
+        required_action="action:invoke:bad-scale",
+        # replicaCount is controller-owned (KEDA) -> must be rejected by validate_change
+        changes=[VarChange(cls="helmvars", name="receiver-default", path="replicaCount", value=3)],
+    )
+    store.save(bad, actor="admin")
+    with pytest.raises(CommitPolicyError):
+        store.invoke("bad-scale", actor="bob")
 
 
 def test_invoke_multi_file_is_atomic_one_commit(store, crud):
@@ -160,11 +197,11 @@ def test_invoke_protected_allowed_with_override(store, crud):
     crud.put(
         _POLICY_CLASS,
         "lockdown",
-        ProtectedPolicy(name="lockdown", protected=["helmvars:*:replicaCount"]).model_dump(),
+        ProtectedPolicy(name="lockdown", protected=["helmvars:*:keda.minReplicas"]).model_dump(),
         actor="admin",
     )
     store.save(_scale_action(), actor="admin")
     policy = PolicyStore(crud)
     res = store.invoke("scale-receiver", actor="bob", policy=policy, override=True)
     assert res.changed is True
-    assert crud.get("helmvars", "receiver-default")["replicaCount"] == 3
+    assert crud.get("helmvars", "receiver-default")["keda"]["minReplicas"] == 3

@@ -28,8 +28,10 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 from dfe_engine.governance import (
     ActionDef,
+    ActionForbiddenError,
     ActionStore,
     ProtectedPolicy,
     ProtectedVarError,
@@ -101,6 +103,10 @@ async def invoke_action(
         res = store.invoke(name, user.user_id, policy=policy, dry_run=dry_run, override=override)
     except ProtectedVarError as exc:
         raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+    except ActionForbiddenError as exc:
+        raise HTTPException(403, detail={"code": "action_forbidden", "message": str(exc)}) from exc
+    except CommitPolicyError as exc:
+        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     if not dry_run:
         audit_resource_change(user.user_id, "action", name, "invoked", {"commit": res.commit_sha})
     return InvokeResponse(

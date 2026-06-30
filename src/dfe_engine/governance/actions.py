@@ -18,11 +18,16 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
+from dfe_engine.gitcrud.commit_policy import validate_change
 
 from .models import ActionDef
 from .policies import PolicyStore
 
 _ACTION_CLASS = "actions"
+
+
+class ActionForbiddenError(PermissionError):
+    """Raised when an action tries to do something actions are not allowed to do."""
 
 
 @dataclass
@@ -74,6 +79,16 @@ class ActionStore:
         diff: list[dict[str, Any]] = []
 
         for ch in action.changes:
+            # Security: actions are for operational dials, NOT RBAC. An action that
+            # could write the governance class is a privilege-escalation path, so
+            # forbid it outright - RBAC changes go through admin Tier-1 only.
+            if self._crud.resource_class(ch.cls).rbac_prefix == "governance":
+                raise ActionForbiddenError(
+                    f"action '{name}' may not change the governance class ({ch.cls})"
+                )
+            # Same commit-policy validators as the direct path (no latest/replicaCount
+            # sneaking in via an action).
+            validate_change(ch.path, ch.value)
             key = (ch.cls, ch.name)
             if key not in docs:
                 try:

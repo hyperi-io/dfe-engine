@@ -126,6 +126,10 @@ class GitCrud:
     def _cls(self, cls_name: str) -> ResourceClass:
         return self._registry.get(cls_name)
 
+    def resource_class(self, cls_name: str) -> ResourceClass:
+        """Public: resolve a class descriptor (name, directory, rbac_prefix)."""
+        return self._cls(cls_name)
+
     def _rel(self, cls: ResourceClass, name: str) -> str:
         return f"{cls.directory}/{name}{cls.suffix}"
 
