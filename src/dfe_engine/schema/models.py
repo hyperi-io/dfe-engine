@@ -109,6 +109,17 @@ class SchemaColumn(BaseModel):
         return self.model_dump(mode="python", exclude_none=True, exclude={"matched_searchable"})
 
 
+class SchemaColumnWrite(SchemaColumn):
+    """Column payload for API writes (create schema / add version)."""
+
+    field_type: NonEmptyStr = Field(
+        ...,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
+    )
+
+
 class SchemaVersion(BaseModel):
     """A version in the schema."""
 
@@ -245,10 +256,50 @@ class MetaSchemaAddVersionRequest(BaseModel):
         default=None,
         description="Human-readable summary stored on the new version",
     )
-    columns: NonEmptyList[SchemaColumn] = Field(
+    columns: NonEmptyList[SchemaColumnWrite] = Field(
         ...,
         min_length=1,
         description="Complete column snapshot for the new version (at least one column)",
+    )
+
+
+class SchemaVersionCreate(BaseModel):
+    """Initial version entry when creating a meta-schema via the API."""
+
+    date: NonEmptyStr = Field(..., description="Date of the version")
+    type: NonEmptyStr = Field(..., description="Type of the version")
+    summary: NonEmptyStr = Field(..., description="Summary of the version")
+    columns: NonEmptyList[SchemaColumnWrite] = Field(
+        ..., description="List of columns in the version"
+    )
+
+
+class MetaSchemaCreateRequest(BaseModel):
+    """Create a new custom meta-schema (``resource_type`` is set by the server)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    current: NonEmptyStr = Field(..., description="Current version of the schema")
+    versions: NonEmptyDict[str, SchemaVersionCreate] = Field(
+        ..., description="Dictionary of versions and their metadata"
+    )
+    path: str | None = Field(
+        default=None,
+        description="DirectoryConfigStore table key / relative path (must match URL when set)",
+    )
+
+
+def meta_schema_from_create(body: MetaSchemaCreateRequest, *, path: str) -> MetaSchema:
+    """Build a persisted ``MetaSchema`` from a create request (always ``resource_type: custom``)."""
+    versions = {
+        version_id: SchemaVersion.model_validate(version.model_dump())
+        for version_id, version in body.versions.items()
+    }
+    return MetaSchema(
+        resource_type="custom",
+        current=body.current,
+        versions=versions,
+        path=path,
     )
 
 

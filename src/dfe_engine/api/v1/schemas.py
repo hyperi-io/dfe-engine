@@ -42,12 +42,14 @@ from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
     MetaSchemaAddVersionRequest,
+    MetaSchemaCreateRequest,
     MetaSchemaGetResponse,
     MetaSchemaUpdateRequest,
     MetaSchemaVersionWriteResponse,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
     SchemaVersionGet,
+    meta_schema_from_create,
     meta_schema_version_write_response,
 )
 from dfe_engine.schema.models import (
@@ -678,7 +680,7 @@ async def create_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
-    body: MetaSchema,
+    body: MetaSchemaCreateRequest,
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
@@ -716,7 +718,7 @@ async def create_meta_schema(
                 "message": f"A meta-schema already exists at {canonical_path!r}",
             },
         )
-    to_save = body.model_copy(update={"path": canonical_path})
+    to_save = meta_schema_from_create(body, path=canonical_path)
 
     try:
         SchemaManager.validate_meta_schema_columns(to_save)

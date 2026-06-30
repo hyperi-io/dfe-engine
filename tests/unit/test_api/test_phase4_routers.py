@@ -354,7 +354,14 @@ class TestSchemasMetaListRouter:
                     "date": "2026-01-01",
                     "type": "model",
                     "summary": "init",
-                    "columns": [{"name": "e", "type": "string", "expr": "@source: E"}],
+                    "columns": [
+                        {
+                            "name": "e",
+                            "type": "string",
+                            "expr": "@source: E",
+                            "_field_type": "base",
+                        }
+                    ],
                 }
             },
         }
@@ -575,7 +582,14 @@ class TestSchemasMetaWriteRouter:
                     "date": "2026-01-01",
                     "type": "model",
                     "summary": "init",
-                    "columns": [{"name": "e", "type": "string", "expr": "@source: E"}],
+                    "columns": [
+                        {
+                            "name": "e",
+                            "type": "string",
+                            "expr": "@source: E",
+                            "_field_type": "base",
+                        }
+                    ],
                 }
             },
         }
@@ -634,6 +648,7 @@ class TestSchemasMetaWriteRouter:
                                         "name": "bad",
                                         "type": "not_a_type",
                                         "expr": "@source: X",
+                                        "_field_type": "base",
                                     }
                                 ],
                             }
@@ -645,9 +660,34 @@ class TestSchemasMetaWriteRouter:
                 assert invalid_cols.json()["code"] == "validation_error"
                 assert "Column validation failed" in invalid_cols.json()["message"]
 
+                missing_field_type = tc.post(
+                    "/api/v1/schemas/definitions/gcp/missing_field_type",
+                    json=self._minimal_schema_body()
+                    | {
+                        "versions": {
+                            "1": {
+                                "date": "2026-01-01",
+                                "type": "model",
+                                "summary": "init",
+                                "columns": [{"name": "e", "type": "string"}],
+                            }
+                        }
+                    },
+                    headers=headers,
+                )
+                assert missing_field_type.status_code == 422
+
+                core_type = tc.post(
+                    "/api/v1/schemas/definitions/gcp/core_type",
+                    json={**self._minimal_schema_body(), "resource_type": "core"},
+                    headers=headers,
+                )
+                assert core_type.status_code == 422
+
                 post = tc.post(url, json=self._minimal_schema_body(), headers=headers)
                 assert post.status_code == 201
                 assert post.json()["path"] == "gcp/audit_log"
+                assert post.json()["resource_type"] == "custom"
                 assert (schemas_root / "gcp" / "audit_log.yaml").is_file()
 
                 duplicate = tc.post(
@@ -889,9 +929,9 @@ class TestSchemasMetaWriteRouter:
                         "type": "revision",
                         "summary": "added column p",
                         "columns": [
-                            {"name": "e", "type": "string"},
-                            {"name": "n", "type": "integer"},
-                            {"name": "p", "type": "boolean"},
+                            {"name": "e", "type": "string", "_field_type": "base"},
+                            {"name": "n", "type": "integer", "_field_type": "base"},
+                            {"name": "p", "type": "boolean", "_field_type": "base"},
                         ],
                     },
                     headers=headers,
