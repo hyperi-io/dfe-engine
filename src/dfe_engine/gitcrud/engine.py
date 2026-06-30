@@ -30,6 +30,21 @@ class ResourceNotFoundError(FileNotFoundError):
     """Raised when a named resource does not exist in its class."""
 
 
+class ConcurrencyConflictError(Exception):
+    """Raised when a write's base revision is stale (HEAD moved underneath it).
+
+    Carries the current doc + revision so the caller (router) can build a 3-way
+    view: current-at-head vs the caller's intended change vs theirs.
+    """
+
+    def __init__(self, cls: str, name: str, current: dict, head: str | None) -> None:
+        super().__init__(f"{cls}/{name}: base revision is stale (HEAD={head})")
+        self.cls = cls
+        self.name = name
+        self.current = current
+        self.head = head
+
+
 def flatten(doc: Any, prefix: str = "") -> dict[str, Any]:
     """Flatten a nested dict/list to dot-paths (list items indexed as ``key[i]``)."""
     out: dict[str, Any] = {}
@@ -62,6 +77,21 @@ def _set_path(doc: dict, dotpath: str, value: Any) -> None:
             cur[p] = nxt
         cur = nxt
     cur[parts[-1]] = value
+
+
+def set_path(doc: dict, dotpath: str, value: Any) -> None:
+    """Public dot-path setter (creates intermediate dicts). Mutates ``doc``."""
+    _set_path(doc, dotpath, value)
+
+
+def get_path(doc: dict, dotpath: str, default: Any = None) -> Any:
+    """Read a dot-path value, or ``default`` if absent."""
+    cur: Any = doc
+    for p in dotpath.split("."):
+        if not isinstance(cur, dict) or p not in cur:
+            return default
+        cur = cur[p]
+    return cur
 
 
 def _del_path(doc: dict, dotpath: str) -> bool:
@@ -123,6 +153,24 @@ class GitCrud:
         """Flatten a resource to dot-path vars (enumeration for Tier-1)."""
         return flatten(self.get(cls_name, name))
 
+    def head_revision(self) -> str | None:
+        """Current repo HEAD SHA - the optimistic-concurrency version token."""
+        return self._repo.head_revision()
+
+    def get_with_revision(self, cls_name: str, name: str) -> tuple[dict, str | None]:
+        """Read a resource doc plus the current HEAD revision (for If-Match writes)."""
+        return self.get(cls_name, name), self.head_revision()
+
+    def _guard_revision(self, cls_name: str, name: str, base_revision: str | None) -> None:
+        """Raise ConcurrencyConflictError if base_revision is stale (HEAD moved)."""
+        if base_revision is None:
+            return
+        head = self.head_revision()
+        if head is not None and head != base_revision:
+            cls = self._cls(cls_name)
+            current = self.get(cls_name, name) if self._file(cls, name).is_file() else {}
+            raise ConcurrencyConflictError(cls_name, name, current, head)
+
     def put(
         self,
         cls_name: str,
@@ -130,11 +178,30 @@ class GitCrud:
         doc: dict,
         actor: str,
         message: str | None = None,
+        base_revision: str | None = None,
     ) -> PublishResult:
-        """Write a whole doc and commit."""
+        """Write a whole doc and commit. If base_revision is given, enforce it."""
+        self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         msg = message or f"{cls.name}({name}): update by {actor}"
         return self._repo.publish({self._rel(cls, name): yaml_dump_string(doc)}, msg)
+
+    def put_many(
+        self,
+        items: list[tuple[str, str, dict]],
+        actor: str,
+        message: str,
+    ) -> PublishResult:
+        """Write several resources in ONE commit (atomic actions).
+
+        items: list of (cls_name, name, doc). All land in a single commit so a
+        defined action that touches N resources is one atomic change.
+        """
+        artifacts: dict[str, str] = {}
+        for cls_name, name, doc in items:
+            cls = self._cls(cls_name)
+            artifacts[self._rel(cls, name)] = yaml_dump_string(doc)
+        return self._repo.publish(artifacts, message)
 
     def set_key(
         self,
@@ -144,8 +211,10 @@ class GitCrud:
         value: Any,
         actor: str,
         message: str | None = None,
+        base_revision: str | None = None,
     ) -> PublishResult:
         """Set a single dot-path (creating intermediates) and commit."""
+        self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         doc = self.get(cls_name, name) if self._file(cls, name).is_file() else {}
         _set_path(doc, dotpath, value)

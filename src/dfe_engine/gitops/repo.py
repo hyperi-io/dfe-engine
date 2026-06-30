@@ -65,6 +65,20 @@ class GitopsRepo:
         """Working-tree path of the local clone."""
         return self._path
 
+    def head_revision(self) -> str | None:
+        """Current HEAD commit SHA, or None for an empty repo (no commits yet).
+
+        Used as the optimistic-concurrency version token: a read returns it, a
+        write requires it, and a moved HEAD means a conflict.
+        """
+        from dulwich.repo import Repo
+
+        try:
+            with Repo(str(self._path)) as repo:
+                return repo.head().decode()
+        except (KeyError, FileNotFoundError):
+            return None
+
     def _authed_url(self) -> str:
         """Embed HTTPS credentials in the remote URL.
 

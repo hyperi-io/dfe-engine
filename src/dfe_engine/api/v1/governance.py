@@ -1,0 +1,160 @@
+#  Project:      dfe-engine
+#  File:         api/v1/governance.py
+#  Purpose:      Governed Ops Tier-2 - defined actions + admin CRUD
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""Tier-2 defined actions (the curated big dials) + admin CRUD of actions/policies.
+
+GET  /api/v1/governance/actions                 -> list actions (governance:read)
+GET  /api/v1/governance/actions/{name}          -> get an action (governance:read)
+POST /api/v1/governance/actions/{name}/invoke   -> invoke (per-action required_action)
+POST/PUT/DELETE /api/v1/governance/admin/actions[/{name}]   -> CRUD defs (governance:write)
+POST/DELETE     /api/v1/governance/admin/policies[/{name}]  -> CRUD policies (governance:write)
+
+Operators get curated actions via `action:invoke:<name>`; raw class CRUD stays with
+admins (governance:write). Everything commits to gitops via the engine.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
+
+from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.engine import authorize
+from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.governance import (
+    ActionDef,
+    ActionStore,
+    ProtectedPolicy,
+    ProtectedVarError,
+)
+
+router = APIRouter(prefix="/governance", tags=["Governed Ops: Actions"])
+
+_POLICY_CLASS = "policies"
+
+
+class InvokeResponse(BaseModel):
+    dry_run: bool
+    changed: bool
+    commit_sha: str | None = None
+    diff: list[dict[str, Any]]
+
+
+def _gitcrud(request: Request) -> GitCrud:
+    gc = getattr(request.app.state, "gitcrud", None)
+    if gc is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "gitops is not enabled"},
+        )
+    return gc
+
+
+def _actions(request: Request) -> ActionStore:
+    return ActionStore(_gitcrud(request))
+
+
+@router.get("/actions", dependencies=[Depends(require_action("governance:read"))])
+async def list_actions(user: CurrentUser, request: Request) -> list[str]:
+    return _actions(request).list()
+
+
+@router.get("/actions/{name}", dependencies=[Depends(require_action("governance:read"))])
+async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
+    try:
+        return _actions(request).get(name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+
+@router.post("/actions/{name}/invoke", response_model=InvokeResponse)
+async def invoke_action(
+    name: str,
+    user: CurrentUser,
+    request: Request,
+    dry_run: bool = Query(default=False),
+) -> InvokeResponse:
+    """Invoke a defined action - gated on the action's OWN required_action."""
+    store = _actions(request)
+    try:
+        action = store.get(name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+    # Per-action RBAC: the action declares the permission needed to run it.
+    decision = authorize(user, action.required_action, role_config=request.app.state.role_config)
+    if not decision.allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+
+    policy = getattr(request.app.state, "policy_store", None)
+    override = authorize(
+        user, "helmvars:override", role_config=request.app.state.role_config
+    ).allowed
+    try:
+        res = store.invoke(name, user.user_id, policy=policy, dry_run=dry_run, override=override)
+    except ProtectedVarError as exc:
+        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+    if not dry_run:
+        audit_resource_change(user.user_id, "action", name, "invoked", {"commit": res.commit_sha})
+    return InvokeResponse(
+        dry_run=res.dry_run, changed=res.changed, commit_sha=res.commit_sha, diff=res.diff
+    )
+
+
+@router.post(
+    "/admin/actions",
+    status_code=201,
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def create_action(body: ActionDef, user: CurrentUser, request: Request) -> ActionDef:
+    _actions(request).save(body, user.user_id)
+    audit_resource_change(user.user_id, "action", body.name, "created")
+    return body
+
+
+@router.delete(
+    "/admin/actions/{name}",
+    status_code=204,
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
+    try:
+        _actions(request).delete(name, user.user_id)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+    audit_resource_change(user.user_id, "action", name, "deleted")
+
+
+@router.post(
+    "/admin/policies",
+    status_code=201,
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def create_policy(
+    body: ProtectedPolicy, user: CurrentUser, request: Request
+) -> ProtectedPolicy:
+    gc = _gitcrud(request)
+    gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id)
+    audit_resource_change(user.user_id, "policy", body.name, "created")
+    return body
+
+
+@router.delete(
+    "/admin/policies/{name}",
+    status_code=204,
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
+    gc = _gitcrud(request)
+    try:
+        gc.delete(_POLICY_CLASS, name, user.user_id)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+    audit_resource_change(user.user_id, "policy", name, "deleted")

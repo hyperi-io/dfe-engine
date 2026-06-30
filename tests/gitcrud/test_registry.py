@@ -18,9 +18,20 @@ from dfe_engine.gitcrud import (
 )
 
 
-def test_default_registry_has_the_four_classes():
-    names = default_registry().names()
-    assert names == ["datamodel", "governance", "helmvars", "hunts"]
+def test_default_registry_classes_are_the_rbac_prefixes():
+    # deploy-repo scope: helmvars + governance (datamodel/hunts arrive with multi-repo)
+    assert default_registry().classes() == ["governance", "helmvars"]
+
+
+def test_default_registry_governance_types_share_the_class_prefix():
+    reg = default_registry()
+    for type_name in ("accounts", "groups", "roles", "actions", "policies"):
+        assert reg.get(type_name).rbac_prefix == "governance"
+        assert reg.get(type_name).action("write") == "governance:write"
+
+
+def test_helmvars_type_is_present():
+    assert default_registry().get("helmvars").directory == "values"
 
 
 def test_get_unknown_class_raises():

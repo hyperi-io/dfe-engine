@@ -12,7 +12,14 @@ same way and RBAC is bound once at the class level. See docs/ARCHITECTURE.md
 ("Governed Ops") and docs/GITOPS-COMMIT-STANDARD.md.
 """
 
-from .engine import GitCrud, ResourceNotFoundError, flatten
+from .engine import (
+    ConcurrencyConflictError,
+    GitCrud,
+    ResourceNotFoundError,
+    flatten,
+    get_path,
+    set_path,
+)
 from .models import ResourceClass
 from .registry import (
     ResourceClassRegistry,
@@ -21,6 +28,7 @@ from .registry import (
 )
 
 __all__ = [
+    "ConcurrencyConflictError",
     "GitCrud",
     "ResourceClass",
     "ResourceClassRegistry",
@@ -28,4 +36,6 @@ __all__ = [
     "UnknownResourceClassError",
     "default_registry",
     "flatten",
+    "get_path",
+    "set_path",
 ]

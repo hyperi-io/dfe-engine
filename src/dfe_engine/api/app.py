@@ -63,6 +63,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). None when
+    # gitops is disabled -> the governance routers return 503 (not_configured).
+    from dfe_engine.gitcrud.factory import build_gitcrud
+    from dfe_engine.governance import PolicyStore
+
+    try:
+        gitcrud = build_gitcrud(settings.gitops)
+    except Exception as exc:  # never let gitops setup break app startup
+        logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
+        gitcrud = None
+    app.state.gitcrud = gitcrud
+    app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
+
     # Bootstrap OIDC provider registry
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 

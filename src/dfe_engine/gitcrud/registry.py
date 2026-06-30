@@ -24,7 +24,13 @@ class UnknownResourceClassError(KeyError):
 
 
 class ResourceClassRegistry:
-    """Holds the known resource classes; resolves a class by name."""
+    """Holds the known resource types; resolves one by name.
+
+    Each registered ResourceClass is a resource TYPE (one directory); several types
+    share an RBAC `rbac_prefix` (the high-level CLASS). RBAC is bound at the class
+    level (the prefix), so a `governance:write` grant covers every governance type
+    (accounts/groups/roles/actions/policies) - never per-file.
+    """
 
     def __init__(self, classes: Iterable[ResourceClass]) -> None:
         self._by_name: dict[str, ResourceClass] = {c.name: c for c in classes}
@@ -36,19 +42,35 @@ class ResourceClassRegistry:
             raise UnknownResourceClassError(name) from None
 
     def names(self) -> list[str]:
+        """All resource-type names."""
         return sorted(self._by_name)
 
     def all(self) -> list[ResourceClass]:
         return [self._by_name[n] for n in self.names()]
 
+    def classes(self) -> list[str]:
+        """Distinct RBAC class prefixes (the high-level RBAC handles)."""
+        return sorted({c.rbac_prefix or c.name for c in self._by_name.values()})
+
 
 def default_registry() -> ResourceClassRegistry:
-    """The four DFE Governed Ops classes (see docs/ARCHITECTURE.md, Governed Ops)."""
+    """DFE Governed Ops resource types for the DEPLOY repo (see docs/ARCHITECTURE.md).
+
+    Typed entries sharing RBAC class prefixes. Scope here is the deploy repo:
+    `helmvars` (overlays) + the `governance` class (rbac + actions + policies).
+    The `datamodel` (sources/schemas/fieldmaps) and `hunts` (defs/rules/alert-dests)
+    classes live in the config-SSoT repo and arrive with the multi-repo work
+    (option A); they are a second registry over that repo.
+    """
     return ResourceClassRegistry(
         [
+            # helmvars class - deployment overlays
             ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
-            ResourceClass("hunts", "hunts", rbac_prefix="hunts"),
-            ResourceClass("datamodel", "datamodel", rbac_prefix="datamodel"),
-            ResourceClass("governance", "governance", rbac_prefix="governance"),
+            # governance class - RBAC + curated actions + protected-var policies
+            ResourceClass("accounts", "governance/rbac/accounts", rbac_prefix="governance"),
+            ResourceClass("groups", "governance/rbac/groups", rbac_prefix="governance"),
+            ResourceClass("roles", "governance/rbac/roles", rbac_prefix="governance"),
+            ResourceClass("actions", "governance/actions", rbac_prefix="governance"),
+            ResourceClass("policies", "governance/policies", rbac_prefix="governance"),
         ]
     )
