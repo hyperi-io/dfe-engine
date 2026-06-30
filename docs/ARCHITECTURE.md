@@ -41,6 +41,40 @@ These constraints shape every decision below. Read them first.
 
 ---
 
+## Governed Ops (the operating model)
+
+**Governed Ops** is DFE's term for how every operational change is made. All
+change - deployment dials, detection hunts, data-model config, access control - is
+a versioned YAML change in a git repo, made through one governed path. The engine
+exposes this as the **Governed Ops API**: a uniform CRUD-over-gitops surface where
+
+- everything is YAML in git, so one generic git-native engine handles every
+  resource class the same way (no per-resource plumbing);
+- access is granted at a high level - by resource class, by a named *action*, or
+  by an *operation* - never per individual field, which keeps the security surface
+  small and the policy easy to reason about;
+- every change is committed to git, which is the single source of truth AND the
+  authority; Argo reconciles it to the cluster. The engine never changes the live
+  cluster directly.
+
+Because authority lives in git, DFE stays fully operable from the repos alone: if
+the engine and UI are unavailable, the running system is unaffected and can still
+be managed by editing the repos directly. The engine and UI are convenience and
+governance layers over that git-backed model, not a separate source of truth.
+
+Operational tasks fit the same model: a "restart" or "scale" is an ordinary YAML
+change, a "rollback" is a git revert, and a "sync" is simply the commit. Curated
+*actions* bundle a set of changes behind a single permission (the safe surface for
+operators), while raw class-level CRUD is reserved for administrators. Every change
+is audited and carries the actor, the permission used, and the resulting commit.
+
+The unified Governed Ops API surface is being rolled out in DFE 2.2; the model and
+its principles (YAML+git source of truth, engine as control plane) already describe
+how the engine operates today. Commit conventions for this path are in
+docs/GITOPS-COMMIT-STANDARD.md.
+
+---
+
 ## 2. Component map
 
 ```mermaid
