@@ -189,6 +189,30 @@ All configuration uses environment variables with the `DFE_` prefix.
 | `DFE_KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Bootstrap servers |
 | `DFE_KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | Security protocol |
 
+### Config and Schema Directories
+
+These point the engine at the shared config tree (`dfe-devex`) and the schematree (`dfe-schemas`). Both ship inside the Docker image and both are overridable at runtime.
+
+| Variable | Image default | Local-dev default | Description |
+|----------|---------------|-------------------|-------------|
+| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config submodule root. Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
+| `DFE_SCHEMAS_DIR` | `/app/schemas` | `./schemas` | Schema submodule root (`dfe-schemas`). |
+
+How resolution works:
+
+- The Docker image bakes the `config/` and `schemas/` submodule trees in at
+  `/app/config` and `/app/schemas`, and the Dockerfile sets `DFE_CONFIG_DIR`
+  and `DFE_SCHEMAS_DIR` to those paths. A container therefore runs with no env
+  set.
+- Setting either variable at runtime (`docker run -e ...`, a K8s pod `env:`,
+  or a local `.env`) overrides the baked-in default - for example, to point at
+  a mounted volume or ConfigMap.
+- For `DFE_CONFIG_DIR`, a more specific per-registry override such as
+  `DFE_SOURCES_DIR` takes precedence over the subdirectory derived from
+  `DFE_CONFIG_DIR`.
+- The variable names are exact and `DFE_`-prefixed. A bare `CONFIG_DIR` or
+  `SCHEMAS_DIR` (no prefix) is not read.
+
 ## Code Standards
 
 ### Logging
