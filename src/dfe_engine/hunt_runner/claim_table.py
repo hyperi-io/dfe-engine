@@ -70,6 +70,8 @@ ENQUEUE_SQL = "INSERT INTO hunt_run (hunt_id, due_at) VALUES (%(hunt_id)s, %(due
 
 RUNNING_COUNT_SQL = "SELECT count(*) FROM hunt_run WHERE state = 'running'"
 
+ACTIVE_IDS_SQL = "SELECT DISTINCT hunt_id FROM hunt_run WHERE state IN ('pending', 'running')"
+
 
 class ClaimTable:
     """Thin psycopg wrapper over the claim-table SQL (caller owns the connection)."""
@@ -117,3 +119,9 @@ class ClaimTable:
         with self._conn.cursor() as cur:
             cur.execute(RUNNING_COUNT_SQL)
             return int(cur.fetchone()[0])
+
+    def active_hunt_ids(self) -> set[str]:
+        """Hunt ids with a pending or running run (for enqueue dedup)."""
+        with self._conn.cursor() as cur:
+            cur.execute(ACTIVE_IDS_SQL)
+            return {r[0] for r in cur.fetchall()}

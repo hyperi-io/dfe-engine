@@ -58,6 +58,16 @@ def test_decide_runs_when_due_idle_and_under_cap():
     assert d.action == "run"
 
 
+def test_due_now_and_current_fire():
+    from dfe_engine.hunt_runner.spread import current_fire, due_now
+
+    # fire = boundary + stable offset; due once now passes it
+    fire = current_fire("h", 600, 1000)
+    assert 600 <= fire < 1200
+    assert due_now("h", 600, fire) is True
+    assert due_now("h", 600, fire - 1) is False
+
+
 def test_mark_deferred_flags_too_aggressive():
     st = HuntState(hunt_id="h", status="running", overrun_count=1)
     out = mark_deferred(st)

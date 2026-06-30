@@ -29,12 +29,17 @@ def collect_deploy_artifacts(
     result: CompilationResult,
     *,
     ddl: dict[str, str] | None = None,
+    ch_rbac: list[tuple[object, str]] | None = None,
 ) -> dict[str, str]:
     """Return ``{repo_relative_path: content}`` for the deploy repo.
 
     Args:
         result: Compiled overlay values from ``HelmValuesCompiler``.
         ddl: Optional ``{table_name: sql}`` from ``DDLFileWriter.generate_all()``.
+        ch_rbac: Optional ``[(GroupChBinding, password_hash)]`` - per-group CH
+            identity (grants+profile+quota) emitted as gitops DDL under
+            ``ddl/ch-rbac/`` (applied by the shared migration runner, like schema
+            DDL). See governance.ch_rbac.
 
     Returns:
         Mapping of repo-relative path to file content (values/ + ddl/ only).
@@ -51,5 +56,12 @@ def collect_deploy_artifacts(
 
     for name, sql in (ddl or {}).items():
         artifacts[f"ddl/{name}.sql"] = sql
+
+    if ch_rbac:
+        from dfe_engine.governance.ch_rbac import ddl_artifact
+
+        for binding, password_hash in ch_rbac:
+            path, sql = ddl_artifact(binding, password_hash)  # type: ignore[arg-type]
+            artifacts[path] = sql
 
     return artifacts

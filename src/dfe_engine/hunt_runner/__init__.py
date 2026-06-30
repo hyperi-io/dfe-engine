@@ -18,15 +18,20 @@ and will live in the standalone dfe-hunt-runner deliverable.
 from .checkpoint import TIMESTAMP_FIELD, predicate, window
 from .claim_table import ClaimTable
 from .models import HuntSpec, HuntState
+from .runner import HuntRunner
 from .scheduler import Decision, decide
 from .spread import next_due, phase_offset
+from .worker import CheckpointStore, HuntWorker
 
 __all__ = [
     "TIMESTAMP_FIELD",
+    "CheckpointStore",
     "ClaimTable",
     "Decision",
+    "HuntRunner",
     "HuntSpec",
     "HuntState",
+    "HuntWorker",
     "decide",
     "next_due",
     "phase_offset",

@@ -38,3 +38,14 @@ def next_due(
     if due <= now_epoch:
         due += interval_seconds
     return due
+
+
+def current_fire(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> int:
+    """The scheduled fire time for the CURRENT interval (boundary + offset)."""
+    offset = phase_offset(hunt_id, interval_seconds, fraction)
+    return (now_epoch // interval_seconds) * interval_seconds + offset
+
+
+def due_now(hunt_id: str, interval_seconds: int, now_epoch: int, fraction: float = 0.8) -> bool:
+    """True if this interval's scheduled fire has arrived (now >= boundary+offset)."""
+    return now_epoch >= current_fire(hunt_id, interval_seconds, now_epoch, fraction)

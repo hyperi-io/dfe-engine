@@ -57,3 +57,13 @@ def test_ddl_artifact_is_gitops_path_and_sql():
 def test_minimal_binding_just_creates_user():
     sql = build_group_sql(GroupChBinding(group="g"), "h")
     assert sql == ["CREATE USER IF NOT EXISTS `dfe_grp_g` IDENTIFIED WITH sha256_hash BY 'h'"]
+
+
+def test_collect_deploy_artifacts_emits_ch_rbac_ddl():
+    from dfe_engine.gitops.artifacts import collect_deploy_artifacts
+    from dfe_engine.helm.models import CompilationResult
+
+    result = CompilationResult(helm_values={})
+    arts = collect_deploy_artifacts(result, ch_rbac=[(_binding(), "deadbeef")])
+    assert "ddl/ch-rbac/soc-ro.sql" in arts
+    assert "CREATE USER" in arts["ddl/ch-rbac/soc-ro.sql"]
