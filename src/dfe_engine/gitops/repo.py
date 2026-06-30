@@ -96,8 +96,13 @@ class GitopsRepo:
         porcelain.init(str(self._path))
         return self._path
 
-    def publish(self, artifacts: dict[str, str], message: str) -> PublishResult:
-        """Write artifacts, stage, commit-if-changed, push-if-configured."""
+    def publish(
+        self,
+        artifacts: dict[str, str],
+        message: str,
+        deletions: list[str] | None = None,
+    ) -> PublishResult:
+        """Write artifacts, optionally remove files, commit-if-changed, push-if-set."""
         written: list[str] = []
         for rel, content in sorted(artifacts.items()):
             target = self._path / rel
@@ -105,6 +110,13 @@ class GitopsRepo:
             target.write_text(content, encoding="utf-8", newline="\n")
             written.append(rel)
             porcelain.add(str(self._path), paths=[str(target)])
+
+        for rel in sorted(deletions or []):
+            target = self._path / rel
+            if target.exists():
+                # porcelain.remove deletes from the working tree AND stages removal.
+                porcelain.remove(str(self._path), paths=[str(target)])
+                written.append(rel)
 
         status = porcelain.status(str(self._path))
         staged = status.staged
