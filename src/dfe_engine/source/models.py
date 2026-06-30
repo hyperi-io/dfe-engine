@@ -257,13 +257,13 @@ class SourceVersion(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     date_time: str = Field(..., description="Version creation date (YYYY-MM-DD)")
-    header: SourceHeader = Field(
-        default_factory=SourceHeader,
-        description="Common schema header configuration",
+    header: SourceHeader | None = Field(
+        default=None,
+        description="Common schema header configuration (None when the version did not author one)",
     )
-    schema_config: SourceSchema = Field(
-        default_factory=SourceSchema,
-        description="Schema configuration",
+    schema_config: SourceSchema | None = Field(
+        default=None,
+        description="Schema configuration (None when the version did not author one)",
         alias="schema",
     )
     mapping_standards: list[str] = Field(
@@ -281,6 +281,14 @@ class SourceVersion(BaseModel):
         default=None, description="Transform stage (optional)"
     )
 
+    def effective_header(self) -> SourceHeader:
+        """Header for runtime/DDL resolution, defaulting the profile when unauthored."""
+        return self.header or SourceHeader()
+
+    def effective_schema(self) -> SourceSchema:
+        """Schema config for runtime/DDL resolution, defaulting to empty when unauthored."""
+        return self.schema_config or SourceSchema()
+
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence under ``versions.<id>``."""
         raw = self.model_dump(mode="json", by_alias=True, exclude_none=True)
@@ -288,6 +296,15 @@ class SourceVersion(BaseModel):
             if isinstance(raw[key], (dict, list)) and not raw[key]:
                 del raw[key]
         return raw
+
+
+def _derive_deployed_version(
+    *, existing_deployed: str | None, snapshot: SourceVersion, version_id: str
+) -> str | None:
+    """Track current_version unless the version owns a meta_schema table to deploy."""
+    if snapshot.effective_schema().meta_schema:
+        return existing_deployed
+    return version_id
 
 
 def _next_major_semver(current: str) -> str:
@@ -370,8 +387,8 @@ class SourceWriteRequest(BaseModel):
         """Build a new immutable version entry from this write payload."""
         return SourceVersion(
             date_time=date.today().isoformat(),
-            header=self.header or SourceHeader(),
-            schema_config=self.schema_config or SourceSchema(),
+            header=self.header,
+            schema_config=self.schema_config,
             mapping_standards=self.mapping_standards or [],
             sigma=self.sigma,
             field_mappings=self.field_mappings,
@@ -491,15 +508,11 @@ class Source(BaseModel):
         }
         if header_raw is not None:
             version_body["header"] = header_raw
-        else:
-            version_body["header"] = {"type": "time_series", "version": version_id}
 
         if "schema" in data:
             version_body["schema"] = data.pop("schema")
         elif "schema_config" in data:
             version_body["schema"] = data.pop("schema_config")
-        else:
-            version_body["schema"] = {}
 
         for key in _VERSIONED_KEYS:
             if key in ("header", "schema", "schema_config"):
@@ -555,13 +568,13 @@ class Source(BaseModel):
 
     @property
     def header(self) -> SourceHeader:
-        """Deployed version header (legacy accessor)."""
-        return self.version().header
+        """Deployed version header (legacy accessor; defaults the profile when unauthored)."""
+        return self.version().effective_header()
 
     @property
     def schema_config(self) -> SourceSchema:
-        """Deployed version schema config (legacy accessor)."""
-        return self.version().schema_config
+        """Deployed version schema config (legacy accessor; empty default when unauthored)."""
+        return self.version().effective_schema()
 
     @property
     def mapping_standards(self) -> list[str]:

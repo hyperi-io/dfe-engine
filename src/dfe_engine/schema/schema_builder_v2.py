@@ -180,7 +180,7 @@ class SchemaBuilderV2:
     @staticmethod
     def version_snapshot_has_schema_files(snap: SourceVersion) -> bool:
         """True when the snapshot references at least one schema YAML file."""
-        cfg = snap.schema_config
+        cfg = snap.effective_schema()
         return bool(cfg.meta_schema or cfg.derived_schema or cfg.additional_fields)
 
     def build_ddl_only(
@@ -257,8 +257,9 @@ class SchemaBuilderV2:
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
         """Load the common header profile from a source version snapshot."""
-        profile_name = snap.header.type
-        profile_version = snap.header.version
+        header = snap.effective_header()
+        profile_name = header.type
+        profile_version = header.version
         try:
             return SchemaLoader.load_profile(profile_name, profile_version=profile_version)
         except SchemaLoadError as e:
@@ -274,7 +275,7 @@ class SchemaBuilderV2:
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
         """Load meta/derived/additional columns from a source version snapshot."""
-        schema_cfg = snap.schema_config
+        schema_cfg = snap.effective_schema()
         columns: list[SchemaColumn] = []
 
         if schema_cfg.meta_schema:
@@ -312,10 +313,11 @@ class SchemaBuilderV2:
 
     def _build_ddl_config_for_snapshot(self, snap: SourceVersion) -> DDLConfig:
         """Build DDLConfig from a source version snapshot."""
-        schema_cfg = snap.schema_config
+        schema_cfg = snap.effective_schema()
+        header = snap.effective_header()
         return DDLConfig(
             engine=schema_cfg.engine,
             ttl_days=schema_cfg.ttl_days,
-            profile_name=snap.header.type,
-            profile_version=snap.header.version,
+            profile_name=header.type,
+            profile_version=header.version,
         )
