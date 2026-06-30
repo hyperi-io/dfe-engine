@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -36,6 +36,7 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
@@ -116,11 +117,50 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
 class SchemaColumn(BaseModel):
     """A column in a schema definition."""
 
+    model_config = {"populate_by_name": True}
+
     name: str
     type: str
     use_case: str = ""
     attribute: str = ""
     description: str = ""
+    field_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
+    )
+
+
+def _composed_column_to_api(col: Any) -> SchemaColumn:
+    return SchemaColumn(
+        name=col.name,
+        type=col.type,
+        use_case=getattr(col, "use_case", "") or "",
+        attribute=(
+            ", ".join(col.attribute)
+            if isinstance(col.attribute, list)
+            else (getattr(col, "attribute", "") or "")
+        ),
+        description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
+        field_type=getattr(col, "field_type", None),
+    )
+
+
+def _meta_schema_resource_type(
+    schema_registry: SchemaReg,
+    *,
+    meta_schema_ref: str | None,
+) -> ResourceType:
+    if not meta_schema_ref:
+        return "custom"
+    from dfe_engine.schema.registry import SchemaNotFoundError, canonical_schema_path
+
+    try:
+        canonical = canonical_schema_path(meta_schema_ref.removesuffix(".yaml"))
+        return schema_registry.get_schema(canonical).resource_type
+    except (SchemaNotFoundError, ValueError):
+        return "custom"
 
 
 class SchemaVersionInfo(BaseModel):
@@ -146,6 +186,15 @@ class SchemaBuildResult(BaseModel):
     version: str = ""
     columns: list[SchemaColumn]
     ddl: DDLResult | None = None
+
+
+class SourceSchemaColumnsResponse(PaginatedResponse[SchemaColumn]):
+    """Composed source columns plus meta-schema ``resource_type``."""
+
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="resource_type from the source version's meta-schema, when configured",
+    )
 
 
 # ── JSON field promotion models ─────────────────────────────
@@ -402,6 +451,7 @@ async def list_schemas(
     summaries = [
         SchemaSummaryObject(
             name=schema["path"],
+            resource_type=schema.get("resource_type", "custom"),
             current=schema["current"],
             versions=schema["versions"],
             updated_at=schema["updated_at"],
@@ -509,6 +559,7 @@ async def get_meta_schema(
         pagination.per_page,
     )
     return MetaSchemaGetResponse(
+        resource_type=meta.resource_type,
         current=meta.current,
         selected=version,
         version=SchemaVersionGet(
@@ -877,20 +928,21 @@ async def elastic_converter(
 
 @router.get(
     "/{source_name}/columns",
-    response_model=PaginatedResponse[SchemaColumn],
+    response_model=SourceSchemaColumnsResponse,
 )
 async def get_schema_columns(
     source_name: str,
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
+    schema_registry: SchemaReg,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
     pagination: PaginationParams = Depends(),
     _auth: None = Depends(require_action("source:read")),
-) -> PaginatedResponse[SchemaColumn]:
+) -> SourceSchemaColumnsResponse:
     """Get composed schema columns for a source version (profile + meta/derived/additional).
 
     Use ``per_page=-1`` to return all columns in one page.
@@ -939,24 +991,18 @@ async def get_schema_columns(
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
-    all_columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in columns
-    ]
-    return PaginatedResponse.from_list(
+    all_columns = [_composed_column_to_api(col) for col in columns]
+    page = PaginatedResponse.from_list(
         all_columns,
         pagination.page,
         pagination.per_page,
+    )
+    return SourceSchemaColumnsResponse(
+        resource_type=_meta_schema_resource_type(
+            schema_registry,
+            meta_schema_ref=snap.meta_schema,
+        ),
+        **page.model_dump(),
     )
 
 
@@ -1021,20 +1067,7 @@ async def build_schema(
             detail={"code": "build_error", "message": str(exc)},
         ) from exc
 
-    columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in result.columns
-    ]
+    columns = [_composed_column_to_api(col) for col in result.columns]
 
     ddl = None
     if result.create_table_ddl:

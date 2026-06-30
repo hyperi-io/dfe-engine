@@ -439,15 +439,21 @@ class TestSchemasMetaListRouter:
         yaml_dump(
             {
                 "current": "1",
+                "resource_type": "core",
                 "versions": {
                     "1": {
                         "date": "2026-01-01",
                         "type": "model",
                         "summary": "init",
                         "columns": [
-                            {"name": "e", "type": "string", "expr": "@source: E"},
-                            {"name": "z_col", "type": "integer"},
-                            {"name": "a_col", "type": "string"},
+                            {
+                                "name": "e",
+                                "type": "string",
+                                "expr": "@source: E",
+                                "_field_type": "base",
+                            },
+                            {"name": "z_col", "type": "integer", "_field_type": "base"},
+                            {"name": "a_col", "type": "string", "_field_type": "base"},
                         ],
                     }
                 },
@@ -485,6 +491,7 @@ class TestSchemasMetaListRouter:
                 assert resp.status_code == 200
                 body = resp.json()
                 assert body["path"] == "aws/cloudtrail"
+                assert body["resource_type"] == "core"
                 assert body["current"] == "1"
                 assert body["versions"] == ["1"]
                 assert body["selected"] == "1"
@@ -524,6 +531,7 @@ class TestSchemasMetaListRouter:
                 all_cols = all_page.json()["version"]["columns"]
                 assert all_cols["per_page"] == -1
                 assert len(all_cols["items"]) == all_cols["total"] == 3
+                assert all_cols["items"][0]["_field_type"] == "base"
                 assert all_cols["next_page"] is None
 
                 bad_version = tc.get(

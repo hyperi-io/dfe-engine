@@ -16,6 +16,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     AfterValidator,
+    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -26,6 +27,7 @@ from pydantic import (
 )
 
 from dfe_engine.api.pagination import PaginatedResponse, PaginatedResponseWithObjects, PathTree
+from dfe_engine.core_resources.yaml_resource_type import ResourceType
 
 
 def _reject_empty_str(value: Any, info: ValidationInfo) -> Any:
@@ -74,6 +76,12 @@ class SchemaColumn(BaseModel):
     use_case: str | None = Field(default=None, description="Use case of the column")
     expr: str | None = Field(default=None, description="Expression for the column")
     comment: str | None = Field(default=None, description="Comment for the column")
+    field_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
+    )
     matched_searchable: list[str] = Field(
         default_factory=list,
         serialization_alias="_matched_searchable",
@@ -133,6 +141,10 @@ class SchemaVersionGet(BaseModel):
 class MetaSchemaGetResponse(BaseModel):
     """Meta-schema definition for a single requested version."""
 
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for system schemas, custom for user-created schemas",
+    )
     current: str = Field(..., description="Current version of the schema")
     selected: str = Field(..., description="Version id requested via query parameter")
     version: SchemaVersionGet = Field(
@@ -153,6 +165,10 @@ class MetaSchema(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for system schemas, custom for user-created schemas",
+    )
     current: NonEmptyStr = Field(..., description="Current version of the schema")
     versions: NonEmptyDict[str, SchemaVersion] = Field(
         ..., description="Dictionary of versions and their metadata"
@@ -161,6 +177,13 @@ class MetaSchema(BaseModel):
         default=None,
         description="DirectoryConfigStore table key / relative path (not stored in YAML files)",
     )
+
+    @field_validator("resource_type", mode="before")
+    @classmethod
+    def _coerce_resource_type(cls, value: Any) -> ResourceType:
+        if value == "core":
+            return "core"
+        return "custom"
 
     @model_validator(mode="after")
     def _current_version_must_have_columns(self) -> MetaSchema:
@@ -179,6 +202,7 @@ class MetaSchema(BaseModel):
         """Serialize for YAML persistence (excludes registry-only ``path``)."""
         data: dict[str, Any] = {
             "current": self.current,
+            "resource_type": self.resource_type,
             "versions": {key: ver.to_yaml_dict() for key, ver in self.versions.items()},
         }
         return data
@@ -261,6 +285,10 @@ class SchemaSummaryObject(BaseModel):
     """
 
     name: NonEmptyStr = Field(..., description="Name of the schema")
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="core for system schemas, custom for user-created schemas",
+    )
     current: NonEmptyStr = Field(..., description="Current version of the schema")
     versions: NonEmptyList[NonEmptyStr] = Field(..., description="List of versions")
     updated_at: NonEmptyStr = Field(..., description="Last updated timestamp")

@@ -19,7 +19,15 @@ import re
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 
@@ -39,6 +47,8 @@ class SchemaColumn(BaseModel):
     See docs/SCHEMA.md for the column model:
     type + attribute + use_case + expr + comment
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     name: str = Field(..., description="Column name")
     type: str = Field(..., description="Primitive type (string, integer, etc.)")
@@ -65,6 +75,12 @@ class SchemaColumn(BaseModel):
     comment: str | None = Field(
         default=None,
         description="Human-readable column description",
+    )
+    field_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
     )
     ch_override: str | None = Field(
         default=None,

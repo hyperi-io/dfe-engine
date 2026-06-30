@@ -445,6 +445,7 @@ class SchemaRegistry:
             results.append(
                 {
                     "path": schema_rel,
+                    "resource_type": schema.resource_type,
                     "current": schema.current,
                     "versions": list(schema.versions.keys()),
                     "column_count": len(version.columns),
