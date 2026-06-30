@@ -1108,9 +1108,10 @@ def _discovery_target(source, ver, schema_registry):
     Returns:
         ``(target_table, match_field, match_value, existing_columns)``.
     """
-    if ver.schema_config.meta_schema:
+    ver_schema = ver.effective_schema()
+    if ver_schema.meta_schema:
         _canonical, _meta, columns = _resolve_meta_schema(
-            ver.schema_config.meta_schema, source.source, schema_registry
+            ver_schema.meta_schema, source.source, schema_registry
         )
         return source.table_name, None, None, columns
     return get_settings().clickhouse.landing_table, ver.match.field, ver.match.value, []
