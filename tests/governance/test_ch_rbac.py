@@ -36,12 +36,13 @@ def test_default_names():
 def test_build_group_sql_has_all_three_controls():
     sql = build_group_sql(_binding(), "deadbeef")
     joined = "\n".join(sql)
-    assert "CREATE USER IF NOT EXISTS dfe_grp_soc-ro" in joined  # identity
-    assert "GRANT SELECT ON dfe.* TO dfe_grp_soc-ro" in joined  # data scope
-    assert "CREATE SETTINGS PROFILE IF NOT EXISTS dfe_grp_soc-ro_profile" in joined  # limits
+    # identifiers are backtick-quoted (hyphenated group names must be valid CH names)
+    assert "CREATE USER IF NOT EXISTS `dfe_grp_soc-ro`" in joined  # identity
+    assert "GRANT SELECT ON dfe.* TO `dfe_grp_soc-ro`" in joined  # data scope
+    assert "CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_grp_soc-ro_profile`" in joined  # limits
     assert "max_memory_usage = 10000000000" in joined
-    assert "ALTER USER dfe_grp_soc-ro SETTINGS PROFILE dfe_grp_soc-ro_profile" in joined
-    assert "CREATE QUOTA IF NOT EXISTS dfe_grp_soc-ro_quota" in joined  # rate/volume
+    assert "ALTER USER `dfe_grp_soc-ro` SETTINGS PROFILE `dfe_grp_soc-ro_profile`" in joined
+    assert "CREATE QUOTA IF NOT EXISTS `dfe_grp_soc-ro_quota`" in joined  # rate/volume
     assert "FOR INTERVAL 1 hour MAX" in joined
 
 
@@ -55,4 +56,4 @@ def test_ddl_artifact_is_gitops_path_and_sql():
 
 def test_minimal_binding_just_creates_user():
     sql = build_group_sql(GroupChBinding(group="g"), "h")
-    assert sql == ["CREATE USER IF NOT EXISTS dfe_grp_g IDENTIFIED WITH sha256_hash BY 'h'"]
+    assert sql == ["CREATE USER IF NOT EXISTS `dfe_grp_g` IDENTIFIED WITH sha256_hash BY 'h'"]

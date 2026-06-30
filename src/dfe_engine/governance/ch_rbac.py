@@ -63,24 +63,30 @@ def generate_password() -> str:
 
 
 def build_group_sql(binding: GroupChBinding, password_hash: str) -> list[str]:
-    """CH DDL for the group's user + grants + settings profile + quota (idempotent)."""
-    user = binding.user()
+    """CH DDL for the group's user + grants + settings profile + quota (idempotent).
+
+    Identifiers are backtick-quoted so group names with hyphens (e.g. ``soc-ro``)
+    produce valid ClickHouse names.
+    """
+    qu = f"`{binding.user()}`"
     stmts: list[str] = [
-        f"CREATE USER IF NOT EXISTS {user} IDENTIFIED WITH sha256_hash BY '{password_hash}'"
+        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY '{password_hash}'"
     ]
     for grant in binding.grants:
-        stmts.append(f"GRANT {grant} TO {user}")
+        stmts.append(f"GRANT {grant} TO {qu}")
 
     if binding.settings:
+        prof = f"`{binding.profile()}`"
         kv = ", ".join(f"{k} = {v}" for k, v in sorted(binding.settings.items()))
-        stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {binding.profile()} SETTINGS {kv}")
-        stmts.append(f"ALTER USER {user} SETTINGS PROFILE {binding.profile()}")
+        stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof} SETTINGS {kv}")
+        stmts.append(f"ALTER USER {qu} SETTINGS PROFILE {prof}")
 
     if binding.quota:
+        qn = f"`{binding.quota_name()}`"
         maxima = ", ".join(f"{k} = {v}" for k, v in sorted(binding.quota.items()))
         stmts.append(
-            f"CREATE QUOTA IF NOT EXISTS {binding.quota_name()} "
-            f"FOR INTERVAL {binding.quota_interval} MAX {maxima} TO {user}"
+            f"CREATE QUOTA IF NOT EXISTS {qn} "
+            f"FOR INTERVAL {binding.quota_interval} MAX {maxima} TO {qu}"
         )
     return stmts
 

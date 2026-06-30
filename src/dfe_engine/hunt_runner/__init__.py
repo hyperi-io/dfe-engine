@@ -15,15 +15,21 @@ checkpoint watermark on `timestamp_load`, leader-elected scheduler) layers on to
 and will live in the standalone dfe-hunt-runner deliverable.
 """
 
+from .checkpoint import TIMESTAMP_FIELD, predicate, window
+from .claim_table import ClaimTable
 from .models import HuntSpec, HuntState
 from .scheduler import Decision, decide
 from .spread import next_due, phase_offset
 
 __all__ = [
+    "TIMESTAMP_FIELD",
+    "ClaimTable",
     "Decision",
     "HuntSpec",
     "HuntState",
     "decide",
     "next_due",
     "phase_offset",
+    "predicate",
+    "window",
 ]
