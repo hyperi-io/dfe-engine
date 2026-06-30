@@ -1915,7 +1915,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -6475,7 +6475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3"
+                  "$ref": "#/components/schemas/SourceSchemaColumnsResponse"
                 }
               }
             }
@@ -9706,6 +9706,16 @@
       },
       "MetaSchema-Input": {
         "properties": {
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -9738,6 +9748,16 @@
       },
       "MetaSchema-Output": {
         "properties": {
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -9809,6 +9829,16 @@
       },
       "MetaSchemaGetResponse": {
         "properties": {
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -11930,6 +11960,18 @@
             "title": "Comment",
             "description": "Comment for the column"
           },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
           "matched_searchable": {
             "items": {
               "type": "string"
@@ -11985,6 +12027,16 @@
             "type": "string",
             "title": "Name",
             "description": "Name of the schema"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
           },
           "current": {
             "type": "string",
@@ -12691,6 +12743,83 @@
         "title": "SourceSchema",
         "description": "Schema configuration for the source's ClickHouse table."
       },
+      "SourceSchemaColumnsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "resource_type from the source version's meta-schema, when configured",
+            "default": "custom"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "SourceSchemaColumnsResponse",
+        "description": "Composed source columns plus meta-schema ``resource_type``."
+      },
       "SourceSigma": {
         "properties": {
           "taxonomy": {
@@ -12879,8 +13008,15 @@
             "description": "Version creation date (YYYY-MM-DD)"
           },
           "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common schema header configuration (optional; applied at DDL compose time)"
           },
           "schema": {
             "$ref": "#/components/schemas/SourceSchema",
@@ -14250,72 +14386,6 @@
         ],
         "title": "PaginatedResponse[SchemaColumn]"
       },
-      "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[SchemaColumn]"
-      },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {
           "seeded": {
@@ -14448,6 +14518,18 @@
             "type": "string",
             "title": "Description",
             "default": ""
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           }
         },
         "type": "object",
@@ -14665,6 +14747,18 @@
             ],
             "title": "Comment",
             "description": "Comment for the column"
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           },
           "_matched_searchable": {
             "items": {
