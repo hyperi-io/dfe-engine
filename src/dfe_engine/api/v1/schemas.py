@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -36,17 +36,20 @@ from dfe_engine.api.pagination import (
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.core_resources.yaml_resource_type import ResourceType
 from dfe_engine.git_identity import git_author
 from dfe_engine.schema.column_query import filter_columns
 from dfe_engine.schema.models import (
     MetaSchema,
     MetaSchemaAddVersionRequest,
+    MetaSchemaCreateRequest,
     MetaSchemaGetResponse,
     MetaSchemaUpdateRequest,
     MetaSchemaVersionWriteResponse,
     PaginatedSchemaSummaryResponse,
     SchemaSummaryObject,
     SchemaVersionGet,
+    meta_schema_from_create,
     meta_schema_version_write_response,
 )
 from dfe_engine.schema.models import (
@@ -116,11 +119,50 @@ async def _read_upload_capped(upload: UploadFile, *, max_bytes: int, read_chunk_
 class SchemaColumn(BaseModel):
     """A column in a schema definition."""
 
+    model_config = {"populate_by_name": True}
+
     name: str
     type: str
     use_case: str = ""
     attribute: str = ""
     description: str = ""
+    field_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
+    )
+
+
+def _composed_column_to_api(col: Any) -> SchemaColumn:
+    return SchemaColumn(
+        name=col.name,
+        type=col.type,
+        use_case=getattr(col, "use_case", "") or "",
+        attribute=(
+            ", ".join(col.attribute)
+            if isinstance(col.attribute, list)
+            else (getattr(col, "attribute", "") or "")
+        ),
+        description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
+        field_type=getattr(col, "field_type", None),
+    )
+
+
+def _meta_schema_resource_type(
+    schema_registry: SchemaReg,
+    *,
+    meta_schema_ref: str | None,
+) -> ResourceType:
+    if not meta_schema_ref:
+        return "custom"
+    from dfe_engine.schema.registry import SchemaNotFoundError, canonical_schema_path
+
+    try:
+        canonical = canonical_schema_path(meta_schema_ref.removesuffix(".yaml"))
+        return schema_registry.get_schema(canonical).resource_type
+    except (SchemaNotFoundError, ValueError):
+        return "custom"
 
 
 class SchemaVersionInfo(BaseModel):
@@ -146,6 +188,15 @@ class SchemaBuildResult(BaseModel):
     version: str = ""
     columns: list[SchemaColumn]
     ddl: DDLResult | None = None
+
+
+class SourceSchemaColumnsResponse(PaginatedResponse[SchemaColumn]):
+    """Composed source columns plus meta-schema ``resource_type``."""
+
+    resource_type: ResourceType = Field(
+        default="custom",
+        description="resource_type from the source version's meta-schema, when configured",
+    )
 
 
 # ── JSON field promotion models ─────────────────────────────
@@ -402,6 +453,7 @@ async def list_schemas(
     summaries = [
         SchemaSummaryObject(
             name=schema["path"],
+            resource_type=schema.get("resource_type", "custom"),
             current=schema["current"],
             versions=schema["versions"],
             updated_at=schema["updated_at"],
@@ -509,6 +561,7 @@ async def get_meta_schema(
         pagination.per_page,
     )
     return MetaSchemaGetResponse(
+        resource_type=meta.resource_type,
         current=meta.current,
         selected=version,
         version=SchemaVersionGet(
@@ -627,7 +680,7 @@ async def create_meta_schema(
     schema_path: str,
     user: CurrentUser,
     registry: SchemaReg,
-    body: MetaSchema,
+    body: MetaSchemaCreateRequest,
 ) -> MetaSchema:
     """Create a new meta-schema at the given registry path (parent path + schema name)."""
     from dfe_engine.schema.registry import SchemaValidationError, canonical_schema_path
@@ -665,7 +718,7 @@ async def create_meta_schema(
                 "message": f"A meta-schema already exists at {canonical_path!r}",
             },
         )
-    to_save = body.model_copy(update={"path": canonical_path})
+    to_save = meta_schema_from_create(body, path=canonical_path)
 
     try:
         SchemaManager.validate_meta_schema_columns(to_save)
@@ -877,20 +930,21 @@ async def elastic_converter(
 
 @router.get(
     "/{source_name}/columns",
-    response_model=PaginatedResponse[SchemaColumn],
+    response_model=SourceSchemaColumnsResponse,
 )
 async def get_schema_columns(
     source_name: str,
     request: Request,
     user: CurrentUser,
     registry: SourceReg,
+    schema_registry: SchemaReg,
     version: str | None = Query(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
     pagination: PaginationParams = Depends(),
     _auth: None = Depends(require_action("source:read")),
-) -> PaginatedResponse[SchemaColumn]:
+) -> SourceSchemaColumnsResponse:
     """Get composed schema columns for a source version (profile + meta/derived/additional).
 
     Use ``per_page=-1`` to return all columns in one page.
@@ -939,24 +993,18 @@ async def get_schema_columns(
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
-    all_columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in columns
-    ]
-    return PaginatedResponse.from_list(
+    all_columns = [_composed_column_to_api(col) for col in columns]
+    page = PaginatedResponse.from_list(
         all_columns,
         pagination.page,
         pagination.per_page,
+    )
+    return SourceSchemaColumnsResponse(
+        resource_type=_meta_schema_resource_type(
+            schema_registry,
+            meta_schema_ref=snap.meta_schema,
+        ),
+        **page.model_dump(),
     )
 
 
@@ -1021,20 +1069,7 @@ async def build_schema(
             detail={"code": "build_error", "message": str(exc)},
         ) from exc
 
-    columns = [
-        SchemaColumn(
-            name=col.name,
-            type=col.type,
-            use_case=getattr(col, "use_case", "") or "",
-            attribute=(
-                ", ".join(col.attribute)
-                if isinstance(col.attribute, list)
-                else (getattr(col, "attribute", "") or "")
-            ),
-            description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
-        )
-        for col in result.columns
-    ]
+    columns = [_composed_column_to_api(col) for col in result.columns]
 
     ddl = None
     if result.create_table_ddl:
@@ -1097,24 +1132,32 @@ def _resolve_source_meta_schema(source, schema_registry):
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
-def _discovery_target(source, ver, schema_registry):
+def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
     A version with a ``meta_schema`` owns its own table, so discovery targets
-    ``db.<source>`` with that schema's columns. Otherwise the version's data
-    still lives in the shared catch-all landing table, so discovery targets
-    ``db.<landing>`` filtered by the version's match rule.
+    ``db.<source>`` with that schema's columns when that table exists in
+    ClickHouse. If the dedicated table is not materialized yet, discovery falls
+    back to ``db.<landing>`` filtered by the version's match rule (same as a
+    version without ``meta_schema``). When ``ch``/``db`` are omitted, a version
+    with ``meta_schema`` always targets ``db.<source>``.
 
     Returns:
         ``(target_table, match_field, match_value, existing_columns)``.
     """
-    ver_schema = ver.effective_schema()
-    if ver_schema.meta_schema:
+    from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
+
+    landing = get_settings().clickhouse.landing_table
+    match_field, match_value = ver.match.field, ver.match.value
+    if ver.effective_schema().meta_schema:
         _canonical, _meta, columns = _resolve_meta_schema(
-            ver_schema.meta_schema, source.source, schema_registry
+            ver.effective_schema().meta_schema, source.source, schema_registry
         )
-        return source.table_name, None, None, columns
-    return get_settings().clickhouse.landing_table, ver.match.field, ver.match.value, []
+        target_table = source.table_name
+        if ch is not None and db is not None and not clickhouse_table_exists(ch, db, target_table):
+            return landing, match_field, match_value, columns
+        return target_table, None, None, columns
+    return landing, match_field, match_value, []
 
 
 def _resolve_source_version(source, version, source_name):
@@ -1187,11 +1230,11 @@ async def discover_json_paths(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
+    db = get_settings().clickhouse.effective_data_database
     target_table, match_field, match_value, columns = _discovery_target(
-        source, ver, schema_registry
+        source, ver, schema_registry, ch=ch, db=db
     )
 
-    db = get_settings().clickhouse.effective_data_database
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
     try:
@@ -1280,11 +1323,10 @@ async def sample_source_rows(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
-    target_table, match_field, match_value, _columns = _discovery_target(
-        source, ver, schema_registry
-    )
-
     db = get_settings().clickhouse.effective_data_database
+    target_table, match_field, match_value, _columns = _discovery_target(
+        source, ver, schema_registry, ch=ch, db=db
+    )
 
     try:
         columns, rows = sample_rows(
@@ -1368,6 +1410,10 @@ async def promote_field(
     ]
 
     db = get_settings().clickhouse.effective_data_database
+    _version_id, ver = _resolve_source_version(source, None, source_name)
+    target_table, match_field, match_value, _ = _discovery_target(
+        source, ver, schema_registry, ch=ch, db=db
+    )
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}
@@ -1376,8 +1422,10 @@ async def promote_field(
             discovered = discover_paths(
                 ch,
                 db=db,
-                source=source.table_name,
+                source=target_table,
                 existing_columns=columns,
+                match_field=match_field,
+                match_value=match_value,
                 paths=[r.json_path for r in requests],
             )
         except JsonPromotionError as exc:

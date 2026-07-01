@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dfe_engine.core_resources.policy import (
+    core_schema_current_only_patch,
     fieldmap_target_is_core,
     match_api_core_mutation,
     schema_registry_path_is_core,
@@ -68,6 +69,97 @@ class TestSchemaRegistryPathIsCore:
         reg = SchemaRegistry(schemas_directory=schemas_dir, refresh_interval=0)
         assert schema_registry_path_is_core("common-header/minimal", reg) is True
         reg.close()
+
+
+class TestCoreSchemaPatchCurrent:
+    def _core_registry(self, tmp_path) -> SchemaRegistry:
+        schemas_dir = tmp_path / "schemas"
+        path = schemas_dir / "common-header" / "minimal.yaml"
+        path.parent.mkdir(parents=True)
+        yaml_dump(
+            {
+                "resource_type": "core",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-01-01",
+                        "type": "model",
+                        "summary": "x",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                    "1.1.0": {
+                        "date": "2026-02-01",
+                        "type": "addition",
+                        "summary": "y",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                },
+            },
+            path,
+        )
+        return SchemaRegistry(schemas_directory=schemas_dir, refresh_interval=0)
+
+    def test_allows_patch_current_only(self, tmp_path):
+        reg = self._core_registry(tmp_path)
+        try:
+            msg = match_api_core_mutation(
+                method="PATCH",
+                path="/api/v1/schemas/definitions/common-header/minimal",
+                role_store=None,
+                schema_registry=reg,
+                body=b'{"current": "1.1.0"}',
+            )
+            assert msg is None
+        finally:
+            reg.close()
+
+    def test_blocks_patch_summary(self, tmp_path):
+        reg = self._core_registry(tmp_path)
+        try:
+            msg = match_api_core_mutation(
+                method="PATCH",
+                path="/api/v1/schemas/definitions/common-header/minimal",
+                role_store=None,
+                schema_registry=reg,
+                body=b'{"summary": "nope"}',
+            )
+            assert msg == "Core resources can't be mutated"
+        finally:
+            reg.close()
+
+    def test_blocks_patch_current_and_summary(self, tmp_path):
+        reg = self._core_registry(tmp_path)
+        try:
+            msg = match_api_core_mutation(
+                method="PATCH",
+                path="/api/v1/schemas/definitions/common-header/minimal",
+                role_store=None,
+                schema_registry=reg,
+                body=b'{"current": "1.1.0", "summary": "nope"}',
+            )
+            assert msg == "Core resources can't be mutated"
+        finally:
+            reg.close()
+
+    def test_blocks_post_new_version(self, tmp_path):
+        reg = self._core_registry(tmp_path)
+        try:
+            msg = match_api_core_mutation(
+                method="POST",
+                path="/api/v1/schemas/definitions/common-header/minimal/versions",
+                role_store=None,
+                schema_registry=reg,
+                body=b"{}",
+            )
+            assert msg == "Core resources can't be mutated"
+        finally:
+            reg.close()
+
+    def test_core_schema_current_only_patch_helper(self):
+        assert core_schema_current_only_patch(b'{"current": "1.1.0"}') is True
+        assert core_schema_current_only_patch(b'{"current": "1.1.0", "summary": "x"}') is False
+        assert core_schema_current_only_patch(b'{"summary": "x"}') is False
+        assert core_schema_current_only_patch(b"{}") is False
 
 
 class TestFieldmapTargetIsCore:

@@ -19,7 +19,15 @@ import re
 from datetime import date
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, field_validator, model_validator
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 
@@ -39,6 +47,8 @@ class SchemaColumn(BaseModel):
     See docs/SCHEMA.md for the column model:
     type + attribute + use_case + expr + comment
     """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     name: str = Field(..., description="Column name")
     type: str = Field(..., description="Primitive type (string, integer, etc.)")
@@ -65,6 +75,12 @@ class SchemaColumn(BaseModel):
     comment: str | None = Field(
         default=None,
         description="Human-readable column description",
+    )
+    field_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification (e.g. base); stored as _field_type in YAML",
     )
     ch_override: str | None = Field(
         default=None,
@@ -259,7 +275,7 @@ class SourceVersion(BaseModel):
     date_time: str = Field(..., description="Version creation date (YYYY-MM-DD)")
     header: SourceHeader | None = Field(
         default=None,
-        description="Common schema header configuration (None when the version did not author one)",
+        description="Common schema header configuration (optional; applied at DDL compose time)",
     )
     schema_config: SourceSchema | None = Field(
         default=None,
@@ -388,7 +404,7 @@ class SourceWriteRequest(BaseModel):
         return SourceVersion(
             date_time=date.today().isoformat(),
             header=self.header,
-            schema_config=self.schema_config,
+            schema_config=self.schema_config or SourceSchema(),
             mapping_standards=self.mapping_standards or [],
             sigma=self.sigma,
             field_mappings=self.field_mappings,
@@ -423,6 +439,8 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
     snapshot = write.to_version_snapshot()
     if write.transform is None and existing.transform is not None:
         snapshot = snapshot.model_copy(update={"transform": existing.transform})
+    if write.header is None:
+        snapshot = snapshot.model_copy(update={"header": existing.version(existing.current).header})
 
     merged_versions = dict(existing.versions)
     merged_versions[new_version_id] = snapshot

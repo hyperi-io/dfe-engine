@@ -5,6 +5,7 @@
 # Requires: ClickHouse 26.2+ (JSON type GA, text index GA)
 
 current: "1.0.0"
+resource_type: core
 
 versions:
   "1.0.0":
@@ -18,6 +19,7 @@ versions:
         order: 0
         expr: "@generated: now64(3)"
         comment: "Insertion timestamp (ms precision)"
+        _field_type: base
 
       - name: _timestamp
         type: timestamp
@@ -25,17 +27,20 @@ versions:
         order: 1
         expr: "@source: timestamp | now()"
         comment: "Event timestamp from source data"
+        _field_type: base
 
       - name: _timestamp_received
         type: timestamp
         expr: "@source: first(timestamp_received/received_at)"
         comment: "When the event was first received by the receiver"
+        _field_type: base
 
       - name: _uuid
         type: uuid
         default: "generateUUIDv7()"
         expr: "@generated: generateUUIDv7()"
         comment: "Time-ordered unique event identifier"
+        _field_type: base
 
       - name: _org_id
         type: string
@@ -44,6 +49,7 @@ versions:
         order: 2
         expr: "@source: org_id"
         comment: "Tenant/organisation identifier"
+        _field_type: base
 
       - name: _source
         type: string
@@ -51,6 +57,7 @@ versions:
         use_case: dimension
         expr: "@source: first(_source) | topic_name"
         comment: "Data source label (e.g. beats, syslog, crowdstrike_edr)"
+        _field_type: base
 
       - name: _raw
         type: text
@@ -58,14 +65,17 @@ versions:
         index: "text(tokenizer = 'default') GRANULARITY 64"
         expr: "@captured: raw_payload"
         comment: "Original event payload as text (full-text indexed)"
+        _field_type: base
 
       - name: _json
         type: json
         max_dynamic_paths: 2048
         expr: "@captured: raw_payload as JSON"
         comment: "Original event payload as structured JSON"
+        _field_type: base
 
       - name: _tags
         type: json
         expr: "@source: first(tags/_tags/meta/metadata.tags)"
         comment: "Event metadata tags"
+        _field_type: base

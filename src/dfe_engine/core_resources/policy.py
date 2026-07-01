@@ -89,6 +89,21 @@ def parse_fieldmap_post_body(body: bytes) -> tuple[str | None, str | None]:
     return standard, source
 
 
+def core_schema_current_only_patch(body: bytes) -> bool:
+    """True when a PATCH body only moves the schema ``current`` pointer."""
+    if not body:
+        return False
+    try:
+        data: dict[str, Any] = json.loads(body)
+    except json.JSONDecodeError:
+        return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("current") is None or data.get("summary") is not None:
+        return False
+    return set(data.keys()) == {"current"}
+
+
 def _fieldmap_mutation_conflict(
     *,
     method: str,
@@ -125,6 +140,7 @@ def _schema_mutation_conflict(
     method: str,
     path: str,
     schema_registry: SchemaRegistry | None,
+    body: bytes = b"",
 ) -> str | None:
     definitions = "/api/v1/schemas/definitions/"
     if not path.startswith(definitions):
@@ -144,6 +160,8 @@ def _schema_mutation_conflict(
 
     schema_path = unquote(rest)
     if schema_registry_path_is_core(schema_path, schema_registry):
+        if method == "PATCH" and core_schema_current_only_patch(body):
+            return None
         return core_resource_conflict_message()
     return None
 
@@ -182,7 +200,7 @@ def match_api_core_mutation(
     for check in (
         lambda: _role_mutation_conflict(method=method, path=path, role_store=role_store),
         lambda: _schema_mutation_conflict(
-            method=method, path=path, schema_registry=schema_registry
+            method=method, path=path, schema_registry=schema_registry, body=body
         ),
         lambda: _fieldmap_mutation_conflict(
             method=method,

@@ -10,6 +10,7 @@ from dfe_engine.schema.models import (
     MetaSchemaAddVersionRequest,
     PaginatedSchemaSummaryResponse,
     SchemaColumn,
+    SchemaColumnWrite,
     SchemaSummary,
     SchemaSummaryObject,
     SchemaVersion,
@@ -301,7 +302,14 @@ class TestMetaSchemaAddVersionRequest:
         req = MetaSchemaAddVersionRequest.model_validate(
             {
                 "type": "addition",
-                "columns": [{"name": "x", "type": "string", "expr": "@source: X"}],
+                "columns": [
+                    {
+                        "name": "x",
+                        "type": "string",
+                        "expr": "@source: X",
+                        "_field_type": "base",
+                    }
+                ],
             }
         )
         assert req.summary is None
@@ -310,7 +318,14 @@ class TestMetaSchemaAddVersionRequest:
         req = MetaSchemaAddVersionRequest(
             type="revision",
             summary="Bump columns",
-            columns=[SchemaColumn(name="x", type="string", expr="@source: X")],
+            columns=[
+                SchemaColumnWrite(
+                    name="x",
+                    type="string",
+                    expr="@source: X",
+                    field_type="base",
+                )
+            ],
         )
         assert req.summary == "Bump columns"
 

@@ -50,12 +50,26 @@ class _NoCallClient:
 class _DiscoveryClient:
     """ClickHouse stand-in returning canned discovery rows; records each query."""
 
-    def __init__(self, discover_rows: list[tuple[str, str]] | None = None) -> None:
+    def __init__(
+        self,
+        discover_rows: list[tuple[str, str]] | None = None,
+        *,
+        existing_tables: set[tuple[str, str]] | None = None,
+    ) -> None:
         self.calls: list[tuple[str, dict]] = []
         self._discover_rows = discover_rows or [("user.id", "Int64")]
+        self._existing_tables = existing_tables or set()
 
     def execute(self, sql: str, parameters: dict | None = None):
         self.calls.append((sql, parameters or {}))
+        if "system.tables" in sql:
+            db = (parameters or {}).get("db")
+            tbl = (parameters or {}).get("tbl")
+            return (
+                [(1,)]
+                if db is not None and tbl is not None and (db, tbl) in self._existing_tables
+                else []
+            )
         if "JSONDynamicPathsWithTypes" in sql:
             return self._discover_rows
         return []
@@ -68,10 +82,25 @@ class _SampleClient:
         self,
         columns: list[str] | None = None,
         rows: list[tuple] | None = None,
+        *,
+        existing_tables: set[tuple[str, str]] | None = None,
     ) -> None:
         self.calls: list[tuple[str, dict]] = []
         self._columns = columns or ["_json"]
         self._rows = rows or [({"user": {"id": 1}},)]
+        self._existing_tables = existing_tables or set()
+
+    def execute(self, sql: str, parameters: dict | None = None):
+        self.calls.append((sql, parameters or {}))
+        if "system.tables" in sql:
+            db = (parameters or {}).get("db")
+            tbl = (parameters or {}).get("tbl")
+            return (
+                [(1,)]
+                if db is not None and tbl is not None and (db, tbl) in self._existing_tables
+                else []
+            )
+        return []
 
     def query_rows(self, sql: str, parameters: dict | None = None):
         self.calls.append((sql, parameters or {}))
@@ -253,13 +282,13 @@ class TestDiscoverJsonPaths:
 
     def test_default_version_with_meta_schema_uses_own_table(self, app, client, admin_headers):
         db = get_settings().clickhouse.effective_data_database
-        ch = _DiscoveryClient()
+        ch = _DiscoveryClient(existing_tables={(db, VERSIONED_SOURCE)})
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         # VERSIONED_SOURCE current is v2.0.0, which has a meta_schema.
         resp = client.get(f"/api/v1/schemas/{VERSIONED_SOURCE}/json-paths", headers=admin_headers)
         assert resp.status_code == 200
         assert resp.json()["table"] == f"{db}.{VERSIONED_SOURCE}"
-        sql, _params = ch.calls[0]
+        sql, _params = next((sql, p) for sql, p in ch.calls if "JSONDynamicPathsWithTypes" in sql)
         assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
         assert "WHERE" not in sql  # owns its table -> no match filter
 
@@ -322,7 +351,7 @@ class TestSampleRows:
 
     def test_meta_schema_version_samples_whole_table(self, app, client, admin_headers):
         db = get_settings().clickhouse.effective_data_database
-        ch = _SampleClient()
+        ch = _SampleClient(existing_tables={(db, VERSIONED_SOURCE)})
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         # VERSIONED_SOURCE current is v2.0.0, which owns its own table.
         resp = client.get(f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows", headers=admin_headers)
@@ -331,12 +360,15 @@ class TestSampleRows:
         assert body["table"] == f"{db}.{VERSIONED_SOURCE}"
         assert body["match_field"] is None
         assert body["match_value"] is None
-        sql, _params = ch.calls[0]
+        sql, _params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
         assert f"FROM `{db}`.`{VERSIONED_SOURCE}`" in sql
         assert "WHERE" not in sql
 
     def test_limit_param_is_passed_through(self, app, client, admin_headers):
-        ch = _SampleClient()
+        db = get_settings().clickhouse.effective_data_database
+        ch = _SampleClient(existing_tables={(db, VERSIONED_SOURCE)})
         app.dependency_overrides[get_clickhouse_client] = lambda: ch
         resp = client.get(
             f"/api/v1/schemas/{VERSIONED_SOURCE}/sample-rows",
@@ -344,7 +376,9 @@ class TestSampleRows:
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        _sql, params = ch.calls[0]
+        _sql, params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
         assert params["limit"] == 5
 
     def test_limit_out_of_range_422(self, client: TestClient, admin_headers):
@@ -463,3 +497,18 @@ class TestPromoteField:
             {"json_path": ["a.b"], "column_name": "x", "data_type": "string"},
         )
         assert resp.status_code == 422
+
+    def test_promote_auto_type_queries_landing_when_table_missing(
+        self, app, client: TestClient, admin_headers
+    ):
+        landing = get_settings().clickhouse.landing_table
+        db = get_settings().clickhouse.effective_data_database
+        ch = _DiscoveryClient([("user.email", "String")])
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = _promote(client, admin_headers, {"json_path": "user.email"}, dry_run=True)
+        assert resp.status_code == 200
+        discovery_sql, params = next(
+            (sql, p) for sql, p in ch.calls if "JSONDynamicPathsWithTypes" in sql
+        )
+        assert f"FROM `{db}`.`{landing}`" in discovery_sql
+        assert params.get("match_value") == PROMO_SOURCE

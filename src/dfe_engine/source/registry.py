@@ -346,7 +346,7 @@ class SourceRegistry:
                     "current": source.current,
                     "deployed_version": source.deployed_version,
                     "versions": sorted(source.versions.keys()),
-                    "header_type": source.header.type,
+                    "header_type": source.header.type if source.header else None,
                     "has_transform": source.transform is not None,
                     "has_fetcher": source.fetcher is not None,
                     "mapping_standards": list(source.mapping_standards),

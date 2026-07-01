@@ -257,9 +257,10 @@ class SchemaBuilderV2:
         self, source_name: str, snap: SourceVersion
     ) -> list[SchemaColumn]:
         """Load the common header profile from a source version snapshot."""
-        header = snap.effective_header()
-        profile_name = header.type
-        profile_version = header.version
+        if snap.header is None:
+            return []
+        profile_name = snap.header.type
+        profile_version = snap.header.version
         try:
             return SchemaLoader.load_profile(profile_name, profile_version=profile_version)
         except SchemaLoadError as e:
@@ -318,6 +319,6 @@ class SchemaBuilderV2:
         return DDLConfig(
             engine=schema_cfg.engine,
             ttl_days=schema_cfg.ttl_days,
-            profile_name=header.type,
-            profile_version=header.version,
+            profile_name=header.type if header else None,
+            profile_version=header.version if header else None,
         )

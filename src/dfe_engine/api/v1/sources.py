@@ -194,7 +194,11 @@ async def create_source(
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Create a new source from a flat source definition (initial version ``1.0.0``)."""
+    """Create a new source from a flat source definition (initial version ``1.0.0``).
+
+    ``header`` is optional: when omitted, no common-header profile is stored on the
+    version (DDL compose uses meta/derived columns only until a header is set).
+    """
     name = body.source
 
     if not name:
