@@ -17,6 +17,8 @@ stay valid. All statements are idempotent (``IF NOT EXISTS``).
 
 from __future__ import annotations
 
+from typing import Any
+
 from .models import ChServiceRole, ChTier, org_policy_name, org_role_name
 
 
@@ -152,4 +154,45 @@ def render_group_user(
     ]
     if org_role:
         stmts.append(f"GRANT {_bq(org_role)} TO {qu}")
+    return stmts
+
+
+def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
+    """DDL+DML projecting the gitops SoT into read-only CH meta tables (spec 9).
+
+    ``dfe_meta.orgs`` + ``dfe_meta.ch_tiers`` are ReplacingMergeTree projections;
+    gitops stays the source of truth. Each reconcile TRUNCATEs + re-INSERTs so the
+    projection exactly reflects current config (drops of removed orgs/tiers
+    included) - idempotent and always current.
+    """
+    stmts: list[str] = [
+        "CREATE DATABASE IF NOT EXISTS dfe_meta",
+        (
+            "CREATE TABLE IF NOT EXISTS dfe_meta.orgs "
+            "(name String, org_ids Array(String), display_name String, "
+            "enabled UInt8, updated_at DateTime DEFAULT now()) "
+            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
+        ),
+        (
+            "CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers "
+            "(name String, kind String, is_default UInt8, "
+            "updated_at DateTime DEFAULT now()) "
+            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
+        ),
+        "TRUNCATE TABLE dfe_meta.orgs",
+        "TRUNCATE TABLE dfe_meta.ch_tiers",
+    ]
+    for o in orgs:
+        ids = ", ".join(_sq(i) for i in (o.org_ids or []))
+        display = getattr(o, "display_name", "") or ""
+        enabled = 1 if getattr(o, "enabled", True) else 0
+        stmts.append(
+            "INSERT INTO dfe_meta.orgs (name, org_ids, display_name, enabled) VALUES "
+            f"({_sq(o.name)}, [{ids}], {_sq(display)}, {enabled})"
+        )
+    for t in tiers:
+        stmts.append(
+            "INSERT INTO dfe_meta.ch_tiers (name, kind, is_default) VALUES "
+            f"({_sq(t.name)}, {_sq(t.kind)}, {1 if t.default else 0})"
+        )
     return stmts

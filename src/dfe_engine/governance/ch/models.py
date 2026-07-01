@@ -168,3 +168,43 @@ DEFAULT_TIERS: list[ChTier] = [
     _hunt_tier("hunt_tier_2", 4 * _GiB, 120, 5000, default=True),
     _hunt_tier("hunt_tier_3", 1 * _GiB, 15, 1000),
 ]
+
+# Fixed service identities (spec 5.3) - single, not tiered. Seeded like the
+# tiers: non-destructive, operator-editable.
+DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
+    # dfe-loader: async-insert profile + INSERT on the data dbs.
+    ChServiceRole(
+        name="loader",
+        mint_user=True,
+        grants=["INSERT ON dfe.*", "INSERT ON dfe_hunts.*"],
+        settings={
+            "async_insert": 1,
+            "wait_for_async_insert": 1,
+            "wait_for_async_insert_timeout": 120,
+            "async_insert_busy_timeout_max_ms": 1000,
+            "async_insert_max_data_size": 134217728,
+        },
+    ),
+    # The restricted engine reader - folds the old query/ddl.py dfe_query_reader
+    # into ONE definition. readonly, no DDL, bounded per query.
+    ChServiceRole(
+        name="query_reader",
+        mint_user=True,
+        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
+        settings={
+            "readonly": 1,
+            "allow_ddl": 0,
+            "max_execution_time": 30,
+            "max_rows_to_read": 10_000_000,
+            "max_memory_usage": 2 * _GiB,
+        },
+    ),
+    # Hunt-runner coordination role: read/write on the hunt_lease/watermark/state
+    # tables. Granted alongside a hunt tier at bind time; global (no org role), so
+    # not a minted user of its own.
+    ChServiceRole(
+        name="hunt_runner",
+        mint_user=False,
+        grants=["SELECT ON dfe_hunts.*", "INSERT ON dfe_hunts.*"],
+    ),
+]

@@ -27,6 +27,7 @@ from .models import org_policy_name, org_role_name
 from .render import (
     _bq,
     render_group_user,
+    render_materialise,
     render_org_role,
     render_service_role,
     render_service_user,
@@ -208,13 +209,14 @@ class ChRbacReconciler:
         drops = compute_drops(
             self._existing_org_roles(), self._existing_row_policies(), orgs, org_tables
         )
+        materialise = render_materialise(orgs, tiers)
 
-        for stmt in stmts + drops:
+        for stmt in stmts + drops + materialise:
             try:
                 self._client.command(stmt)
             except Exception as exc:  # a bad statement must not abort the rest
                 result.errors.append(f"{stmt[:60]}...: {exc}")
-        result.statements = stmts
+        result.statements = stmts + materialise
         result.dropped = drops
 
         if result.errors:

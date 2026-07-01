@@ -9,7 +9,10 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from dfe_engine.governance.ch.models import (
+    DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
     ChServiceRole,
     ChTier,
@@ -19,6 +22,7 @@ from dfe_engine.governance.ch.models import (
 )
 from dfe_engine.governance.ch.render import (
     render_group_user,
+    render_materialise,
     render_org_role,
     render_service_role,
     render_tier,
@@ -195,3 +199,63 @@ class TestDefaultTiers:
             assert f"CREATE ROLE IF NOT EXISTS `dfe_{t.name}_role`" in s
             assert f"CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_{t.name}_profile`" in s
             assert f"CREATE QUOTA IF NOT EXISTS `dfe_{t.name}_quota`" in s
+
+
+class TestDefaultServiceRoles:
+    def test_three_service_roles(self):
+        assert {r.name for r in DEFAULT_SERVICE_ROLES} == {"loader", "query_reader", "hunt_runner"}
+
+    def test_mint_user_flags(self):
+        by_name = {r.name: r for r in DEFAULT_SERVICE_ROLES}
+        assert by_name["loader"].mint_user is True
+        assert by_name["query_reader"].mint_user is True
+        # hunt_runner is granted to hunt users alongside a tier, not its own user
+        assert by_name["hunt_runner"].mint_user is False
+
+    def test_query_reader_readonly_no_ddl_select_only(self):
+        qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
+        assert qr.settings["readonly"] == 1
+        assert qr.settings["allow_ddl"] == 0
+        assert all("INSERT" not in g for g in qr.grants)
+
+    def test_loader_inserts_and_async(self):
+        loader = {r.name: r for r in DEFAULT_SERVICE_ROLES}["loader"]
+        assert any("INSERT" in g for g in loader.grants)
+        assert loader.settings["async_insert"] == 1
+
+    def test_service_roles_render_a_role_each(self):
+        for r in DEFAULT_SERVICE_ROLES:
+            s = _joined(render_service_role(r))
+            assert f"CREATE ROLE IF NOT EXISTS `dfe_{r.name}_role`" in s
+
+
+class TestRenderMaterialise:
+    def test_creates_meta_db_and_replacing_tables(self):
+        s = _joined(render_materialise([], []))
+        assert "CREATE DATABASE IF NOT EXISTS dfe_meta" in s
+        assert "CREATE TABLE IF NOT EXISTS dfe_meta.orgs" in s
+        assert "CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers" in s
+        assert "ReplacingMergeTree(updated_at)" in s
+        # full refresh each run so removed orgs/tiers drop out of the projection
+        assert "TRUNCATE TABLE dfe_meta.orgs" in s
+        assert "TRUNCATE TABLE dfe_meta.ch_tiers" in s
+
+    def test_inserts_orgs_and_tiers(self):
+        org = SimpleNamespace(
+            name="acme", org_ids=["acme", "acme2"], display_name="Acme", enabled=True
+        )
+        tier = ChTier(name="analyst_tier_2", kind="analyst", default=True)
+        s = _joined(render_materialise([org], [tier]))
+        assert (
+            "INSERT INTO dfe_meta.orgs (name, org_ids, display_name, enabled) VALUES "
+            "('acme', ['acme', 'acme2'], 'Acme', 1)" in s
+        )
+        assert (
+            "INSERT INTO dfe_meta.ch_tiers (name, kind, is_default) VALUES "
+            "('analyst_tier_2', 'analyst', 1)" in s
+        )
+
+    def test_disabled_org_and_empty_ids(self):
+        org = SimpleNamespace(name="x", org_ids=[], display_name="", enabled=False)
+        s = _joined(render_materialise([org], []))
+        assert "VALUES ('x', [], '', 0)" in s

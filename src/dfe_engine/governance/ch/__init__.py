@@ -18,6 +18,7 @@ The catalogue is gitcrud config, not code; the reconciler renders whatever tiers
 """
 
 from .models import (
+    DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
     ChServiceRole,
     ChTier,
@@ -28,6 +29,7 @@ from .models import (
 from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops
 from .render import (
     render_group_user,
+    render_materialise,
     render_org_role,
     render_service_role,
     render_service_user,
@@ -35,6 +37,7 @@ from .render import (
 )
 
 __all__ = [
+    "DEFAULT_SERVICE_ROLES",
     "DEFAULT_TIERS",
     "ChRbacReconciler",
     "ChServiceRole",
@@ -45,6 +48,7 @@ __all__ = [
     "org_policy_name",
     "org_role_name",
     "render_group_user",
+    "render_materialise",
     "render_org_role",
     "render_service_role",
     "render_service_user",
