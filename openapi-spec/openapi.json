@@ -1915,7 +1915,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -6203,7 +6203,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MetaSchema-Input"
+                "$ref": "#/components/schemas/MetaSchemaCreateRequest"
               }
             }
           }
@@ -6214,7 +6214,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MetaSchema-Output"
+                  "$ref": "#/components/schemas/MetaSchema"
                 }
               }
             }
@@ -6375,7 +6375,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
                   },
                   "type": "array",
                   "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
@@ -6475,7 +6475,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3"
+                  "$ref": "#/components/schemas/SourceSchemaColumnsResponse"
                 }
               }
             }
@@ -9704,47 +9704,25 @@
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
       },
-      "MetaSchema-Input": {
+      "MetaSchema": {
         "properties": {
-          "current": {
+          "resource_type": {
             "type": "string",
-            "title": "Current",
-            "description": "Current version of the schema"
-          },
-          "versions": {
-            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_-Input",
-            "description": "Dictionary of versions and their metadata"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "core",
+              "custom"
             ],
-            "title": "Path",
-            "description": "DirectoryConfigStore table key / relative path (not stored in YAML files)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "current",
-          "versions"
-        ],
-        "title": "MetaSchema",
-        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
-      },
-      "MetaSchema-Output": {
-        "properties": {
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
             "description": "Current version of the schema"
           },
           "versions": {
-            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_-Output",
+            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_",
             "description": "Dictionary of versions and their metadata"
           },
           "path": {
@@ -9793,7 +9771,7 @@
             "description": "Human-readable summary stored on the new version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn__MinLen_min_length_1_",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumnWrite__MinLen_min_length_1_",
             "minItems": 1,
             "description": "Complete column snapshot for the new version (at least one column)"
           }
@@ -9807,8 +9785,51 @@
         "title": "MetaSchemaAddVersionRequest",
         "description": "Add a new schema version (semver bump from current)."
       },
+      "MetaSchemaCreateRequest": {
+        "properties": {
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version of the schema"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersionCreate_",
+            "description": "Dictionary of versions and their metadata"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "DirectoryConfigStore table key / relative path (must match URL when set)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current",
+          "versions"
+        ],
+        "title": "MetaSchemaCreateRequest",
+        "description": "Create a new custom meta-schema (``resource_type`` is set by the server)."
+      },
       "MetaSchemaGetResponse": {
         "properties": {
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -9951,15 +9972,15 @@
         "title": "MetricEntry",
         "description": "A single metric from the service's manifest."
       },
-      "NonEmptyDict_str_SchemaVersion_-Input": {
+      "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/SchemaVersion-Input"
+          "$ref": "#/components/schemas/SchemaVersionCreate"
         },
         "type": "object"
       },
-      "NonEmptyDict_str_SchemaVersion_-Output": {
+      "NonEmptyDict_str_SchemaVersion_": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/SchemaVersion-Output"
+          "$ref": "#/components/schemas/SchemaVersion"
         },
         "type": "object"
       },
@@ -9969,21 +9990,21 @@
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn_-Input": {
+      "NonEmptyList_SchemaColumnWrite_": {
         "items": {
-          "$ref": "#/components/schemas/SchemaColumn-Input"
+          "$ref": "#/components/schemas/SchemaColumnWrite"
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn_-Output": {
+      "NonEmptyList_SchemaColumnWrite__MinLen_min_length_1_": {
         "items": {
-          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+          "$ref": "#/components/schemas/SchemaColumnWrite"
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn__MinLen_min_length_1_": {
+      "NonEmptyList_SchemaColumn_": {
         "items": {
-          "$ref": "#/components/schemas/SchemaColumn-Input"
+          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
         },
         "type": "array"
       },
@@ -11867,7 +11888,7 @@
         "title": "SampleRowsResponse",
         "description": "Random sample rows for a source, scoped to its match rule."
       },
-      "SchemaColumn-Input": {
+      "SchemaColumnWrite": {
         "properties": {
           "name": {
             "type": "string",
@@ -11930,6 +11951,11 @@
             "title": "Comment",
             "description": "Comment for the column"
           },
+          "_field_type": {
+            "type": "string",
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
           "matched_searchable": {
             "items": {
               "type": "string"
@@ -11942,10 +11968,11 @@
         "type": "object",
         "required": [
           "name",
-          "type"
+          "type",
+          "_field_type"
         ],
-        "title": "SchemaColumn",
-        "description": "A column in the schema."
+        "title": "SchemaColumnWrite",
+        "description": "Column payload for API writes (create schema / add version)."
       },
       "SchemaDiff": {
         "properties": {
@@ -11986,6 +12013,16 @@
             "title": "Name",
             "description": "Name of the schema"
           },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -12017,7 +12054,7 @@
         "title": "SchemaSummaryObject",
         "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
-      "SchemaVersion-Input": {
+      "SchemaVersion": {
         "properties": {
           "date": {
             "type": "string",
@@ -12035,7 +12072,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Input",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_",
             "description": "List of columns in the version"
           }
         },
@@ -12049,7 +12086,7 @@
         "title": "SchemaVersion",
         "description": "A version in the schema."
       },
-      "SchemaVersion-Output": {
+      "SchemaVersionCreate": {
         "properties": {
           "date": {
             "type": "string",
@@ -12067,7 +12104,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Output",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumnWrite_",
             "description": "List of columns in the version"
           }
         },
@@ -12078,8 +12115,8 @@
           "summary",
           "columns"
         ],
-        "title": "SchemaVersion",
-        "description": "A version in the schema."
+        "title": "SchemaVersionCreate",
+        "description": "Initial version entry when creating a meta-schema via the API."
       },
       "SchemaVersionGet": {
         "properties": {
@@ -12691,6 +12728,83 @@
         "title": "SourceSchema",
         "description": "Schema configuration for the source's ClickHouse table."
       },
+      "SourceSchemaColumnsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "resource_type from the source version's meta-schema, when configured",
+            "default": "custom"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "SourceSchemaColumnsResponse",
+        "description": "Composed source columns plus meta-schema ``resource_type``."
+      },
       "SourceSigma": {
         "properties": {
           "taxonomy": {
@@ -12879,8 +12993,15 @@
             "description": "Version creation date (YYYY-MM-DD)"
           },
           "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common schema header configuration (optional; applied at DDL compose time)"
           },
           "schema": {
             "$ref": "#/components/schemas/SourceSchema",
@@ -14188,73 +14309,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[SchemaColumn]"
-      },
-      "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
             },
             "type": "array",
             "title": "Items"
@@ -14448,6 +14503,18 @@
             "type": "string",
             "title": "Description",
             "default": ""
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           }
         },
         "type": "object",
@@ -14603,7 +14670,7 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__schema__models__SchemaColumn-Output": {
+      "dfe_engine__schema__models__SchemaColumn": {
         "properties": {
           "name": {
             "type": "string",
@@ -14665,6 +14732,18 @@
             ],
             "title": "Comment",
             "description": "Comment for the column"
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           },
           "_matched_searchable": {
             "items": {
