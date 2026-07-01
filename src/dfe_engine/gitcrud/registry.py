@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Registry mapping a class name to its ResourceClass descriptor.
 
-The default registry seeds the four DFE Governed Ops classes. Directories are the
+The default registry seeds the DFE Governed Ops resource classes. Directories are the
 deploy-repo layout from docs/ARCHITECTURE.md; they are config, not hardcoded
 behaviour, so a deployment can override them.
 """
@@ -72,5 +72,16 @@ def default_registry() -> ResourceClassRegistry:
             ResourceClass("roles", "governance/rbac/roles", rbac_prefix="governance"),
             ResourceClass("actions", "governance/actions", rbac_prefix="governance"),
             ResourceClass("policies", "governance/policies", rbac_prefix="governance"),
+            # CH RBAC - quota tiers + fixed service roles, reconciled to real CH
+            # objects (settings profile + quota + role). Versioned like schemas.
+            ResourceClass(
+                "ch_tiers", "governance/ch/tiers", rbac_prefix="governance", versioned=True
+            ),
+            ResourceClass(
+                "ch_service_roles",
+                "governance/ch/service-roles",
+                rbac_prefix="governance",
+                versioned=True,
+            ),
         ]
     )
