@@ -87,6 +87,7 @@ class TestProfileTables:
 # ── Checkpoint Table ─────────────────────────────────────────────
 
 
+@requires_schemas
 class TestCheckpointTable:
     """Test detection checkpoint table DDL generation."""
 
