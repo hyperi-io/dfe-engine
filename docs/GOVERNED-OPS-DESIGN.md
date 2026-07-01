@@ -1,147 +1,301 @@
 <!-- Project: dfe-engine -->
-# Governed Ops + Hunt-Runner - Design & Function Reference
+# Governed Ops and the Hunt Runner
 
-Status: implemented on `feat/governed-ops-api` (not yet pushed/merged). This is the
-as-built reference for the new code: what each module does, the key functions, and
-how they compose. Companion to docs/ARCHITECTURE.md ("Governed Ops") and the
-standards docs (GITOPS-COMMIT-STANDARD, OBSERVABILITY, HYPERDX-FORK-MAINTENANCE).
+How DFE is operated, and how detection runs. Two subsystems, one idea: the GitOps
+repo is the source of truth and the authority, and dfe-engine is a governed window
+onto it. Companion to [ARCHITECTURE.md](ARCHITECTURE.md), the
+[commit standard](GITOPS-COMMIT-STANDARD.md), and the
+[observability standard](OBSERVABILITY-STANDARD.md).
 
-## 1. The shape (layering)
+## The one idea
 
+Everything you can change in DFE -- deployment dials, detection hunts, access
+control -- is YAML in a git repo. The engine does not hold a config database and
+does not touch the live cluster. It reads and writes those YAML files through one
+generic, git-native CRUD engine called `GitCrud`, applies RBAC, and commits.
+Argo reconciles the commit. Kill the engine and the UI and DFE keeps running --
+you can still drive it by editing the repo by hand. That survivability is the
+whole point, and it is the acceptance test for every piece below.
+
+## Layering
+
+```mermaid
+graph TD
+    CLI["CLI - dfe-api governed"]
+    HelmRouter["Tier-1 router - api/v1/helm"]
+    GovRouter["Tier-2 router - api/v1/governance"]
+    ConfigRouter["Config router - api/v1/config"]
+    Actions["ActionStore + PolicyStore"]
+    GitCrud["GitCrud engine - generic YAML CRUD"]
+    CommitPolicy["CommitPolicy - message + validators + mode"]
+    Repo["GitopsRepo - dulwich, no git CLI"]
+    Argo["Argo CD reconciles the commit"]
+
+    CLI --> GitCrud
+    CLI --> Actions
+    HelmRouter --> GitCrud
+    GovRouter --> Actions
+    Actions --> GitCrud
+    GitCrud --> CommitPolicy
+    GitCrud --> Repo
+    Repo --> Argo
 ```
-CLI (dfe-api governed ...) ─┐
-API routers (helm/governance/config) ─┤── call the SAME services ──┐
-                                       │                            v
-                              Tier-2: governance/ (actions, policies, ch_rbac, rbac)
-                                       │                            │
-                              Tier-1 + foundation: gitcrud/ (GitCrud engine)
-                                       │                            │
-                                       v                            v
-                              GitopsRepo (dulwich, no git CLI) -> commit -> Argo reconciles
+
+Two tiers sit on the one engine:
+
+- **Tier-1** is raw, generic var CRUD over the overlay files. Powerful, so it is
+  admin-grade.
+- **Tier-2** is curated *actions* -- named bundles of changes, each behind its own
+  permission. This is the safe surface an operator gets. They can run
+  "scale-receiver" without holding the keys to edit any var.
+
+RBAC binds at the high level only -- a resource class, a named action, an operation
+-- never per field. One permission check per request. That keeps the security
+surface small and the policy readable.
+
+## GitCrud -- the generic engine
+
+`src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
+because every resource is just YAML in git. A `ResourceClass` says where a class
+lives (a directory) and which RBAC prefix governs it. The default registry covers
+the deploy repo: `helmvars` (the overlays under `values/`) and the `governance`
+class (`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`).
+
+The engine is small on purpose. Read, flatten to dot-paths, set or delete a path,
+write a whole doc, delete a resource -- every mutation ends in one commit via
+`GitopsRepo` (which uses dulwich, so there is no shell-out to `git`). Two extras
+earn their keep:
+
+- `put_many` writes several resources in ONE commit, so an action that touches N
+  files is atomic.
+- The HEAD commit SHA is the optimistic-concurrency token. A read returns it, a
+  write may require it, and a stale one raises `ConcurrencyConflictError` carrying
+  the current doc -- so two editors never silently clobber each other.
+
+`commit_policy.py` enforces the [commit standard](GITOPS-COMMIT-STANDARD.md) in
+code: it builds every message and its audit trailers (callers cannot hand-write
+them), rejects `latest`/unpinned image refs and controller-owned fields like
+`replicaCount`, and resolves direct-commit vs PR from the environment and class.
+
+## Writing a helm var, end to end
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant Helm as Tier-1 router
+    participant Policy as PolicyStore
+    participant Crud as GitCrud
+    participant Repo as GitopsRepo
+    participant Argo
+
+    User->>Helm: PUT /helm/files/receiver-default/vars/keda.maxReplicas (If-Match SHA)
+    Helm->>Helm: require_action helmvars:write
+    Helm->>Helm: validate_change (no latest, no replicaCount)
+    Helm->>Policy: protected? (override held?)
+    Helm->>Crud: set_key (base_revision = If-Match)
+    Crud->>Crud: stale base? -> 409 with current
+    Crud->>Repo: publish (one commit, audited)
+    Repo-->>Argo: commit on the tracked branch
+    Argo-->>User: reconciles to the cluster
 ```
 
-Everything is YAML in git; one generic engine handles every resource class; RBAC is
-bound at the class/action/operation level; every mutation ends in a git commit. The
-engine never touches the live cluster.
+The router is thin. The work -- validation, the protected-var check, the commit --
+lives in the engine and the policy store, so the CLI and the API take the identical
+path.
 
-## 2. gitcrud/ - the generic YAML-in-git CRUD engine (the foundation)
+## Defined actions and protected vars
 
-- **`models.ResourceClass`** - describes one CRUD class: `name`, `directory`
-  (repo-relative), `rbac_prefix`, `suffix`. `.action(verb)` -> the RBAC string,
-  e.g. `helmvars:write`.
-- **`registry.ResourceClassRegistry`** + **`default_registry()`** - maps a resource
-  TYPE name to its ResourceClass. Several types share an `rbac_prefix` (the high-level
-  CLASS): `helmvars` (dir `values`); `governance` class = `accounts`/`groups`/`roles`
-  (dir `governance/rbac/*`) + `actions` + `policies`. `.classes()` -> the distinct
-  RBAC prefixes. (datamodel + hunts classes arrive with the multi-repo work.)
-- **`engine.GitCrud`** - the engine. Holds a `GitopsRepo`. Methods:
-  - `list(cls)` - enumerate resource names in a class.
-  - `get(cls, name)` / `vars(cls, name)` - read the doc / its flattened dot-path vars.
-  - `put(cls, name, doc, actor, message=, base_revision=)` - write a whole doc + commit.
-  - `set_key` / `delete_key(cls, name, dotpath, ...)` - set/remove one dot-path + commit.
-  - `delete(cls, name, actor)` - remove a resource + commit.
-  - `put_many(items, actor, message)` - write several resources in ONE commit (atomic
-    actions).
-  - `head_revision()` / `get_with_revision()` / `_guard_revision()` - optimistic
-    concurrency: HEAD SHA is the version token; a stale `base_revision` raises
-    `ConcurrencyConflictError(current, head)`.
-  - module helpers: `flatten(doc)` (dot-paths), `set_path`/`get_path`.
-- **`commit_policy`** - enforces the GitOps Commit Standard in code:
-  `CommitContext` + `build_message()` (conforming subject + audit trailers + `[skip ci]`),
-  `validate_subject` (ASCII/<=50/allowed type), `validate_change` (reject `latest`/
-  unpinned images + controller-owned `replicaCount`), `resolve_mode()` (direct vs PR).
-- **`defaults.diff_against_defaults(current_flat, chart_defaults)`** - the
-  changed-from-default view for Tier-1 (per-var `default` + `changed`).
-- **`factory.build_gitcrud(settings)`** - build a GitCrud from settings, or None when
-  gitops is disabled (so the API degrades to 503, startup unaffected).
+`src/dfe_engine/governance/`. An `ActionDef` is a name, the permission needed to run
+it (`required_action`), and a list of `VarChange`s. `ActionStore.invoke` applies them
+all in one commit, honours the protected-var policy (a single violation aborts the
+whole action -- it is atomic), and `dry_run` returns the diff without writing.
 
-## 3. governance/ - Tier-2 (curated actions) + policies + RBAC + CH identity
+```mermaid
+sequenceDiagram
+    participant Op as Operator
+    participant Gov as Tier-2 router
+    participant Store as ActionStore
+    participant Pol as PolicyStore
+    participant Crud as GitCrud
 
-- **`models`** - `VarChange(cls,name,path,value)`, `ActionDef(name, required_action,
-  changes)`, `ProtectedPolicy(name, protected[])`.
-- **`actions.ActionStore`** - CRUD action defs (gitops `actions` class) + **`invoke()`**:
-  applies ALL of an action's changes in ONE commit (`put_many`), honours the
-  protected-var policy (a violation aborts the WHOLE action - atomic), `dry_run` returns
-  the diff without committing. The curated "big dials" surface.
-- **`policies.PolicyStore`** - load protected-var policies; `is_protected(cls,name,path)`
-  (fnmatch on `cls:name:path` globs); `enforce(..., override=)` raises `ProtectedVarError`
-  unless the caller holds the override grant. The one thing that reaches below a class.
-- **`rbac_source`** - load roles/groups FROM gitops (`load_roles`/`load_groups`/
-  `resolve_roles_for_groups`) so authz is versioned + survives the engine.
-- **`auth_sync.sync_rbac_to_gitops(crud, group_store, role_store)`** - mirror the RBAC
-  STRUCTURE (roles+groups) INTO gitops (closes the survivability gap). Accounts/API
-  keys hold secret material -> NOT mirrored (ESO follow-up).
-- **`ch_rbac`** - the per-group ClickHouse identity (Phase 6): `GroupChBinding`
-  (group -> ch_user + grants + settings + quota), `build_group_sql()` (CREATE USER +
-  GRANT + SETTINGS PROFILE + QUOTA, backtick-quoted), `ddl_artifact()` (emit as a
-  gitops DDL file `ddl/ch-rbac/<group>.sql` - primary path, applied by the migration
-  runner like schema DDL), `GroupChProvisioner` (imperative apply - secondary path).
+    Op->>Gov: POST /governance/actions/scale-receiver/invoke
+    Gov->>Store: load the action
+    Gov->>Gov: require the action's OWN required_action
+    Gov->>Store: invoke (actor, dry_run)
+    loop each change
+        Store->>Pol: enforce - protected var aborts the lot
+    end
+    Store->>Crud: put_many - ONE atomic commit
+    Crud-->>Op: diff + commit SHA
+```
 
-## 4. api/v1/ - the routers (thin; call the services above)
+A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked
+`cls:name:path` globs that even Tier-1 must respect unless the caller holds the
+override grant. It is a policy object, not a per-var ACL.
 
-- **`helm`** (Tier-1, `/api/v1/helm`): `GET /files`, `GET /files/{name}/vars`,
-  `PUT/DELETE /files/{name}/vars/{path}`. RBAC `helmvars:read|write`(+`override`);
-  `If-Match` -> 409 conflict (current vs theirs); commit-policy + protected-var guards;
-  audits every mutation.
-- **`governance`** (Tier-2, `/api/v1/governance`): list/get actions; `POST
-  /actions/{name}/invoke` gated on the action's OWN `required_action` (per-action RBAC,
-  resolved at call time); admin CRUD of actions + policies (`governance:write`).
-- **`config`** (`/api/v1/config/client`, public, no secrets): runtime config for the UI
-  (api base, hyperdx url+enabled, auth mode, feature flags) - fixes the Next.js
-  build-time `NEXT_PUBLIC` trap (one image, every env).
+Two more governance pieces keep authz itself in git: `rbac_source` loads roles and
+groups FROM the gitops tree, and `auth_sync` mirrors them back INTO it. Accounts and
+API keys hold secret material, so they stay out of git (that is an ESO job).
 
-## 5. hunt_runner/ - the multi-pod runner (Phase 2)
+## ClickHouse data RBAC -- one user per group
 
-The pull-based model: hunts are NEVER assigned to pods; workers pull due runs.
+`governance/ch_rbac.py`. Access control in HyperDX's app layer cannot contain a bad
+query. Quotas and resource limits can, and those live on the ClickHouse user. So a
+group maps to exactly one ClickHouse user carrying three controls:
 
-- **`models`** - `HuntSpec(hunt_id, interval_seconds, query, target_table,
-  timestamp_field="timestamp_load")`, `HuntState(status, overrun_count, too_aggressive)`.
-- **`spread`** - deterministic load-spread (no CH thundering herd):
-  `phase_offset(hunt_id, interval)` (stable hash offset in `[0, interval*0.8)`),
-  `current_fire` (this interval's scheduled fire = boundary+offset), `due_now`
-  (has the current fire arrived?), `next_due` (next future fire).
-- **`scheduler`** - the never-double-run decision: `decide(state, now, due, running,
-  cap)` -> `run` | `defer` (already running) | `wait` (not due / cap reached);
-  `mark_deferred` flags `too_aggressive` + bumps overrun.
-- **`claim_table.ClaimTable`** (PostgreSQL) - the distribution substrate. DDL for
-  `hunt_run` + `hunt_state`; `enqueue`, `claim(worker, now, limit)` via
-  **`SELECT ... FOR UPDATE SKIP LOCKED`** (exactly-once across workers), `complete`,
-  `reclaim_expired` (crashed-worker lease recovery), `running_count`, `active_hunt_ids`.
-- **`checkpoint`** - incremental window on `timestamp_load`: `window(last_watermark,
-  scheduled_start, interval)` -> `(start, end)`; `predicate()` -> the SQL clause.
-  Crash-safe: the watermark advances only after the query commits.
-- **`worker`** - `CheckpointStore` (per-hunt watermark in CH, ReplacingMergeTree),
-  `HuntWorker.run(spec, scheduled_start)`: load watermark -> compute window ->
-  substitute `{window}` in the rule query -> execute against CH (the query INSERTs
-  matched rows into the target table) -> advance the watermark.
-- **`runner.HuntRunner`** - ties it together. `enqueue_due(now)` (enqueue this
-  interval's fire for any due hunt not already active - deduped), `drain(now)` (claim
-  up to `cap - running`, execute each at its scheduled window, complete), `tick(now)`
-  = enqueue_due + drain. The daemon is `while: tick(); sleep`.
+```mermaid
+graph LR
+    Group["RBAC group - e.g. soc-ro"]
+    User["ClickHouse user - dfe_grp_soc-ro"]
+    Grants["GRANTs + row policies - what data"]
+    Profile["Settings profile - per-query limits"]
+    Quota["Quota - rate and volume"]
 
-Live-validated on real PG + CH: concurrent disjoint claims, lease reclaim, full tick
-with incremental resume (no duplicate rows).
+    Group --> User
+    User --> Grants
+    User --> Profile
+    User --> Quota
+```
 
-## 6. alerting/ - scaffold (Phase 7, deferred)
+`build_group_sql` renders the `CREATE USER` + `GRANT` + `CREATE SETTINGS PROFILE` +
+`CREATE QUOTA` (identifiers backtick-quoted, so a hyphenated group name is a valid
+CH name). The primary path is `ddl_artifact`, which emits that as a gitops DDL file
+under `ddl/ch-rbac/<group>.sql` -- applied by the same migration runner as the schema
+DDL, with the read-only core tiers supplied from dfe-schemas. The imperative
+`GroupChProvisioner` is the secondary, direct path. HyperDX then selects the
+connection bound to the user's group, so every query runs as that user and CH itself
+is the enforcing boundary.
 
-`AlertRule(threshold, window_seconds, severity, destination)` + `fires(rule, count)`;
-`AlertDestination`; `Dispatcher(destinations, senders)` with a `Sender` protocol +
-`LogSender` placeholder. Real senders (Apprise candidate) + web-research held until the
-phase is reached.
+This applies to **hunts too**, and it is the same mechanism. A hunt worker does not
+connect to ClickHouse as an unbounded account -- it runs its query as a CH user
+carrying a quota and a settings profile. The primary job there is a cost guard: a
+dumb or runaway hunt query (a full-table scan, an unbounded join) is killed by the
+quota or the `max_memory_usage`/`max_execution_time`/`max_rows_to_read` limits
+rather than taking the cluster down. The grants are a security scope on top if a
+hunt should only ever see certain data. So the per-group CH user has two consumers --
+interactive queries through HyperDX, and hunt execution -- and CH is the safety
+boundary for both.
 
-## 7. cli/governed_ops.py
+## The hunt runner
 
-`dfe-api governed helm set/get/list` and `action invoke` - a thin wrapper calling the
-SAME `GitCrud`/`ActionStore` the routers use (so the gitops-commit path is identical).
-For CI / break-glass.
+`src/dfe_engine/hunt_runner/`. A hunt is a rule query on a schedule that writes
+matched rows to a table. One pod proved it cannot service them all, so the runner is
+a pool -- but hunts are never *assigned* to pods. Workers pull due runs from a
+ClickHouse lease table. Add a pod and it just starts pulling. Kill one and its leases
+expire and get reclaimed. There is no shard map to rebalance and nothing to go
+split-brain over.
 
-## 8. Principles enforced (acceptance criteria)
+ClickHouse is the ONLY operational store -- no Postgres. Making hunts (the
+mission-critical path) depend on a second database purely for coordination is not
+worth the operational surface, so the same CH the hunts already query holds the
+lease, watermark, and state. CH has no row locks, so the claim is optimistic:
+insert-a-lease-then-resolve, not `SELECT ... FOR UPDATE`.
 
-- **GitOps-survivability** - every mutation is a `GitopsRepo.publish()`; no live cluster
-  client. Kill engine+ui and the repos still drive + manage DFE.
-- **RBAC at the abstraction** - bound at class/action/operation handles only, never
-  per-var; one `require_action` check per request.
-- **CH is the authoritative + safety boundary** - per-group CH user carries grants +
-  quota + settings profile (the app layer cannot do quotas/limits).
-- **No double-run, ever** - PG row state + lease; overrun -> defer + `too_aggressive`.
-- **Crash-safe** - watermark advances only after commit; SKIP-LOCKED leases reclaim.
+```mermaid
+graph TD
+    Scheduler["Scheduler - compute due fires"]
+    Claim["ClickHouse hunt_lease - insert + resolve winner"]
+    W1["Worker"]
+    W2["Worker"]
+    CH["ClickHouse - run query, write results"]
+    WM["Watermark on timestamp_load"]
+
+    W1 -->|claim| Claim
+    W2 -->|claim| Claim
+    W1 --> CH
+    W2 --> CH
+    CH --> WM
+    WM -->|resume incrementally| W1
+```
+
+The smarts are deterministic, not random. `spread.phase_offset` gives each hunt a
+stable offset inside its interval from a hash of its id, so hunts on the same
+schedule fan out evenly and never stampede ClickHouse at the boundary. `due_now`
+asks whether this interval's fire has arrived. A global cap hard-limits how much hits
+CH at once.
+
+A run never doubles up. To claim, a worker INSERTs a lease row for `(hunt, fire)`
+then reads the rows back for that key and settles on one deterministic winner (claim
+time, then owner id) after a short window -- so a single worker is exactly-once, and
+the rare multi-worker race is absorbed because the windowed INSERT is idempotent (the
+same window written twice is the same rows). Per-hunt state means an overrun defers
+rather than starting a second copy -- and flags `too_aggressive` so the UI can tell
+the user their schedule is too tight.
+
+```mermaid
+stateDiagram-v2
+    [*] --> due: phase_offset + due_now
+    due --> running: worker claims (insert+resolve, under cap)
+    running --> done: query committed, watermark advanced
+    running --> due: lease expired (worker died) -> reclaimed
+    done --> [*]
+    due --> deferred: previous run still running
+    deferred --> due: previous run finished
+```
+
+Each run is incremental and crash-safe. The query carries a `{window}` placeholder;
+the worker substitutes `timestamp_load >= start AND < end`, runs it, and advances the
+watermark ONLY after the query commits. A pod killed mid-run re-runs the same window
+from the last committed watermark -- no gap, no loss. The watermark field is fixed to
+`timestamp_load`, the common-header column that is always present.
+
+The three coordination tables (ReplacingMergeTree, in the effective data database):
+
+```mermaid
+erDiagram
+    hunt_lease {
+        string hunt_id
+        string owner
+        int64 fire
+        int64 lease_until
+        datetime64 claimed
+    }
+    hunt_watermark {
+        string hunt_id
+        int64 watermark
+        datetime64 updated
+    }
+    hunt_state {
+        string hunt_id
+        int64 overrun_count
+        uint8 too_aggressive
+        datetime64 updated
+    }
+```
+
+`HuntRunner.tick(now)` is one cycle -- find due hunts that are not already active,
+then claim up to the cap and execute each at its scheduled window. The daemon is
+`while: tick(); sleep`. Validated end to end against real ClickHouse: concurrent
+disjoint claims, lease reclaim, and incremental resume with no duplicate rows.
+
+## The smaller pieces
+
+- **Runtime config** -- `GET /api/v1/config/client` (public, no secrets) hands the UI
+  its API base, HyperDX URL, auth mode, and feature flags at runtime. This is what
+  lets one UI image run in every environment instead of baking the URLs in at build
+  time.
+- **Alerting** -- a scaffold only, deferred by design. A rule model (threshold over a
+  window, severity to a channel) and a pluggable dispatcher. The real senders and the
+  library choice wait until we reach that phase.
+- **CLI** -- `dfe-api governed helm ...` and `action invoke` wrap the same services
+  the API uses, for CI and break-glass. A CLI is a thin window over the API, not a
+  second way of doing things.
+
+## What holds it together
+
+```mermaid
+graph TD
+    Surv["GitOps survivability - repo is SoT + authority"]
+    RBAC["RBAC at the abstraction - class / action / operation"]
+    CHsafe["ClickHouse is the safety boundary - quotas + limits"]
+    NoDouble["No double-run, ever - lease + per-hunt state"]
+    Crash["Crash-safe - watermark advances only after commit"]
+
+    Surv --> RBAC
+    Surv --> CHsafe
+    Surv --> NoDouble
+    NoDouble --> Crash
+```
+
+If a change cannot be made by committing YAML to the repo, it does not belong in the
+engine. That rule is what keeps DFE operable without us.
