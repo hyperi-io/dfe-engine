@@ -199,8 +199,12 @@ def _connect_when_ready(clickhouse_connect, params: dict, attempts: int = 40, de
 
 
 @pytest.fixture
-def ch_client():
-    """A real ClickHouse client resolved by tier (cluster -> remote -> local docker)."""
+def ch_params():
+    """Resolved CH connection params by tier (cluster -> remote -> local docker).
+
+    Yields the params dict (so a test can open MANY clients - e.g. N synthetic
+    hunt-runner pods, one client each). Spins/tears down docker as needed.
+    """
     clickhouse_connect = pytest.importorskip("clickhouse_connect")
     tier = _resolve_tier()
     teardown = None
@@ -219,13 +223,21 @@ def ch_client():
         params, teardown = _spin_ch_on_docker(spec, keep=_truthy("DFE_TEST_KEEP"))
 
     try:
-        client = _connect_when_ready(clickhouse_connect, params)
+        _connect_when_ready(clickhouse_connect, params).close()  # verify reachable
     except Exception as exc:  # not reachable -> skip, do not error the suite
         if teardown is not None:
             teardown()
         pytest.skip(f"ClickHouse not reachable: {exc}")
     try:
-        yield client
+        yield params
     finally:
         if teardown is not None:
             teardown()
+
+
+@pytest.fixture
+def ch_client(ch_params):
+    """A single real ClickHouse client (from ch_params)."""
+    import clickhouse_connect
+
+    return clickhouse_connect.get_client(**ch_params)
