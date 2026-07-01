@@ -317,67 +317,6 @@ def clickhouse_test_database(docker_services, test_run_id):
         pytest.skip(f"ClickHouse connection failed: {e}")
 
 
-@pytest.fixture(scope="session")
-def postgres_test_database(docker_services, test_run_id):
-    """
-    Create an isolated PostgreSQL database for this test run.
-
-    The database is named: dfe_test_{run_id}
-    It is cleaned up after the test session completes.
-    """
-    if not docker_services.get("postgres"):
-        pytest.skip("PostgreSQL not available")
-
-    db_name = f"dfe_test_{test_run_id}"
-
-    # Get connection settings
-    host = os.getenv("DFE_POSTGRES_HOST", "localhost")
-    port = int(os.getenv("DFE_POSTGRES_PORT", "5432"))
-    user = os.getenv("DFE_POSTGRES_USER", "postgres")
-    password = os.getenv("DFE_POSTGRES_PASSWORD", "postgres")
-    default_db = os.getenv("DFE_POSTGRES_DATABASE", "postgres")
-
-    try:
-        import psycopg
-
-        # Connect to default database to create test database (autocommit for CREATE DATABASE)
-        conn = psycopg.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            dbname=default_db,
-            autocommit=True,
-        )
-
-        # Create test database
-        conn.execute(f"DROP DATABASE IF EXISTS {db_name}")
-        conn.execute(f"CREATE DATABASE {db_name}")
-        logger.info(f"Created test database: {db_name}")
-        conn.close()
-
-        yield db_name
-
-        # Cleanup: drop test database
-        conn = psycopg.connect(
-            host=host,
-            port=port,
-            user=user,
-            password=password,
-            dbname=default_db,
-            autocommit=True,
-        )
-        conn.execute(f"DROP DATABASE IF EXISTS {db_name}")
-        logger.info(f"Dropped test database: {db_name}")
-        conn.close()
-
-    except ImportError:
-        pytest.skip("psycopg not installed")
-    except Exception as e:
-        logger.error(f"Failed to create test database: {e}")
-        pytest.skip(f"PostgreSQL connection failed: {e}")
-
-
 @pytest.fixture
 def clickhouse_client(clickhouse_test_database):
     """
@@ -401,29 +340,3 @@ def clickhouse_client(clickhouse_test_database):
         database=clickhouse_test_database,
     )
     return client
-
-
-@pytest.fixture
-def postgres_connection(postgres_test_database):
-    """
-    Provide a PostgreSQL connection to the test database.
-
-    This is a function-scoped fixture that provides a fresh connection
-    for each test, connected to the isolated test database.
-    """
-    host = os.getenv("DFE_POSTGRES_HOST", "localhost")
-    port = int(os.getenv("DFE_POSTGRES_PORT", "5432"))
-    user = os.getenv("DFE_POSTGRES_USER", "postgres")
-    password = os.getenv("DFE_POSTGRES_PASSWORD", "postgres")
-
-    import psycopg
-
-    conn = psycopg.connect(
-        host=host,
-        port=port,
-        user=user,
-        password=password,
-        dbname=postgres_test_database,
-    )
-    yield conn
-    conn.close()

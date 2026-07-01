@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Hunt definition (gitops) + runtime coordination state (PG)."""
+"""Hunt definition (gitops) + runtime coordination state (ClickHouse)."""
 
 from __future__ import annotations
 
@@ -17,14 +17,16 @@ class HuntSpec(BaseModel):
 
     hunt_id: str
     interval_seconds: int
-    query: str = ""  # rule/template reference
-    target_table: str = "dfe.default"
+    query: str = ""  # rule/template reference; carries its own INSERT target
+    # Optional target metadata. Empty by default - the query carries its own target,
+    # resolved against effective_data_database by config; never hardcode 'dfe' here.
+    target_table: str = ""
     # FIXED watermark field - the always-present common-header column (Derek).
     timestamp_field: str = "timestamp_load"
 
 
 class HuntState(BaseModel):
-    """Per-hunt runtime coordination state (lives in PG, not gitops)."""
+    """Per-hunt runtime coordination state (lives in ClickHouse, not gitops)."""
 
     hunt_id: str
     status: str = "idle"  # idle | running | deferred

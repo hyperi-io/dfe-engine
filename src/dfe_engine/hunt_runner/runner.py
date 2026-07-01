@@ -1,73 +1,69 @@
 #  Project:      dfe-engine
 #  File:         hunt_runner/runner.py
-#  Purpose:      The pull-based runner tick: enqueue due -> claim -> execute
+#  Purpose:      The pull-based runner tick: due -> claim -> execute (CH-only)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""One cycle of the multi-pod hunt runner.
+"""One cycle of the multi-pod hunt runner, coordinated entirely through ClickHouse.
 
-``tick`` is the unit a long-running worker repeats: enqueue any due hunts not
-already active, claim up to the global cap via SKIP LOCKED, and execute each
-claimed run. Pull-based -> no hunt is assigned to a pod; add a pod and it just
-pulls. The daemon loop is a thin `while: tick(); sleep` wrapper around this.
+``tick`` is the unit a long-running worker repeats: for each due hunt that has not
+already completed this fire and is not already running, claim it (insert-and-resolve
+lease -> never double-run) and execute it, up to the global cap. Pull-based -> no
+hunt is assigned to a pod; add a pod and it just competes for claims; kill one and
+its lease expires and is reclaimed. The daemon loop is a thin ``while: tick(); sleep``
+wrapper around this.
 """
 
 from __future__ import annotations
 
-from .claim_table import ClaimTable
+from .ch_coordinator import ChCoordinator
 from .models import HuntSpec
 from .spread import current_fire, due_now
 from .worker import HuntWorker
 
 
 class HuntRunner:
-    """Ties the scheduler decision (spread/cap) to the claim table + worker."""
+    """Ties the spread/cap decision to the ClickHouse coordinator + worker."""
 
     def __init__(
         self,
-        claims: ClaimTable,
+        coordinator: ChCoordinator,
         worker: HuntWorker,
         specs: dict[str, HuntSpec],
         cap: int = 8,
-        worker_id: str = "worker-0",
     ) -> None:
-        self._claims = claims
+        self._coord = coordinator
         self._worker = worker
         self._specs = specs
         self._cap = cap
-        self._worker_id = worker_id
-
-    def enqueue_due(self, now: int) -> int:
-        """Enqueue this interval's fire for any due hunt not already active. Dedups."""
-        active = self._claims.active_hunt_ids()
-        n = 0
-        for spec in self._specs.values():
-            if spec.hunt_id in active:
-                continue
-            if due_now(spec.hunt_id, spec.interval_seconds, now):
-                # due_at = the scheduled fire time = the query window's end
-                self._claims.enqueue(
-                    spec.hunt_id, current_fire(spec.hunt_id, spec.interval_seconds, now)
-                )
-                n += 1
-        return n
-
-    def drain(self, now: int) -> int:
-        """Claim up to the global cap and execute each run at its scheduled window."""
-        limit = max(0, self._cap - self._claims.running_count())
-        if limit == 0:
-            return 0
-        claimed = self._claims.claim(self._worker_id, now, limit)
-        for run in claimed:
-            spec = self._specs.get(run["hunt_id"])
-            if spec is not None:
-                # window end = the run's scheduled fire time (due_at), so resume is exact
-                self._worker.run(spec, run["due_at"])
-            self._claims.complete(run["id"])
-        return len(claimed)
 
     def tick(self, now: int) -> int:
-        """One cycle: enqueue due hunts (deduped) then drain. Returns runs executed."""
-        self.enqueue_due(now)
-        return self.drain(now)
+        """One cycle: claim + run every due hunt (never double-run), up to the cap.
+
+        Returns the number of runs executed this tick.
+        """
+        running = self._coord.active_count(now)
+        executed = 0
+        for spec in self._specs.values():
+            if running + executed >= self._cap:
+                break  # global cap protects ClickHouse; lateness surfaces as overload
+            if not due_now(spec.hunt_id, spec.interval_seconds, now):
+                continue
+            fire = current_fire(spec.hunt_id, spec.interval_seconds, now)
+            watermark = self._coord.get_watermark(spec.hunt_id)
+            if watermark is not None and watermark >= fire:
+                continue  # this fire already completed - idempotent across ticks
+            lease = self._coord.current_lease(spec.hunt_id)
+            if lease is not None and lease.lease_until > now:
+                # still running from a prior fire -> defer, NEVER double-run
+                self._coord.record_overrun(spec.hunt_id)
+                continue
+            if not self._coord.try_claim(spec.hunt_id, fire, now):
+                continue  # lost the settle-window race -> another worker has it
+            try:
+                self._worker.run(spec, fire)
+            finally:
+                self._coord.release(spec.hunt_id, fire)
+            executed += 1
+        return executed
