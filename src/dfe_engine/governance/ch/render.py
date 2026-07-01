@@ -89,6 +89,22 @@ def render_service_role(role_def: ChServiceRole) -> list[str]:
     return stmts
 
 
+def render_service_user(role_def: ChServiceRole, pw_hash: str) -> list[str]:
+    """DDL for a minted service USER (``mint_user``): create + grant its role.
+
+    Separate from ``render_service_role`` because it carries the freshly minted
+    password hash; the reconciler calls it only after minting the secret.
+    """
+    qu = _bq(role_def.user())
+    stmts = [
+        f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"GRANT {_bq(role_def.role())} TO {qu}",
+    ]
+    if role_def.settings:
+        stmts.append(f"ALTER USER {qu} SETTINGS PROFILE {_bq(role_def.profile())}")
+    return stmts
+
+
 def _org_predicate(org_ids: list[str]) -> str:
     """``_org_id = 'x'`` for a single id, ``_org_id IN ('a', 'b')`` for many."""
     if len(org_ids) == 1:

@@ -25,22 +25,28 @@ from .models import (
     org_policy_name,
     org_role_name,
 )
+from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops
 from .render import (
     render_group_user,
     render_org_role,
     render_service_role,
+    render_service_user,
     render_tier,
 )
 
 __all__ = [
     "DEFAULT_TIERS",
+    "ChRbacReconciler",
     "ChServiceRole",
     "ChTier",
     "GroupChBinding",
+    "ReconcileResult",
+    "compute_drops",
     "org_policy_name",
     "org_role_name",
     "render_group_user",
     "render_org_role",
     "render_service_role",
+    "render_service_user",
     "render_tier",
 ]
