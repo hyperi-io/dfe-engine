@@ -248,3 +248,13 @@ class TestRouterProtected:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
+
+
+class TestChRbacReconcileEndpoint:
+    def test_requires_auth(self, client):
+        # the governance:write gate rejects before any ClickHouse work
+        assert client.post("/api/v1/governance/ch-rbac/reconcile").status_code == 401
+
+    def test_viewer_forbidden(self, client, viewer_headers):
+        resp = client.post("/api/v1/governance/ch-rbac/reconcile", headers=viewer_headers)
+        assert resp.status_code == 403

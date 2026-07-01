@@ -83,6 +83,43 @@ def action_invoke(name: str, actor: str = "cli", dry_run: bool = False) -> None:
     typer.echo(f"dry_run={res.dry_run} changed={res.changed} commit={res.commit_sha or '-'}")
 
 
+@governed_app.command("reconcile-ch-rbac")
+def reconcile_ch_rbac_cmd() -> None:
+    """Reconcile CH quota tiers + service roles + per-org row policies into
+    ClickHouse (mints the service-user secrets via the secrets seam). Idempotent.
+    """
+    from pathlib import Path
+
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.governance.ch import reconcile_ch_rbac
+    from dfe_engine.orgs.registry import OrgRegistry
+    from dfe_engine.secrets import build_secrets
+
+    settings = load_settings()
+    ch_cfg = {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+    }
+    admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
+    orgs_dir = Path(settings.config_dir or "config") / "orgs"
+    orgs = OrgRegistry(orgs_dir).list() if orgs_dir.exists() else []
+    result = reconcile_ch_rbac(
+        admin_client,
+        secrets_store=build_secrets(settings.secrets),
+        orgs=orgs,
+    )
+    typer.echo(
+        f"applied={len(result.statements)} dropped={len(result.dropped)} "
+        f"minted={len(result.minted)} errors={len(result.errors)}"
+    )
+    for err in result.errors:
+        typer.echo(f"  error: {err}", err=True)
+
+
 def register_governed_ops_commands(app: typer.Typer) -> None:
     """Register the ``governed`` subcommand group on *app*."""
     app.add_typer(governed_app, name="governed")

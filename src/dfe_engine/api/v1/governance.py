@@ -164,3 +164,49 @@ async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "policy", name, "deleted")
+
+
+@router.post(
+    "/ch-rbac/reconcile",
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
+    """Reconcile CH quota tiers + service roles + per-org row policies into
+    ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
+    governance:write.
+    """
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.governance.ch import reconcile_ch_rbac
+    from dfe_engine.secrets import build_secrets
+    from dfe_engine.settings import load_settings
+
+    settings = load_settings()
+    ch_cfg = {
+        "ch_host": settings.clickhouse.host,
+        "ch_port": settings.clickhouse.port,
+        "ch_username": settings.clickhouse.username,
+        "ch_password": settings.clickhouse.password,
+        "ch_secure": settings.clickhouse.secure,
+        "ch_verify": settings.clickhouse.verify,
+    }
+    try:
+        admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_unavailable", "message": str(exc)},
+        ) from exc
+
+    org_registry = getattr(request.app.state, "org_registry", None)
+    orgs = org_registry.list() if org_registry is not None else []
+    result = reconcile_ch_rbac(
+        admin_client,
+        secrets_store=build_secrets(settings.secrets),
+        orgs=orgs,
+    )
+    return {
+        "statements": len(result.statements),
+        "dropped": len(result.dropped),
+        "minted": result.minted,
+        "errors": result.errors,
+    }

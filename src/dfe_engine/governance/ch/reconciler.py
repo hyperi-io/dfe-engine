@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from .models import org_policy_name, org_role_name
+from .models import DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_policy_name, org_role_name
 from .render import (
     _bq,
     render_group_user,
@@ -231,3 +231,28 @@ class ChRbacReconciler:
                 minted=len(result.minted),
             )
         return result
+
+
+def reconcile_ch_rbac(
+    admin_client: Any,
+    *,
+    secrets_store: Any = None,
+    orgs: list[Any] | None = None,
+    tiers: list[Any] | None = None,
+    service_roles: list[Any] | None = None,
+    bindings: list[Any] | None = None,
+) -> ReconcileResult:
+    """The one entry point to reconcile the CH-RBAC config into ClickHouse.
+
+    Defaults to the SEEDED tiers + service roles; pass explicit lists to override
+    (e.g. once tiers/bindings load from gitcrud). ``secrets_store`` (the
+    scalo.secrets seam) enables minting the service/group USERS - without it only
+    tiers, roles and org row policies reconcile. Used by app.py startup, the
+    ``reconcile-ch-rbac`` CLI command, and the governance API endpoint.
+    """
+    return ChRbacReconciler(admin_client, secrets_store=secrets_store).reconcile(
+        tiers=tiers if tiers is not None else DEFAULT_TIERS,
+        service_roles=service_roles if service_roles is not None else DEFAULT_SERVICE_ROLES,
+        orgs=orgs or [],
+        bindings=bindings or [],
+    )

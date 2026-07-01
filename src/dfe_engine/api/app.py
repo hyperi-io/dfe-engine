@@ -139,11 +139,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
         try:
             from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-            from dfe_engine.governance.ch import (
-                DEFAULT_SERVICE_ROLES,
-                DEFAULT_TIERS,
-                ChRbacReconciler,
-            )
+            from dfe_engine.governance.ch import reconcile_ch_rbac
+            from dfe_engine.secrets import build_secrets
 
             ch_cfg = {
                 "ch_host": settings.clickhouse.host,
@@ -154,11 +151,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "ch_verify": settings.clickhouse.verify,
             }
             admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
-            ChRbacReconciler(admin_client).reconcile(
-                tiers=DEFAULT_TIERS,
-                service_roles=DEFAULT_SERVICE_ROLES,
+            # The secrets store mints the loader / query_reader service users;
+            # without it only tiers, roles and org row policies reconcile.
+            reconcile_ch_rbac(
+                admin_client,
+                secrets_store=build_secrets(settings.secrets),
                 orgs=app.state.org_registry.list(),
-                bindings=[],
             )
             logger.info("CH RBAC reconcile complete")
         except Exception:

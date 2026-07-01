@@ -26,7 +26,7 @@ from .models import (
     org_policy_name,
     org_role_name,
 )
-from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops
+from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops, reconcile_ch_rbac
 from .render import (
     render_group_user,
     render_materialise,
@@ -47,6 +47,7 @@ __all__ = [
     "compute_drops",
     "org_policy_name",
     "org_role_name",
+    "reconcile_ch_rbac",
     "render_group_user",
     "render_materialise",
     "render_org_role",
