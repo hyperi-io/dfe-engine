@@ -278,12 +278,16 @@ class QueryViewSettings(BaseModel):
     """
 
     restricted_user: str = Field(
-        default="dfe_query_user", description="Username for restricted query user"
+        # The query_reader service user minted by governance.ch.ChRbacReconciler;
+        # its password comes from the secrets seam (ch/service/query_reader),
+        # injected via DFE_QUERY_VIEWS_RESTRICTED_PASSWORD.
+        default="dfe_query_reader",
+        description="Username for the restricted query user (the query_reader service user)",
     )
     restricted_password: str = Field(default="", description="Password for restricted query user")
     auto_bootstrap: bool = Field(
         default=True,
-        description="Automatically bootstrap RBAC and builtin views on startup",
+        description="Automatically apply builtin views on startup (reader RBAC is reconciled separately)",
     )
     view_prefix: str = Field(default="dfe_v_", description="Prefix for parameterized view names")
     catalog_cache_ttl: int = Field(default=60, description="View catalog cache TTL in seconds")

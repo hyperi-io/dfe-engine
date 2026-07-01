@@ -1,83 +1,15 @@
-"""Unit tests for DDLManager - RBAC bootstrap and view management."""
+"""Unit tests for DDLManager - parameterized-view management.
+
+The restricted-reader RBAC moved to the query_reader service role (reconciled by
+governance.ch.ChRbacReconciler); DDLManager only manages views + grants SELECT
+to dfe_query_reader_role.
+"""
 
 from unittest.mock import MagicMock
 
 import pytest
 
 from dfe_engine.query.ddl import DDLManager
-
-
-class TestRBACBootstrap:
-    """Tests for RBAC DDL generation."""
-
-    def test_rbac_statements_default(self):
-        """Test RBAC DDL with default settings."""
-        client = MagicMock()
-        mgr = DDLManager(client=client, database="default")
-
-        stmts = mgr._build_rbac_statements()
-        assert len(stmts) == 3
-
-        # Settings profile
-        assert "CREATE SETTINGS PROFILE IF NOT EXISTS dfe_query_profile" in stmts[0]
-        assert "readonly = 1 CONST" in stmts[0]
-        assert "max_execution_time = 30 CONST" in stmts[0]
-        assert "max_rows_to_read = 10000000 CONST" in stmts[0]
-        assert "max_memory_usage = '2G' CONST" in stmts[0]
-        assert "allow_ddl = 0 CONST" in stmts[0]
-
-        # Role
-        assert stmts[1] == "CREATE ROLE IF NOT EXISTS dfe_query_reader"
-
-        # User
-        assert "CREATE USER IF NOT EXISTS dfe_query_user" in stmts[2]
-        assert "SETTINGS PROFILE dfe_query_profile" in stmts[2]
-
-    def test_rbac_statements_custom_limits(self):
-        """Test RBAC DDL with custom resource limits."""
-        client = MagicMock()
-        mgr = DDLManager(
-            client=client,
-            database="prod",
-            max_execution_time=60,
-            max_rows_to_read=50_000_000,
-            max_memory_usage="4G",
-        )
-
-        stmts = mgr._build_rbac_statements()
-        assert "max_execution_time = 60 CONST" in stmts[0]
-        assert "max_rows_to_read = 50000000 CONST" in stmts[0]
-        assert "max_memory_usage = '4G' CONST" in stmts[0]
-
-    def test_rbac_statements_custom_user(self):
-        """Test RBAC DDL with custom username and password."""
-        client = MagicMock()
-        mgr = DDLManager(
-            client=client,
-            restricted_user="custom_reader",
-            restricted_password="s3cret",
-        )
-
-        stmts = mgr._build_rbac_statements()
-        assert "CREATE USER IF NOT EXISTS custom_reader" in stmts[2]
-        assert "BY 's3cret'" in stmts[2]
-
-    def test_ensure_rbac_executes_all(self):
-        """Test that ensure_rbac executes all statements."""
-        client = MagicMock()
-        mgr = DDLManager(client=client)
-        mgr.ensure_rbac()
-
-        assert client.command.call_count == 3
-
-    def test_ensure_rbac_raises_on_failure(self):
-        """Test that ensure_rbac raises if a statement fails."""
-        client = MagicMock()
-        client.command.side_effect = Exception("Access denied")
-        mgr = DDLManager(client=client)
-
-        with pytest.raises(Exception, match="Access denied"):
-            mgr.ensure_rbac()
 
 
 class TestViewManagement:
@@ -95,7 +27,7 @@ class TestViewManagement:
         assert client.command.call_count == 2
         calls = [c.args[0] for c in client.command.call_args_list]
         assert calls[0] == sql
-        assert "GRANT SELECT ON testdb.dfe_v_system_health TO dfe_query_reader" in calls[1]
+        assert "GRANT SELECT ON testdb.dfe_v_system_health TO dfe_query_reader_role" in calls[1]
 
     def test_apply_view_invalid_prefix(self):
         """Test that apply_view rejects views without dfe_v_ prefix."""
@@ -163,12 +95,12 @@ class TestBootstrap:
     """Tests for full bootstrap flow."""
 
     def test_bootstrap(self):
-        """Test bootstrap runs RBAC then applies views."""
+        """Test bootstrap applies the builtin views (reader RBAC is elsewhere now)."""
         client = MagicMock()
         mgr = DDLManager(client=client, database="default")
 
         applied = mgr.bootstrap()
 
-        # 3 RBAC statements + 2 per view (CREATE + GRANT) x 3 views = 9
-        assert client.command.call_count >= 9
+        # 2 per view (CREATE + GRANT) x 3 views = 6
+        assert client.command.call_count >= 6
         assert len(applied) >= 3
