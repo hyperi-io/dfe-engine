@@ -524,6 +524,31 @@ class APISettings(BaseModel):
     )
 
 
+class SecretsSettings(BaseModel):
+    """Backing-service seam for secrets the engine MINTS - backend by config.
+
+    The engine reads runtime config secrets from env; this is the WRITE seam for
+    secrets it generates (per-group ClickHouse passwords, OIDC client secrets, API
+    keys). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
+    product: 'file'/'ansible_vault' for dfe-docker (a local encrypted file, no extra
+    service), 'openbao' on k8s (external-first), 'aws'/'gcp'/'azure' for cloud
+    (deferred). See docs/BACKING-SERVICES.md.
+
+    Environment variables (DFE_SECRETS_ prefix):
+    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|aws|gcp|azure)
+    - DFE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
+    - DFE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
+    - DFE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
+    - DFE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
+    """
+
+    provider: str = Field(default="file", description="scalo.secrets backend provider")
+    path: str = Field(default="./.secrets", description="file/ansible_vault root path")
+    addr: str = Field(default="", description="openbao/vault address")
+    mount: str = Field(default="dfe", description="kv mount / key prefix")
+    role: str = Field(default="", description="openbao AppRole role id")
+
+
 class DFESettings(BaseModel):
     """Main DFE Engine settings container."""
 
@@ -548,6 +573,7 @@ class DFESettings(BaseModel):
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
+    secrets: SecretsSettings = Field(default_factory=SecretsSettings)
 
 
 def _load_defaults() -> dict:
@@ -581,6 +607,7 @@ def _get_env_overrides() -> dict:
         "hyperdx": {},
         "gitops": {},
         "api": {},
+        "secrets": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -808,6 +835,18 @@ def _get_env_overrides() -> dict:
         overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
         overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
+
+    # Secrets settings (the scalo.secrets seam for minted secrets)
+    if val := _get_env("DFE_SECRETS_PROVIDER"):
+        overrides["secrets"]["provider"] = val
+    if val := _get_env("DFE_SECRETS_PATH"):
+        overrides["secrets"]["path"] = val
+    if val := _get_env("DFE_SECRETS_ADDR"):
+        overrides["secrets"]["addr"] = val
+    if val := _get_env("DFE_SECRETS_MOUNT"):
+        overrides["secrets"]["mount"] = val
+    if val := _get_env("DFE_SECRETS_ROLE"):
+        overrides["secrets"]["role"] = val
 
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
