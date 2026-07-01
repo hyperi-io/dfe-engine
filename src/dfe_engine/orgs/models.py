@@ -26,8 +26,6 @@ class Org(BaseModel):
         display_name: Human-readable label for UI display.
         org_ids: Tenant IDs used for ClickHouse row-level security filters.
         enabled: Whether this org is active.
-        dedicated_database: Whether this org has a dedicated ClickHouse database.
-        database_name: ClickHouse database name for this org (empty = shared default).
         hyperdx_team_id: HyperDX team ID for this org's connection sync.
         hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
         ch_password_env: Environment variable name holding the ClickHouse password.
@@ -39,8 +37,6 @@ class Org(BaseModel):
     display_name: str = ""
     org_ids: list[str] = Field(default_factory=list)
     enabled: bool = True
-    dedicated_database: bool = False
-    database_name: str = ""
     hyperdx_team_id: str = ""
     hyperdx_team_api_key_env: str = ""
     ch_password_env: str = ""

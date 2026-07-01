@@ -22,27 +22,15 @@ from __future__ import annotations
 class TestOrgApiWithLifecycle:
     """Test org API endpoints with OrgLifecycleManager wired in."""
 
-    def test_create_returns_dedicated_database_field(self, client, admin_headers):
-        """POST /api/v1/orgs response includes dedicated_database field."""
+    def test_create_returns_enabled_field(self, client, admin_headers):
+        """POST /api/v1/orgs response includes the enabled field (default True)."""
         resp = client.post(
             "/api/v1/orgs",
             json={"name": "api-test", "org_ids": ["at"]},
             headers=admin_headers,
         )
         assert resp.status_code == 201
-        data = resp.json()
-        assert "dedicated_database" in data
-        assert data["dedicated_database"] is False
-
-    def test_create_with_dedicated_db_true(self, client, admin_headers):
-        """POST /api/v1/orgs with dedicated_database=True persists correctly."""
-        resp = client.post(
-            "/api/v1/orgs",
-            json={"name": "ded-api-test", "org_ids": ["dat"], "dedicated_database": True},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 201
-        assert resp.json()["dedicated_database"] is True
+        assert resp.json()["enabled"] is True
 
     def test_create_org_response_shape(self, client, admin_headers):
         """POST response includes all required OrgResponse fields."""
@@ -58,14 +46,13 @@ class TestOrgApiWithLifecycle:
             "display_name",
             "org_ids",
             "enabled",
-            "dedicated_database",
             "created_at",
             "updated_at",
         ):
             assert field in data, f"Missing field: {field}"
 
-    def test_list_orgs_shows_dedicated_database(self, client, admin_headers):
-        """GET /api/v1/orgs returns orgs with dedicated_database visible."""
+    def test_list_orgs_returns_created(self, client, admin_headers):
+        """GET /api/v1/orgs returns the created orgs as a plain array."""
         client.post(
             "/api/v1/orgs",
             json={"name": "list-test", "org_ids": ["lt"]},
@@ -78,9 +65,6 @@ class TestOrgApiWithLifecycle:
         assert isinstance(orgs, list)
         names = [o["name"] for o in orgs]
         assert "list-test" in names
-        # Every org in list has dedicated_database field
-        for org in orgs:
-            assert "dedicated_database" in org
 
     def test_get_org_by_name(self, client, admin_headers):
         """GET /api/v1/orgs/{name} returns correct org."""
@@ -131,51 +115,6 @@ class TestOrgApiWithLifecycle:
         )
         assert resp.status_code == 200
         assert resp.json()["display_name"] == "After"
-
-    def test_toggle_off_without_confirm_returns_400(self, client, admin_headers):
-        """Toggling dedicated_database off without confirm_merge returns 400."""
-        client.post(
-            "/api/v1/orgs",
-            json={"name": "tgl-no-confirm", "org_ids": ["tnc"], "dedicated_database": True},
-            headers=admin_headers,
-        )
-        resp = client.put(
-            "/api/v1/orgs/tgl-no-confirm",
-            json={"dedicated_database": False},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 400
-        assert resp.json()["code"] == "confirmation_required"
-
-    def test_toggle_off_with_confirm_succeeds(self, client, admin_headers):
-        """Toggling dedicated_database off with confirm_merge=True succeeds."""
-        client.post(
-            "/api/v1/orgs",
-            json={"name": "tgl-confirm", "org_ids": ["tc"], "dedicated_database": True},
-            headers=admin_headers,
-        )
-        resp = client.put(
-            "/api/v1/orgs/tgl-confirm",
-            json={"dedicated_database": False, "confirm_merge": True},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["dedicated_database"] is False
-
-    def test_toggle_on_from_shared(self, client, admin_headers):
-        """Enabling dedicated_database on a shared-DB org."""
-        client.post(
-            "/api/v1/orgs",
-            json={"name": "tgl-on", "org_ids": ["ton"]},
-            headers=admin_headers,
-        )
-        resp = client.put(
-            "/api/v1/orgs/tgl-on",
-            json={"dedicated_database": True},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["dedicated_database"] is True
 
     def test_delete_org_returns_204(self, client, admin_headers):
         """DELETE /api/v1/orgs/{name} returns 204 and org is gone."""

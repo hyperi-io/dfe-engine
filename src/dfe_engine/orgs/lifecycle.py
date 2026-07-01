@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         orgs/lifecycle.py
-#  Purpose:      Orchestrates org lifecycle across registry, CH provisioner, and HyperDX
+#  Purpose:      Orchestrates org lifecycle across the registry and HyperDX
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -8,10 +8,14 @@
 
 """Org lifecycle manager.
 
-Orchestrates org creation, deletion, and configuration changes across
-the OrgRegistry, OrgChProvisioner, and HyperDXClient.  CH and HyperDX
-operations are non-fatal — failures are logged as warnings and the org
+Orchestrates org creation and deletion across the OrgRegistry and HyperDXClient.
+HyperDX operations are non-fatal - failures are logged as warnings and the org
 operation proceeds.
+
+ClickHouse isolation is NO LONGER a per-org database (the retired 2.1 model);
+under the shared-table + ``_org_id`` model it is a per-org ROLE + restrictive row
+policy, reconciled from the Org registry by
+``governance.ch.ChRbacReconciler`` - not here.
 
 Usage::
 
@@ -21,7 +25,7 @@ Usage::
 
     registry = OrgRegistry(Path("/etc/dfe/orgs"))
     manager = OrgLifecycleManager(registry)
-    org = await manager.create_org("acme", org_ids=["acme"], dedicated_database=True, admin_id="admin")
+    org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
 """
 
 from __future__ import annotations
@@ -31,8 +35,6 @@ from typing import TYPE_CHECKING
 from scalo.logger import logger
 
 from dfe_engine.auth.audit import (
-    audit_org_ch_failed,
-    audit_org_ch_provisioned,
     audit_org_change,
     audit_org_hyperdx_failed,
     audit_org_hyperdx_provisioned,
@@ -43,25 +45,24 @@ from dfe_engine.orgs.registry import OrgRegistry
 if TYPE_CHECKING:
     from dfe_engine.connections.config import ConnectionConfig
     from dfe_engine.hyperdx.client import HyperDXClient
-    from dfe_engine.orgs.ch_provisioner import OrgChProvisioner
 
 
 class OrgLifecycleManager:
-    """Orchestrates org lifecycle across OrgRegistry, OrgChProvisioner, and HyperDXClient.
+    """Orchestrates org lifecycle across OrgRegistry and HyperDXClient.
 
-    CH and HyperDX operations are non-fatal: failures are logged and do not
-    prevent the org operation from completing.
+    HyperDX operations are non-fatal: failures are logged and do not prevent the
+    org operation from completing. Per-org ClickHouse isolation (row policies on
+    ``_org_id``) is applied by ``governance.ch.ChRbacReconciler`` from the
+    registry, not here - orgs share tables.
     """
 
     def __init__(
         self,
         registry: OrgRegistry,
-        ch_provisioner: OrgChProvisioner | None = None,
         hyperdx_client: HyperDXClient | None = None,
         connection_config: ConnectionConfig | None = None,
     ) -> None:
         self._registry = registry
-        self._ch = ch_provisioner
         self._hdx = hyperdx_client
         self._conn_config = connection_config
 
@@ -75,20 +76,18 @@ class OrgLifecycleManager:
         *,
         org_ids: list[str] | None = None,
         display_name: str = "",
-        dedicated_database: bool = False,
         admin_id: str,
     ) -> Org:
-        """Create a new org and provision external resources.
+        """Create a new org and provision its HyperDX team.
 
-        Creates the org in the registry, optionally provisions a dedicated
-        ClickHouse database, and creates a HyperDX team.  CH and HyperDX
-        failures are non-fatal.
+        Creates the org in the registry and creates a HyperDX team (non-fatal).
+        Per-org ClickHouse row-policy isolation is reconciled from the registry
+        by the CH RBAC reconciler, not here.
 
         Args:
             name: Unique org name.
             org_ids: Tenant IDs for ClickHouse row-level security.
             display_name: Human-readable label.
-            dedicated_database: Whether to provision a dedicated CH database.
             admin_id: Identity of the admin performing the operation.
 
         Returns:
@@ -98,21 +97,16 @@ class OrgLifecycleManager:
             ValueError: If an org with this name already exists.
         """
         org = self._registry.create(name, org_ids=org_ids, display_name=display_name)
-
-        if dedicated_database:
-            org = await self._enable_dedicated_db(org)
-
         org = await self._provision_hyperdx(org)
-
         audit_org_change(admin_id=admin_id, org_name=name, change="created")
         return org
 
     async def delete_org(self, name: str, *, admin_id: str) -> None:
-        """Delete an org and deprovision external resources.
+        """Delete an org and its HyperDX team.
 
-        Deprovisions the ClickHouse user (if dedicated database) and
-        deletes the HyperDX team before removing the org from the registry.
-        CH and HyperDX failures are non-fatal.
+        Deletes the HyperDX team (if any) before removing the org from the
+        registry. HyperDX failures are non-fatal. The CH RBAC reconciler drops
+        the org's role + row policies on its next run.
 
         Args:
             name: Org to delete.
@@ -125,112 +119,15 @@ class OrgLifecycleManager:
         if org is None:
             raise KeyError(name)
 
-        if org.dedicated_database and self._ch is not None:
-            self._ch.deprovision(name)
-
         if org.hyperdx_team_id and self._hdx is not None:
             await self._hdx.delete_team(org.hyperdx_team_id)
 
         self._registry.delete(name)
         audit_org_change(admin_id=admin_id, org_name=name, change="deleted")
 
-    async def toggle_dedicated_db(
-        self,
-        name: str,
-        *,
-        enabled: bool,
-        confirm_merge: bool = False,
-        admin_id: str,
-    ) -> Org:
-        """Enable or disable a dedicated ClickHouse database for an org.
-
-        When disabling, ``confirm_merge`` must be True to acknowledge that
-        data migration is the caller's responsibility.
-
-        Args:
-            name: Org to update.
-            enabled: True to enable dedicated database, False to disable.
-            confirm_merge: Required when disabling — caller confirms they
-                have handled data migration.
-            admin_id: Identity of the admin performing the operation.
-
-        Returns:
-            The updated Org.
-
-        Raises:
-            KeyError: If no org with *name* exists.
-            ValueError: If disabling without ``confirm_merge=True``.
-        """
-        org = self._registry.get(name)
-        if org is None:
-            raise KeyError(name)
-
-        if not enabled and not confirm_merge:
-            raise ValueError(
-                "confirm_merge=True is required when disabling dedicated_database "
-                "to acknowledge that data migration is the caller's responsibility."
-            )
-
-        if enabled:
-            org = await self._enable_dedicated_db(org)
-        else:
-            org = self._registry.update(name, dedicated_database=False)
-
-        audit_org_change(
-            admin_id=admin_id,
-            org_name=name,
-            change="updated",
-            details={"dedicated_database": enabled},
-        )
-        return org
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
-
-    async def _enable_dedicated_db(self, org: Org) -> Org:
-        """Provision a dedicated CH database and update the org record.
-
-        Non-fatal: if provisioning fails, the org is still updated with
-        ``dedicated_database=True`` and an empty ``database_name``.
-
-        Args:
-            org: The org to provision.
-
-        Returns:
-            Updated Org with dedicated_database=True and database_name set.
-        """
-        if self._ch is None:
-            logger.warning(
-                "No CH provisioner configured, skipping dedicated DB setup",
-                org_name=org.name,
-            )
-            return self._registry.update(
-                org.name,
-                dedicated_database=True,
-            )
-
-        db_name = self._ch.database_name(org.name)
-        ch_user = self._ch.ch_user_name(org.name)
-        success, _password = self._ch.provision(org.name)
-
-        if success:
-            audit_org_ch_provisioned(
-                org_name=org.name,
-                ch_user=ch_user,
-                databases=[db_name],
-            )
-        else:
-            audit_org_ch_failed(
-                org_name=org.name,
-                error="CH provisioning returned failure",
-            )
-
-        return self._registry.update(
-            org.name,
-            dedicated_database=True,
-            database_name=db_name if success else "",
-        )
 
     async def _provision_hyperdx(self, org: Org) -> Org:
         """Create a HyperDX team for the org and persist the team ID.
