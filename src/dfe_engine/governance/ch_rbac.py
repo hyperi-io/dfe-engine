@@ -26,8 +26,12 @@ from __future__ import annotations
 
 import hashlib
 import secrets
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from dfe_engine.secrets import DfeSecrets
 
 
 class GroupChBinding(BaseModel):
@@ -104,6 +108,20 @@ def ddl_artifact(binding: GroupChBinding, password_hash: str) -> tuple[str, str]
     )
     sql = header + ";\n".join(build_group_sql(binding, password_hash)) + ";\n"
     return f"ddl/ch-rbac/{binding.group}.sql", sql
+
+
+def mint_group_secret(binding: GroupChBinding, secrets_store: DfeSecrets) -> tuple[str, str]:
+    """Mint a group's CH password: plaintext to the secrets seam, hash to gitops DDL.
+
+    The generated password goes to ``scalo.secrets`` (file / openbao / cloud, per
+    config) under ``ch/groups/<group>``; the deploy-repo DDL artifact carries ONLY
+    the sha256 hash. The plaintext NEVER lands in git. Returns the same
+    (repo-relative path, SQL) tuple as ``ddl_artifact``.
+    """
+    password = generate_password()
+    secrets_store.put(f"ch/groups/{binding.group}", password)
+    pw_hash = hashlib.sha256(password.encode()).hexdigest()
+    return ddl_artifact(binding, pw_hash)
 
 
 class GroupChProvisioner:
