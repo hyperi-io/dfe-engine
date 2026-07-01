@@ -7,6 +7,7 @@ from dfe_engine.api.v1.accounts import router as accounts_router
 from dfe_engine.api.v1.alerts import router as alerts_router
 from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.auth import router as auth_router
+from dfe_engine.api.v1.authoring import router as authoring_router
 from dfe_engine.api.v1.cel import router as cel_router
 from dfe_engine.api.v1.config import router as config_router
 from dfe_engine.api.v1.deployments import router as deployments_router
@@ -65,6 +66,7 @@ v1_router.include_router(cel_router)
 v1_router.include_router(helm_router)
 v1_router.include_router(governance_router)
 v1_router.include_router(lifecycle_router)
+v1_router.include_router(authoring_router)
 # Runtime client-config bootstrap for the UI (public, no secrets)
 v1_router.include_router(config_router)
 
