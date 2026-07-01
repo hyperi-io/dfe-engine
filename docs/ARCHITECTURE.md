@@ -4,8 +4,8 @@
 **Applies to:** DFE 2.2
 
 This document describes how DFE actually works today, end to end: the engine, the
-config and deploy repos, the layered deployment model, the data substrate, and
-the runtime data path. It is grounded in the current code, not a proposal.
+config and deploy repos, the layered deployment model, the data backing services,
+and the runtime data path. It is grounded in the current code, not a proposal.
 
 ---
 
@@ -24,7 +24,7 @@ These constraints shape every decision below. Read them first.
    services read their config files directly; the engine reads and writes them
    through an in-memory, git-aware store.
 
-3. **The engine is the config control plane, never the substrate installer.**
+3. **The engine is the config control plane, never the backing-services installer.**
    The engine turns dials (writes config). It does NOT deploy ClickHouse, Kafka,
    Postgres, or author Argo Applications. That is the deployment layer's job.
    See section 11, the engine<->infra boundary - it is a hard rule.
@@ -159,7 +159,7 @@ graph TB
         ARGO[DFE's Argo CD<br/>dfe-system]
         APPSETS[ApplicationSets<br/>author Argo Apps]
         RUST[Rust services<br/>receiver - loader - archiver - fetcher - transform-*]
-        SUB[(Substrate<br/>ClickHouse - Kafka - PG/FerretDB - HyperDX)]
+        SUB[(Backing services<br/>ClickHouse - Kafka - PG/FerretDB - HyperDX)]
     end
 
     UI --> API
@@ -270,7 +270,7 @@ deploy repo. It writes config and DDL - NOT Argo Applications.
   what the engine actually set, letting base-chart defaults show through.
 - **DDL writer** (`schema/ddl_writer.py`) - topology-aware: `single` emits
   MergeTree; `replicated` emits ReplicatedMergeTree `ON CLUSTER`. The engine
-  emits the DDL that matches the substrate it was told it is deploying into.
+  emits the DDL that matches the backing services it was told it is deploying into.
 - **Sigma converter** (`sigma/`) - reads Sigma YAML, applies field maps, and
   transpiles to ClickHouse SQL via the pySigma ClickHouse backend.
 - **Field-map resolver** (`fieldmap/resolver.py`) - section 8 of the old design,
@@ -354,7 +354,7 @@ graph TB
         DARGO[DFE's own Argo CD - dfe-system]
         OPS[operators via DETECT-OR-INSTALL<br/>cert-manager - ESO - KEDA - CH-op - CNPG - gateway]
     end
-    subgraph L1["Layer 1 - substrate"]
+    subgraph L1["Layer 1 - backing services"]
         CH[(ClickHouse)]
         KAFKA[(Kafka - optional)]
         PG[(Postgres + FerretDB)]
@@ -385,17 +385,17 @@ on a cluster that already runs Argo/Rancher it sits beside the host's untouched.
 The hard part is cluster-singleton operators (one CRD, cannot have two
 controllers fighting) - that is exactly what detect-or-install handles.
 
-### Layer 1 - substrate
+### Layer 1 - backing services
 
 ClickHouse, optionally Kafka, Postgres+FerretDB, and HyperDX, deployed by DFE's
 Argo via ApplicationSets (`argocd/appsets/layer2-data.yaml`). DFE deploys its
-OWN substrate; it never piggybacks a shared one. See section 8 for modes.
+OWN backing services; it never piggybacks a shared one. See section 8 for modes.
 
-The substrate is **decoupled from the deploy repo**: layer2-data is a single
-source (base chart + profile/cloud values only) and does not reference the
-deploy repo, so the substrate comes up even before any external git or in-cluster
-git host exists. (This decoupling was validated live: the full substrate reaches
-Healthy on a bare cluster with no deploy repo present.)
+The backing services are **decoupled from the deploy repo**: layer2-data is a
+single source (base chart + profile/cloud values only) and does not reference the
+deploy repo, so the backing services come up even before any external git or
+in-cluster git host exists. (This decoupling was validated live: the full set of
+backing services reaches Healthy on a bare cluster with no deploy repo present.)
 
 ### Layer 2 - apps + config
 
@@ -451,7 +451,7 @@ pods sized for reliability. This is the difference from slim: a real Kafka path
 **scale** - the single set, clustered: ReplicatedMergeTree ClickHouse + dedicated
 Keeper, multi-broker Kafka, multi-instance CNPG, reliability sizing.
 
-All k8s tiers also bring the **data substrate** (ClickHouse, Postgres+FerretDB)
+All k8s tiers also bring the **data backing services** (ClickHouse, Postgres+FerretDB)
 and **all Layer 0 platform services** (DFE-owned Argo CD + detect-or-install
 operators + StorageClass/LB baseline).
 
@@ -485,13 +485,15 @@ change.
 
 ---
 
-## 8. Deploy-repo providers and data-substrate modes
+## 8. Deploy-repo providers and backing-service modes
+
+See [Backing Services](BACKING-SERVICES.md) for the per-service swap matrix.
 
 ### Deploy-repo providers (provider-agnostic seam)
 
 The deploy repo is just `config_repo_url` + revision + credentials. Expected
 mix: GitHub ~85%, GitLab ~10%, in-cluster Forgejo ~5%. There is NO hard
-git-server dependency (the substrate does not depend on it).
+git-server dependency (the backing services do not depend on it).
 
 - **External git PRIMARY** (GitHub / GitLab) - the deployer sets
   `DFE_CONFIG_REPO_URL` + creds (`DFE_CONFIG_REPO_TOKEN`+`_USER` for HTTPS, or
@@ -508,7 +510,7 @@ All three providers use the same downstream mechanism (an Argo repository
 credential + a git-files generator); from Argo's perspective GitLab and GitHub
 are identical external remotes.
 
-### Data-substrate modes
+### Data backing-service modes
 
 DFE deploys its own data layer, mode-driven (`argocd/values/*.yaml` +
 cluster-secret annotations):
@@ -623,12 +625,12 @@ to ClickHouse SQL (`==`->`=`, `&&`->`AND`, `.contains()`->`position()>0`,
 This is the most important boundary in the system.
 
 - **dfe-infra** = the GitOps SSoT + deployment vehicle. It deploys the core
-  substrate (always: engine, HyperDX, PG+FerretDB, ClickHouse, Kafka when not
-  using gRPC) and makes the other Rust apps available-but-not-default. It owns
+  backing services (always: engine, HyperDX, PG+FerretDB, ClickHouse, Kafka when
+  not using gRPC) and makes the other Rust apps available-but-not-default. It owns
   the charts, the ApplicationSets, and bootstrap.
 - **dfe-engine** = the config control plane. It writes config + DDL + OIDC into
   the deploy repo and turns dfe-* app params/scaling dials through overlays. It
-  NEVER deploys substrate and NEVER authors Argo Applications.
+  NEVER deploys backing services and NEVER authors Argo Applications.
 
 If you find yourself making the engine install ClickHouse or write an Argo
 Application, stop - that work belongs in dfe-infra.
@@ -689,7 +691,7 @@ cooldown in a ReplacingMergeTree state table, fail-open.
 | Deployment | Argo CD + Helm, base+overlay multi-source | engine turns dials, appsets author apps |
 | Platform baseline | Layer 0 detect-or-install | assume only a bare cluster |
 | Deploy repo | provider-agnostic (GitHub/GitLab/Forgejo) | no hard git-server dependency |
-| Substrate | DFE-owned, mode-driven (single/cluster/external) | never piggyback shared infra |
+| Backing services | DFE-owned, mode-driven (single/cluster/external) | never piggyback shared infra |
 | Secrets | External Secrets Operator (+ generators) | customer Vault, or in-cluster generators on bare |
 | Observability | OTel -> ClickHouse -> HyperDX | single storage backend |
 | Ingress / OIDC | Envoy Gateway (k8s) / oauth2-proxy (docker) | native OIDC at the edge |
