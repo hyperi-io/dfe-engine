@@ -46,6 +46,7 @@ class AIModuleType(str, Enum):
     """Discriminator for AI module types."""
 
     QUERY_OPTIMISER = "query_optimiser"
+    QUERY_GENERATOR = "query_generator"
     SCHEMA_OPTIMISER = "schema_optimiser"
     LOG_PARSER = "log_parser"
 
@@ -159,6 +160,31 @@ class QueryOptimiser(AIModuleInterface):
     @property
     def module_type(self) -> AIModuleType:
         return AIModuleType.QUERY_OPTIMISER
+
+
+class QueryGenerator(AIModuleInterface):
+    """Takes a natural-language prompt + context, returns a proposed query."""
+
+    class Input(BaseModel):
+        """Input for query generation."""
+
+        prompt: str = Field(..., description="Natural-language description of the query")
+        source_name: str | None = Field(default=None, description="Source to query")
+        columns: list[dict[str, Any]] = Field(
+            default_factory=list,
+            description="Available columns (from source meta + landed _json)",
+        )
+        context: dict[str, Any] = Field(default_factory=dict, description="Additional context")
+
+    class Output(BaseModel):
+        """Output from query generation."""
+
+        proposed_query: str = Field(..., description="Generated SQL query")
+        rationale: str = Field(default="", description="How the prompt maps to the query")
+
+    @property
+    def module_type(self) -> AIModuleType:
+        return AIModuleType.QUERY_GENERATOR
 
 
 class SchemaOptimiser(AIModuleInterface):
