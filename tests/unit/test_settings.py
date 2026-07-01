@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from dfe_engine.settings import DFESettings, load_settings, reset_settings
 
@@ -183,9 +184,9 @@ class TestEnvOverrides:
         assert settings.api.port == 9090
 
     def test_api_jwt_secret_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret-hmac-key-at-least-32-bytes")
         settings = load_settings()
-        assert settings.api.jwt_secret == "super-secret"
+        assert settings.api.jwt_secret == "super-secret-hmac-key-at-least-32-bytes"
 
     def test_api_cors_origins_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
@@ -209,8 +210,26 @@ class TestEnvOverrides:
 
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.auth.enabled is True
+
+    def test_placeholder_jwt_secret_rejected_in_production(self, monkeypatch):
+        # Security guard: auth on + production posture + the known dev secret must
+        # fail fast rather than run with a forgeable token key.
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")  # env defaults to production
+        with pytest.raises(ValidationError):
+            load_settings()
+
+    def test_placeholder_jwt_secret_allowed_in_dev(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")
+        assert load_settings().auth.enabled is True
+
+    def test_production_accepts_real_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
+        assert load_settings().auth.enabled is True
 
     def test_auth_dir_override(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DFE_AUTH_DIR", str(tmp_path / "auth"))
@@ -335,6 +354,7 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
         monkeypatch.setenv("DFE_API_PORT", "9090")
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.clickhouse.host == "ch1.example.com"
         assert settings.clickhouse.port == 9000

@@ -78,7 +78,7 @@ API (Elasticsearch template elastic-converter upload limits):
 import os
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .yaml_utils import yaml_load
 
@@ -473,6 +473,15 @@ class GitopsSettings(BaseModel):
     author_email: str = Field(default="dfe-engine@hyperi.io", description="Commit author email")
 
 
+# Known placeholder JWT secret - fine for local dev, REJECTED in a production
+# posture when auth is on (see DFESettings._reject_placeholder_secret).
+_DEV_JWT_SECRET = "dev-secret-key-change-in-production"
+
+# Postures that are NOT production; anything else (incl. the default
+# "production") is treated as production for the placeholder-secret guard.
+_NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
+
+
 class APISettings(BaseModel):
     """API server settings.
 
@@ -499,8 +508,12 @@ class APISettings(BaseModel):
         description="CORS allowed origins",
     )
     jwt_secret: str = Field(
-        default="dev-secret-key-change-in-production",
-        description="JWT signing secret (HS256). Change in production!",
+        default=_DEV_JWT_SECRET,
+        description=(
+            "JWT signing secret (HS256), >= 32 bytes. This dev default is a KNOWN "
+            "placeholder - operators MUST override it via DFE_API_JWT_SECRET in "
+            "production, else tokens can be forged."
+        ),
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
@@ -522,6 +535,19 @@ class APISettings(BaseModel):
             "extra bytes when comparing Content-Length to elastic_converter_max_upload_bytes"
         ),
     )
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _jwt_secret_min_length(cls, v: str) -> str:
+        # HS256 best practice: signing key >= 32 bytes (RFC 7518 3.2). Fail fast at
+        # config load rather than let PyJWT warn on every encode/decode - so a
+        # too-short secret can never reach production silently.
+        if len(v.encode("utf-8")) < 32:
+            raise ValueError(
+                "api.jwt_secret must be at least 32 bytes (HS256 minimum); "
+                "set a strong DFE_API_JWT_SECRET"
+            )
+        return v
 
 
 class SecretsSettings(BaseModel):
@@ -574,6 +600,28 @@ class DFESettings(BaseModel):
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    env: str = Field(
+        default="production",
+        description=(
+            "Deployment posture. 'production' (default, secure) rejects the "
+            "placeholder api.jwt_secret when auth is enabled; set DFE_ENV to "
+            "dev/development/local/test/ci for local development. DFE_ENV."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secret(self) -> "DFESettings":
+        # Fail fast if a production deployment turns auth on but never overrode
+        # the known dev jwt_secret - otherwise anyone can forge tokens. Local dev
+        # opts out via DFE_ENV. Minimum length is enforced on the field itself.
+        is_prod = self.env.strip().lower() not in _NON_PROD_ENVS
+        if is_prod and self.auth.enabled and self.api.jwt_secret == _DEV_JWT_SECRET:
+            raise ValueError(
+                "api.jwt_secret is the known dev placeholder but env is "
+                f"'{self.env}' with auth enabled; set a strong DFE_API_JWT_SECRET "
+                "(or DFE_ENV=dev for local development)"
+            )
+        return self
 
 
 def _load_defaults() -> dict:
@@ -847,6 +895,10 @@ def _get_env_overrides() -> dict:
         overrides["secrets"]["mount"] = val
     if val := _get_env("DFE_SECRETS_ROLE"):
         overrides["secrets"]["role"] = val
+
+    # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
+    if val := _get_env("DFE_ENV"):
+        overrides["env"] = val
 
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.

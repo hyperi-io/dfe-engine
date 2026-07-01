@@ -24,7 +24,7 @@ def app_with_services(tmp_path):
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
         ),
-        api=APISettings(jwt_secret="test-secret"),
+        api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
     )
     (tmp_path / "sources").mkdir(exist_ok=True)
     app = create_app(settings=settings)
