@@ -23,6 +23,7 @@ from .interface import (
     QueryOptimiser,
     SchemaOptimiser,
 )
+from .sampling import discover_json_keys, sample_json_rows
 from .stubs import (
     StubLogParser,
     StubQueryGenerator,
@@ -46,4 +47,6 @@ __all__ = [
     "StubQueryOptimiser",
     "StubSchemaOptimiser",
     "default_ai_registry",
+    "discover_json_keys",
+    "sample_json_rows",
 ]
