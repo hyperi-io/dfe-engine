@@ -51,11 +51,19 @@ def test_draft_publish_rollback_lifecycle(vc):
     assert vc.list_versions("rules", "brute-force") == [1, 2]
 
 
-def test_flat_doc_loads_as_implicit_v1(vc):
-    # a pre-versioning flat doc (raw write) reads as one published version
-    vc._crud.put("rules", "legacy", {"sql": "SELECT 9"}, actor="x")
-    assert vc.get_published("rules", "legacy")["sql"] == "SELECT 9"
-    assert vc.list_versions("rules", "legacy") == [1]
+def test_versions_carry_metadata(vc):
+    vc.save_draft("rules", "r", {"sql": "a"}, actor="kaz")
+    vc.publish("rules", "r", actor="kaz", message="initial")
+    vc.save_draft("rules", "r", {"sql": "b"}, actor="tanya")
+    vc.publish("rules", "r", actor="tanya", message="tune predicate")
+    # per-version metadata (change-log convention) - who published each version, why
+    assert vc.versions_meta("rules", "r") == [
+        {"version": 1, "by": "kaz", "message": "initial"},
+        {"version": 2, "by": "tanya", "message": "tune predicate"},
+    ]
+    # payloads (spec) still resolve cleanly
+    assert vc.get_version("rules", "r", 1)["sql"] == "a"
+    assert vc.get_published("rules", "r")["sql"] == "b"
 
 
 def test_published_snapshots_are_immutable(vc):

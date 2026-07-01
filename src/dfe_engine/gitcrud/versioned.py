@@ -7,22 +7,24 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """VersionedDoc - the single per-artifact versioning authority.
 
-A versioned artifact is ONE YAML doc with an envelope::
+No single YAML standard exists for in-file version history with draft/published, so
+this follows the two recognised conventions it maps to (and the DFE meta-schema it
+generalises): monotonic INTEGER versions per artifact (Confluent Schema Registry
+model) + a ``status: draft|published`` field (the change-log convention - there is
+no built-in keyword) + per-version metadata like a change log. Envelope::
 
     current: 2            # latest PUBLISHED version (consumers read this)
     deployed: 1           # what Argo/the cluster actually has (commit != deployment)
     status: published     # draft | published
-    draft: {...}          # the mutable working copy (None once published, no new edits)
+    draft: {...}          # the mutable working payload (None once published, no edits)
     versions:
-      1: {...}            # immutable published snapshots (arbitrary payload)
-      2: {...}
+      1: {by: kaz, message: "...", spec: {...}}   # metadata + the payload
+      2: {by: kaz, message: "...", spec: {...}}
 
-Version numbers are monotonic integers. Each op is ONE git commit via GitCrud (audit
-trail); the version series lives IN the doc - a per-artifact grouping, NOT repo
-git-log. A pre-versioning FLAT doc reads as an implicit single published version (v1),
-so adopters migrate without a hard cutover (mirrors schema_loader's flat fallback).
-Published snapshots are immutable - never overwritten (mirrors the Sources
-append-only rule). See docs/superpowers/plans/2026-07-01-rules-hunts-versioning.md.
+Each op is ONE git commit via GitCrud (audit); the version series lives IN the doc -
+a per-artifact grouping, NOT repo git-log. Published snapshots are immutable (never
+overwritten - the Sources append-only rule). See
+docs/superpowers/plans/2026-07-01-rules-hunts-versioning.md.
 """
 
 from __future__ import annotations
@@ -33,6 +35,7 @@ from typing import Any
 from .engine import GitCrud, ResourceNotFoundError
 
 _VERSIONS = "versions"
+_SPEC = "spec"
 
 
 class VersionConflictError(Exception):
@@ -50,23 +53,14 @@ class VersionedDoc:
     def _envelope(self, cls: str, name: str) -> dict[str, Any] | None:
         """The version envelope, or None if the resource does not exist.
 
-        A flat legacy doc (no ``versions`` map) is wrapped in-memory as an implicit
-        single published version - it is only rewritten to envelope form on the next
-        write.
+        VersionedDoc owns every write, so a stored doc is always an envelope; a doc
+        with no ``versions`` map reads as "no published versions" (no legacy
+        flat-doc back-compat - nothing is GA to migrate from).
         """
         try:
-            raw = self._crud.get(cls, name)
+            return self._crud.get(cls, name)
         except ResourceNotFoundError:
             return None
-        if isinstance(raw.get(_VERSIONS), dict):
-            return raw
-        return {
-            "current": 1,
-            "deployed": None,
-            "status": "published",
-            "draft": None,
-            _VERSIONS: {1: raw},
-        }
 
     @staticmethod
     def _versions(env: dict) -> dict[int, Any]:
@@ -79,14 +73,15 @@ class VersionedDoc:
     # ---- reads --------------------------------------------------------
 
     def get_published(self, cls: str, name: str) -> dict | None:
-        """The current published version's payload, or None if nothing published."""
+        """The current published version's payload (spec), or None."""
         env = self._envelope(cls, name)
         if env is None:
             return None
         cur = env.get("current")
         if cur is None:
             return None
-        return copy.deepcopy(self._versions(env).get(int(cur)))
+        entry = self._versions(env).get(int(cur))
+        return copy.deepcopy(entry.get(_SPEC)) if entry else None
 
     def get_draft(self, cls: str, name: str) -> dict | None:
         """The working draft payload, or None."""
@@ -94,14 +89,28 @@ class VersionedDoc:
         return copy.deepcopy(env.get("draft")) if env else None
 
     def get_version(self, cls: str, name: str, version: int) -> dict | None:
-        """A specific published version's payload, or None."""
+        """A specific published version's payload (spec), or None."""
         env = self._envelope(cls, name)
-        return copy.deepcopy(self._versions(env).get(int(version))) if env else None
+        if env is None:
+            return None
+        entry = self._versions(env).get(int(version))
+        return copy.deepcopy(entry.get(_SPEC)) if entry else None
 
     def list_versions(self, cls: str, name: str) -> list[int]:
         """Ascending list of published version numbers."""
         env = self._envelope(cls, name)
         return sorted(self._versions(env)) if env else []
+
+    def versions_meta(self, cls: str, name: str) -> list[dict[str, Any]]:
+        """Per-version metadata (version, by, message) for the UI - no payloads."""
+        env = self._envelope(cls, name)
+        if env is None:
+            return []
+        out = []
+        for ver in sorted(self._versions(env)):
+            entry = self._versions(env)[ver]
+            out.append({"version": ver, "by": entry.get("by"), "message": entry.get("message", "")})
+        return out
 
     def status(self, cls: str, name: str) -> str | None:
         env = self._envelope(cls, name)
@@ -127,7 +136,7 @@ class VersionedDoc:
         env["status"] = "draft"
         return self._save(cls, name, env, actor, f"{cls}({name}): draft by {actor}")
 
-    def publish(self, cls: str, name: str, actor: str) -> int:
+    def publish(self, cls: str, name: str, actor: str, message: str = "") -> int:
         """Freeze the draft as the next immutable version; return its number."""
         env = self._envelope(cls, name)
         if env is None or env.get("draft") is None:
@@ -136,7 +145,7 @@ class VersionedDoc:
         new_ver = (max(versions) + 1) if versions else 1
         if new_ver in versions:  # never overwrite a published snapshot
             raise VersionConflictError(f"{cls}/{name}: version {new_ver} already exists")
-        versions[new_ver] = copy.deepcopy(env["draft"])
+        versions[new_ver] = {"by": actor, "message": message, _SPEC: copy.deepcopy(env["draft"])}
         env[_VERSIONS] = versions
         env["current"] = new_ver
         env["draft"] = None
