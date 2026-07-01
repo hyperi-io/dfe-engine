@@ -250,7 +250,8 @@ class TestSource:
         assert s.source == "syslog"
         assert s.enabled is True
         assert s.display_name == "Syslog"
-        assert s.header is None
+        assert s.version().header is None
+        assert s.header == SourceHeader()
         assert s.schema_config.engine == "MergeTree"
 
     def test_full(self):
