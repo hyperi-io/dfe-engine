@@ -22,17 +22,17 @@ class Hunt:
         cron: str,
         log_buffer: int,
         customer: str,
-        rules: list[str],
+        rules: list[dict[str, Any]],
         name: str,
         global_source_table_name: str,
         global_target_table_name: str,
         hunt_log_path: str,
         target_config_data: dict,
         checkpoint_timestamp_field: str = "timestamp_load",
-        customer_filters: dict[str, dict[str, str]] = None,
+        customer_filters: dict[str, dict[str, Any]] | None = None,
         checkpoint_destination: str = "clickhouse",
         hunt_checkpoint_path: str | None = None,
-        thread_id: str = None,
+        thread_id: str = "",
         explain_queries: bool = False,
         source_registry: Any | None = None,
         resource_limits: dict[str, int] | None = None,
@@ -47,7 +47,7 @@ class Hunt:
         - cron (str): Cron expression for scheduling the hunt
         - log_buffer (int): Buffer time for logging
         - customer (str): customer ID
-        - rules (List[str]): List of rules as strings
+        - rules (list[dict]): List of rule config dicts (rule_name, filters, etc.)
         - name (str): Name of the hunt
         - global_source_table_name (str): Default source table name
         - global_target_table_name (str): Default target table name
@@ -133,7 +133,7 @@ class Hunt:
         return name.replace(" ", "_")
 
     def convert_yaml_to_sql(
-        self, env: Environment, org_id: str, customer_filters: dict[str, dict[str, str]]
+        self, env: Environment, org_id: str, customer_filters: dict[str, dict[str, Any]]
     ) -> list[str]:
         """
         Convert YAML rules to SQL queries for a specific customer.
@@ -314,6 +314,9 @@ class Hunt:
         """
         from .alert import AlertDispatcher
 
+        if self.alert_config is None:
+            return
+
         try:
             dispatcher = AlertDispatcher(self.alert_config)
             alerts_sent = 0
@@ -426,6 +429,10 @@ class Hunt:
         )
         from .hunt_output import RESULTS_TABLE_COLUMNS
 
+        grouping = self.alert_grouping
+        if grouping is None:
+            return alerts_sent
+
         rule_name = rule_result["rule_name"]
         target_db = rule_result["target_db"]
         target_table = rule_result["target_table"]
@@ -438,11 +445,11 @@ class Hunt:
             hunt_name=self.name,
             rule_name=rule_name,
             customer=customer,
-            group_by=self.alert_grouping.group_by,
+            group_by=grouping.group_by,
             time_start=time_start,
             time_end=time_end,
             results_table_columns=RESULTS_TABLE_COLUMNS,
-            max_sample_events=self.alert_grouping.max_sample_events,
+            max_sample_events=grouping.max_sample_events,
         )
 
         if not grouping_sql:
@@ -452,7 +459,7 @@ class Hunt:
             with ClickHouseManager.get_instance(
                 self.target_config_data
             ).get_clickhouse_client() as ch_client:
-                cooldown = self.alert_grouping.cooldown_td
+                cooldown = grouping.cooldown_td
                 state_mgr = AlertStateManager()
                 state_mgr.ensure_table_exists(ch_client)
 
@@ -461,7 +468,7 @@ class Hunt:
                 if not rows:
                     return alerts_sent
 
-                group_by_fields = self.alert_grouping.group_by
+                group_by_fields = grouping.group_by
                 for row in rows:
                     if max_alerts and alerts_sent >= max_alerts:
                         break
@@ -549,7 +556,7 @@ class Hunt:
 
     def _get_checkpoint_file_path(self, customer: str) -> str | None:
         """Get checkpoint file path if using file-based checkpointing."""
-        if self.checkpoint_destination == self.FILE:
+        if self.checkpoint_destination == self.FILE and self.hunt_checkpoint_path:
             self.checkpoint_manager.ensure_checkpoint_file_path_exists(self.hunt_checkpoint_path)
             return os.path.join(
                 self.hunt_checkpoint_path,
@@ -623,7 +630,7 @@ class Hunt:
             customer=customer,
             hunt_name=self.name,
             rule_name=rule["rule_name"],
-            file_path=file_path,
+            file_path=file_path or "",
         )
 
         last_success_time, last_success_time_str = self._resolve_last_success_time(
@@ -686,7 +693,7 @@ class Hunt:
 
             checkpoint = {
                 "checkpoint_destination": self.checkpoint_destination,
-                "customer_name": customer,
+                "_org_id": customer,
                 "rule_name": rule["rule_name"],
                 "hunt_name": self.name,
                 "query_id": generated_query_id,
@@ -842,4 +849,6 @@ class Hunt:
                 ch_client, successful_checkpoints
             )
         else:
-            self.checkpoint_manager.create_batch_checkpoint_file(successful_checkpoints, file_path)
+            self.checkpoint_manager.create_batch_checkpoint_file(
+                successful_checkpoints, file_path or ""
+            )

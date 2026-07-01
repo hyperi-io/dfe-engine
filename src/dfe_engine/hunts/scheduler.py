@@ -25,7 +25,7 @@ class HuntScheduler:
         checkpoint_destination: str,
         hunt_cron_task_timeout: int,
         checkpoint_timestamp_field: str,
-        target_config_data: dict = None,
+        target_config_data: dict | None = None,
         logger=None,
     ):
         import warnings

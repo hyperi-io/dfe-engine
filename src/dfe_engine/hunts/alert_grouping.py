@@ -30,6 +30,7 @@ Hunt YAML format::
 from __future__ import annotations
 
 import re
+from collections.abc import Collection
 from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, Field, field_validator
@@ -118,7 +119,7 @@ def build_group_key(group_by: list[str], group_values: dict[str, str]) -> str:
 # ── Grouping Query Builder ──────────────────────────────────────
 
 
-def _field_select_expr(field: str, results_table_columns: set[str]) -> tuple[str, str]:
+def _field_select_expr(field: str, results_table_columns: Collection[str]) -> tuple[str, str]:
     """Return (select_expression, group_by_expression) for a field.
 
     If the field exists as a direct column on the results table, use it
@@ -143,7 +144,7 @@ def build_grouping_query(
     group_by: list[str],
     time_start: str,
     time_end: str,
-    results_table_columns: set[str],
+    results_table_columns: Collection[str],
     max_sample_events: int = 10,
 ) -> str | None:
     """Build a post-INSERT aggregation query for alert grouping.
@@ -203,27 +204,27 @@ _ALERT_STATE_DDL = """\
 CREATE TABLE IF NOT EXISTS {db}.alert_state (
     hunt_name     LowCardinality(String) CODEC(LZ4),
     rule_name     LowCardinality(String) CODEC(LZ4),
-    customer_name LowCardinality(String) CODEC(LZ4),
+    _org_id       LowCardinality(String) CODEC(LZ4),
     group_key     String DEFAULT ''      CODEC(ZSTD),
     last_fired_at DateTime               CODEC(DoubleDelta, LZ4),
     fire_count    UInt32 DEFAULT 1        CODEC(Delta, ZSTD),
     suppressed_count UInt64 DEFAULT 0     CODEC(Delta, ZSTD)
 ) ENGINE = ReplacingMergeTree(last_fired_at)
-ORDER BY (hunt_name, rule_name, customer_name, group_key)
+ORDER BY (hunt_name, rule_name, _org_id, group_key)
 TTL last_fired_at + INTERVAL 30 DAY
 """
 
 _CHECK_COOLDOWN_SQL = """\
 SELECT last_fired_at
 FROM {db}.alert_state FINAL
-WHERE hunt_name = %(hunt)s AND rule_name = %(rule)s AND customer_name = %(cust)s
+WHERE hunt_name = %(hunt)s AND rule_name = %(rule)s AND _org_id = %(cust)s
   AND group_key = %(group_key)s
 LIMIT 1\
 """
 
 _RECORD_FIRE_SQL = """\
 INSERT INTO {db}.alert_state
-    (hunt_name, rule_name, customer_name, group_key, last_fired_at, fire_count, suppressed_count)
+    (hunt_name, rule_name, _org_id, group_key, last_fired_at, fire_count, suppressed_count)
 VALUES\
 """
 
@@ -232,8 +233,9 @@ class AlertStateManager:
     """Manages alert cooldown state in dfe_audit.alert_state.
 
     Uses ReplacingMergeTree to keep only the latest fire state per
-    (hunt_name, rule_name, customer_name). Follows the same pattern
-    as HuntCheckpointManager.
+    (hunt_name, rule_name, _org_id). Follows the same pattern
+    as HuntCheckpointManager. The `customer` argument carries the org
+    id (the tenant identifier) and is written to the `_org_id` column.
     """
 
     DATABASE = "dfe_audit"
@@ -305,16 +307,30 @@ class AlertStateManager:
         fired_at: datetime | None = None,
         suppressed_count: int = 0,
     ) -> None:
-        """Record that an alert was fired."""
+        """Record that an alert was fired.
+
+        ``customer`` carries the org id and is written to the ``_org_id``
+        isolation column. An empty org id is refused (fail-open: the fire is
+        simply not recorded, so the alert may re-fire next run) rather than
+        writing a blank isolation key.
+        """
+        if not (customer or "").strip():
+            logger.warning(
+                "AlertStateManager: refusing to record fire with empty _org_id "
+                f"(hunt={hunt_name}, rule={rule_name})"
+            )
+            return
+
         fired_at = fired_at or datetime.now(UTC)
-        fired_at_str = fired_at.strftime("%Y-%m-%d %H:%M:%S")
 
         try:
+            # Pass the row as POSITIONAL data (not a `parameters=` kwarg) so the
+            # client wrapper routes it through insert(); a kwarg lands in
+            # command() and silently inserts nothing. last_fired_at is a real
+            # datetime (DateTime column), not a string.
             ch_client.execute(
-                f"{_RECORD_FIRE_SQL.format(db=self._db)}",
-                parameters=[
-                    [hunt_name, rule_name, customer, group_key, fired_at_str, 1, suppressed_count]
-                ],
+                _RECORD_FIRE_SQL.format(db=self._db),
+                [[hunt_name, rule_name, customer, group_key, fired_at, 1, suppressed_count]],
             )
         except Exception as e:
             logger.warning(f"AlertStateManager: failed to record fire: {e}")

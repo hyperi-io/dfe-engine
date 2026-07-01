@@ -56,7 +56,7 @@ class TestCheckpointSchemaExtension:
         HuntCheckpointManager()
 
         checkpoint = {
-            "customer_name": "test_org",
+            "_org_id": "test_org",
             "rule_name": "test_rule",
             "thread_id": "t1",
             "log_buffer": 60,
@@ -75,7 +75,7 @@ class TestCheckpointSchemaExtension:
 
         # Build the data tuple as the batch method would
         data = (
-            str(checkpoint.get("customer_name", "na")),
+            str(checkpoint.get("_org_id", "na")),
             str(checkpoint.get("rule_name", "na")),
             str(checkpoint.get("thread_id", "na")),
             int(checkpoint.get("log_buffer", 0)),
@@ -103,7 +103,7 @@ class TestCheckpointSchemaExtension:
         """Checkpoint without explain fields should use safe defaults."""
 
         checkpoint = {
-            "customer_name": "org",
+            "_org_id": "org",
             "rule_name": "rule",
             "thread_id": "t",
             "log_buffer": 60,

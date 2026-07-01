@@ -93,7 +93,7 @@ class TestCheckpointTable:
     def test_structure(self, writer):
         ddl = writer.generate_detection_checkpoint_table()
         assert "detection_checkpoint" in ddl
-        assert "customer_name" in ddl
+        assert "_org_id" in ddl
         assert "rule_name" in ddl
         assert "query_checkpoint_time" in ddl
 

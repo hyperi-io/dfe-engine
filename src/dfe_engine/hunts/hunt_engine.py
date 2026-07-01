@@ -88,7 +88,8 @@ class HuntEngine:
             if self._loop and self._stop_event:
                 self._loop.call_soon_threadsafe(self._stop_event.set)
 
-            self._thread.join(timeout=timeout)
+            if self._thread is not None:
+                self._thread.join(timeout=timeout)
             self._thread = None
             logger.info("HuntEngine stopped.")
 

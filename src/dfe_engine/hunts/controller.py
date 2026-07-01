@@ -85,11 +85,12 @@ class HuntController:
         if paths is None:
             return
 
-        hunt_dirs, rule_dirs = HuntController._validate_directories(
+        dirs = HuntController._validate_directories(
             paths["hunt_config_path"], paths["hunt_rules_path"]
         )
-        if hunt_dirs is None:
+        if dirs is None:
             return
+        hunt_dirs, rule_dirs = dirs
 
         hunt_log_path = HuntController._resolve_hunt_log_path(config_values["hunt_log_path"])
 
@@ -462,9 +463,9 @@ class HuntController:
                     tabulated_output = tabulate(data_list, headers="keys", tablefmt="grid")
                     logger.info(f"\n\n{tabulated_output}")
             else:
-                logger.warn("PID not found")
+                logger.warning("PID not found")
         else:
-            logger.warn("PID not found")
+            logger.warning("PID not found")
 
     @staticmethod
     def print_hunt_parameters(
@@ -560,6 +561,9 @@ class HuntController:
         args_log_path: str | None = None,
     ) -> None:
         """Kill a hunt associated with a specified PID."""
+        if args_kill_pid is None:
+            logger.warning("kill_hunt called with no PID; nothing to kill")
+            return
         settings = get_settings()
         logger.info(
             f"Target: host={settings.clickhouse.host} "

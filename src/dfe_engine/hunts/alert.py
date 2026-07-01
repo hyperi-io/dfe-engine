@@ -31,6 +31,7 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import Any
 
@@ -147,8 +148,12 @@ class AlertDestinationRegistry:
             return False
         return self._memory.pop(name, None) is not None
 
-    def list(self) -> list[AlertDestination]:
-        """List all registered destinations."""
+    def list(self) -> builtins.list[AlertDestination]:
+        """List all registered destinations.
+
+        Return annotation is ``builtins.list`` because this method named ``list``
+        shadows the builtin for the type checker's annotation resolution.
+        """
         if self._store is not None:
             results = []
             for table_name in self._store.list_tables():
@@ -159,7 +164,7 @@ class AlertDestinationRegistry:
             return results
         return list(self._memory.values())
 
-    def resolve_many(self, names: list[str]) -> list[str]:
+    def resolve_many(self, names: builtins.list[str]) -> builtins.list[str]:
         """Resolve a list of destination names to Apprise URLs.
 
         Skips unknown or disabled destinations with a warning.
@@ -358,7 +363,7 @@ class AlertDispatcher:
                 logger.info(f"Alert sent: {title}")
             else:
                 logger.warning(f"Alert dispatch failed: {title}")
-            return result
+            return bool(result)
         except Exception as e:
             logger.error(f"Alert dispatch error: {e}")
             return False

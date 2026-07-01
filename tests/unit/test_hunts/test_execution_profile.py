@@ -109,7 +109,7 @@ class TestCheckpointProfileColumns:
 
         checkpoints = [
             {
-                "customer_name": "acme",
+                "_org_id": "acme",
                 "rule_name": "rule_1",
                 "thread_id": "t1",
                 "log_buffer": 10,

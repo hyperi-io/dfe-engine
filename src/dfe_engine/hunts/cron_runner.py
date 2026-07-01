@@ -99,8 +99,8 @@ class CronRunner:
                     if self.cron_runner is None:
                         self.cron_runner = CronJob(
                             hunt_log_path=self.hunt_log_path,
-                            target_config_data=self.target_config_data,
-                            checkpoint_timestamp_field=self.checkpoint_timestamp_field,
+                            target_config_data=self.target_config_data or {},
+                            checkpoint_timestamp_field=self.checkpoint_timestamp_field or "",
                         )
                         await self.cron_runner.add_hunts_from_directory(
                             self.hunt_dir,

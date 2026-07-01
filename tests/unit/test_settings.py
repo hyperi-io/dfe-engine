@@ -16,6 +16,20 @@ def _clean_settings():
     reset_settings()
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    """Isolate settings tests from a populated developer .env.
+
+    tests/conftest.py loads the project .env with override=True, so a real .env
+    (CH host, DFE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
+    default / fallback / production-guard assertions here. Strip every DFE_* and
+    legacy CLICKHOUSE_* var so each test controls exactly the environment it sets.
+    """
+    for key in list(os.environ):
+        if key.startswith(("DFE_", "CLICKHOUSE_")):
+            monkeypatch.delenv(key, raising=False)
+
+
 @pytest.fixture
 def config_dir(tmp_path):
     """Create a temporary config directory with expected subdirs."""

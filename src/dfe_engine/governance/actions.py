@@ -14,6 +14,7 @@ the protected-var policy, and supports dry-run (returns the diff without writing
 
 from __future__ import annotations
 
+import builtins
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -46,7 +47,7 @@ class ActionStore:
     def __init__(self, crud: GitCrud) -> None:
         self._crud = crud
 
-    def list(self) -> list[str]:
+    def list(self) -> builtins.list[str]:
         return self._crud.list(_ACTION_CLASS)
 
     def get(self, name: str) -> ActionDef:
