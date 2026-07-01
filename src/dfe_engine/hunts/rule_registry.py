@@ -129,7 +129,7 @@ class RuleRegistry:
                     self._store._repo,
                     author=COMMITTER_IDENTITY.encode("utf-8"),
                     committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"rule: delete {rule_id}".encode(),
+                    message=f"rule: delete {name}".encode(),
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()
