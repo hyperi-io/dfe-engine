@@ -26,6 +26,7 @@ from .registry import (
     UnknownResourceClassError,
     default_registry,
 )
+from .versioned import VersionConflictError, VersionedDoc
 
 __all__ = [
     "ConcurrencyConflictError",
@@ -34,6 +35,8 @@ __all__ = [
     "ResourceClassRegistry",
     "ResourceNotFoundError",
     "UnknownResourceClassError",
+    "VersionConflictError",
+    "VersionedDoc",
     "default_registry",
     "flatten",
     "get_path",

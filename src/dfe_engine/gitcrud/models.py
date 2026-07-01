@@ -27,12 +27,16 @@ class ResourceClass:
     rbac_prefix RBAC action prefix; defaults to ``name``. Grants are bound here,
                 e.g. ``helmvars:write`` covers every file in the class.
     suffix      file extension (".yaml").
+    versioned   opt-in: the class's docs carry a per-artifact version envelope
+                ({current, versions, draft, ...}) managed by VersionedDoc. A dial
+                class (helmvars, actions) is unversioned - the git log is enough.
     """
 
     name: str
     directory: str
     rbac_prefix: str = ""
     suffix: str = ".yaml"
+    versioned: bool = False
 
     def action(self, verb: str) -> str:
         """RBAC action string for a verb, e.g. ``helmvars:write``."""
