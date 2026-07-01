@@ -5,6 +5,7 @@
 # Requires: ClickHouse 26.2+ (JSON type GA)
 
 current: "1.0.0"
+resource_type: core
 
 versions:
   "1.0.0":
@@ -18,12 +19,14 @@ versions:
         order: 0
         expr: "@generated: now64(3)"
         comment: "Insertion timestamp (ms precision)"
+        _field_type: base
 
       - name: _uuid
         type: uuid
         default: "generateUUIDv7()"
         expr: "@generated: generateUUIDv7()"
         comment: "Time-ordered unique event identifier"
+        _field_type: base
 
       - name: _org_id
         type: string
@@ -32,9 +35,11 @@ versions:
         order: 1
         expr: "@source: org_id"
         comment: "Tenant/organisation identifier"
+        _field_type: base
 
       - name: _json
         type: json
         max_dynamic_paths: 2048
         expr: "@captured: raw_payload as JSON"
         comment: "Original event payload as structured JSON"
+        _field_type: base
