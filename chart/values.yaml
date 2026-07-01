@@ -87,6 +87,12 @@ clickhouse:
     password: clickhouse-password
   password: ""
 
+# -- Deployment posture. "production" (default, secure) makes the engine REJECT
+# the placeholder jwt.secret when auth is enabled - it will refuse to start.
+# Set to "dev" (or development/local/test) for local/tyre-kicker deploys that
+# run on the placeholder secret. Maps to DFE_ENV.
+env: "production"
+
 # -- JWT signing secret
 jwt:
   # -- Name of an existing secret containing the JWT secret.
