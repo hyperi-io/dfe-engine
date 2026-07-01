@@ -6,6 +6,7 @@ GET    /api/v1/sources/{name}           → Get source details
 GET    /api/v1/sources/{name}/versions  → Get one version snapshot
 GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
+POST   /api/v1/sources/{name}/deploy    → Plan (dry_run) / deploy the schema DDL to ClickHouse
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
@@ -137,6 +138,19 @@ class SchemaBuildResult(BaseModel):
     version: str = ""
     columns: list[SchemaColumn]
     ddl: DDLResult | None = None
+
+
+class SchemaDeployResult(BaseModel):
+    """Plan / deploy result for a source's schema."""
+
+    source_name: str
+    version: str
+    dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
+    applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
+    create_table: str = Field(description="CREATE TABLE DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+    validation_errors: list[str] = Field(default_factory=list)
+    statements_applied: int = 0
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -425,6 +439,146 @@ async def build_source_schema(
         version=version_id,
         columns=columns,
         ddl=ddl,
+    )
+
+
+@router.post(
+    "/{name}/deploy",
+    response_model=SchemaDeployResult,
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def deploy_source_schema(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str | None = Query(
+        None, description="Source version id (defaults to deployed_version)"
+    ),
+    dry_run: bool = Query(
+        False, description="Plan only: generate + validate the DDL without applying it"
+    ),
+) -> SchemaDeployResult:
+    """Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.
+
+    Runs the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard
+    views) and validation errors are returned for review WITHOUT touching
+    ClickHouse. In deploy mode the DDL is applied - it is idempotent (CREATE ... IF
+    NOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never
+    deployed.
+    """
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    try:
+        result = builder.build_for_source_version(source, source_version=version_id)
+    except SchemaBuildError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "build_error", "message": str(exc)},
+        ) from exc
+
+    if not result.create_table_ddl:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "no_ddl", "message": "no CREATE TABLE DDL was generated"},
+        )
+
+    views = dict(result.view_ddls or {})
+    validation_errors = list(result.validation_errors or [])
+
+    # Plan mode: hand the DDL + validation back for review; never touch ClickHouse.
+    if dry_run:
+        return SchemaDeployResult(
+            source_name=name,
+            version=version_id,
+            dry_run=True,
+            applied=False,
+            create_table=result.create_table_ddl,
+            views=views,
+            validation_errors=validation_errors,
+        )
+
+    # Deploy mode: refuse to apply a schema that failed validation.
+    if validation_errors:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "validation_failed",
+                "message": "schema has validation errors; fix them or use dry_run to review",
+                "errors": validation_errors,
+            },
+        )
+
+    # Only reach for ClickHouse when actually deploying (keeps plan CH-free).
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_clickhouse_config
+
+    try:
+        ch = ClickHouseManager.get_instance(get_clickhouse_config(settings)).get_clickhouse_client()
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "clickhouse_unavailable", "message": str(exc)},
+        ) from exc
+
+    statements = [result.create_table_ddl, *views.values()]
+    applied = 0
+    try:
+        for stmt in statements:
+            ch.execute(stmt)
+            applied += 1
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "ddl_apply_error",
+                "message": f"ClickHouse rejected DDL after {applied} statement(s): {exc}",
+            },
+        ) from exc
+
+    audit_resource_change(user.user_id, "schema", name, "deployed")
+    return SchemaDeployResult(
+        source_name=name,
+        version=version_id,
+        dry_run=False,
+        applied=True,
+        create_table=result.create_table_ddl,
+        views=views,
+        validation_errors=[],
+        statements_applied=applied,
     )
 
 
