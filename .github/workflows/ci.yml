@@ -30,10 +30,17 @@ name: CI
         default: "auto"
         description: "Version resolution for from-head: auto | patch | minor (forced) | X.Y.Z (exact version)."
 
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  packages: write
+
 jobs:
   ci:
     uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
     with:
+      publish-target: internal
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
       bump: ${{ inputs.bump || 'auto' }}
