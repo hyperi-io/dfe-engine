@@ -40,7 +40,6 @@ jobs:
   ci:
     uses: hyperi-io/hyperi-ci/.github/workflows/python-ci.yml@main
     with:
-      publish-target: internal
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
       bump: ${{ inputs.bump || 'auto' }}
