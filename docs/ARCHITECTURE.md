@@ -434,6 +434,44 @@ A tier sets defaults; a deployer overrides any single dial.
 
 ### Default deployment composition (k8s)
 
+At a glance - what is enabled by DEFAULT per tier (`on` = deployed and enabled;
+`opt` = shipped but off by default, enable via the overlay; `off` = not deployed):
+
+| Component | dfe-docker | slim | single | scale |
+|-----------|:---:|:---:|:---:|:---:|
+| dfe-engine (control plane) | on | on | on | on |
+| dfe-ui | on | on | on | on |
+| HyperDX (explore UI + self-telemetry sink) | on | on | on | on |
+| dfe-receiver (ingest) | on | on | on | on |
+| dfe-loader (ingest) | on | on | on | on |
+| **dfe-hunt-runner (detection hunts)** | on [1] | **off** | on [2] | on [2] |
+| dfe-fetcher | off | off | on | on |
+| dfe-archiver | off | off | opt | opt |
+| transform workers (vrl / vector; wasm / elastic / splunk) | off | off | opt [3] | opt [3] |
+| ClickHouse | single | single | single | cluster |
+| Postgres + FerretDB | on | on | on | on |
+| Kafka | off | off | single | cluster |
+| Kafbat | off | off | on | on |
+| Layer 0 (Argo CD + operators + StorageClass/LB) | n/a [4] | on | on | on |
+
+- **[1]** dfe-docker / SME runs the hunt runner as a single always-on worker (no
+  KEDA); hunts are core single-host value, so it is on.
+- **[2]** KEDA scale-to-zero: the runner idles at 0 replicas when the backlog is
+  empty and wakes on the next due fire (see [HUNT-RUNNER-SCALING.md](HUNT-RUNNER-SCALING.md)).
+  Disabling it entirely is one dial - set the app's replica dial off in the deploy
+  overlay; the schedule + watermarks stay in ClickHouse so it resumes cleanly.
+- **[3]** `vrl` / `vector` are published and can be enabled per deploy; the
+  `wasm` / `elastic` / `splunk` transforms are not yet published - do not deploy by
+  default.
+- **[4]** dfe-docker is Compose, not k8s - there is no Argo/operators layer; the
+  container brings its own minimal wiring.
+
+Why `dfe-hunt-runner` is OFF for slim specifically: slim is the bare-minimum k8s
+tier - just the ingest path (receiver -> loader -> ClickHouse) plus the engine, UI,
+and HyperDX. Scheduled detection is real recurring ClickHouse load, so it is opt-in
+there and on-by-default everywhere else. It stays trivially enable-able (flip the
+overlay dial) because the runner is already deployed-capable on every tier.
+
 **slim** - the bare minimum. Only the essential pods:
 
 - `dfe-engine` + `dfe-ui` + **HyperDX** (always present - see below), and the

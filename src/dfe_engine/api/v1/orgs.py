@@ -20,12 +20,17 @@ Read endpoints require org:read.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
+
+if TYPE_CHECKING:
+    from dfe_engine.orgs.models import Org
 
 router = APIRouter(prefix="/orgs", tags=["Organisations"])
 
@@ -210,15 +215,15 @@ async def delete_org(
 # -- Helpers -----------------------------------------------------------------
 
 
-def _org_response(org: object) -> OrgResponse:
+def _org_response(org: Org) -> OrgResponse:
     """Build an OrgResponse from an Org model."""
     return OrgResponse(
-        name=org.name,  # type: ignore[attr-defined]
-        display_name=org.display_name,  # type: ignore[attr-defined]
-        org_ids=org.org_ids,  # type: ignore[attr-defined]
-        enabled=org.enabled,  # type: ignore[attr-defined]
-        created_at=org.created_at,  # type: ignore[attr-defined]
-        updated_at=org.updated_at,  # type: ignore[attr-defined]
+        name=org.name,
+        display_name=org.display_name,
+        org_ids=org.org_ids,
+        enabled=org.enabled,
+        created_at=org.created_at,
+        updated_at=org.updated_at,
     )
 
 

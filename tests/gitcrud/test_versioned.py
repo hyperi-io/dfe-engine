@@ -98,6 +98,26 @@ def test_deployed_pointer_tracks_reconciled_version(vc):
     assert vc.deployed("rules", "r") == 1
 
 
+def test_versioned_doc_refuses_unversioned_class(tmp_path):
+    """The opt-in is enforced: VersionedDoc rejects a versioned=False class.
+
+    Guarantees a dial class (helmvars) can never accidentally gain a draft/publish
+    envelope - it is edited directly via GitCrud, and the git log is its history.
+    Both a write path (save_draft) and a read path (get_published) are refused.
+    """
+    repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+    reg = ResourceClassRegistry(
+        # helmvars is versioned=False (the default) - a pure dial class
+        [ResourceClass("helmvars", "values", rbac_prefix="helmvars")]
+    )
+    vdoc = VersionedDoc(GitCrud(repo, reg))
+
+    with pytest.raises(ValueError, match="not versioned"):
+        vdoc.save_draft("helmvars", "receiver", {"replicas": 2}, actor="kaz")
+    with pytest.raises(ValueError, match="not versioned"):
+        vdoc.get_published("helmvars", "receiver")
+
+
 def test_each_op_is_a_commit(vc):
     # head_revision() is git's own commit id (we only read it); each op advances it
     vc.save_draft("rules", "r", {"sql": "a"}, actor="x")

@@ -244,6 +244,11 @@ async def add_member(
         added=[body.username],
     )
     group = store.get(name)
+    if group is None:  # deleted concurrently between the mutation and re-fetch
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
     return GroupResponse(
         name=group.name,
         description=group.description,
@@ -283,6 +288,11 @@ async def remove_member(
         removed=[username],
     )
     group = store.get(name)
+    if group is None:  # deleted concurrently between the mutation and re-fetch
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
     return GroupResponse(
         name=group.name,
         description=group.description,

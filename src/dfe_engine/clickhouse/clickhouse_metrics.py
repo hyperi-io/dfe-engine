@@ -7,7 +7,7 @@ from .clickhouse_manager import ClickHouseManager
 class ClickHouseMetrics:
     """Class for retrieving metrics from ClickHouse using the connection pool."""
 
-    def __init__(self, target_config_data: dict = None):
+    def __init__(self, target_config_data: dict | None = None):
         """Initialize with target configuration data."""
         self.ch_manager = ClickHouseManager.get_instance(target_config_data)
 

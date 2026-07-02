@@ -306,7 +306,7 @@ class RuleCreationService:
             from ..clickhouse.clickhouse_manager import ClickHouseManager
 
             ch = ClickHouseManager.get_instance()
-            client = ch.get_client()
+            client = ch.get_clickhouse_client()
 
             # Build a minimal SELECT to estimate cost
             db_table = (

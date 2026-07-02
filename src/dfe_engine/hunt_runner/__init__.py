@@ -20,6 +20,7 @@ from .ch_coordinator import ChCoordinator, HuntStateRow, Lease
 from .checkpoint import TIMESTAMP_FIELD, predicate, window
 from .models import HuntSpec, HuntState
 from .runner import HuntRunner
+from .schedule import due_count, due_query, ensure_schedule_schema, publish_schedule
 from .scheduler import Decision, decide
 from .spread import next_due, phase_offset
 from .worker import HuntWorker
@@ -35,8 +36,12 @@ __all__ = [
     "HuntWorker",
     "Lease",
     "decide",
+    "due_count",
+    "due_query",
+    "ensure_schedule_schema",
     "next_due",
     "phase_offset",
     "predicate",
+    "publish_schedule",
     "window",
 ]

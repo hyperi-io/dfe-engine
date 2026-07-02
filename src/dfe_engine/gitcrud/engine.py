@@ -15,6 +15,7 @@ for and the foundation Tier-1/Tier-2/operations build on.
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import Any
 
@@ -136,7 +137,7 @@ class GitCrud:
     def _file(self, cls: ResourceClass, name: str) -> Path:
         return self._repo.path / self._rel(cls, name)
 
-    def list(self, cls_name: str) -> list[str]:
+    def list(self, cls_name: str) -> builtins.list[str]:
         """Enumerate resource names in a class (filenames minus the suffix)."""
         cls = self._cls(cls_name)
         directory = self._repo.path / cls.directory
@@ -192,7 +193,7 @@ class GitCrud:
 
     def put_many(
         self,
-        items: list[tuple[str, str, dict]],
+        items: builtins.list[tuple[str, str, dict]],
         actor: str,
         message: str,
     ) -> PublishResult:

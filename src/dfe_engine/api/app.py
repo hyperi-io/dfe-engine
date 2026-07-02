@@ -276,7 +276,7 @@ def create_app(
         finally:
             for route, response_model, response_field in saved_health:
                 route.response_model = response_model
-                route.response_field = response_field
+                route.response_field = response_field  # ty: ignore[invalid-assignment]  # FastAPI Route internal
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {
                 "type": "http",
@@ -294,7 +294,7 @@ def create_app(
         app.openapi_schema = schema
         return schema
 
-    app.openapi = custom_openapi  # type: ignore[method-assign]
+    app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     return app
 

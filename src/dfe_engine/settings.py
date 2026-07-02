@@ -410,6 +410,21 @@ class OIDCSettings(BaseModel):
     sync_on_startup: bool = Field(default=True, description="Sync on startup")
 
 
+class LocalAuthSettings(BaseModel):
+    """Built-in local-account bootstrap config (nested under auth.local).
+
+    When enabled, the engine seeds admin/operator/viewer accounts at startup with
+    these passwords. Populated by load_settings from the DFE_AUTH_LOCAL_* env
+    vars; field names must match the keys set there.
+    """
+
+    enabled: bool = Field(default=False, description="Seed built-in local accounts")
+    org_id: str = Field(default="default", description="Org id for the seeded accounts")
+    admin_password: str = Field(default="", description="Bootstrap admin password")
+    operator_password: str = Field(default="", description="Bootstrap operator password")
+    viewer_password: str = Field(default="", description="Bootstrap viewer password")
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -429,6 +444,7 @@ class AuthSettings(BaseModel):
         description="Auth config directory (accounts, groups, api-keys)",
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
+    local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
 
 class HyperDXSettings(BaseModel):
@@ -809,6 +825,8 @@ def _get_env_overrides() -> dict:
         overrides["services"]["transform_vector_url"] = val
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
         overrides["services"]["transform_wasm_url"] = val
+    if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
+        overrides["services"]["transform_wasm_compiler_url"] = val
     if val := _get_env("DFE_SERVICES_FETCHER_URL"):
         overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
@@ -841,6 +859,22 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
+
+    # OIDC settings (nested under auth.oidc)
+    if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
+        overrides["auth"].setdefault("oidc", {})["providers_dir"] = val
+    if val := _get_env("DFE_AUTH_OIDC_SYNC_ENABLED"):
+        overrides["auth"].setdefault("oidc", {})["sync_enabled"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+    if val := _get_env("DFE_AUTH_OIDC_SYNC_ON_STARTUP"):
+        overrides["auth"].setdefault("oidc", {})["sync_on_startup"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
 
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):

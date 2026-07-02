@@ -13,7 +13,7 @@ Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 """
 
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Any
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
@@ -35,6 +35,27 @@ class ClickHouseClientWrapper:
 
     def __init__(self, client: Client):
         self._client = client
+
+    def __enter__(self) -> "ClickHouseClientWrapper":
+        # The ClickHouseManager singleton owns the underlying client's lifecycle;
+        # `with get_clickhouse_client() as ch` is scoping sugar only, so __exit__
+        # must NOT close the shared client out from under other callers.
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def query(self, query: str, *args, **kwargs):
+        """Raw SELECT -> the clickhouse-connect QueryResult (``.column_names`` /
+        ``.result_rows``). Use when the caller needs the result object;
+        ``execute()`` yields only result_rows and ``query_rows()`` returns
+        ``(columns, rows)``.
+        """
+        return self._client.query(query, *args, **kwargs)
+
+    def command(self, statement: str, *args, **kwargs):
+        """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
+        return self._client.command(statement, *args, **kwargs)
 
     def query_rows(self, query: str, *args, **kwargs):
         """Run a SELECT and return ``(column_names, result_rows)``.
@@ -174,6 +195,8 @@ class ClickHouseManager:
         try:
             if self._client is None:
                 self._initialize_client()
+            if self._client is None:  # _initialize_client sets it or raises
+                raise RuntimeError("ClickHouse client failed to initialise")
             return ClickHouseClientWrapper(self._client)
 
         except Exception as e:
@@ -208,8 +231,10 @@ class ClickHouseManager:
                 num_pools=10,
             )
 
-            # Build connection parameters
-            connect_params = {
+            # Build connection parameters. Typed dict[str, Any] because the values
+            # are heterogeneous (str/int/PoolManager/bool) and get **-unpacked into
+            # clickhouse_connect.get_client's precisely-typed kwargs.
+            connect_params: dict[str, Any] = {
                 "host": host,
                 "port": port,
                 "pool_mgr": self._pool_manager,

@@ -20,7 +20,7 @@ suggest meta-schema column promotions (SchemaOptimiser).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -28,6 +28,7 @@ from .interface import (
     AIModuleRegistry,
     AIModuleResult,
     AIModuleStatus,
+    AIModuleType,
     LogParser,
     QueryGenerator,
     QueryOptimiser,
@@ -38,15 +39,24 @@ from .interface import (
 class _StubExec:
     """Mixin: a synchronous stub whose submit() computes a COMPLETED marked result."""
 
+    if TYPE_CHECKING:
+        # Provided by the concrete AI-module host this mixin is combined with
+        # (interface.py QueryOptimiser/QueryGenerator/LogParser/SchemaOptimiser).
+        # Declared for type-checkers only; no runtime attribute is created here.
+        name: str
+        module_type: AIModuleType
+
+        def generate_task_id(self) -> str: ...
+
     def __init__(self) -> None:
         self._results: dict[str, AIModuleResult] = {}
 
     def submit(self, input_data: BaseModel) -> str:
-        task_id = self.generate_task_id()  # type: ignore[attr-defined]
+        task_id = self.generate_task_id()
         self._results[task_id] = AIModuleResult(
             task_id=task_id,
-            module_name=self.name,  # type: ignore[attr-defined]
-            module_type=self.module_type,  # type: ignore[attr-defined]
+            module_name=self.name,
+            module_type=self.module_type,
             status=AIModuleStatus.COMPLETED,
             output={"stub": True, **self._stub_output(input_data)},
         )

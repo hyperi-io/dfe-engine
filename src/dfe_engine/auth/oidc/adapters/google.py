@@ -64,7 +64,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK group fetch failed — using identity fallback",
-                provider=self._provider.name,
+                provider=self._provider.issuer,
                 error=str(exc),
             )
             return {g: g for g in group_ids}
@@ -97,7 +97,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK list_all_groups failed",
-                provider=self._provider.name,
+                provider=self._provider.issuer,
                 error=str(exc),
             )
             return []
@@ -135,7 +135,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Google Admin SDK test_connection failed",
-                provider=self._provider.name,
+                provider=self._provider.issuer,
                 error=str(exc),
             )
             return False, str(exc)
@@ -201,7 +201,7 @@ class GoogleAdapter(OIDCGroupAdapter):
         except Exception as exc:
             logger.warning(
                 "Failed to build Google Admin SDK service",
-                provider=self._provider.name,
+                provider=self._provider.issuer,
                 error=str(exc),
             )
             return None

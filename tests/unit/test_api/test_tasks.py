@@ -217,15 +217,20 @@ class TestHuntsRouter:
         resp = client.post("/api/v1/hunts", json=payload, headers=viewer_headers)
         assert resp.status_code == 403
 
-    def test_trigger_no_engine_returns_503(self, client, admin_headers):
-        """Returns 503 when trying to trigger a hunt without engine running."""
+    def test_trigger_nonexistent_hunt_returns_404(self, client, admin_headers):
+        """Triggering a hunt that does not exist returns 404.
+
+        Hunts execute in the separate dfe-hunt-runner service; the API validates
+        the hunt exists, then returns 501 (ad-hoc trigger not yet wired). A missing
+        hunt short-circuits to 404 before that.
+        """
         resp = client.post(
             "/api/v1/hunts/test-hunt/run",
             json={"customer": "test-org"},
             headers=admin_headers,
         )
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "not_configured"
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "not_found"
 
     def test_requires_auth(self, client):
         """Endpoints require authentication when auth is enabled."""

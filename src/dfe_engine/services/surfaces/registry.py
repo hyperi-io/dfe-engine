@@ -18,6 +18,7 @@ load when the target directory is empty.
 
 from __future__ import annotations
 
+import builtins
 import importlib.resources
 from pathlib import Path
 
@@ -52,7 +53,7 @@ class SurfaceRegistry:
             return None
         return self._load_surface(path)
 
-    def list(self) -> list[ServiceSurface]:
+    def list(self) -> builtins.list[ServiceSurface]:
         """List all service surfaces sorted by service name."""
         surfaces: list[ServiceSurface] = []
         for path in sorted(self._dir.glob("*.yaml")):

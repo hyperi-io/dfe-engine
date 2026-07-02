@@ -48,6 +48,22 @@ class VersionedDoc:
     def __init__(self, crud: GitCrud) -> None:
         self._crud = crud
 
+    def _require_versioned(self, cls: str) -> None:
+        """Enforce the opt-in: refuse a class that did not set ``versioned=True``.
+
+        A versioned=False class (helmvars, actions, and other dial classes) is
+        edited directly via GitCrud - its git log IS its history. Guarding at the
+        two chokepoints (_envelope for every read/read-before-write, _save for
+        every write) means such a class can never accidentally be wrapped in a
+        draft/publish version envelope - the opt-in is a guarantee, not a
+        convention. Unknown classes raise from the registry.
+        """
+        if not self._crud.resource_class(cls).versioned:
+            raise ValueError(
+                f"resource class {cls!r} is not versioned (versioned=False); "
+                "edit it directly via GitCrud, or set versioned=True to opt in"
+            )
+
     # ---- envelope load ------------------------------------------------
 
     def _envelope(self, cls: str, name: str) -> dict[str, Any] | None:
@@ -57,6 +73,7 @@ class VersionedDoc:
         with no ``versions`` map reads as "no published versions" (no legacy
         flat-doc back-compat - nothing is GA to migrate from).
         """
+        self._require_versioned(cls)
         try:
             return self._crud.get(cls, name)
         except ResourceNotFoundError:
@@ -68,6 +85,7 @@ class VersionedDoc:
         return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
 
     def _save(self, cls: str, name: str, env: dict, actor: str, msg: str):
+        self._require_versioned(cls)
         return self._crud.put(cls, name, env, actor, message=msg)
 
     # ---- reads --------------------------------------------------------

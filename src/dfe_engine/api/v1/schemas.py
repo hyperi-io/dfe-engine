@@ -14,7 +14,7 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field, model_validator
@@ -1396,7 +1396,7 @@ async def promote_field(
     results = [
         PromoteResult(
             json_path=o.json_path,
-            status=o.status,
+            status=cast('Literal["ok", "error"]', o.status),
             column_name=o.column_name,
             data_type=o.data_type,
             index_type=o.index_type,

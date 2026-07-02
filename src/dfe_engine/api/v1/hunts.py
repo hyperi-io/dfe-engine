@@ -6,13 +6,14 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Hunts router — engine status, hunt config CRUD, and on-demand execution.
+"""Hunts router — scheduling status + hunt config CRUD.
 
-The HuntEngine runs as a background scheduler. This router provides:
-- Engine lifecycle status
+Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated via
+ClickHouse), not in this API process. This router provides:
+- Scheduling status (runner liveness via active ClickHouse leases)
 - Hunt configuration CRUD (YAML under ``hunts.hunt_dir``)
 - Paginated hunt list with search
-- On-demand hunt execution (returns 202 + task_id for polling)
+- On-demand execution is not wired yet (POST /{name}/run -> 501)
 """
 
 from __future__ import annotations
@@ -25,7 +26,6 @@ from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, OptionalAlertDestStore, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
-from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
@@ -195,19 +195,28 @@ class TriggerResponse(BaseModel):
 # ── Dependencies ────────────────────────────────────────────
 
 
-def _get_hunt_engine(request: Request):
-    return getattr(request.app.state, "hunt_engine", None)
+def _active_hunt_leases(request: Request) -> int:
+    """Best-effort count of hunts currently held by a runner (active CH leases).
 
+    Hunt execution runs in the separate dfe-hunt-runner service and coordinates via
+    ClickHouse (the hunt_lease table). The API surfaces liveness by counting active
+    leases; it returns 0 (never errors) when ClickHouse is unreachable or the
+    coordination table does not exist yet.
+    """
+    try:
+        from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+        from dfe_engine.settings import get_settings
 
-def _get_task_manager(request: Request) -> TaskManager:
-    return request.app.state.task_manager
-
-
-def _hunt_display_name_matches(hunt: Any, hunt_name: str) -> bool:
-    """Match engine ``Hunt`` instance to registry file name or display label."""
-    if hunt.name == hunt_name:
-        return True
-    return hunt.name.replace(" ", "_") == hunt_name
+        db = get_settings().clickhouse.effective_data_database
+        client = ClickHouseManager.get_instance().get_clickhouse_client()
+        rows = client.query(
+            "SELECT countIf(lu > toInt64(now())) FROM ("
+            f"SELECT hunt_id, argMax(lease_until, claimed) AS lu "
+            f"FROM `{db}`.hunt_lease GROUP BY hunt_id)"
+        ).result_rows
+        return int(rows[0][0]) if rows else 0
+    except Exception:
+        return 0
 
 
 def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
@@ -224,21 +233,6 @@ def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
     )
 
 
-def _find_engine_hunt(engine: Any, hunt_name: str, registry: HuntConfigReg | None):
-    display_name = hunt_name
-    if registry is not None:
-        try:
-            display_name = resolve_display_name(registry.get(hunt_name), hunt_name)
-        except HuntConfigNotFoundError:
-            pass
-
-    for cron_job in engine._cron_jobs:
-        for hunt in cron_job.hunts:
-            if hunt.name == display_name or _hunt_display_name_matches(hunt, hunt_name):
-                return hunt
-    return None
-
-
 # ── Endpoints ───────────────────────────────────────────────
 
 
@@ -250,17 +244,20 @@ def _find_engine_hunt(engine: Any, hunt_name: str, registry: HuntConfigReg | Non
 async def get_engine_status(
     request: Request,
     user: CurrentUser,
+    registry: HuntConfigReg,
 ) -> HuntEngineStatus:
-    """Get the current status of the hunt scheduler."""
-    engine = _get_hunt_engine(request)
-    if engine is None:
-        return HuntEngineStatus(running=False)
+    """Report hunt scheduling status.
 
-    hunt_count = sum(len(cj.hunts) for cj in engine._cron_jobs)
+    Hunts execute in the separate dfe-hunt-runner service (pull-based, coordinated
+    via ClickHouse), not in this API process. ``running`` reflects whether any
+    runner currently holds a hunt lease; ``hunt_count`` is the configured-hunt
+    count.
+    """
+    active = _active_hunt_leases(request)
     return HuntEngineStatus(
-        running=engine.is_running,
-        hunt_count=hunt_count,
-        scheduling_mode=engine._settings.hunts.scheduling_mode,
+        running=active > 0,
+        hunt_count=len(registry.list_hunts()),
+        scheduling_mode="pull",
     )
 
 
@@ -418,48 +415,24 @@ async def trigger_hunt(
 ) -> TriggerResponse:
     """Trigger an ad-hoc hunt execution.
 
-    Returns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``
-    or streamed via ``GET /tasks/{task_id}/stream``.
+    Hunts run in the separate dfe-hunt-runner service on their schedule. On-demand
+    execution from the API (enqueue a one-shot fire the runner claims) is not wired
+    yet, so this returns 501 after validating the hunt exists.
     """
-    engine = _get_hunt_engine(request)
-    if engine is None:
-        raise HTTPException(
-            status_code=503,
-            detail={"code": "not_configured", "message": "Hunt engine not running"},
-        )
-
-    target_hunt = _find_engine_hunt(engine, name, registry)
-    if target_hunt is None:
+    try:
+        registry.get(name)
+    except HuntConfigNotFoundError:
         raise HTTPException(
             status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found in scheduler"},
-        )
-
-    manager = _get_task_manager(request)
-    task_info = manager.submit(
-        "hunt:execute",
-        _execute_hunt,
-        target_hunt,
-        body.customer,
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
+        ) from None
+    raise HTTPException(
+        status_code=501,
+        detail={
+            "code": "not_implemented",
+            "message": (
+                "On-demand hunt execution runs via the dfe-hunt-runner service; "
+                "ad-hoc trigger from the API is not yet wired"
+            ),
+        },
     )
-
-    audit_resource_change(user.user_id, "hunt", name, "executed")
-    return TriggerResponse(task_id=task_info.id, hunt_name=target_hunt.name)
-
-
-async def _execute_hunt(hunt: Any, customer: str, *, task: Any) -> dict:
-    """Run a single hunt for a customer. Called by TaskManager."""
-    from datetime import UTC, datetime
-
-    task.set_progress(10, f"Starting hunt '{hunt.name}' for customer '{customer}'")
-
-    try:
-        result = hunt.execute_hunt(
-            customer=customer,
-            scheduled_start_time=datetime.now(UTC),
-        )
-    except Exception as exc:
-        raise RuntimeError(f"Hunt '{hunt.name}' failed: {exc}") from exc
-
-    task.set_progress(90, "Hunt execution complete, collecting results")
-    return result
