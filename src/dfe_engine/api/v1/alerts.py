@@ -1,9 +1,11 @@
 """Alerts router — alert destination CRUD.
 
-Alert destinations are Apprise notification URLs stored as YAML files
-via DirectoryConfigStore (one file per destination). Each file stores
-the destination data under a top-level "data" key so delete() cleanly
-removes the payload (store.delete(name, "data")).
+Alert destinations are Apprise notification URLs persisted one YAML file
+per destination via the ``AlertDestinationRegistry`` (top-level fields:
+``url``, ``description``, ``enabled``, optional ``hunt_name``; the name
+comes from the filename). This is the same registry the hunt engine reads
+when dispatching alerts, so a destination created here is resolvable by a
+hunt straight away.
 
 GET    /api/v1/alerts/destinations            → Paginated list
 POST   /api/v1/alerts/destinations            → Create destination
@@ -19,21 +21,18 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import AlertDestStore, CurrentUser, require_action
+from dfe_engine.api.deps import AlertDestRegistry, CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.hunts.alert import AlertDestination as RegistryAlertDestination
 from dfe_engine.hunts.alert_hunt_link import (
-    ALERT_DEST_DATA_KEY,
     add_destination_to_hunt,
     require_hunt,
 )
 from dfe_engine.hunts.hunt_config_registry import HuntConfigNotFoundError
 
 router = APIRouter(prefix="/alerts", tags=["Alerts"])
-
-# DirectoryConfigStore key used within each destination's YAML file
-_DATA_KEY = ALERT_DEST_DATA_KEY
 
 
 def _get_hunt_config_registry_optional() -> Any | None:
@@ -76,7 +75,7 @@ class AlertDestinationSummary(BaseModel):
 )
 async def list_destinations(
     user: CurrentUser,
-    store: AlertDestStore,
+    registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
     pagination: PaginationParams = Depends(),
     search: str | None = Query(None, description="Search in name/description"),
@@ -88,11 +87,16 @@ async def list_destinations(
     sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
     """List alert destinations."""
-    raw = []
-    for name in store.list_tables():
-        data = store.get(name, _DATA_KEY)
-        if data is not None:  # Skip deleted (empty) tables
-            raw.append({"name": name, **data})
+    raw = [
+        {
+            "name": dest.name,
+            "url": dest.url,
+            "description": dest.description,
+            "enabled": dest.enabled,
+            "hunt_name": dest.hunt_name,
+        }
+        for dest in registry.list()
+    ]
 
     if hunt is not None:
         if hunt_registry is None:
@@ -136,11 +140,11 @@ async def list_destinations(
 async def create_destination(
     body: AlertDestination,
     user: CurrentUser,
-    store: AlertDestStore,
+    registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
 ):
     """Create an alert destination."""
-    if store.get(body.name, _DATA_KEY) is not None:
+    if body.name in registry:
         raise HTTPException(
             status_code=409,
             detail={
@@ -150,11 +154,11 @@ async def create_destination(
         )
     if body.hunt_name is not None:
         _ensure_hunt_for_link(hunt_registry, body.hunt_name)
-    _write_destination(store, body, hunt_name=body.hunt_name)
+    _write_destination(registry, body, hunt_name=body.hunt_name)
     if body.hunt_name is not None and hunt_registry is not None:
         add_destination_to_hunt(hunt_registry, body.hunt_name, body.name)
     audit_resource_change(user.user_id, "alert_destination", body.name, "created")
-    return _destination_from_store(body.name, store.get(body.name, _DATA_KEY) or {})
+    return _destination_from_registry(registry.get(body.name))
 
 
 @router.get(
@@ -162,10 +166,9 @@ async def create_destination(
     response_model=AlertDestination,
     dependencies=[Depends(require_action(scopes_dict["alert_read"]))],
 )
-async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
+async def get_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Get an alert destination by name."""
-    data = store.get(name, _DATA_KEY)
-    if data is None:
+    if name not in registry:
         raise HTTPException(
             status_code=404,
             detail={
@@ -173,7 +176,7 @@ async def get_destination(name: str, user: CurrentUser, store: AlertDestStore):
                 "message": f"Alert destination '{name}' not found",
             },
         )
-    return _destination_from_store(name, data)
+    return _destination_from_registry(registry.get(name))
 
 
 @router.put(
@@ -185,12 +188,11 @@ async def update_destination(
     name: str,
     body: AlertDestination,
     user: CurrentUser,
-    store: AlertDestStore,
+    registry: AlertDestRegistry,
     hunt_registry: OptionalHuntConfigReg,
 ):
     """Update an alert destination."""
-    existing = store.get(name, _DATA_KEY)
-    if existing is None:
+    if name not in registry:
         raise HTTPException(
             status_code=404,
             detail={
@@ -198,16 +200,17 @@ async def update_destination(
                 "message": f"Alert destination '{name}' not found",
             },
         )
+    existing = registry.get(name)
     body.name = name
     hunt_to_link = body.hunt_name
     if hunt_to_link is not None:
         _ensure_hunt_for_link(hunt_registry, hunt_to_link)
-    stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.get("hunt_name")
-    _write_destination(store, body, hunt_name=stored_hunt_name)
+    stored_hunt_name = hunt_to_link if hunt_to_link is not None else existing.hunt_name
+    _write_destination(registry, body, hunt_name=stored_hunt_name)
     if hunt_to_link is not None and hunt_registry is not None:
         add_destination_to_hunt(hunt_registry, hunt_to_link, name)
     audit_resource_change(user.user_id, "alert_destination", name, "updated")
-    return _destination_from_store(name, store.get(name, _DATA_KEY) or {})
+    return _destination_from_registry(registry.get(name))
 
 
 @router.delete(
@@ -215,9 +218,9 @@ async def update_destination(
     status_code=204,
     dependencies=[Depends(require_action(scopes_dict["alert_delete"]))],
 )
-async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore):
+async def delete_destination(name: str, user: CurrentUser, registry: AlertDestRegistry):
     """Delete an alert destination."""
-    if store.get(name, _DATA_KEY) is None:
+    if not registry.remove(name):
         raise HTTPException(
             status_code=404,
             detail={
@@ -225,37 +228,38 @@ async def delete_destination(name: str, user: CurrentUser, store: AlertDestStore
                 "message": f"Alert destination '{name}' not found",
             },
         )
-    store.delete(name, _DATA_KEY)
     audit_resource_change(user.user_id, "alert_destination", name, "deleted")
 
 
 # ── Helpers ──────────────────────────────────────────────────
 
 
+def _destination_from_registry(dest: RegistryAlertDestination) -> AlertDestination:
+    """Convert a registry destination model to the API response model."""
+    return AlertDestination(
+        name=dest.name,
+        url=dest.url,
+        description=dest.description,
+        enabled=dest.enabled,
+        hunt_name=dest.hunt_name,
+    )
+
+
 def _write_destination(
-    store,
+    registry,
     dest: AlertDestination,
     *,
     hunt_name: str | None = None,
 ) -> None:
-    """Write destination as a single "data" key within its YAML table."""
-    payload: dict[str, Any] = {
-        "url": dest.url,
-        "description": dest.description,
-        "enabled": dest.enabled,
-    }
-    if hunt_name is not None:
-        payload["hunt_name"] = hunt_name
-    store.set(dest.name, _DATA_KEY, payload)
-
-
-def _destination_from_store(name: str, data: dict[str, Any]) -> AlertDestination:
-    return AlertDestination(
-        name=name,
-        url=data.get("url", ""),
-        description=data.get("description", ""),
-        enabled=data.get("enabled", True),
-        hunt_name=data.get("hunt_name"),
+    """Persist a destination via the registry (overwrites if the name exists)."""
+    registry.add(
+        RegistryAlertDestination(
+            name=dest.name,
+            url=dest.url,
+            description=dest.description,
+            enabled=dest.enabled,
+            hunt_name=hunt_name,
+        )
     )
 
 

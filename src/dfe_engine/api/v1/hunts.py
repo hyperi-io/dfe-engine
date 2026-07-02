@@ -23,7 +23,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
 
-from dfe_engine.api.deps import CurrentUser, HuntConfigReg, OptionalAlertDestStore, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    HuntConfigReg,
+    OptionalAlertDestRegistry,
+    require_action,
+)
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.api.task_manager import TaskManager
 from dfe_engine.auth.audit import audit_resource_change
@@ -387,7 +392,7 @@ async def delete_hunt(
     name: str,
     user: CurrentUser,
     registry: HuntConfigReg,
-    alert_store: OptionalAlertDestStore,
+    alert_registry: OptionalAlertDestRegistry,
 ):
     """Delete a hunt configuration."""
     try:
@@ -397,8 +402,8 @@ async def delete_hunt(
             status_code=404,
             detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
         ) from None
-    if alert_store is not None:
-        delete_destinations_owned_by_hunt(alert_store, registry, name)
+    if alert_registry is not None:
+        delete_destinations_owned_by_hunt(alert_registry, registry, name)
     registry.delete(name)
     audit_resource_change(user.user_id, "hunt", name, "deleted")
 
