@@ -41,6 +41,8 @@ Hunts:
 - DFE_HUNTS_CHECKPOINT_PATH -> hunts.checkpoint_path
 - DFE_HUNTS_CRON_TASK_TIMEOUT -> hunts.cron_task_timeout
 - DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
+- DFE_HUNTS_ALERT_DESTINATIONS -> hunts.alert_destinations (JSON {name: apprise_url})
+- DFE_HUNTS_ALERT_DESTINATIONS_DIR -> hunts.alert_destinations_dir
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -620,6 +622,8 @@ def _get_env_overrides() -> dict:
             overrides["hunts"]["alert_destinations"] = json.loads(val)
         except json.JSONDecodeError:
             pass
+    if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS_DIR"):
+        overrides["hunts"]["alert_destinations_dir"] = val
     if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
         overrides["hunts"]["default_alert_cooldown"] = val
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):

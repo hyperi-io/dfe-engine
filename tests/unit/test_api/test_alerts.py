@@ -74,6 +74,44 @@ def sample_destination():
     }
 
 
+class TestAlertDestinationsBootstrap:
+    def test_bootstrap_creates_missing_directory(self, tmp_path):
+        from dfe_engine.api.deps import _registries, bootstrap_registries, shutdown_registries
+        from dfe_engine.settings import DFESettings, HuntsSettings
+
+        dest_dir = tmp_path / "config" / "alert-destinations"
+        assert not dest_dir.exists()
+        settings = DFESettings(hunts=HuntsSettings(alert_destinations_dir=str(dest_dir)))
+        try:
+            bootstrap_registries(settings)
+            assert dest_dir.is_dir()
+            assert "alert_destinations" in _registries
+        finally:
+            shutdown_registries()
+
+    def test_api_created_destination_is_hunt_engine_readable(
+        self, alert_admin_headers, alert_client, sample_destination, tmp_path
+    ):
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
+
+        resp = alert_client.post(
+            "/api/v1/alerts/destinations",
+            json=sample_destination,
+            headers=alert_admin_headers,
+        )
+        assert resp.status_code == 201
+
+        # A fresh registry (as the hunt engine builds it) must resolve the
+        # API-written file — proving both layers share one on-disk format.
+        hunt_engine_registry = AlertDestinationRegistry(
+            directory=str(tmp_path / "alert-destinations")
+        )
+        try:
+            assert hunt_engine_registry.resolve("slack-alerts") == sample_destination["url"]
+        finally:
+            hunt_engine_registry.close()
+
+
 class TestAlertDestinationsList:
     def test_list_empty(self, alert_client, alert_admin_headers):
         resp = alert_client.get("/api/v1/alerts/destinations", headers=alert_admin_headers)

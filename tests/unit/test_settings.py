@@ -330,6 +330,11 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
 
+    def test_hunt_alert_destinations_dir_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS_DIR", "/data/alert-destinations")
+        settings = load_settings()
+        assert settings.hunts.alert_destinations_dir == "/data/alert-destinations"
+
     def test_multiple_overrides_at_once(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch1.example.com")
         monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")

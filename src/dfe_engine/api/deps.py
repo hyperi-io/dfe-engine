@@ -83,11 +83,10 @@ def bootstrap_registries(settings: DFESettings) -> None:
             _registries["hunt_configs"] = HuntConfigRegistry(hunts_directory=hunt_dir)
 
     if settings.hunts.alert_destinations_dir:
-        from hyperi_pylib.config import DirectoryConfigStore
+        from dfe_engine.hunts.alert import AlertDestinationRegistry
 
-        _registries["alert_destinations"] = DirectoryConfigStore(
+        _registries["alert_destinations"] = AlertDestinationRegistry(
             directory=settings.hunts.alert_destinations_dir,
-            writable=True,
         )
 
     if settings.deployment.config_dir:
@@ -163,10 +162,10 @@ def get_field_map_registry():
     return reg
 
 
-def get_alert_destinations_store():
-    """FastAPI dependency: resolve alert destinations DirectoryConfigStore."""
-    store = _registries.get("alert_destinations")
-    if store is None:
+def get_alert_destinations_registry():
+    """FastAPI dependency: resolve the AlertDestinationRegistry singleton."""
+    reg = _registries.get("alert_destinations")
+    if reg is None:
         raise HTTPException(
             status_code=503,
             detail={
@@ -175,11 +174,11 @@ def get_alert_destinations_store():
                 " — set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
             },
         )
-    return store
+    return reg
 
 
-def get_alert_destinations_store_optional():
-    """Optional alert destinations store (for hunt delete cascade)."""
+def get_alert_destinations_registry_optional():
+    """Optional AlertDestinationRegistry (for hunt delete cascade)."""
     return _registries.get("alert_destinations")
 
 
@@ -230,8 +229,10 @@ SchemaReg = Annotated[Any, Depends(get_schema_registry)]
 SourceReg = Annotated[Any, Depends(get_source_registry)]
 ServiceConfigReg = Annotated[Any, Depends(get_service_config_registry)]
 FieldMapReg = Annotated[Any, Depends(get_field_map_registry)]
-AlertDestStore = Annotated[Any, Depends(get_alert_destinations_store)]
-OptionalAlertDestStore = Annotated[Any | None, Depends(get_alert_destinations_store_optional)]
+AlertDestRegistry = Annotated[Any, Depends(get_alert_destinations_registry)]
+OptionalAlertDestRegistry = Annotated[
+    Any | None, Depends(get_alert_destinations_registry_optional)
+]
 DeploymentConfigReg = Annotated[Any, Depends(get_deployment_config_registry)]
 RuleReg = Annotated[Any, Depends(get_rule_registry)]
 HuntConfigReg = Annotated[Any, Depends(get_hunt_config_registry)]

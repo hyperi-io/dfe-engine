@@ -54,6 +54,10 @@ class AlertDestination(BaseModel):
     url: str = Field(..., description="Apprise notification URL")
     description: str = Field(default="", description="Human-readable description")
     enabled: bool = Field(default=True, description="Enable/disable this destination")
+    hunt_name: str | None = Field(
+        default=None,
+        description="Hunt file stem when this destination is owned by a hunt (set via API)",
+    )
 
 
 class AlertDestinationRegistry:
@@ -105,8 +109,9 @@ class AlertDestinationRegistry:
         if self._store is not None:
             from dfe_engine.yaml_utils import yaml_dump
 
-            # Store url/description/enabled — name comes from the filename
-            data = destination.model_dump(exclude={"name"})
+            # Store url/description/enabled/hunt_name — name comes from the filename.
+            # exclude_none drops hunt_name when unset so unowned destinations stay clean.
+            data = destination.model_dump(exclude={"name"}, exclude_none=True)
             yaml_path = Path(self._store._directory) / f"{destination.name}.yaml"
             yaml_dump(data, yaml_path)
             self._store._refresh_all()
@@ -177,6 +182,11 @@ class AlertDestinationRegistry:
         """Bulk-load destinations from a {name: url} dict (e.g. from settings)."""
         for name, url in destinations.items():
             self.add(AlertDestination(name=name, url=url))
+
+    def close(self) -> None:
+        """Stop the backing store's background refresh thread (no-op in-memory)."""
+        if self._store is not None:
+            self._store.stop()
 
     def __len__(self) -> int:
         if self._store is not None:
