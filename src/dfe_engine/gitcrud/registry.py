@@ -83,5 +83,7 @@ def default_registry() -> ResourceClassRegistry:
                 rbac_prefix="governance",
                 versioned=True,
             ),
+            # engine-wide gitops settings (the auto-merge flag lives here)
+            ResourceClass("gov_settings", "governance/settings", rbac_prefix="governance"),
         ]
     )

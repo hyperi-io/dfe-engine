@@ -77,6 +77,7 @@ API (Elasticsearch template elastic-converter upload limits):
 
 import os
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -480,6 +481,7 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_PUSH -> gitops.push
     - DFE_GITOPS_USERNAME / DFE_GITOPS_TOKEN -> HTTPS push auth
     - DFE_GITOPS_AUTHOR_NAME / DFE_GITOPS_AUTHOR_EMAIL -> commit identity
+    - DFE_GITOPS_MODE -> gitops.mode
     """
 
     enabled: bool = Field(default=False, description="Enable gitops publishing")
@@ -491,6 +493,15 @@ class GitopsSettings(BaseModel):
     token: str = Field(default="", description="HTTPS push token/password")
     author_name: str = Field(default="dfe-engine", description="Commit author name")
     author_email: str = Field(default="dfe-engine@hyperi.io", description="Commit author email")
+    mode: Literal["solo", "team"] = Field(
+        default="team",
+        description=(
+            "Operator posture. 'solo' declares a single-operator deployment and "
+            "is the explicit override that permits gitops auto-merge in a "
+            "production DFE_ENV; 'team' (default) refuses auto-merge outside "
+            "dev postures."
+        ),
+    )
 
 
 # Known placeholder JWT secret - fine for local dev, REJECTED in a production
@@ -500,6 +511,11 @@ _DEV_JWT_SECRET = "dev-secret-key-change-in-production"
 # Postures that are NOT production; anything else (incl. the default
 # "production") is treated as production for the placeholder-secret guard.
 _NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
+
+
+def is_dev_posture(env: str) -> bool:
+    """True when DFE_ENV declares a non-production posture (dev/local/test/ci)."""
+    return env.strip().lower() in _NON_PROD_ENVS
 
 
 class APISettings(BaseModel):
@@ -634,7 +650,7 @@ class DFESettings(BaseModel):
         # Fail fast if a production deployment turns auth on but never overrode
         # the known dev jwt_secret - otherwise anyone can forge tokens. Local dev
         # opts out via DFE_ENV. Minimum length is enforced on the field itself.
-        is_prod = self.env.strip().lower() not in _NON_PROD_ENVS
+        is_prod = not is_dev_posture(self.env)
         if is_prod and self.auth.enabled and self.api.jwt_secret == _DEV_JWT_SECRET:
             raise ValueError(
                 "api.jwt_secret is the known dev placeholder but env is "
@@ -903,6 +919,8 @@ def _get_env_overrides() -> dict:
         overrides["gitops"]["author_name"] = val
     if val := _get_env("DFE_GITOPS_AUTHOR_EMAIL"):
         overrides["gitops"]["author_email"] = val
+    if val := _get_env("DFE_GITOPS_MODE"):
+        overrides["gitops"]["mode"] = val.strip().lower()
 
     # API settings
     if val := _get_env("DFE_API_HOST"):

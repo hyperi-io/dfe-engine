@@ -48,3 +48,11 @@ def test_action_string_uses_rbac_prefix():
 def test_action_string_defaults_prefix_to_name():
     cls = ResourceClass("hunts", "hunts")
     assert cls.action("write") == "hunts:write"
+
+
+def test_gov_settings_class_registered():
+    reg = default_registry()
+    cls = reg.get("gov_settings")
+    assert cls.directory == "governance/settings"
+    assert cls.rbac_prefix == "governance"
+    assert cls.versioned is False

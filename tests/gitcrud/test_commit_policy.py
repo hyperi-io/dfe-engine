@@ -89,3 +89,22 @@ def test_resolve_mode():
     assert resolve_mode(environment="dev", rbac_class="governance") == "pr"
     assert resolve_mode(environment="dev", rbac_class="helmvars", protected=True) == "pr"
     assert resolve_mode(environment="dev", rbac_class="helmvars", require_pr=True) == "pr"
+
+
+class TestAutoMergeMode:
+    def test_auto_merge_forces_direct_everywhere(self):
+        # prod + protected + governance + require_pr: ALL direct under auto-merge
+        assert (
+            resolve_mode(
+                environment="prod",
+                rbac_class="governance",
+                protected=True,
+                require_pr=True,
+                auto_merge=True,
+            )
+            == "direct"
+        )
+
+    def test_without_auto_merge_pr_untouched(self):
+        assert resolve_mode(environment="prod", rbac_class="helmvars") == "pr"
+        assert resolve_mode(environment="dev", rbac_class="helmvars") == "direct"

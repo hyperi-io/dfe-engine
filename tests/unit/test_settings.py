@@ -374,3 +374,45 @@ class TestEnvOverrides:
         assert settings.clickhouse.port == 9000
         assert settings.api.port == 9090
         assert settings.auth.enabled is True
+
+
+class TestGitopsMode:
+    def test_default_is_team(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings().mode == "team"
+
+    def test_solo_accepted(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings(mode="solo").mode == "solo"
+
+    def test_invalid_mode_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+
+        from dfe_engine.settings import GitopsSettings
+
+        with pytest.raises(ValidationError):
+            GitopsSettings(mode="duo")
+
+    def test_env_override(self, monkeypatch):
+        from dfe_engine.settings import _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_MODE", "solo")
+        overrides = _get_env_overrides()
+        assert overrides["gitops"]["mode"] == "solo"
+
+
+class TestIsDevPosture:
+    def test_dev_postures(self):
+        from dfe_engine.settings import is_dev_posture
+
+        for env in ("dev", "development", "local", "test", "ci", " DEV "):
+            assert is_dev_posture(env) is True
+
+    def test_production_postures(self):
+        from dfe_engine.settings import is_dev_posture
+
+        for env in ("production", "prod", "staging", ""):
+            assert is_dev_posture(env) is False

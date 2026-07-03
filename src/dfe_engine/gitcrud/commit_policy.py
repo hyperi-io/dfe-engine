@@ -118,12 +118,17 @@ def resolve_mode(
     rbac_class: str,
     protected: bool = False,
     require_pr: bool = False,
+    auto_merge: bool = False,
 ) -> str:
     """'pr' for prod / protected / governance / explicit; else 'direct'.
 
     PRs for production-controlling changes, direct-commit for low-risk - enforced at
-    the git level (the standard).
+    the git level (the standard). auto_merge=True (the solo/dev fast path) force-
+    directs EVERYTHING - the caller is responsible for gating + loud warnings (see
+    gitcrud/auto_merge.py).
     """
+    if auto_merge:
+        return "direct"
     if require_pr or protected or rbac_class == "governance" or environment == "prod":
         return "pr"
     return "direct"
