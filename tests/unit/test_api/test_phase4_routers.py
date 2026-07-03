@@ -273,7 +273,7 @@ class TestSchemasRouter:
             SourceSettings,
             reset_settings,
         )
-        from dfe_engine.yaml_utils import yaml_dump
+        from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
         reset_settings()
 
@@ -367,8 +367,10 @@ class TestSchemasRouter:
                 assert get_plan.status_code == 200
                 assert get_plan.json()["planned_at"] == body["planned_at"]
 
-                assert (tmp_path / "source-plans" / "plan_src" / "1.0.0.yaml").is_file()
-                assert (tmp_path / "source-builds" / "plan_src" / "1.0.0.yaml").is_file()
+                assert (tmp_path / "source-plans" / "plan_src.yaml").is_file()
+                assert (tmp_path / "source-builds" / "plan_src.yaml").is_file()
+                plan_doc = yaml_load(tmp_path / "source-plans" / "plan_src.yaml")
+                assert plan_doc["versions"]["1.0.0"]
         finally:
             app.dependency_overrides.clear()
             _registries.clear()

@@ -571,7 +571,7 @@ async def plan_source_deploy(
         statements=statements,
         table_exists=table_exists,
     )
-    store.save_plan(plan)
+    store.save_plan(plan, source)
     audit_resource_change(user.user_id, "source", name, "planned")
     return _plan_to_response(plan)
 
@@ -686,7 +686,7 @@ async def deploy_source(
         ddl_executed=executed,
         ddl_failed=[{"statement": stmt, "error": err} for stmt, err in failed],
     )
-    store.save_deploy(deploy_artifact)
+    store.save_deploy(deploy_artifact, source)
 
     if success:
         audit_resource_change(user.user_id, "source", name, "deployed")

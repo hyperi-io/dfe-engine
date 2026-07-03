@@ -15,6 +15,7 @@ from dfe_engine.source.deployment import (
 )
 from dfe_engine.source.models import SchemaColumn, Source
 from dfe_engine.source.type_registry import TypeRegistry
+from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 
 class TestQualifyDdl:
@@ -37,11 +38,47 @@ class TestSourceDeploymentStore:
             statements=["CREATE TABLE analytics.syslog (x UInt8)"],
             ready=True,
         )
-        store.save_plan(plan)
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "enabled": True,
+                "match": {"field": "f", "value": "v"},
+                "current": "1.0.0",
+                "versions": {"1.0.0": {"date_time": "2026-01-01"}},
+            }
+        )
+        store.save_plan(plan, source)
         loaded = store.load_plan("syslog", "1.0.0")
         assert loaded is not None
         assert loaded.statements == plan.statements
         assert loaded.ready is True
+        assert (tmp_path / "plans" / "syslog.yaml").is_file()
+        doc = yaml_load(tmp_path / "plans" / "syslog.yaml")
+        assert doc["source"] == "syslog"
+        assert "1.0.0" in doc["versions"]
+
+    def test_migrates_legacy_per_version_files(self, tmp_path: Path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        legacy = tmp_path / "plans" / "evt"
+        legacy.mkdir(parents=True)
+        yaml_dump(
+            {
+                "source_name": "evt",
+                "version": "1.0.0",
+                "planned_at": "2026-01-01T00:00:00+00:00",
+                "ready": True,
+                "statements": ["SELECT 1"],
+            },
+            legacy / "1.0.0.yaml",
+        )
+        loaded = store.load_plan("evt", "1.0.0")
+        assert loaded is not None
+        assert loaded.statements == ["SELECT 1"]
+        assert (tmp_path / "plans" / "evt.yaml").is_file()
 
 
 class TestDeployStatements:

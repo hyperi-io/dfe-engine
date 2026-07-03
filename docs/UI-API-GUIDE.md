@@ -159,6 +159,8 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/sources/{name}/plan` | Get saved ClickHouse deploy plan (`?version=` required) |
 | POST | `/sources/{name}/plan` | Dry-run deploy plan; persists under `source-plans/` (`?version=` defaults to `current`) |
 | POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
+
+Artifact files mirror source layout: `source-builds/{name}.yaml`, `source-plans/{name}.yaml`, and `source-deploys/{name}.yaml` each hold a `versions` map keyed like `sources/{name}.yaml` (plus `current`; deploys also track `deployed_version`). Legacy per-version files under `{name}/{version}.yaml` are merged on first read.
 | PUT | `/sources/{name}` | Update source |
 | DELETE | `/sources/{name}` | Delete source |
 | POST | `/sources/bulk` | Bulk import |
