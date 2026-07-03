@@ -121,6 +121,7 @@ const source_scopes = {
   source_read: "source:read",
   source_write: "source:write",
   source_delete: "source:delete",
+  source_deploy: "source:deploy",
 } as const;
 
 const system_scopes = {

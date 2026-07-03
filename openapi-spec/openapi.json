@@ -2194,6 +2194,195 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/plan": {
+      "get": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Get Source Plan",
+        "description": "Return a saved deploy plan for a source version (from source-plans).",
+        "operationId": "get_source_plan_api_v1_sources__name__plan_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "description": "Source version id to retrieve the plan for",
+              "title": "Version"
+            },
+            "description": "Source version id to retrieve the plan for"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Plan Source Deploy",
+        "description": "Dry-run ClickHouse deploy: DDL statements, validation errors, persisted plan.",
+        "operationId": "plan_source_deploy_api_v1_sources__name__plan_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to current working version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to current working version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/{name}/deploy": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Deploy Source",
+        "description": "Apply DDL for a source version to ClickHouse and set deployed_version.",
+        "operationId": "deploy_source_api_v1_sources__name__deploy_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id to deploy (defaults to current working version)",
+              "title": "Version"
+            },
+            "description": "Source version id to deploy (defaults to current working version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceDeployResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}": {
       "get": {
         "tags": [
@@ -12476,6 +12665,63 @@
         "title": "Source",
         "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
       },
+      "SourceDeployResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "deployed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Version"
+          },
+          "deployed_at": {
+            "type": "string",
+            "title": "Deployed At"
+          },
+          "ddl_executed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ddl Executed"
+          },
+          "ddl_failed": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ddl Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "success",
+          "deployed_at"
+        ],
+        "title": "SourceDeployResponse",
+        "description": "Result of deploying a source version to ClickHouse."
+      },
       "SourceFetcher": {
         "properties": {
           "source_type": {
@@ -12614,6 +12860,64 @@
         ],
         "title": "SourceNameConflictErrorResponse",
         "description": "409 when POST /sources and the source name already exists."
+      },
+      "SourcePlanResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "planned_at": {
+            "type": "string",
+            "title": "Planned At"
+          },
+          "table_exists": {
+            "type": "boolean",
+            "title": "Table Exists",
+            "default": false
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
+          },
+          "statements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statements"
+          },
+          "ddl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DDLResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "planned_at"
+        ],
+        "title": "SourcePlanResponse",
+        "description": "Dry-run ClickHouse deploy plan for a source version."
       },
       "SourceResponse": {
         "properties": {
@@ -14598,6 +14902,13 @@
                 "type": "null"
               }
             ]
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
           }
         },
         "type": "object",
