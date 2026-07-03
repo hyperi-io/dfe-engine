@@ -74,6 +74,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
         gitcrud = None
     app.state.gitcrud = gitcrud
+    if gitcrud is not None:
+        from dfe_engine.gitcrud.auto_merge import resolve_state, startup_banner
+
+        startup_banner(resolve_state(gitcrud, environment=settings.env, mode=settings.gitops.mode))
     app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
 
     # Bootstrap OIDC provider registry

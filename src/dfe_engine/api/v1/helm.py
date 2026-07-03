@@ -28,6 +28,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import ConcurrencyConflictError, GitCrud
+from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
 from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
     CommitPolicyError,
@@ -48,6 +49,7 @@ class SetVarRequest(BaseModel):
 class WriteResult(BaseModel):
     changed: bool
     commit_sha: str | None = None
+    auto_merged: bool = False
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -66,6 +68,22 @@ def _policy(request: Request) -> PolicyStore | None:
 
 def _has_override(request: Request, user: Any) -> bool:
     return authorize(user, "helmvars:override", role_config=request.app.state.role_config).allowed
+
+
+def _auto_merged(
+    request: Request, gc: GitCrud, *, protected: bool, actor: str, resource: str
+) -> bool:
+    """Badge + WARN when auto-merge converted this write from PR-mode to direct."""
+    settings = request.app.state.settings
+    state = resolve_state(gc, environment=settings.env, mode=settings.gitops.mode)
+    return apply_auto_merge(
+        state,
+        environment=settings.env,
+        rbac_class=_CLASS,
+        protected=protected,
+        actor=actor,
+        resource=resource,
+    )
 
 
 @router.get("/files", dependencies=[Depends(require_action("helmvars:read"))])
@@ -108,6 +126,7 @@ async def set_var(
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
+    protected = bool(policy and policy.is_protected(_CLASS, name, path))
     if policy is not None:
         try:
             policy.enforce(_CLASS, name, path, override=_has_override(request, user))
@@ -146,7 +165,13 @@ async def set_var(
         "updated",
         {"path": path, "commit": res.commit_sha},
     )
-    return WriteResult(changed=res.changed, commit_sha=res.commit_sha)
+    return WriteResult(
+        changed=res.changed,
+        commit_sha=res.commit_sha,
+        auto_merged=_auto_merged(
+            request, gc, protected=protected, actor=user.user_id, resource=f"{_CLASS}/{name}:{path}"
+        ),
+    )
 
 
 @router.delete(
@@ -159,4 +184,10 @@ async def delete_var(name: str, path: str, user: CurrentUser, request: Request) 
     gc = _gitcrud(request)
     res = gc.delete_key(_CLASS, name, path, user.user_id)
     audit_resource_change(user.user_id, "helmvars", name, "updated", {"path": path, "revert": True})
-    return WriteResult(changed=res.changed, commit_sha=res.commit_sha)
+    return WriteResult(
+        changed=res.changed,
+        commit_sha=res.commit_sha,
+        auto_merged=_auto_merged(
+            request, gc, protected=False, actor=user.user_id, resource=f"{_CLASS}/{name}:{path}"
+        ),
+    )

@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from dfe_engine.settings import is_dev_posture
+
 # Gitops-operational commit types (NOT release fix/feat - deploy repo has no
 # semantic-release). See the standard.
 ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "seed"})
@@ -120,15 +122,16 @@ def resolve_mode(
     require_pr: bool = False,
     auto_merge: bool = False,
 ) -> str:
-    """'pr' for prod / protected / governance / explicit; else 'direct'.
+    """'pr' for production posture / protected / governance / explicit; else 'direct'.
 
     PRs for production-controlling changes, direct-commit for low-risk - enforced at
-    the git level (the standard). auto_merge=True (the solo/dev fast path) force-
-    directs EVERYTHING - the caller is responsible for gating + loud warnings (see
-    gitcrud/auto_merge.py).
+    the git level (the standard). Production posture is anything DFE_ENV does not
+    declare as dev (is_dev_posture), matching auto_merge.gate(). auto_merge=True
+    (the solo/dev fast path) force-directs EVERYTHING - the caller is responsible
+    for gating + loud warnings (see gitcrud/auto_merge.py).
     """
     if auto_merge:
         return "direct"
-    if require_pr or protected or rbac_class == "governance" or environment == "prod":
+    if require_pr or protected or rbac_class == "governance" or not is_dev_posture(environment):
         return "pr"
     return "direct"

@@ -13,6 +13,7 @@ from dfe_engine.api.v1.config import router as config_router
 from dfe_engine.api.v1.deployments import router as deployments_router
 from dfe_engine.api.v1.discovery import router as discovery_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
+from dfe_engine.api.v1.gitops import router as gitops_router
 from dfe_engine.api.v1.governance import router as governance_router
 from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
@@ -65,6 +66,7 @@ v1_router.include_router(cel_router)
 # Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
 v1_router.include_router(helm_router)
 v1_router.include_router(governance_router)
+v1_router.include_router(gitops_router)
 v1_router.include_router(lifecycle_router)
 v1_router.include_router(authoring_router)
 # Runtime client-config bootstrap for the UI (public, no secrets)

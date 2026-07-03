@@ -28,6 +28,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 from dfe_engine.governance import (
     ActionDef,
@@ -46,6 +47,7 @@ class InvokeResponse(BaseModel):
     dry_run: bool
     changed: bool
     commit_sha: str | None = None
+    auto_merged: bool = False
     diff: list[dict[str, Any]]
 
 
@@ -109,8 +111,26 @@ async def invoke_action(
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
     if not dry_run:
         audit_resource_change(user.user_id, "action", name, "invoked", {"commit": res.commit_sha})
+
+    auto_merged = False
+    if not dry_run and res.changed:
+        settings = request.app.state.settings
+        state = resolve_state(
+            _gitcrud(request), environment=settings.env, mode=settings.gitops.mode
+        )
+        auto_merged = apply_auto_merge(
+            state,
+            environment=settings.env,
+            rbac_class="governance",
+            actor=user.user_id,
+            resource=f"action/{name}",
+        )
     return InvokeResponse(
-        dry_run=res.dry_run, changed=res.changed, commit_sha=res.commit_sha, diff=res.diff
+        dry_run=res.dry_run,
+        changed=res.changed,
+        commit_sha=res.commit_sha,
+        auto_merged=auto_merged,
+        diff=res.diff,
     )
 
 
