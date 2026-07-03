@@ -23,6 +23,8 @@ from typing import Any
 
 from dfe_engine.schema.models import SchemaColumn
 
+ELASTIC_IMPORT_FIELD_TYPE = "elastic_imported"
+
 
 class ElasticSchemaConversionError(ValueError):
     """Raised when JSON is not a usable Elastic template / mappings document."""
@@ -113,6 +115,7 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
                 use_case=use_case,
                 expr=f"@source: {fp}",
                 comment="Elasticsearch mapping type: object",
+                field_type=ELASTIC_IMPORT_FIELD_TYPE,
             )
         )
         return
@@ -135,6 +138,7 @@ def _walk_mapping(prefix: str, mapping: dict[str, Any], columns: list[SchemaColu
                 use_case=use_case,
                 expr=f"@source: {fp}",
                 comment=comment,
+                field_type=ELASTIC_IMPORT_FIELD_TYPE,
             )
         )
 
