@@ -85,6 +85,10 @@ pipeline_scopes = {
 query_scopes = {
     "query_read": "query:read",
     "query_execute": "query:execute",
+    # Ad-hoc arbitrary-SQL against a datasource adapter (POST /queries/raw). NOT
+    # org-isolated (no org_id injection), so it is a SEPARATE, admin-level action -
+    # kept off query:execute so query:execute can be an org-scoped tenant action.
+    "query_raw": "query:raw",
 }
 
 repository_scopes = {

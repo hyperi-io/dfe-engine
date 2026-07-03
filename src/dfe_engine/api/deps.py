@@ -605,50 +605,31 @@ CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
 
 # ── Authorization ─────────────────────────────────────────────
 
-# Data-plane actions an org-scoped user performs within THEIR OWN org. For these,
-# an unscoped check (scope=None) resolves to "system OR any org the caller belongs
-# to", so an org-scoped grant satisfies it (ClickHouse row policies enforce which
-# rows are visible). Every action NOT listed stays system-only (admin/infra/
-# governance) - err toward lockout, never a cross-org or system leak. This is the
-# app-level half of scoped-rbac: without it, an org-scoped group member is 403'd on
-# their own org's data because their grant is at org scope and the check was system.
-TENANT_ACTIONS: frozenset[str] = frozenset(
-    {
-        "query:read",
-        "query:execute",
-        "query:write",
-        "source:read",
-        "source:write",
-        "source:delete",
-        "hunt:read",
-        "hunt:write",
-        "hunt:execute",
-        "hunt:delete",
-        "rule:read",
-        "rule:write",
-        "rule:delete",
-        "rule:validate",
-        "sigma:read",
-        "sigma:write",
-        "fieldmap:read",
-        "fieldmap:write",
-        "fieldmap:delete",
-        "schema:read",
-        "schema:write",
-        "schema:delete",
-        "sampler:read",
-        "discovery:read",
-        "dashboard:read",
-        "transform:compile",
-        "transform:test",
-        "cel:check",
-        "alert:read",
-        "alert:write",
-        "alert:delete",
-        "task:read",
-        "task:write",
-    }
-)
+# The ONLY action an ORG-scoped grant may satisfy at the caller's OWN org. This is
+# a deliberately minimal allowlist, NOT "all data-plane actions". scoped-rbac's
+# tenant boundary is enforced solely at the ClickHouse row-policy layer, and the
+# ONLY handler that routes through the caller's per-org connection (org_id
+# force-injected + tenant_isolated guard, see query/executor.py) is the
+# parameterized-view executor behind query:execute. An org-scoped grant therefore
+# reaches ONLY that path, and the view returns just the caller's org rows.
+#
+# Everything else stays system-only - deliberately, not by omission - because the
+# rest of the app operates on a SHARED, un-partitioned layer:
+#   * config WRITES (source/schema/rule/hunt/fieldmap/alert :write/:delete) mutate
+#     ONE global YAML registry shared by every org; an org grant must never satisfy
+#     them or one tenant rewrites config for all orgs.
+#   * config READS (source/schema/... :read) disclose that shared catalogue, which
+#     can carry connection/destination secrets - kept system-only pending a
+#     content-sensitivity + per-org-config decision.
+#   * raw-data reads via the shared ADMIN ClickHouse client (sampler:read,
+#     discovery:read, schema json-paths/sample-rows, and the /raw query path)
+#     bypass row policies entirely - a cross-org DATA leak until they route through
+#     the caller's per-org connection.
+# Widening this set is a scoped-rbac RESOURCE-LAYER follow-up (org-partition the
+# config, or route those reads per-org), NOT a one-line edit. Err toward lockout.
+# NB: /raw was split off query:execute onto the admin-only query:raw action so that
+# query:execute gates ONLY the org-isolated view executor here.
+TENANT_ACTIONS: frozenset[str] = frozenset({"query:execute"})
 
 
 def _authorize_resolved(

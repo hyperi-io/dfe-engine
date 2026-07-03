@@ -202,18 +202,20 @@ async def execute_view(
 @router.post(
     "/raw",
     response_model=QueryResponse,
-    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
+    dependencies=[Depends(require_action(scopes_dict["query_raw"]))],
 )
 async def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
-    _auth: None = Depends(require_action(scopes_dict["query_execute"])),
+    _auth: None = Depends(require_action(scopes_dict["query_raw"])),
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 
     This is the lower-level query path — for ad-hoc queries against
-    datasource adapters rather than parameterized views. Requires
-    ``query:execute`` permission.
+    datasource adapters rather than parameterized views. Requires the
+    admin-level ``query:raw`` permission (NOT the org-scoped ``query:execute``):
+    it runs arbitrary SQL via a datasource adapter with no org_id injection, so
+    it must stay off the tenant-scoped view path.
     """
     from dfe_engine.query.datasources import get_adapter
 
