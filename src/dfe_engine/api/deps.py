@@ -25,6 +25,7 @@ from dfe_engine.auth.audit import (
     audit_permission_denied,
 )
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.models import AuthzResult
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings
 
@@ -604,6 +605,82 @@ CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
 
 # ── Authorization ─────────────────────────────────────────────
 
+# Data-plane actions an org-scoped user performs within THEIR OWN org. For these,
+# an unscoped check (scope=None) resolves to "system OR any org the caller belongs
+# to", so an org-scoped grant satisfies it (ClickHouse row policies enforce which
+# rows are visible). Every action NOT listed stays system-only (admin/infra/
+# governance) - err toward lockout, never a cross-org or system leak. This is the
+# app-level half of scoped-rbac: without it, an org-scoped group member is 403'd on
+# their own org's data because their grant is at org scope and the check was system.
+TENANT_ACTIONS: frozenset[str] = frozenset(
+    {
+        "query:read",
+        "query:execute",
+        "query:write",
+        "source:read",
+        "source:write",
+        "source:delete",
+        "hunt:read",
+        "hunt:write",
+        "hunt:execute",
+        "hunt:delete",
+        "rule:read",
+        "rule:write",
+        "rule:delete",
+        "rule:validate",
+        "sigma:read",
+        "sigma:write",
+        "fieldmap:read",
+        "fieldmap:write",
+        "fieldmap:delete",
+        "schema:read",
+        "schema:write",
+        "schema:delete",
+        "sampler:read",
+        "discovery:read",
+        "dashboard:read",
+        "transform:compile",
+        "transform:test",
+        "cel:check",
+        "alert:read",
+        "alert:write",
+        "alert:delete",
+        "task:read",
+        "task:write",
+    }
+)
+
+
+def _authorize_resolved(
+    user: AuthContext,
+    action: str,
+    scope: Scope | None,
+    *,
+    enabled: bool,
+    role_config: RoleConfig | None,
+) -> AuthzResult:
+    """``authorize()`` with tenant-scope resolution.
+
+    An explicit ``scope`` is honoured as-is. For a TENANT action with no explicit
+    scope, try system then each org the caller belongs to, allowing if any grant
+    covers it - so an org-scoped user reaches their OWN org's data plane while a
+    system (unrestricted) user still passes and a cross-org request is denied.
+    Every other unscoped action stays a single system check (historical behaviour).
+    """
+    if scope is not None or action not in TENANT_ACTIONS:
+        return authorize(user, action, scope=scope, enabled=enabled, role_config=role_config)
+    candidates: list[Scope | None] = [None]
+    candidates += [
+        Scope(type="org", id=org)
+        for org in (user.org_ids or ([user.org_id] if user.org_id else []))
+    ]
+    result = AuthzResult(allowed=False, reason=f"no role grants '{action}' at the caller's scope")
+    for cand in candidates:
+        result = authorize(user, action, scope=cand, enabled=enabled, role_config=role_config)
+        if result.allowed:
+            return result
+    return result
+
 
 def is_action_allowed(
     request: Request,
@@ -615,12 +692,8 @@ def is_action_allowed(
     """Non-raising authorize() for visibility filtering in handlers."""
     settings: DFESettings = request.app.state.settings
     role_config = getattr(request.app.state, "role_config", None)
-    return authorize(
-        user,
-        action,
-        scope=scope,
-        enabled=settings.auth.enabled,
-        role_config=role_config,
+    return _authorize_resolved(
+        user, action, scope, enabled=settings.auth.enabled, role_config=role_config
     ).allowed
 
 
@@ -640,12 +713,8 @@ def check_action(
     """
     settings: DFESettings = request.app.state.settings
     role_config = getattr(request.app.state, "role_config", None)
-    result = authorize(
-        user,
-        action,
-        scope=scope,
-        enabled=settings.auth.enabled,
-        role_config=role_config,
+    result = _authorize_resolved(
+        user, action, scope, enabled=settings.auth.enabled, role_config=role_config
     )
     if not result.allowed:
         audit_permission_denied(user.user_id, action, user.roles, result.reason)
@@ -674,12 +743,8 @@ def require_action(action: str, *, scope: Scope | None = None):
         settings: DFESettings = Depends(get_app_settings),
     ) -> None:
         role_config = getattr(request.app.state, "role_config", None)
-        result = authorize(
-            user,
-            action,
-            scope=scope,
-            enabled=settings.auth.enabled,
-            role_config=role_config,
+        result = _authorize_resolved(
+            user, action, scope, enabled=settings.auth.enabled, role_config=role_config
         )
         if not result.allowed:
             audit_permission_denied(user.user_id, action, user.roles, result.reason)

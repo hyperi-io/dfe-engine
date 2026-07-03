@@ -17,7 +17,7 @@ roles:
       - "rule:*"
       - "schema:read"
       - "schema:write"
-      - "transforms:*"
+      - "transform:*"
       - "org:read"
   data_analyst_viewer:
     description: "Same scope as data_analyst, read-only"

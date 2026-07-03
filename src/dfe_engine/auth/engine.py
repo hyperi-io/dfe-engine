@@ -56,8 +56,8 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "schema:write",
         "source:read",
         "source:write",
-        "transforms:compile",
-        "transforms:test",
+        "transform:compile",
+        "transform:test",
     }
 )
 

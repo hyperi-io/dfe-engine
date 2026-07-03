@@ -55,7 +55,11 @@ def read_recent(
 ) -> list[str]:
     """Read up to ``limit`` newest messages across all partitions of ``topic``."""
     try:
-        from confluent_kafka import Consumer, KafkaError, TopicPartition  # ty: ignore[unresolved-import]
+        from confluent_kafka import (  # ty: ignore[unresolved-import]
+            Consumer,
+            KafkaError,
+            TopicPartition,
+        )
     except ImportError as exc:  # pragma: no cover - confluent-kafka is a hard dep here
         raise SamplerError(
             "Kafka sampling needs confluent-kafka (already a dfe-engine dependency)."

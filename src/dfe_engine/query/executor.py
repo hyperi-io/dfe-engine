@@ -125,18 +125,32 @@ class ViewExecutor:
         return self._catalog.get_view(label)
 
     def _check_authorization(self, view_def: ViewDefinition, auth: AuthContext) -> None:
-        from dfe_engine.auth import authorize
+        from dfe_engine.auth import Scope, authorize
         from dfe_engine.settings import get_settings
 
         settings = get_settings()
-        result = authorize(
-            auth,
-            "query:execute",
-            view_def.label,
-            enabled=settings.auth.enabled,
-        )
-        if not result.allowed:
-            raise AuthorizationError(f"View '{view_def.label}': access denied ({result.reason})")
+        # query:execute is a tenant action: allow if the caller holds it at system
+        # OR any org they belong to, so an org-scoped viewer reaches their own org's
+        # views instead of this system-only re-check denying them after the endpoint
+        # already authorized. (Sharing this with deps._authorize_resolved via one
+        # auth-layer resolver is a noted DRY follow-on.)
+        candidate_scopes: list[Scope | None] = [None]
+        candidate_scopes += [
+            Scope(type="org", id=org)
+            for org in (auth.org_ids or ([auth.org_id] if auth.org_id else []))
+        ]
+        allowed = False
+        reason = "no query:execute grant at the caller's scope"
+        for cand in candidate_scopes:
+            r = authorize(
+                auth, "query:execute", view_def.label, scope=cand, enabled=settings.auth.enabled
+            )
+            if r.allowed:
+                allowed = True
+                break
+            reason = r.reason
+        if not allowed:
+            raise AuthorizationError(f"View '{view_def.label}': access denied ({reason})")
 
         if view_def.required_roles:
             if not any(role in auth.roles for role in view_def.required_roles):
