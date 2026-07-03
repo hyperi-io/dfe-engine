@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
-from pydantic import AliasChoices, BaseModel, Field, model_validator
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
 
 from dfe_engine.api.deps import (
     ClickHouseClient,
@@ -59,6 +59,7 @@ from dfe_engine.services.schema.elastic_schema_service import (
     ElasticSchemaConversionError,
     ElasticSchemaService,
 )
+from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
 from dfe_engine.settings import get_settings
 from dfe_engine.source.registry import SourceNotFoundError
 
@@ -212,6 +213,8 @@ class DraftColumn(BaseModel):
     before saving.
     """
 
+    model_config = ConfigDict(populate_by_name=True, serialize_by_alias=True)
+
     name: str = Field(
         description=(
             "Server-derived snake_case column name for the path. camelCase is split, "
@@ -252,6 +255,12 @@ class DraftColumn(BaseModel):
     )
     comment: str | None = Field(
         default=None, description="Human-readable column description (defaults to the source path)."
+    )
+    field_type: str = Field(
+        ...,
+        validation_alias=AliasChoices("_field_type", "field_type"),
+        serialization_alias="_field_type",
+        description="Column classification for JSON promotion drafts (always 'promoted').",
     )
 
 
@@ -1271,6 +1280,7 @@ async def discover_json_paths(
                     attribute=d.column_attributes,
                     expr=d.copy_expr,
                     comment=f"Promoted from _json.{d.path}",
+                    field_type=PROMOTED_FIELD_TYPE,
                 ),
                 coverage_pct=d.coverage_pct,
                 distinct_count=d.distinct_count,
@@ -1465,6 +1475,7 @@ async def promote_field(
                     use_case=c.use_case or "",
                     attribute=", ".join(c.attribute),
                     description=c.comment or "",
+                    field_type=c.field_type,
                 )
                 for c in new_columns
             ],
@@ -1497,6 +1508,7 @@ async def promote_field(
             use_case=c.use_case,
             expr=c.expr,
             comment=c.comment,
+            field_type=c.field_type,
         ).to_yaml_dict()
         for c in new_columns
     )
