@@ -6,9 +6,9 @@ claims by dfe-control-plane and passed into engine for Cedar evaluation.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AuthenticationError(Exception):
@@ -17,6 +17,64 @@ class AuthenticationError(Exception):
 
 class AuthorizationError(Exception):
     """User not authorized for the requested action."""
+
+
+ScopeType = Literal["system", "org", "group", "user"]
+
+
+class Scope(BaseModel):
+    """Where a grant applies (or where an action is requested).
+
+    Scope is orthogonal to the action string: roles keep their global
+    permission patterns, and a grant carries the scope it was bound at.
+    Coverage is grant-only union - system covers everything, an org
+    covers itself and its own groups, group/user cover only themselves.
+    An unscoped require_action() check is a SYSTEM-scope check: "no
+    scope" never implicitly means "all scopes".
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    type: ScopeType = "system"
+    id: str = Field(default="", description="Org name, group name, or username ('' for system)")
+    org: str = Field(
+        default="",
+        description="Owning org for group scopes ('' = system-wide group)",
+    )
+
+    def covers(self, requested: Scope) -> bool:
+        """True if a grant at this scope satisfies a check at ``requested``."""
+        if self.type == "system":
+            return True
+        if self.type == "org":
+            if requested.type == "org":
+                return requested.id == self.id
+            if requested.type == "group":
+                # An org covers only groups that belong to it - never
+                # system-wide groups (org admins don't manage those).
+                return requested.org == self.id and requested.org != ""
+            return False
+        if self.type == "group":
+            return (
+                requested.type == "group" and requested.id == self.id and requested.org == self.org
+            )
+        return requested.type == "user" and requested.id == self.id
+
+    def __str__(self) -> str:
+        if self.type == "system":
+            return "system"
+        if self.type == "group" and self.org:
+            return f"group:{self.org}/{self.id}"
+        return f"{self.type}:{self.id}"
+
+
+class ScopedGrant(BaseModel):
+    """A role bound at a scope - the unit authorize() evaluates."""
+
+    model_config = ConfigDict(frozen=True)
+
+    role: str
+    scope: Scope = Field(default_factory=Scope)
 
 
 class AuthContext(BaseModel):
@@ -37,6 +95,11 @@ class AuthContext(BaseModel):
         "None for local accounts, API keys, and dev mode",
     )
     roles: list[str] = Field(default_factory=list)
+    grants: list[ScopedGrant] = Field(
+        default_factory=list,
+        description="Roles with the scope each was bound at (resolved from group "
+        "membership). Empty falls back to treating `roles` as system-scope grants.",
+    )
     org_ids: list[str] = Field(
         default_factory=list, description="Org IDs for customer-scoped roles"
     )

@@ -83,9 +83,12 @@ class TestListGroups:
         names = [g["name"] for g in data]
         assert "dfe-admins" in names
 
-    def test_list_requires_admin(self, client, viewer_headers):
+    def test_list_filters_to_own_memberships_without_grant(self, client, viewer_headers):
+        # Visibility model: no group:read grant -> only groups the caller
+        # is a member of (viewer belongs to dfe-viewers only).
         resp = client.get("/api/v1/auth/groups", headers=viewer_headers)
-        assert resp.status_code == 403
+        assert resp.status_code == 200
+        assert [g["name"] for g in resp.json()] == ["dfe-viewers"]
 
 
 class TestGetGroup:
@@ -104,9 +107,10 @@ class TestGetGroup:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
-    def test_get_requires_admin(self, client, viewer_headers):
+    def test_get_hidden_without_grant_or_membership(self, client, viewer_headers):
+        # Non-visible groups 404 (existence is hidden, not just forbidden).
         resp = client.get("/api/v1/auth/groups/dfe-admins", headers=viewer_headers)
-        assert resp.status_code == 403
+        assert resp.status_code == 404
 
 
 class TestUpdateGroup:

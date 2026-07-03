@@ -24,7 +24,8 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
+from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/orgs", tags=["Organisations"])
@@ -115,32 +116,43 @@ async def create_org(
 @router.get(
     "",
     response_model=list[OrgResponse],
-    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def list_orgs(
     user: CurrentUser,
     request: Request,
 ):
-    """List all organisations."""
+    """List organisations visible to the caller.
+
+    System-scope org:read holders see every org; org-scope holders see
+    only the orgs their grants cover.
+    """
     from dfe_engine.orgs.registry import OrgRegistry
 
     registry: OrgRegistry = request.app.state.org_registry
-    return [_org_response(o) for o in registry.list()]
+    if is_action_allowed(request, user, scopes_dict["org_read"]):
+        return [_org_response(o) for o in registry.list()]
+    return [
+        _org_response(o)
+        for o in registry.list()
+        if is_action_allowed(
+            request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
+        )
+    ]
 
 
 @router.get(
     "/{name}",
     response_model=OrgResponse,
-    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def get_org(
     name: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single organisation by name."""
+    """Get a single organisation by name (org:read at that org's scope)."""
     from dfe_engine.orgs.registry import OrgRegistry
 
+    check_action(request, user, scopes_dict["org_read"], scope=Scope(type="org", id=name))
     registry: OrgRegistry = request.app.state.org_registry
     org = registry.get(name)
     if org is None:

@@ -10,9 +10,24 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+GROUP_SCOPE_SYSTEM = "system"
+_ORG_SCOPE_PREFIX = "org:"
+
+
+def validate_group_scope(scope: str) -> str:
+    """Validate a group scope string: ``system`` or ``org:<name>``.
+
+    Returns the scope unchanged; raises ValueError otherwise.
+    """
+    if scope == GROUP_SCOPE_SYSTEM:
+        return scope
+    if scope.startswith(_ORG_SCOPE_PREFIX) and scope[len(_ORG_SCOPE_PREFIX) :].strip():
+        return scope
+    raise ValueError(f"Group scope must be 'system' or 'org:<name>', got '{scope}'")
 
 
 class Group(BaseModel):
@@ -22,12 +37,28 @@ class Group(BaseModel):
     description: str = ""
     roles: list[str] = Field(default_factory=list)
     members: list[str] = Field(default_factory=list)
+    scope: str = GROUP_SCOPE_SYSTEM
+    """Where this group lives: ``system`` (spans orgs, today's default) or
+    ``org:<name>`` (exists only inside that org - invisible outside it, and its
+    roles bind at that org's scope only, never system-wide)."""
     source_provider: str = ""
     """Name of the OIDC provider that owns this group (empty for manually managed groups)."""
     source_id: str = ""
     """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
+
+    @field_validator("scope")
+    @classmethod
+    def _check_scope(cls, value: str) -> str:
+        return validate_group_scope(value)
+
+    @property
+    def scope_org(self) -> str:
+        """Owning org name for org-scoped groups, '' for system groups."""
+        if self.scope.startswith(_ORG_SCOPE_PREFIX):
+            return self.scope[len(_ORG_SCOPE_PREFIX) :]
+        return ""
 
 
 class GroupStore:
@@ -81,11 +112,13 @@ class GroupStore:
         description: str = "",
         *,
         members: list[str] | None = None,
+        scope: str = GROUP_SCOPE_SYSTEM,
     ) -> Group:
         """Create a new group and persist it to YAML.
 
         Raises:
-            ValueError: If a group with this name already exists.
+            ValueError: If a group with this name already exists, or the
+                scope is not ``system`` / ``org:<name>``.
         """
         if self._path(name).exists():
             raise ValueError(f"Group '{name}' already exists")
@@ -101,6 +134,7 @@ class GroupStore:
             roles=roles,
             description=description,
             members=member_list,
+            scope=scope,
         )
         self._write(group)
         return group
@@ -121,14 +155,19 @@ class GroupStore:
     def update(self, name: str, **fields: object) -> Group:
         """Update one or more fields on an existing group and persist.
 
-        Accepted keyword arguments: ``roles``, ``description``, ``members``, ``org_ids``.
+        Accepted keyword arguments: ``roles``, ``description``, ``members``,
+        ``org_ids``, ``scope``.
 
         Raises:
             KeyError: If the group does not exist.
+            ValueError: If ``scope`` is not ``system`` / ``org:<name>``.
         """
         group = self._read(name)
         if group is None:
             raise KeyError(f"Group '{name}' not found")
+        if "scope" in fields:
+            # model_copy(update=...) skips validators - check explicitly.
+            validate_group_scope(str(fields["scope"]))
         updated = group.model_copy(update=fields)
         self._write(updated)
         return updated
