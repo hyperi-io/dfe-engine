@@ -21,7 +21,6 @@ dependencies = [
     # AWS
     "boto3>=1.43.38",
     # Scheduling
-    "apscheduler>=3.11.3",
     "croniter>=6.2.2",
     # HTTP clients
     "httpx>=0.28.1",
@@ -189,6 +188,7 @@ convention = "google"
 
 [project.scripts]
 dfe-api = "dfe_engine.api:run_dev_server"
+dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
 
 [project.entry-points."dfe_engine.services"]
 receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"

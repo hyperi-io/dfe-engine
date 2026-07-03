@@ -26,12 +26,32 @@ from .models import HuntSpec
 WINDOW_TOKEN = "{window}"
 
 
+def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
+    """Per-query ClickHouse settings that attribute (and optionally class) a hunt run.
+
+    ``log_comment`` tags the row in ``system.query_log`` so cost (read rows/bytes,
+    memory, wall time) attributes back to the hunt - always set, always safe.
+    ``workload`` puts the query in a CH WORKLOAD for server-side fair-share, but is
+    only set when a workload name is CONFIGURED: setting an UNDEFINED workload errors
+    on the server, and the "hunts" workload is not provisioned until the smoothing
+    backstop lands (docs/HUNT-SCHEDULE-SMOOTHING.md), so it defaults OFF. Pure, so it
+    is unit-testable; the real attribution is verified in the live-CH Phase A test.
+    """
+    settings = {"log_comment": f"hunt:{hunt_id}"}
+    if workload:
+        settings["workload"] = workload
+    return settings
+
+
 class HuntWorker:
     """Runs a hunt's windowed query and advances its watermark on success."""
 
-    def __init__(self, ch: Any, coordinator: ChCoordinator) -> None:
+    def __init__(self, ch: Any, coordinator: ChCoordinator, workload: str = "") -> None:
         self._ch = ch
         self._coord = coordinator
+        # Optional CH WORKLOAD name for server-side fair-share; empty = do not set it
+        # (an undefined workload errors). Provisioned later (the v2 smoothing backstop).
+        self._workload = workload
 
     def run(self, spec: HuntSpec, scheduled_start: int) -> int:
         """Execute the incremental window; return the new watermark (= window end)."""
@@ -40,8 +60,10 @@ class HuntWorker:
         pred = predicate(start, end, spec.timestamp_field)
         sql = spec.query.replace(WINDOW_TOKEN, pred)
         if sql.strip():
-            # The query is an INSERT INTO <target> SELECT ... WHERE {window}.
-            self._ch.command(sql)
+            # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
+            # the query in system.query_log; workload (if configured) puts it in a CH
+            # fair-share class.
+            self._ch.command(sql, settings=query_settings(spec.hunt_id, self._workload))
         # Advance ONLY after the query committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
         return end

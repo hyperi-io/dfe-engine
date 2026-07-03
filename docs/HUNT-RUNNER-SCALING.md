@@ -38,9 +38,9 @@ waking KEDA, without a DELETE.
 
 ## The scaler query (deterministic-due)
 
-KEDA's ClickHouse trigger runs `schedule.due_query(db)` - the count of hunts that
-are due-and-unclaimed. It uses the EXACT arithmetic the worker uses
-(`spread.current_fire`):
+KEDA runs `schedule.due_query(db)` against ClickHouse (via the MySQL scaler - see
+"KEDA ScaledObject" below) - the count of hunts that are due-and-unclaimed. It uses
+the EXACT arithmetic the worker uses (`spread.current_fire`):
 
 ```
 boundary = intDiv(now(), interval) * interval      -- start of this interval
@@ -120,6 +120,27 @@ holds to that (no Postgres, no engine, no convenience store on the hot path), wh
 is also what lets the same runner work on a non-k8s single deploy (dfe-docker) where
 only ClickHouse is guaranteed present.
 
+### Coordination needs a SINGLE LOGICAL ClickHouse (scale-tier requirement)
+
+The four coordination tables are the shared source of truth every worker and KEDA
+read/write. That only works if all of them see the SAME tables. On a single-node CH
+(docker / slim / single tiers) that is automatic. On the **scale tier's multi-node
+cluster behind a round-robin load balancer, it is NOT**: a plain
+`ReplacingMergeTree` (and a plain `CREATE DATABASE`) lands on one node, so workers
+whose connections land on other nodes see an empty/absent table - coordination
+silently breaks (surfaced as `UNKNOWN_DATABASE` / missing leases). So on a clustered
+CH the coordination tables MUST be either:
+
+- **Replicated** - `ReplicatedReplacingMergeTree` in a `Replicated`/`ON CLUSTER`
+  database, so lease/watermark/schedule state is shared across nodes; or
+- **pinned to a single endpoint** - point the runner + KEDA + the materialiser at one
+  CH node (or a sticky service), so every connection hits the same tables.
+
+`ensure_schema` currently creates plain engines (correct for the single-node tiers);
+the scale-tier variant (Replicated engines, chosen by the data-substrate mode) is a
+follow-up. The synthetic multi-pod integration test detects this and skips on a
+multi-node endpoint rather than flaking (see tests/integration/test_hunt_synthetic).
+
 ### Materialisation trigger (config-deploy time)
 
 `schedule.publish_schedule(ch, db, specs)` is the ONLY writer of `hunt_schedule`. It
@@ -131,8 +152,11 @@ gets a `hunt_schedule` row, so KEDA can wake a worker for it - no chicken-and-eg
 
 ## KEDA ScaledObject (shape)
 
-Folded into the hunt-runner chart (`dfe-common.scaledobject`), scaling on the
-ClickHouse backlog rather than raw CG lag:
+**KEDA has NO native ClickHouse scaler.** So we scale on the due backlog via KEDA's
+**MySQL scaler pointed at ClickHouse's MySQL-compatible interface** (`mysql_port`,
+default 9004). The query is still ClickHouse SQL, executed by CH - so KEDA still
+reads CH DIRECTLY (no engine on the scaling path). Ships in the engine chart
+(`chart/templates/hunt-runner-scaledobject.yaml`, gated by `huntRunner.keda.enabled`):
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
@@ -142,23 +166,30 @@ metadata:
 spec:
   scaleTargetRef:
     name: dfe-hunt-runner
-  minReplicaCount: 0            # scale to zero when due_count == 0
+  minReplicaCount: 0            # scale to zero when due == 0
   maxReplicaCount: 8            # == the global CH cap the runner enforces
   pollingInterval: 30
   cooldownPeriod: 120
   triggers:
-    - type: clickhouse
+    - type: mysql              # NOT "clickhouse" - KEDA has no CH scaler
       metadata:
-        # host/port/username/database from the chart's CH wiring; password via auth ref
+        host: <ch-host>
+        port: "9004"           # ClickHouse mysql_port (must be enabled on CH)
+        dbName: <data-database>
+        username: <ch-user>
+        queryValue: "1"        # ceil(due / 1) workers; tune hunts-per-worker here
         query: >-
           SELECT count() AS due FROM ( ... schedule.due_query(db) ... )
-        queryValue: "1"        # ceil(due / 1) workers; tune hunts-per-worker here
       authenticationRef:
-        name: dfe-clickhouse-auth
+        name: dfe-hunt-runner-auth   # CH password via TriggerAuthentication
 ```
 
-`due_query(db)` is the source of truth for the `query` field - keep them identical
-(the unit test pins the clauses so a drift fails CI).
+Requirements + notes: ClickHouse must have `mysql_port` enabled. `due_query(db)` is
+the source of truth for the `query` field - keep them identical (the unit test pins
+the clauses so a drift fails CI). If enabling `mysql_port` is undesirable, the
+fallback is a KEDA metrics-api scaler over a small always-on endpoint returning
+`due_count` - but that reintroduces an HTTP dependency on the scaling path, so the
+direct MySQL-scaler route is preferred.
 
 ## Disable = pod count 0
 

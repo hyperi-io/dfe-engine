@@ -12,16 +12,25 @@ hunts fan evenly across the interval, no ClickHouse thundering herd), the
 never-double-run decision (defer + too_aggressive flag, global CH cap), and the
 ClickHouse-only coordinator (lease + watermark + state - NO Postgres, so hunts do
 not depend on a convenience store and still work on a non-k8s single deploy). The
-KEDA-scaled worker pool and daemon loop layer on top and live in the standalone
-dfe-hunt-runner deliverable.
+daemon loop (daemon.py), the gitops spec loader (spec_loader.py), and the
+`dfe-hunt-runner` CLI (cli.py - `run` + `materialise`) now live here too; the
+KEDA-scaled worker pool wraps them.
 """
 
 from .ch_coordinator import ChCoordinator, HuntStateRow, Lease
 from .checkpoint import TIMESTAMP_FIELD, predicate, window
+from .daemon import run_loop
+from .interval import (
+    cron_to_interval_seconds,
+    duration_to_seconds,
+    is_irregular,
+    parse_interval,
+)
 from .models import HuntSpec, HuntState
 from .runner import HuntRunner
 from .schedule import due_count, due_query, ensure_schedule_schema, publish_schedule
 from .scheduler import Decision, decide
+from .spec_loader import load_specs
 from .spread import next_due, phase_offset
 from .worker import HuntWorker
 
@@ -35,13 +44,19 @@ __all__ = [
     "HuntStateRow",
     "HuntWorker",
     "Lease",
+    "cron_to_interval_seconds",
     "decide",
     "due_count",
     "due_query",
+    "duration_to_seconds",
     "ensure_schedule_schema",
+    "is_irregular",
+    "load_specs",
     "next_due",
+    "parse_interval",
     "phase_offset",
     "predicate",
     "publish_schedule",
+    "run_loop",
     "window",
 ]

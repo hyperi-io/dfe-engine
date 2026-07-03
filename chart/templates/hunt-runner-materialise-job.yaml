@@ -1,0 +1,58 @@
+{{- if and .Values.huntRunner.enabled .Values.huntRunner.materialiseHook.enabled }}
+# Argo CD PostSync hook: materialise the `hunt_schedule` table KEDA scales on, once
+# per deploy-repo sync that changed the hunt config. A one-shot
+# `dfe-hunt-runner materialise` - deploy-time, NOT the hot path (see
+# docs/HUNT-RUNNER-SCALING.md). It is what lets KEDA see a brand-new hunt while the
+# runner is scaled to zero (no chicken-and-egg).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "dfe-engine.fullname" . }}-hunt-runner-materialise
+  labels:
+    {{- include "dfe-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hunt-runner-materialise
+  annotations:
+    argocd.argoproj.io/hook: PostSync
+    argocd.argoproj.io/hook-delete-policy: BeforeHookCreation
+spec:
+  backoffLimit: {{ .Values.huntRunner.materialiseHook.backoffLimit }}
+  ttlSecondsAfterFinished: {{ .Values.huntRunner.materialiseHook.ttlSecondsAfterFinished }}
+  template:
+    metadata:
+      labels:
+        {{- include "dfe-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hunt-runner-materialise
+    spec:
+      restartPolicy: Never
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dfe-engine.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: materialise
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["dfe-hunt-runner", "materialise"]
+          resources:
+            {{- toYaml .Values.huntRunner.materialiseHook.resources | nindent 12 }}
+          env:
+            {{- include "dfe-engine.clickhouseEnv" . | nindent 12 }}
+            {{- include "dfe-engine.configDirEnv" . | nindent 12 }}
+          {{- if .Values.configVolume.enabled }}
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.configVolume.mountPath }}
+              readOnly: true
+          {{- end }}
+      {{- if .Values.configVolume.enabled }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ if .Values.configVolume.existingClaim }}{{ .Values.configVolume.existingClaim }}{{ else }}{{ include "dfe-engine.fullname" . }}-config{{ end }}
+      {{- end }}
+{{- end }}
