@@ -153,6 +153,54 @@ def status() -> None:
     print_table(rows, title="Gitops settings", headers=["setting", "value"])
 
 
+@gitops_app.command("log")
+def gitops_log(
+    limit: int = typer.Option(50, help="Max entries to read."),
+    group_by: str = typer.Option(
+        "", help="Group summary: scope|actor|type|day (empty = flat log)."
+    ),
+) -> None:
+    """Show the gitcrud audit log (all engine git changes, newest first)."""
+    from datetime import UTC, datetime
+
+    from dfe_engine.gitcrud.factory import build_gitcrud
+    from dfe_engine.gitcrud.log import group_log, read_log
+
+    settings = load_settings()
+    crud = build_gitcrud(settings.gitops)
+    if crud is None:
+        print_error("Gitops is not enabled (set DFE_GITOPS_ENABLED + DFE_GITOPS_LOCAL_PATH).")
+        raise typer.Exit(1)
+    entries, _ = read_log(crud, limit=limit)
+    if not entries:
+        print_info("No gitcrud history yet.")
+        return
+    if group_by:
+        groups = group_log(entries, group_by)
+        rows = [[g["key"], str(g["count"]), g["latest"].summary, g["latest"].actor] for g in groups]
+        print_table(
+            rows, title="Gitcrud audit log (grouped)", headers=["Key", "Count", "Latest", "Actor"]
+        )
+        return
+    rows = [
+        [
+            e.sha[:7],
+            datetime.fromtimestamp(e.timestamp, tz=UTC).strftime("%Y-%m-%d %H:%M"),
+            e.ctype or "-",
+            e.scope or "-",
+            e.actor,
+            e.state,
+            e.summary,
+        ]
+        for e in entries
+    ]
+    print_table(
+        rows,
+        title="Gitcrud audit log",
+        headers=["SHA", "When (UTC)", "Type", "Scope", "Actor", "State", "Summary"],
+    )
+
+
 def register_gitops_commands(app: Typer) -> None:
     """Register the ``gitops`` subcommand group on *app*."""
     app.add_typer(gitops_app, name="gitops")

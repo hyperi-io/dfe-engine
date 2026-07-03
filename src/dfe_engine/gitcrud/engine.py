@@ -131,6 +131,16 @@ class GitCrud:
         """Public: resolve a class descriptor (name, directory, rbac_prefix)."""
         return self._cls(cls_name)
 
+    @property
+    def repo_path(self) -> Path:
+        """Working-tree path of the deploy repo (read-only introspection)."""
+        return self._repo.path
+
+    @property
+    def registry(self) -> ResourceClassRegistry:
+        """Public: the resource-class registry (read-only introspection)."""
+        return self._registry
+
     def _rel(self, cls: ResourceClass, name: str) -> str:
         return f"{cls.directory}/{name}{cls.suffix}"
 

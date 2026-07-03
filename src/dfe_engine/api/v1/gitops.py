@@ -5,16 +5,18 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Auto-merge status + toggle (the dfe-ui banner contract).
+"""Auto-merge status + toggle (the dfe-ui banner contract), and the audit log.
 
 GET /api/v1/gitops/auto-merge -> {stored, effective, allowed, reason} (governance:read)
 PUT /api/v1/gitops/auto-merge -> toggle; refuses to enable when the deployment
 gate (dev posture OR DFE_GITOPS_MODE=solo) does not permit (governance:write).
+GET /api/v1/gitops/log -> flat {entries, next_before} or, with ?group_by=,
+{groups} - every gitcrud commit, newest-first (governance:read).
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from scalo.logger import logger
 
@@ -22,6 +24,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.auto_merge import AutoMergeState, resolve_state, set_stored
+from dfe_engine.gitcrud.log import LogEntry, group_log, read_log
 
 router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"])
 
@@ -91,3 +94,85 @@ async def put_auto_merge(
         user.user_id, "gitops", "auto-merge", "updated", {"enabled": body.enabled}
     )
     return _status(_state(request))
+
+
+class LogEntryModel(BaseModel):
+    sha: str
+    timestamp: int
+    ctype: str
+    scope: str
+    summary: str
+    actor: str
+    role: str
+    action: str
+    request_id: str
+    files: list[str]
+    resources: list[str]
+    conforming: bool
+    state: str
+
+
+class LogResponse(BaseModel):
+    entries: list[LogEntryModel]
+    next_before: str | None = None
+
+
+class LogGroup(BaseModel):
+    key: str
+    count: int
+    latest: LogEntryModel
+
+
+class GroupedLogResponse(BaseModel):
+    groups: list[LogGroup]
+
+
+def _entry_model(e: LogEntry) -> LogEntryModel:
+    return LogEntryModel(
+        sha=e.sha,
+        timestamp=e.timestamp,
+        ctype=e.ctype,
+        scope=e.scope,
+        summary=e.summary,
+        actor=e.actor,
+        role=e.role,
+        action=e.action,
+        request_id=e.request_id,
+        files=e.files,
+        resources=e.resources,
+        conforming=e.conforming,
+        state=e.state,
+    )
+
+
+@router.get(
+    "/log",
+    response_model=LogResponse | GroupedLogResponse,
+    dependencies=[Depends(require_action("governance:read"))],
+)
+async def get_log(
+    user: CurrentUser,
+    request: Request,
+    limit: int = Query(default=50, ge=1, le=500),
+    before: str | None = Query(default=None),
+    group_by: str | None = Query(default=None, pattern="^(scope|actor|type|day)$"),
+    applied_revision: str | None = Query(default=None),
+) -> LogResponse | GroupedLogResponse:
+    """Gitcrud audit log: every governed-ops git change, newest-first.
+
+    Flat + cursor-paginated by default; ?group_by= buckets the page for
+    summaries. applied_revision (the Argo-synced SHA) turns state into
+    applied/pending; without it every entry is 'committed'.
+    """
+    gc = _gitcrud(request)
+    entries, next_before = read_log(
+        gc, limit=limit, before=before, applied_revision=applied_revision
+    )
+    if group_by is not None:
+        return GroupedLogResponse(
+            groups=[
+                LogGroup(key=g["key"], count=g["count"], latest=_entry_model(g["latest"]))
+                for g in group_log(entries, group_by)
+            ]
+        )
+    return LogResponse(entries=[_entry_model(e) for e in entries], next_before=next_before)
