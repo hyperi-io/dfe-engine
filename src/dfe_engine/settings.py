@@ -232,10 +232,23 @@ class ArtifactorySettings(BaseModel):
 
 
 class KafkaSettings(BaseModel):
-    """Kafka connection settings."""
+    """Kafka connection settings.
+
+    SASL fields are only needed where the engine itself talks to the brokers -
+    today that is the sampler's Kafka consumer (recent-tail + logreducer
+    KafkaSource). DFE-owned brokers run SASL/SCRAM-SHA-512, so leave the
+    mechanism empty for a PLAINTEXT dev broker and set it (with username +
+    password) for a real cluster.
+    """
 
     bootstrap_servers: str = Field(default="localhost:9092")
     security_protocol: str = Field(default="PLAINTEXT")
+    sasl_mechanism: str = Field(
+        default="",
+        description="librdkafka sasl.mechanism (e.g. SCRAM-SHA-512); empty = no SASL",
+    )
+    sasl_username: str = Field(default="", description="SASL username")
+    sasl_password: str = Field(default="", description="SASL password")
 
 
 class StorageSettings(BaseModel):
@@ -307,6 +320,66 @@ class QueryViewSettings(BaseModel):
     max_memory_usage: str = Field(
         default="2G",
         description="ClickHouse settings profile max_memory_usage",
+    )
+
+
+class SamplerSettings(BaseModel):
+    """Source-sampling settings (the /sources/{source}/sample API + `dfe-api sample`).
+
+    Two families of mode: cheap "recent"/"random" reads that run inline, and the
+    memory-hungry logreducer modes ("smart"/"anomaly") that are gated. logreducer
+    is memory-hungry, so its concurrency is capped at ``max_concurrent`` instances,
+    each bounded to ``max_memory_gb`` - both small by default (Derek, 2026-07-01).
+
+    Environment variables (DFE_SAMPLER_ prefix):
+    - DFE_SAMPLER_DEFAULT_MODE -> sampler.default_mode
+    - DFE_SAMPLER_DEFAULT_LIMIT -> sampler.default_limit
+    - DFE_SAMPLER_MAX_LIMIT -> sampler.max_limit
+    - DFE_SAMPLER_LEVEL -> sampler.level
+    - DFE_SAMPLER_MAX_CONCURRENT -> sampler.max_concurrent
+    - DFE_SAMPLER_MAX_MEMORY_GB -> sampler.max_memory_gb
+    - DFE_SAMPLER_MAX_SCAN_ROWS -> sampler.max_scan_rows
+    - DFE_SAMPLER_KAFKA_MAX_MESSAGES -> sampler.kafka_max_messages
+    - DFE_SAMPLER_TIMESTAMP_FIELD -> sampler.timestamp_field
+    - DFE_SAMPLER_WAIT_SECONDS -> sampler.wait_seconds
+    - DFE_SAMPLER_MAX_EXECUTION_TIME -> sampler.max_execution_time
+    """
+
+    default_mode: str = Field(
+        default="smart",
+        description="Default sample mode: recent | random | smart | anomaly",
+    )
+    default_limit: int = Field(default=100, ge=1, description="Default rows returned")
+    max_limit: int = Field(default=10_000, ge=1, description="Hard cap on rows returned")
+    level: str = Field(
+        default="enhanced",
+        description="logreducer level for smart/anomaly: standard | enhanced | maximum",
+    )
+    max_concurrent: int = Field(
+        default=2, ge=1, description="Max concurrent logreducer runs (N instances)"
+    )
+    max_memory_gb: float = Field(
+        default=1.0, gt=0, description="Memory ceiling per logreducer run (X GB)"
+    )
+    max_scan_rows: int = Field(
+        default=50_000,
+        ge=1,
+        description="Rows fed to a logreducer run (bounds the CH scan / Kafka read)",
+    )
+    kafka_max_messages: int = Field(
+        default=20_000, ge=1, description="Max Kafka messages read per sample pass"
+    )
+    timestamp_field: str = Field(
+        default="timestamp_load",
+        description="Column used to order 'recent' samples (DESC)",
+    )
+    wait_seconds: float = Field(
+        default=8.0,
+        ge=0,
+        description="Seconds the submit endpoint blocks for inline completion (fast modes)",
+    )
+    max_execution_time: int = Field(
+        default=30, ge=1, description="ClickHouse max_execution_time (s) for sample reads"
     )
 
 
@@ -625,6 +698,7 @@ class DFESettings(BaseModel):
     storage: StorageSettings = Field(default_factory=StorageSettings)
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
+    sampler: SamplerSettings = Field(default_factory=SamplerSettings)
     schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)
     fieldmap: FieldMapSettings = Field(default_factory=FieldMapSettings)
@@ -681,6 +755,7 @@ def _get_env_overrides() -> dict:
         "storage": {},
         "query": {},
         "query_views": {},
+        "sampler": {},
         "schemas": {},
         "source": {},
         "fieldmap": {},
@@ -789,6 +864,12 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["bootstrap_servers"] = val
     if val := _get_env("DFE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
         overrides["kafka"]["security_protocol"] = val
+    if val := _get_env("DFE_KAFKA_SASL_MECHANISM", "KAFKA_SASL_MECHANISM"):
+        overrides["kafka"]["sasl_mechanism"] = val
+    if val := _get_env("DFE_KAFKA_SASL_USERNAME", "KAFKA_SASL_USERNAME"):
+        overrides["kafka"]["sasl_username"] = val
+    if val := _get_env("DFE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
+        overrides["kafka"]["sasl_password"] = val
 
     # Storage settings (for on-prem/Rancher deployments)
     if val := _get_env("DFE_STORAGE_TYPE"):
@@ -815,6 +896,30 @@ def _get_env_overrides() -> dict:
         overrides["query_views"]["max_rows_to_read"] = int(val)
     if val := _get_env("DFE_QUERY_VIEWS_MAX_MEMORY_USAGE"):
         overrides["query_views"]["max_memory_usage"] = val
+
+    # Sampler settings (source sampling: recent/random/smart/anomaly)
+    if val := _get_env("DFE_SAMPLER_DEFAULT_MODE"):
+        overrides["sampler"]["default_mode"] = val
+    if val := _get_env("DFE_SAMPLER_DEFAULT_LIMIT"):
+        overrides["sampler"]["default_limit"] = int(val)
+    if val := _get_env("DFE_SAMPLER_MAX_LIMIT"):
+        overrides["sampler"]["max_limit"] = int(val)
+    if val := _get_env("DFE_SAMPLER_LEVEL"):
+        overrides["sampler"]["level"] = val
+    if val := _get_env("DFE_SAMPLER_MAX_CONCURRENT"):
+        overrides["sampler"]["max_concurrent"] = int(val)
+    if val := _get_env("DFE_SAMPLER_MAX_MEMORY_GB"):
+        overrides["sampler"]["max_memory_gb"] = float(val)
+    if val := _get_env("DFE_SAMPLER_MAX_SCAN_ROWS"):
+        overrides["sampler"]["max_scan_rows"] = int(val)
+    if val := _get_env("DFE_SAMPLER_KAFKA_MAX_MESSAGES"):
+        overrides["sampler"]["kafka_max_messages"] = int(val)
+    if val := _get_env("DFE_SAMPLER_TIMESTAMP_FIELD"):
+        overrides["sampler"]["timestamp_field"] = val
+    if val := _get_env("DFE_SAMPLER_WAIT_SECONDS"):
+        overrides["sampler"]["wait_seconds"] = float(val)
+    if val := _get_env("DFE_SAMPLER_MAX_EXECUTION_TIME"):
+        overrides["sampler"]["max_execution_time"] = int(val)
 
     # Schemas settings (dfe-schemas submodule)
     if val := _get_env("DFE_SCHEMAS_DIR"):

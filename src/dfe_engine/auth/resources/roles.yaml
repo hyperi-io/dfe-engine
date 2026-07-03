@@ -11,6 +11,7 @@ roles:
       - "hunt:*"
       - "query:*"
       - "source:*"
+      - "sampler:read"
       - "fieldmap:*"
       - "alert:*"
       - "rule:*"
@@ -25,6 +26,7 @@ roles:
       - "query:read"
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "fieldmap:read"
       - "alert:read"
       - "rule:read"
@@ -36,6 +38,7 @@ roles:
     permissions:
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "dashboard:read"
   infra_admin:
     description: "Service configs, deployments, helm, Argo CD"
@@ -66,5 +69,6 @@ roles:
     permissions:
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "dashboard:read"
     scoped: true
