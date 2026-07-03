@@ -18,7 +18,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.routing import APIRoute
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
@@ -254,33 +253,25 @@ def create_app(
     app.include_router(v1_router, prefix="/api")
 
     # K8s health probes — /health/live, /health/ready, /health/startup
-    app.include_router(create_health_router(health_manager))
+    # include_in_schema=False: probes are not API surface, AND scalo's health
+    # router returns `-> JSONResponse` (an unresolved ForwardRef under future
+    # annotations) that breaks Pydantic OpenAPI generation. These routes nest
+    # BELOW app.routes, so a path-based strip over app.routes silently matches
+    # nothing (it did after the FastAPI/pydantic/scalo sweep) - excluding at the
+    # include is the only reliable point. get_openapi recurses and would
+    # otherwise pull in their JSONResponse stream_item_field.
+    app.include_router(create_health_router(health_manager), include_in_schema=False)
 
     # Custom OpenAPI schema with Bearer auth
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
-        # scalo health router uses `-> JSONResponse` with
-        # `from __future__ import annotations`, which breaks Pydantic OpenAPI
-        # generation (unresolved ForwardRef). Strip response models for
-        # /health/* only while building the schema (see openapi-spec/generate.py).
-        saved_health: list[tuple[APIRoute, object, object]] = []
-        for route in app.routes:
-            if isinstance(route, APIRoute) and route.path.startswith("/health/"):
-                saved_health.append((route, route.response_model, route.response_field))
-                route.response_model = None
-                route.response_field = None
-        try:
-            schema = get_openapi(
-                title=app.title,
-                version=app.version,
-                description=app.description,
-                routes=app.routes,
-            )
-        finally:
-            for route, response_model, response_field in saved_health:
-                route.response_model = response_model
-                route.response_field = response_field  # ty: ignore[invalid-assignment]  # FastAPI Route internal
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {
                 "type": "http",

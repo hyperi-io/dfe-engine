@@ -2194,6 +2194,84 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/deploy": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Deploy Source Schema",
+        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied - it is idempotent (CREATE ... IF\nNOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never\ndeployed.",
+        "operationId": "deploy_source_schema_api_v1_sources__name__deploy_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Plan only: generate + validate the DDL without applying it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Plan only: generate + validate the DDL without applying it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaDeployResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}": {
       "get": {
         "tags": [
@@ -4742,7 +4820,7 @@
           "hunts"
         ],
         "summary": "Get Engine Status",
-        "description": "Get the current status of the hunt scheduler.",
+        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process. ``running`` reflects whether any\nrunner currently holds a hunt lease; ``hunt_count`` is the configured-hunt\ncount.",
         "operationId": "get_engine_status_api_v1_hunts_status_get",
         "responses": {
           "200": {
@@ -5065,7 +5143,7 @@
           "hunts"
         ],
         "summary": "Trigger Hunt",
-        "description": "Trigger an ad-hoc hunt execution.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``\nor streamed via ``GET /tasks/{task_id}/stream``.",
+        "description": "Trigger an ad-hoc hunt execution.\n\nHunts run in the separate dfe-hunt-runner service on their schedule. On-demand\nexecution from the API (enqueue a one-shot fire the runner claims) is not wired\nyet, so this returns 501 after validating the hunt exists.",
         "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {
@@ -7190,67 +7268,1230 @@
         ]
       }
     },
-    "/health/live": {
+    "/api/v1/helm/files": {
       "get": {
         "tags": [
-          "health"
+          "Governed Ops: Helm Vars"
         ],
-        "summary": "Liveness",
-        "description": "Liveness probe -- is the process alive?\n\nChecks run concurrently via ``run_blocking`` with per-check\ntimeout so a single slow check can't stall the kubelet probe.",
-        "operationId": "liveness_health_live_get",
+        "summary": "List Files",
+        "description": "List helm-var overlay resources.",
+        "operationId": "list_files_api_v1_helm_files_get",
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Files Api V1 Helm Files Get"
+                }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
-    "/health/ready": {
+    "/api/v1/helm/files/{name}/vars": {
       "get": {
         "tags": [
-          "health"
+          "Governed Ops: Helm Vars"
         ],
-        "summary": "Readiness",
-        "operationId": "readiness_health_ready_get",
+        "summary": "List Vars",
+        "description": "Flattened dot-path vars for a resource, each marked protected or not.",
+        "operationId": "list_vars_api_v1_helm_files__name__vars_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Vars Api V1 Helm Files  Name  Vars Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     },
-    "/health/startup": {
-      "get": {
+    "/api/v1/helm/files/{name}/vars/{path}": {
+      "put": {
         "tags": [
-          "health"
+          "Governed Ops: Helm Vars"
         ],
-        "summary": "Startup",
-        "operationId": "startup_health_startup_get",
+        "summary": "Set Var",
+        "description": "Set a helm var (-> gitops commit). 409 on stale If-Match; 403 if protected.",
+        "operationId": "set_var_api_v1_helm_files__name__vars__path__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVarRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
               }
             }
           }
-        }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Governed Ops: Helm Vars"
+        ],
+        "summary": "Delete Var",
+        "description": "Revert a helm var to its chart default (remove the override).",
+        "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "List Actions",
+        "operationId": "list_actions_api_v1_governance_actions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Actions Api V1 Governance Actions Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions/{name}": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Get Action",
+        "operationId": "get_action_api_v1_governance_actions__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionDef"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions/{name}/invoke": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Invoke Action",
+        "description": "Invoke a defined action - gated on the action's OWN required_action.",
+        "operationId": "invoke_action_api_v1_governance_actions__name__invoke_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Dry Run"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvokeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/actions": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Create Action",
+        "operationId": "create_action_api_v1_governance_admin_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionDef"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionDef"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/actions/{name}": {
+      "delete": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Delete Action",
+        "operationId": "delete_action_api_v1_governance_admin_actions__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/policies": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Create Policy",
+        "operationId": "create_policy_api_v1_governance_admin_policies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProtectedPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedPolicy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/policies/{name}": {
+      "delete": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Delete Policy",
+        "operationId": "delete_policy_api_v1_governance_admin_policies__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/ch-rbac/reconcile": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Reconcile Ch Rbac Endpoint",
+        "description": "Reconcile CH quota tiers + service roles + per-org row policies into\nClickHouse, minting the service-user secrets via the secrets seam. Idempotent.\ngovernance:write.",
+        "operationId": "reconcile_ch_rbac_endpoint_api_v1_governance_ch_rbac_reconcile_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Reconcile Ch Rbac Endpoint Api V1 Governance Ch Rbac Reconcile Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gitops/auto-merge": {
+      "get": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Get Auto Merge",
+        "description": "Auto-merge status for the UI banner: stored flag, gate verdict, net effect.",
+        "operationId": "get_auto_merge_api_v1_gitops_auto_merge_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoMergeStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Put Auto Merge",
+        "description": "Toggle auto-merge. Enabling requires the deployment gate; disabling always works.",
+        "operationId": "put_auto_merge_api_v1_gitops_auto_merge_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoMergeStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gitops/log": {
+      "get": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Get Log",
+        "description": "Gitcrud audit log: every governed-ops git change, newest-first.\n\nFlat + cursor-paginated by default; ?group_by= buckets the page for\nsummaries. applied_revision (the Argo-synced SHA) turns state into\napplied/pending; without it every entry is 'committed'.",
+        "operationId": "get_log_api_v1_gitops_log_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(scope|actor|type|day)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group By"
+            }
+          },
+          {
+            "name": "applied_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Applied Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LogResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GroupedLogResponse"
+                    }
+                  ],
+                  "title": "Response Get Log Api V1 Gitops Log Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/lifecycle": {
+      "get": {
+        "tags": [
+          "Governed Ops: Lifecycle"
+        ],
+        "summary": "List Services",
+        "description": "List services with their tier and current lifecycle state.",
+        "operationId": "list_services_api_v1_lifecycle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Services Api V1 Lifecycle Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/lifecycle/{name}": {
+      "post": {
+        "tags": [
+          "Governed Ops: Lifecycle"
+        ],
+        "summary": "Set Lifecycle",
+        "description": "Set a service's lifecycle state - per-service RBAC; pinned services are 404.",
+        "operationId": "set_lifecycle_api_v1_lifecycle__name__post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecycleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/from-hyperdx": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "From Hyperdx",
+        "description": "Strip a HyperDX query's time bounds -> {window}, ready to save as a rule.",
+        "operationId": "from_hyperdx_api_v1_authoring_from_hyperdx_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromHyperdxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response From Hyperdx Api V1 Authoring From Hyperdx Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/scaffold": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Scaffold",
+        "description": "A starter SELECT over discovered columns (source meta + landed _json keys).",
+        "operationId": "scaffold_api_v1_authoring_scaffold_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaffoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Scaffold Api V1 Authoring Scaffold Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/review": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Review",
+        "operationId": "ai_review_api_v1_authoring_ai_review_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/create": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Create",
+        "operationId": "ai_create_api_v1_authoring_ai_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/generate-vrl": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Generate Vrl",
+        "operationId": "ai_generate_vrl_api_v1_authoring_ai_generate_vrl_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/suggest-schema": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Suggest Schema",
+        "operationId": "ai_suggest_schema_api_v1_authoring_ai_suggest_schema_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaSuggestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/config/client": {
+      "get": {
+        "tags": [
+          "Client Config"
+        ],
+        "summary": "Client Config",
+        "description": "Runtime config for the web UI (no secrets).",
+        "operationId": "client_config_api_v1_config_client_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfig"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
       }
     }
   },
   "components": {
     "schemas": {
+      "AIModuleResult": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Unique task identifier"
+          },
+          "module_name": {
+            "type": "string",
+            "title": "Module Name",
+            "description": "Module that produced this result"
+          },
+          "module_type": {
+            "$ref": "#/components/schemas/AIModuleType",
+            "description": "Module type"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AIModuleStatus",
+            "description": "Task status",
+            "default": "pending"
+          },
+          "output": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Output",
+            "description": "Module-specific output"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "Execution duration in milliseconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "module_name",
+          "module_type"
+        ],
+        "title": "AIModuleResult",
+        "description": "Result of an AI module execution."
+      },
+      "AIModuleStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "AIModuleStatus",
+        "description": "Status of an async AI module task."
+      },
+      "AIModuleType": {
+        "type": "string",
+        "enum": [
+          "query_optimiser",
+          "query_generator",
+          "schema_optimiser",
+          "log_parser"
+        ],
+        "title": "AIModuleType",
+        "description": "Discriminator for AI module types."
+      },
       "APIKeyCreatedResponse": {
         "properties": {
           "name": {
@@ -7378,6 +8619,37 @@
         "title": "AccountResponse",
         "description": "Account detail \u2014 password_hash is NEVER included."
       },
+      "ActionDef": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "required_action": {
+            "type": "string",
+            "title": "Required Action"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/VarChange"
+            },
+            "type": "array",
+            "title": "Changes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "required_action"
+        ],
+        "title": "ActionDef",
+        "description": "A curated, RBAC-gated bundle of var changes (a \"big dial\").\n\nInvoking the action applies ALL ``changes`` in ONE commit, gated on\n``required_action`` (an RBAC string checked at invoke time)."
+      },
       "AddMemberRequest": {
         "properties": {
           "username": {
@@ -7463,6 +8735,47 @@
           "name"
         ],
         "title": "AlertDestinationSummary"
+      },
+      "AutoMergeRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "AutoMergeRequest"
+      },
+      "AutoMergeStatus": {
+        "properties": {
+          "stored": {
+            "type": "boolean",
+            "title": "Stored"
+          },
+          "effective": {
+            "type": "boolean",
+            "title": "Effective"
+          },
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "effective",
+          "allowed",
+          "reason"
+        ],
+        "title": "AutoMergeStatus"
       },
       "Body_elastic_converter_api_v1_schemas_elastic_converter_post": {
         "properties": {
@@ -7792,6 +9105,37 @@
         "title": "CelCheckResponse",
         "description": "Result of a single CEL expression check."
       },
+      "ClientConfig": {
+        "properties": {
+          "api_base": {
+            "type": "string",
+            "title": "Api Base",
+            "default": ""
+          },
+          "hyperdx": {
+            "$ref": "#/components/schemas/HyperDXConfig",
+            "default": {
+              "enabled": false,
+              "url": ""
+            }
+          },
+          "auth_mode": {
+            "type": "string",
+            "title": "Auth Mode",
+            "default": "jwt"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Features",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "title": "ClientConfig"
+      },
       "ColumnInfo": {
         "properties": {
           "name": {
@@ -8083,12 +9427,6 @@
             "type": "array",
             "title": "Org Ids",
             "description": "Tenant IDs for ClickHouse row-level security"
-          },
-          "dedicated_database": {
-            "type": "boolean",
-            "title": "Dedicated Database",
-            "description": "Whether to provision a dedicated ClickHouse database",
-            "default": false
           }
         },
         "type": "object",
@@ -8106,6 +9444,12 @@
           },
           "type": {
             "type": "string",
+            "enum": [
+              "generic",
+              "google",
+              "entra_id",
+              "okta"
+            ],
             "title": "Type",
             "description": "Provider type: generic, google, entra_id, okta"
           },
@@ -8137,6 +9481,38 @@
           "type"
         ],
         "title": "CreateProviderRequest"
+      },
+      "CreateRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "columns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "CreateRequest"
       },
       "CreateRoleRequest": {
         "properties": {
@@ -8731,10 +10107,42 @@
         "title": "FilterTier",
         "description": "Performance tier for a filter expression."
       },
+      "FromHyperdxRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "time_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "FromHyperdxRequest"
+      },
       "GroupResolutionRequest": {
         "properties": {
           "mode": {
             "type": "string",
+            "enum": [
+              "manual",
+              "token_claim",
+              "api"
+            ],
             "title": "Mode",
             "description": "Group resolution mode: manual, token_claim, api",
             "default": "manual"
@@ -8888,6 +10296,22 @@
           "members"
         ],
         "title": "GroupResponse"
+      },
+      "GroupedLogResponse": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/LogGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "title": "GroupedLogResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -9449,6 +10873,65 @@
         "title": "HuntWriteRequest",
         "description": "Hunt scheduler payload for create/update (without hunt file ``name``)."
       },
+      "HyperDXConfig": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "HyperDXConfig"
+      },
+      "InvokeResponse": {
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "diff": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Diff"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dry_run",
+          "changed",
+          "diff"
+        ],
+        "title": "InvokeResponse"
+      },
       "JsonPathInfo": {
         "properties": {
           "path": {
@@ -9570,6 +11053,195 @@
         ],
         "title": "JsonPathsResponse",
         "description": "Discovered JSON paths for a source."
+      },
+      "LifecycleRequest": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/LifecycleState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "LifecycleRequest"
+      },
+      "LifecycleResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "pending_reconcile": {
+            "type": "boolean",
+            "title": "Pending Reconcile",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "changed"
+        ],
+        "title": "LifecycleResponse"
+      },
+      "LifecycleState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "paused",
+          "stopped"
+        ],
+        "title": "LifecycleState",
+        "description": "The gitops state dial value."
+      },
+      "LogEntryModel": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          },
+          "ctype": {
+            "type": "string",
+            "title": "Ctype"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "resources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resources"
+          },
+          "conforming": {
+            "type": "boolean",
+            "title": "Conforming"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "timestamp",
+          "ctype",
+          "scope",
+          "summary",
+          "actor",
+          "role",
+          "action",
+          "request_id",
+          "files",
+          "resources",
+          "conforming",
+          "state"
+        ],
+        "title": "LogEntryModel"
+      },
+      "LogGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/LogEntryModel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "count",
+          "latest"
+        ],
+        "title": "LogGroup"
+      },
+      "LogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LogEntryModel"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "LogResponse"
       },
       "LoginRequest": {
         "properties": {
@@ -10008,10 +11680,6 @@
             "type": "boolean",
             "title": "Enabled"
           },
-          "dedicated_database": {
-            "type": "boolean",
-            "title": "Dedicated Database"
-          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -10027,7 +11695,6 @@
           "display_name",
           "org_ids",
           "enabled",
-          "dedicated_database",
           "created_at",
           "updated_at"
         ],
@@ -11010,6 +12677,32 @@
         "title": "PromoteResult",
         "description": "Per-path outcome of a promotion."
       },
+      "ProtectedPolicy": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "protected": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Protected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProtectedPolicy",
+        "description": "Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.\n\ne.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.\nA protected var can only be changed by a caller holding the override grant."
+      },
       "ProviderResponse": {
         "properties": {
           "name": {
@@ -11346,6 +13039,24 @@
         ],
         "title": "ResetPasswordRequest"
       },
+      "ReviewRequest": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "execution_profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Execution Profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "ReviewRequest"
+      },
       "RoleResponse": {
         "properties": {
           "name": {
@@ -11463,6 +13174,10 @@
           },
           "source_type": {
             "type": "string",
+            "enum": [
+              "raw",
+              "hyperdx"
+            ],
             "title": "Source Type",
             "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
             "default": "raw"
@@ -11867,6 +13582,42 @@
         "title": "SampleRowsResponse",
         "description": "Random sample rows for a source, scoped to its match rule."
       },
+      "ScaffoldRequest": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "type": "object",
+        "required": [
+          "table"
+        ],
+        "title": "ScaffoldRequest"
+      },
       "SchemaColumn-Input": {
         "properties": {
           "name": {
@@ -11947,6 +13698,63 @@
         "title": "SchemaColumn",
         "description": "A column in the schema."
       },
+      "SchemaDeployResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "True = plan only; the DDL was NOT applied"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "description": "Whether the DDL was executed against ClickHouse"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name \u2192 DDL"
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
+          },
+          "statements_applied": {
+            "type": "integer",
+            "title": "Statements Applied",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "dry_run",
+          "applied",
+          "create_table"
+        ],
+        "title": "SchemaDeployResult",
+        "description": "Plan / deploy result for a source's schema."
+      },
       "SchemaDiff": {
         "properties": {
           "new_columns": {
@@ -11978,6 +13786,31 @@
         ],
         "title": "SchemaDiff",
         "description": "Proposed schema change returned by ``?dry_run=true``."
+      },
+      "SchemaSuggestRequest": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "source_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Source Schema"
+          },
+          "query_patterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Query Patterns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name"
+        ],
+        "title": "SchemaSuggestRequest"
       },
       "SchemaSummaryObject": {
         "properties": {
@@ -12170,6 +14003,29 @@
         ],
         "title": "ServiceConfigSummary"
       },
+      "ServiceInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "tier",
+          "state"
+        ],
+        "title": "ServiceInfo"
+      },
       "ServiceSurface": {
         "properties": {
           "service": {
@@ -12212,6 +14068,18 @@
         ],
         "title": "ServiceSurface",
         "description": "Complete surface definition for a Rust service.\n\nLoaded from YAML files in the service-surfaces config directory.\nOne file per service (e.g. ``dfe-receiver.yaml``)."
+      },
+      "SetVarRequest": {
+        "properties": {
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SetVarRequest"
       },
       "SettingsSummary": {
         "properties": {
@@ -12879,12 +14747,26 @@
             "description": "Version creation date (YYYY-MM-DD)"
           },
           "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common schema header configuration (None when the version did not author one)"
           },
           "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema configuration (None when the version did not author one)"
           },
           "mapping_standards": {
             "items": {
@@ -13707,24 +15589,6 @@
             ],
             "title": "Enabled",
             "description": "Enable or disable the org"
-          },
-          "dedicated_database": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dedicated Database",
-            "description": "Enable or disable a dedicated ClickHouse database"
-          },
-          "confirm_merge": {
-            "type": "boolean",
-            "title": "Confirm Merge",
-            "description": "Required when disabling dedicated_database \u2014 confirms data migration is handled",
-            "default": false
           }
         },
         "type": "object",
@@ -13896,6 +15760,34 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VarChange": {
+        "properties": {
+          "cls": {
+            "type": "string",
+            "title": "Cls"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cls",
+          "name",
+          "path",
+          "value"
+        ],
+        "title": "VarChange",
+        "description": "One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``."
       },
       "VersionResponse": {
         "properties": {
@@ -14117,6 +16009,62 @@
         ],
         "title": "ViewParameter",
         "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse \u2192 Python \u2192 TypeScript \u2192 HTML)."
+      },
+      "VrlRequest": {
+        "properties": {
+          "samples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Samples"
+          },
+          "source_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples"
+        ],
+        "title": "VrlRequest"
+      },
+      "WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
       },
       "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
         "properties": {

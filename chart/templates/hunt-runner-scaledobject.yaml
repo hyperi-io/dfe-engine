@@ -48,7 +48,11 @@ spec:
         # scale up when the due backlog reaches this many hunts; desiredReplicas =
         # ceil(due / queryValue), so this is also "hunts per worker".
         queryValue: {{ .Values.huntRunner.keda.queryValue | quote }}
-        activationQueryValue: "1"
+        # Activate from zero whenever due > 0. KEDA activates on
+        # metric > activationValue (STRICTLY), so this MUST be 0 - "1" would need
+        # due >= 2, and a single due hunt would never wake a worker. Proven in the
+        # Phase C scratch-cluster KEDA scale test (0 -> 1 -> 0).
+        activationQueryValue: "0"
         query: >-
           SELECT count() AS due FROM (SELECT hunt_id, interval_seconds, phase_offset
           FROM (SELECT hunt_id, argMax(interval_seconds, updated) AS interval_seconds,
