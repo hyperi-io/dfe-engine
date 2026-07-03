@@ -156,6 +156,9 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/sources/{name}/versions` | Get one version snapshot |
 | GET | `/sources/{name}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
 | POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
+| GET | `/sources/{name}/plan` | Get saved ClickHouse deploy plan (`?version=` required) |
+| POST | `/sources/{name}/plan` | Dry-run deploy plan; persists under `source-plans/` (`?version=` defaults to `current`) |
+| POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
 | PUT | `/sources/{name}` | Update source |
 | DELETE | `/sources/{name}` | Delete source |
 | POST | `/sources/bulk` | Bulk import |

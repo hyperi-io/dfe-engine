@@ -6,6 +6,9 @@ GET    /api/v1/sources/{name}           → Get source details
 GET    /api/v1/sources/{name}/versions  → Get one version snapshot
 GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
+GET    /api/v1/sources/{name}/plan      → Get saved deploy plan for a version
+POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (saves to source-plans)
+POST   /api/v1/sources/{name}/deploy    → Deploy version to ClickHouse
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
@@ -19,13 +22,22 @@ from typing import Any, NoReturn
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.settings import get_settings
+from dfe_engine.source.deployment import (
+    SourceDeployArtifact,
+    SourceDeploymentStore,
+    SourcePlanArtifact,
+    deploy_statements_for_build,
+    ensure_build_artifact,
+    execute_ddl_statements,
+    plan_from_build,
+)
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     Source,
@@ -137,6 +149,32 @@ class SchemaBuildResult(BaseModel):
     version: str = ""
     columns: list[SchemaColumn]
     ddl: DDLResult | None = None
+    validation_errors: list[str] = Field(default_factory=list)
+
+
+class SourcePlanResponse(BaseModel):
+    """Dry-run ClickHouse deploy plan for a source version."""
+
+    source_name: str
+    version: str
+    planned_at: str
+    table_exists: bool = False
+    validation_errors: list[str] = Field(default_factory=list)
+    statements: list[str] = Field(default_factory=list)
+    ddl: DDLResult | None = None
+    ready: bool = False
+
+
+class SourceDeployResponse(BaseModel):
+    """Result of deploying a source version to ClickHouse."""
+
+    source_name: str
+    version: str
+    success: bool
+    deployed_version: str | None = None
+    deployed_at: str
+    ddl_executed: list[str] = Field(default_factory=list)
+    ddl_failed: list[dict[str, str]] = Field(default_factory=list)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -353,7 +391,7 @@ async def get_source_schema_columns(
 @router.post(
     "/{name}/build",
     response_model=SchemaBuildResult,
-    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+    dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
 )
 async def build_source_schema(
     name: str,
@@ -370,7 +408,6 @@ async def build_source_schema(
     without executing it against ClickHouse.
     """
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
 
     try:
         source = registry.get_source(name)
@@ -401,12 +438,15 @@ async def build_source_schema(
         )
 
     settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
+    store = SourceDeploymentStore.from_settings(settings)
     try:
-        result = builder.build_for_source_version(source, source_version=version_id)
+        result, _build_artifact = ensure_build_artifact(
+            store,
+            source,
+            version_id=version_id,
+            schemas_base_dir=settings.schemas.schemas_dir or None,
+            refresh=True,
+        )
     except SchemaBuildError as exc:
         raise HTTPException(
             status_code=400,
@@ -429,6 +469,238 @@ async def build_source_schema(
         version=version_id,
         columns=columns,
         ddl=ddl,
+        validation_errors=list(result.validation_errors),
+    )
+
+
+@router.get(
+    "/{name}/plan",
+    response_model=SourcePlanResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
+)
+async def get_source_plan(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    version: str = Query(..., description="Source version id to retrieve the plan for"),
+) -> SourcePlanResponse:
+    """Return a saved deploy plan for a source version (from source-plans)."""
+    try:
+        registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    store = SourceDeploymentStore.from_settings(get_settings())
+    plan = store.load_plan(name, version)
+    if plan is None:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"No plan for source '{name}' version '{version}'",
+            },
+        )
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/{name}/plan",
+    response_model=SourcePlanResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
+)
+async def plan_source_deploy(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    ch_client: ClickHouseClient,
+    version: str | None = Query(
+        None,
+        description="Source version id (defaults to current working version)",
+    ),
+) -> SourcePlanResponse:
+    """Dry-run ClickHouse deploy: DDL statements, validation errors, persisted plan."""
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    store = SourceDeploymentStore.from_settings(settings)
+    try:
+        result, _artifact = ensure_build_artifact(
+            store,
+            source,
+            version_id=version_id,
+            schemas_base_dir=settings.schemas.schemas_dir or None,
+            refresh=True,
+        )
+    except SchemaBuildError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "build_error", "message": str(exc)},
+        ) from exc
+
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    db = settings.clickhouse.effective_data_database
+    statements, table_exists = deploy_statements_for_build(
+        builder,
+        source,
+        version_id,
+        result,
+        db=db,
+        ch_client=ch_client,
+    )
+    plan = plan_from_build(
+        result,
+        version=version_id,
+        statements=statements,
+        table_exists=table_exists,
+    )
+    store.save_plan(plan)
+    audit_resource_change(user.user_id, "source", name, "planned")
+    return _plan_to_response(plan)
+
+
+@router.post(
+    "/{name}/deploy",
+    response_model=SourceDeployResponse,
+    dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
+)
+async def deploy_source(
+    name: str,
+    user: CurrentUser,
+    registry: SourceReg,
+    ch_client: ClickHouseClient,
+    version: str | None = Query(
+        None,
+        description="Source version id to deploy (defaults to current working version)",
+    ),
+) -> SourceDeployResponse:
+    """Apply DDL for a source version to ClickHouse and set deployed_version."""
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    store = SourceDeploymentStore.from_settings(settings)
+    plan = store.load_plan(name, version_id)
+    statements: list[str]
+    if plan is not None:
+        if not plan.ready:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "plan_not_ready",
+                    "message": (
+                        f"Plan for source '{name}' version '{version_id}' is not ready to deploy"
+                    ),
+                    "validation_errors": plan.validation_errors,
+                },
+            )
+    if plan is not None and plan.statements:
+        statements = list(plan.statements)
+    else:
+        try:
+            result, _artifact = ensure_build_artifact(
+                store,
+                source,
+                version_id=version_id,
+                schemas_base_dir=settings.schemas.schemas_dir or None,
+                refresh=True,
+            )
+        except SchemaBuildError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "build_error", "message": str(exc)},
+            ) from exc
+        builder = SchemaBuilderV2(
+            TypeRegistry.default(),
+            schemas_base_dir=settings.schemas.schemas_dir or None,
+        )
+        statements, _table_exists = deploy_statements_for_build(
+            builder,
+            source,
+            version_id,
+            result,
+            db=settings.clickhouse.effective_data_database,
+            ch_client=ch_client,
+        )
+
+    if not statements:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "nothing_to_deploy",
+                "message": f"No DDL statements to deploy for source '{name}' version '{version_id}'",
+            },
+        )
+
+    executed, failed = execute_ddl_statements(ch_client, statements)
+    deployed_at = _utc_now_iso()
+    success = not failed
+    deployed_version: str | None = None
+
+    if success:
+        try:
+            updated = registry.set_deployed_version(
+                name,
+                version_id,
+                created_by=git_author(user),
+            )
+            deployed_version = updated.deployed_version
+        except SourceValidationError as exc:
+            success = False
+            failed.append(("", str(exc)))
+
+    deploy_artifact = SourceDeployArtifact(
+        source_name=name,
+        version=version_id,
+        deployed_at=deployed_at,
+        success=success,
+        deployed_version=deployed_version,
+        ddl_executed=executed,
+        ddl_failed=[{"statement": stmt, "error": err} for stmt, err in failed],
+    )
+    store.save_deploy(deploy_artifact)
+
+    if success:
+        audit_resource_change(user.user_id, "source", name, "deployed")
+    else:
+        audit_resource_change(user.user_id, "source", name, "deploy_failed")
+
+    return SourceDeployResponse(
+        source_name=name,
+        version=version_id,
+        success=success,
+        deployed_version=deployed_version,
+        deployed_at=deployed_at,
+        ddl_executed=executed,
+        ddl_failed=deploy_artifact.ddl_failed,
     )
 
 
@@ -572,6 +844,66 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 
 
 # ── Helpers ──────────────────────────────────────────────────
+
+
+def _utc_now_iso() -> str:
+    from datetime import UTC, datetime
+
+    return datetime.now(tz=UTC).isoformat()
+
+
+def _resolve_source_version(
+    registry: SourceReg,
+    name: str,
+    version: str | None,
+    *,
+    default_current: bool = False,
+) -> tuple[Source, str]:
+    """Resolve source and version id for schema operations."""
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    if version:
+        version_id = version
+    elif default_current:
+        version_id = source.current
+    else:
+        version_id = source.runtime_version_id()
+
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{name}'",
+            },
+        )
+    return source, version_id
+
+
+def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
+    ddl = None
+    if plan.create_table_ddl:
+        ddl = DDLResult(
+            source_name=plan.source_name,
+            create_table=plan.create_table_ddl,
+            views=dict(plan.view_ddls),
+        )
+    return SourcePlanResponse(
+        source_name=plan.source_name,
+        version=plan.version,
+        planned_at=plan.planned_at,
+        table_exists=plan.table_exists,
+        validation_errors=list(plan.validation_errors),
+        statements=list(plan.statements),
+        ddl=ddl,
+        ready=plan.ready,
+    )
 
 
 def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
