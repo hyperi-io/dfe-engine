@@ -22,6 +22,7 @@ from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
+from dfe_engine.api.v1.repository import router as repository_router
 from dfe_engine.api.v1.roles import router as roles_router
 from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.sampler import router as sampler_router
@@ -71,6 +72,7 @@ v1_router.include_router(governance_router)
 v1_router.include_router(gitops_router)
 v1_router.include_router(lifecycle_router)
 v1_router.include_router(authoring_router)
+v1_router.include_router(repository_router)
 # Runtime client-config bootstrap for the UI (public, no secrets)
 v1_router.include_router(config_router)
 
