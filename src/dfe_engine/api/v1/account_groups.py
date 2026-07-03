@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         api/v1/account_groups.py
-#  Purpose:      Group CRUD REST endpoints (admin only)
+#  Purpose:      Group CRUD REST endpoints (scope-aware)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -16,15 +16,22 @@ POST   /api/v1/auth/groups/{name}/members            → Add member
 DELETE /api/v1/auth/groups/{name}/members/{username}  → Remove member
 DELETE /api/v1/auth/groups/{name}                    → Delete group
 
-All endpoints require admin role (org:write).
+Groups carry a scope: ``system`` (spans orgs) or ``org:<name>``
+(exists only inside that org). Checks run at the group's scope, so a
+system-scope group:write holder manages everything, while an org-scope
+group:write holder manages only that org's groups. Visibility follows
+the same rule, plus members always see the groups they belong to —
+org-local groups are never listed outside their org.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed
+from dfe_engine.auth import Scope
+from dfe_engine.auth.groups import Group, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
@@ -37,6 +44,11 @@ class CreateGroupRequest(BaseModel):
     name: str = Field(description="Unique group name")
     roles: list[str] = Field(description="Roles assigned to all group members")
     description: str = Field("", description="Human-readable description")
+    scope: str = Field(
+        "system",
+        description="'system' (roles bind system-wide) or 'org:<name>' "
+        "(group exists only inside that org; roles bind at that org's scope)",
+    )
     members: list[str] = Field(
         default_factory=list,
         description="Account usernames in this group (local login resolves roles from this list)",
@@ -58,26 +70,67 @@ class GroupResponse(BaseModel):
     description: str
     roles: list[str]
     members: list[str]
+    scope: str
+
+
+# ── Helpers ──────────────────────────────────────────────────
+
+
+def _scope_of(group: Group) -> Scope:
+    org = group.scope_org
+    return Scope(type="org", id=org) if org else Scope()
+
+
+def _visible(request: Request, user, group: Group) -> bool:
+    """Members always see their own groups; otherwise group:read at the
+    group's scope decides (org-local groups stay invisible outside their org)."""
+    if user.user_id in group.members:
+        return True
+    return is_action_allowed(request, user, scopes_dict["group_read"], scope=_scope_of(group))
+
+
+def _response(group: Group) -> GroupResponse:
+    return GroupResponse(
+        name=group.name,
+        description=group.description,
+        roles=group.roles,
+        members=group.members,
+        scope=group.scope,
+    )
 
 
 # ── Endpoints ────────────────────────────────────────────────
 
 
-@router.post(
-    "",
-    response_model=GroupResponse,
-    status_code=201,
-    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
-)
+@router.post("", response_model=GroupResponse, status_code=201)
 async def create_group(
     body: CreateGroupRequest,
     user: CurrentUser,
     request: Request,
 ):
-    """Create a new RBAC group (admin only)."""
+    """Create a new RBAC group at a scope."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
+
+    try:
+        validate_group_scope(body.scope)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_scope", "message": str(exc)},
+        ) from exc
+
+    target = Group(name=body.name, scope=body.scope)
+    check_action(request, user, scopes_dict["group_write"], scope=_scope_of(target))
+
+    org = target.scope_org
+    org_registry = getattr(request.app.state, "org_registry", None)
+    if org and org_registry is not None and org_registry.get(org) is None:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_scope", "message": f"Org '{org}' not found"},
+        )
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
@@ -91,84 +144,55 @@ async def create_group(
         roles=body.roles,
         description=body.description,
         members=body.members,
+        scope=body.scope,
     )
     sync_account_groups_for_membership_change(
         account_store,
         group.name,
         added=group.members,
     )
-    return GroupResponse(
-        name=group.name,
-        description=group.description,
-        roles=group.roles,
-        members=group.members,
-    )
+    return _response(group)
 
 
-@router.get(
-    "",
-    response_model=list[GroupResponse],
-    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
-)
+@router.get("", response_model=list[GroupResponse])
 async def list_groups(
     user: CurrentUser,
     request: Request,
 ):
-    """List all groups (admin only)."""
+    """List groups visible to the caller (own memberships + scope grants)."""
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
-    return [
-        GroupResponse(
-            name=g.name,
-            description=g.description,
-            roles=g.roles,
-            members=g.members,
-        )
-        for g in store.list()
-    ]
+    return [_response(g) for g in store.list() if _visible(request, user, g)]
 
 
-@router.get(
-    "/{name}",
-    response_model=GroupResponse,
-    dependencies=[Depends(require_action(scopes_dict["group_read"]))],
-)
+@router.get("/{name}", response_model=GroupResponse)
 async def get_group(
     name: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single group by name (admin only)."""
+    """Get a single group by name (404 when not visible to the caller)."""
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
     group = store.get(name)
-    if group is None:
+    if group is None or not _visible(request, user, group):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
-    return GroupResponse(
-        name=group.name,
-        description=group.description,
-        roles=group.roles,
-        members=group.members,
-    )
+    return _response(group)
 
 
-@router.put(
-    "/{name}",
-    response_model=GroupResponse,
-    dependencies=[Depends(require_action(scopes_dict["group_write"]))],
-)
+@router.put("/{name}", response_model=GroupResponse)
 async def update_group(
     name: str,
     body: UpdateGroupRequest,
     user: CurrentUser,
     request: Request,
 ):
-    """Update group roles, description, or members (admin only)."""
+    """Update group roles, description, or members (group:write at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
@@ -181,6 +205,7 @@ async def update_group(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
+    check_action(request, user, scopes_dict["group_write"], scope=_scope_of(existing))
     update_fields: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles
@@ -205,38 +230,30 @@ async def update_group(
         )
     else:
         group = store.update(name, **update_fields)
-    return GroupResponse(
-        name=group.name,
-        description=group.description,
-        roles=group.roles,
-        members=group.members,
-    )
+    return _response(group)
 
 
-@router.post(
-    "/{name}/members",
-    response_model=GroupResponse,
-    status_code=200,
-    dependencies=[Depends(require_action(scopes_dict["group_add_member"]))],
-)
+@router.post("/{name}/members", response_model=GroupResponse, status_code=200)
 async def add_member(
     name: str,
     body: AddMemberRequest,
     user: CurrentUser,
     request: Request,
 ):
-    """Add a member to a group (admin only, idempotent)."""
+    """Add a member to a group (idempotent; checked at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    if store.get(name) is None:
+    existing = store.get(name)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
+    check_action(request, user, scopes_dict["group_add_member"], scope=_scope_of(existing))
     store.add_member(name, body.username)
     sync_account_groups_for_membership_change(
         account_store,
@@ -244,43 +261,30 @@ async def add_member(
         added=[body.username],
     )
     group = store.get(name)
-    if group is None:  # deleted concurrently between the mutation and re-fetch
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
-    return GroupResponse(
-        name=group.name,
-        description=group.description,
-        roles=group.roles,
-        members=group.members,
-    )
+    return _response(group if group is not None else existing)
 
 
-@router.delete(
-    "/{name}/members/{username}",
-    response_model=GroupResponse,
-    status_code=200,
-    dependencies=[Depends(require_action(scopes_dict["group_remove_member"]))],
-)
+@router.delete("/{name}/members/{username}", response_model=GroupResponse, status_code=200)
 async def remove_member(
     name: str,
     username: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Remove a member from a group (admin only)."""
+    """Remove a member from a group (checked at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
     from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    if store.get(name) is None:
+    existing = store.get(name)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
+    check_action(request, user, scopes_dict["group_remove_member"], scope=_scope_of(existing))
     store.remove_member(name, username)
     sync_account_groups_for_membership_change(
         account_store,
@@ -288,38 +292,26 @@ async def remove_member(
         removed=[username],
     )
     group = store.get(name)
-    if group is None:  # deleted concurrently between the mutation and re-fetch
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
-    return GroupResponse(
-        name=group.name,
-        description=group.description,
-        roles=group.roles,
-        members=group.members,
-    )
+    return _response(group if group is not None else existing)
 
 
-@router.delete(
-    "/{name}",
-    status_code=204,
-    dependencies=[Depends(require_action(scopes_dict["group_delete"]))],
-)
+@router.delete("/{name}", status_code=204)
 async def delete_group(
     name: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Delete a group (admin only)."""
+    """Delete a group (checked at the group's scope)."""
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
-    if store.get(name) is None:
+    existing = store.get(name)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
+    check_action(request, user, scopes_dict["group_delete"], scope=_scope_of(existing))
     try:
         store.delete(name)
     except ValueError as exc:

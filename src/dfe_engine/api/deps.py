@@ -12,12 +12,12 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
 from scalo.logger import logger
 
-from dfe_engine.auth import AuthContext, AuthorizationError, authorize
+from dfe_engine.auth import AuthContext, AuthorizationError, Scope, ScopedGrant, authorize
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.audit import (
     audit_login_denied,
@@ -267,26 +267,55 @@ def _get_client_ip(request: Request) -> str | None:
     return request.client.host if request.client else None
 
 
+class GroupResolution(NamedTuple):
+    """Roles, org memberships, and scoped grants resolved from groups."""
+
+    roles: list[str]
+    org_ids: list[str]
+    grants: list[ScopedGrant]
+
+
+def _resolve_group_grants(
+    groups: list[str],
+    group_store: GroupStore,
+) -> GroupResolution:
+    """Resolve roles, org_ids, and scoped grants from a list of group names.
+
+    Looks up each group in the GroupStore. Unknown groups are silently
+    skipped (no error — the user just gets fewer roles). A system group's
+    roles bind at system scope; an org-scoped group's roles bind at that
+    org's scope only. org_ids collects the caller's org memberships (the
+    owning org of each org-scoped group, plus each group's org_ids list).
+    """
+    roles: set[str] = set()
+    org_ids: set[str] = set()
+    grants: list[ScopedGrant] = []
+    seen_grants: set[tuple[str, str]] = set()
+    for group_name in groups:
+        group = group_store.get(group_name)
+        if group is None:
+            continue
+        scope_org = group.scope_org
+        scope = Scope(type="org", id=scope_org) if scope_org else Scope()
+        if scope_org:
+            org_ids.add(scope_org)
+        org_ids.update(group.org_ids)
+        for role in group.roles:
+            roles.add(role)
+            key = (role, str(scope))
+            if key not in seen_grants:
+                seen_grants.add(key)
+                grants.append(ScopedGrant(role=role, scope=scope))
+    return GroupResolution(sorted(roles), sorted(org_ids), grants)
+
+
 def _resolve_roles_from_groups(
     groups: list[str],
     group_store: GroupStore,
 ) -> tuple[list[str], list[str]]:
-    """Resolve roles and org_ids from a list of group names.
-
-    Looks up each group in the GroupStore and collects its roles.
-    Unknown groups are silently skipped (no error — the user just gets
-    fewer roles).
-
-    Returns:
-        Tuple of (sorted unique roles, org_ids).  org_ids is currently
-        always empty — reserved for future multi-tenant scoping.
-    """
-    roles: set[str] = set()
-    for group_name in groups:
-        group = group_store.get(group_name)
-        if group is not None:
-            roles.update(group.roles)
-    return sorted(roles), []
+    """Resolve (roles, org_ids) from group names — see _resolve_group_grants."""
+    resolution = _resolve_group_grants(groups, group_store)
+    return resolution.roles, resolution.org_ids
 
 
 def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
@@ -337,16 +366,16 @@ def _has_local_account(request: Request, user_id: str) -> bool:
     return account_store is not None and account_store.get(user_id) is not None
 
 
-def resolve_live_roles_for_user(
+def resolve_live_grants_for_user(
     request: Request,
     user_id: str,
     *,
     fallback_groups: list[str] | None = None,
-) -> list[str]:
-    """Resolve roles from group membership and role mappings (ignores JWT role claims)."""
+) -> GroupResolution:
+    """Resolve roles/org_ids/grants from group membership (ignores JWT role claims)."""
     group_store: GroupStore | None = getattr(request.app.state, "group_store", None)
     if group_store is None:
-        return []
+        return GroupResolution([], [], [])
 
     if user_id.startswith("apikey:"):
         key_name = user_id.removeprefix("apikey:")
@@ -358,20 +387,24 @@ def resolve_live_roles_for_user(
                 groups = list(key.groups)
         if not groups:
             groups = list(fallback_groups or [])
-        roles, _ = _resolve_roles_from_groups(groups, group_store)
-        return roles
+        return _resolve_group_grants(groups, group_store)
 
-    roles = group_store.resolve_roles_for_member(user_id)
-    if roles:
-        return roles
-
-    groups = _groups_from_stores(request, user_id)
+    groups = sorted(g.name for g in group_store.list() if user_id in g.members)
+    if not groups:
+        groups = _groups_from_stores(request, user_id)
     if not groups and not _has_local_account(request, user_id):
         groups = list(fallback_groups or [])
-    if groups:
-        resolved, _ = _resolve_roles_from_groups(groups, group_store)
-        return resolved
-    return []
+    return _resolve_group_grants(groups, group_store)
+
+
+def resolve_live_roles_for_user(
+    request: Request,
+    user_id: str,
+    *,
+    fallback_groups: list[str] | None = None,
+) -> list[str]:
+    """Resolve roles from group membership and role mappings (ignores JWT role claims)."""
+    return resolve_live_grants_for_user(request, user_id, fallback_groups=fallback_groups).roles
 
 
 def resolve_live_groups_for_user(
@@ -444,7 +477,8 @@ async def get_current_user(request: Request) -> AuthContext:
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
-        roles, org_ids = _resolve_roles_from_groups(groups, group_store)
+        resolution = _resolve_group_grants(groups, group_store)
+        roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
         audit_login_success(oidc_subject, "oidc", client_ip, roles)
 
@@ -460,6 +494,7 @@ async def get_current_user(request: Request) -> AuthContext:
             user_id=oidc_subject,
             email=oidc_email,
             roles=roles,
+            grants=resolution.grants,
             groups=groups,
             org_ids=org_ids,
             request_id=request_id,
@@ -484,7 +519,8 @@ async def get_current_user(request: Request) -> AuthContext:
                 detail={"code": "unauthorized", "message": "Invalid API key"},
             )
         group_store = request.app.state.group_store
-        roles, org_ids = _resolve_roles_from_groups(key_meta.groups, group_store)
+        resolution = _resolve_group_grants(key_meta.groups, group_store)
+        roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug(
             "API key auth",
             key_name=key_meta.name,
@@ -495,6 +531,7 @@ async def get_current_user(request: Request) -> AuthContext:
         return AuthContext(
             user_id=f"apikey:{key_meta.name}",
             roles=roles,
+            grants=resolution.grants,
             groups=key_meta.groups,
             org_ids=org_ids,
             request_id=request_id,
@@ -532,15 +569,18 @@ async def get_current_user(request: Request) -> AuthContext:
         elif not isinstance(jwt_groups, list):
             jwt_groups = []
         require_local_account_enabled(request, jwt_user_id)
-        live_roles = resolve_live_roles_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
+        live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
-        audit_login_success(jwt_user_id, "jwt", client_ip, live_roles)
+        claim_org_ids = payload.get("org_ids", [])
+        org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
+        audit_login_success(jwt_user_id, "jwt", client_ip, live.roles)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
             user_id=jwt_user_id,
             email=jwt_email,
-            roles=live_roles,
-            org_ids=payload.get("org_ids", []),
+            roles=live.roles,
+            grants=live.grants,
+            org_ids=org_ids,
             groups=live_groups,
             request_id=request_id,
             client_ip=client_ip,
@@ -565,8 +605,59 @@ CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
 # ── Authorization ─────────────────────────────────────────────
 
 
-def require_action(action: str):
+def is_action_allowed(
+    request: Request,
+    user: AuthContext,
+    action: str,
+    *,
+    scope: Scope | None = None,
+) -> bool:
+    """Non-raising authorize() for visibility filtering in handlers."""
+    settings: DFESettings = request.app.state.settings
+    role_config = getattr(request.app.state, "role_config", None)
+    return authorize(
+        user,
+        action,
+        scope=scope,
+        enabled=settings.auth.enabled,
+        role_config=role_config,
+    ).allowed
+
+
+def check_action(
+    request: Request,
+    user: AuthContext,
+    action: str,
+    *,
+    scope: Scope | None = None,
+) -> None:
+    """Handler-level RBAC check for scopes only known at request time.
+
+    Use this (instead of the require_action dependency) when the target
+    scope comes from the resource being touched - e.g. the stored scope
+    of a group, or an org name in the path. Raises AuthorizationError
+    exactly like require_action.
+    """
+    settings: DFESettings = request.app.state.settings
+    role_config = getattr(request.app.state, "role_config", None)
+    result = authorize(
+        user,
+        action,
+        scope=scope,
+        enabled=settings.auth.enabled,
+        role_config=role_config,
+    )
+    if not result.allowed:
+        audit_permission_denied(user.user_id, action, user.roles, result.reason)
+        raise AuthorizationError(f"Action '{action}' denied: {result.reason}")
+
+
+def require_action(action: str, *, scope: Scope | None = None):
     """FastAPI dependency factory for RBAC enforcement.
+
+    ``scope=None`` is a system-scope check (the historical behaviour).
+    Pass a Scope for endpoints whose target scope is static; use
+    check_action() inside the handler when it depends on the request.
 
     Usage::
 
@@ -586,6 +677,7 @@ def require_action(action: str):
         result = authorize(
             user,
             action,
+            scope=scope,
             enabled=settings.auth.enabled,
             role_config=role_config,
         )
