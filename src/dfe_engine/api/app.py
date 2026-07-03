@@ -190,6 +190,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.task_manager = TaskManager()
 
+    # Sampler singleton (holds the shared logreducer concurrency gate)
+    from dfe_engine.sampling import Sampler
+
+    app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
