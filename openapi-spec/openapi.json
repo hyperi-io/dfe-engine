@@ -8408,13 +8408,19 @@
             ],
             "title": "Comment",
             "description": "Human-readable column description (defaults to the source path)."
+          },
+          "_field_type": {
+            "type": "string",
+            "title": "Field Type",
+            "description": "Column classification for JSON promotion drafts (always 'promoted')."
           }
         },
         "type": "object",
         "required": [
           "name",
           "type",
-          "expr"
+          "expr",
+          "_field_type"
         ],
         "title": "DraftColumn",
         "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type; for a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
@@ -13004,8 +13010,15 @@
             "description": "Common schema header configuration (optional; applied at DDL compose time)"
           },
           "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema configuration (None when the version did not author one)"
           },
           "mapping_standards": {
             "items": {
