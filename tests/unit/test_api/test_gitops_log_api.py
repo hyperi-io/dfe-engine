@@ -68,3 +68,18 @@ class TestGitopsLogApi:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+    def test_unknown_cursor_rejected(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 10},
+            headers=admin_headers,
+        )
+        resp = client.get(
+            "/api/v1/gitops/log",
+            params={"before": "deadbeef" * 5},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "unknown_cursor"

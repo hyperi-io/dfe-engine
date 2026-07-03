@@ -25,6 +25,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
+from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
 from dfe_engine.governance.lifecycle import (
     LifecycleError,
     LifecycleState,
@@ -115,6 +116,17 @@ async def set_lifecycle(
     audit_resource_change(
         user.user_id, "lifecycle", name, body.state.value, {"commit": res.commit_sha}
     )
+    if res.changed:
+        settings = request.app.state.settings
+        state = resolve_state(gc, environment=settings.env, mode=settings.gitops.mode)
+        apply_auto_merge(
+            state,
+            environment=settings.env,
+            rbac_class=svc.cls,
+            actor=user.user_id,
+            resource=f"lifecycle/{name}",
+            commit_sha=res.commit_sha,
+        )
     return LifecycleResponse(
         name=name, state=body.state.value, changed=res.changed, commit_sha=res.commit_sha
     )

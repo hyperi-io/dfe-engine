@@ -71,9 +71,22 @@ def _has_override(request: Request, user: Any) -> bool:
 
 
 def _auto_merged(
-    request: Request, gc: GitCrud, *, protected: bool, actor: str, resource: str
+    request: Request,
+    gc: GitCrud,
+    *,
+    protected: bool,
+    actor: str,
+    resource: str,
+    changed: bool,
+    commit_sha: str | None,
 ) -> bool:
-    """Badge + WARN when auto-merge converted this write from PR-mode to direct."""
+    """Badge + WARN when auto-merge converted this write from PR-mode to direct.
+
+    A no-op write (no commit) is never badged and never WARNs - mirrors
+    governance.py's ``if not dry_run and res.changed`` guard.
+    """
+    if not changed:
+        return False
     settings = request.app.state.settings
     state = resolve_state(gc, environment=settings.env, mode=settings.gitops.mode)
     return apply_auto_merge(
@@ -83,6 +96,7 @@ def _auto_merged(
         protected=protected,
         actor=actor,
         resource=resource,
+        commit_sha=commit_sha,
     )
 
 
@@ -169,7 +183,13 @@ async def set_var(
         changed=res.changed,
         commit_sha=res.commit_sha,
         auto_merged=_auto_merged(
-            request, gc, protected=protected, actor=user.user_id, resource=f"{_CLASS}/{name}:{path}"
+            request,
+            gc,
+            protected=protected,
+            actor=user.user_id,
+            resource=f"{_CLASS}/{name}:{path}",
+            changed=res.changed,
+            commit_sha=res.commit_sha,
         ),
     )
 
@@ -188,6 +208,12 @@ async def delete_var(name: str, path: str, user: CurrentUser, request: Request) 
         changed=res.changed,
         commit_sha=res.commit_sha,
         auto_merged=_auto_merged(
-            request, gc, protected=False, actor=user.user_id, resource=f"{_CLASS}/{name}:{path}"
+            request,
+            gc,
+            protected=False,
+            actor=user.user_id,
+            resource=f"{_CLASS}/{name}:{path}",
+            changed=res.changed,
+            commit_sha=res.commit_sha,
         ),
     )

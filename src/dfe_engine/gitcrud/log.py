@@ -35,6 +35,14 @@ _TRAILER_RE = re.compile(r"^DFE-(?P<key>[A-Za-z-]+): (?P<value>.+)$")
 GROUP_KEYS = ("scope", "actor", "type", "day")
 
 
+class UnknownCursorError(ValueError):
+    """Raised when a ``before`` cursor SHA never matched during the walk.
+
+    Distinguishes a bad/unknown cursor from end-of-history (both would otherwise
+    return the same ``([], None)`` shape).
+    """
+
+
 @dataclass(frozen=True)
 class LogEntry:
     """One gitcrud operation, parsed from its commit."""
@@ -127,7 +135,11 @@ def read_log(
     before: str | None = None,
     applied_revision: str | None = None,
 ) -> tuple[list[LogEntry], str | None]:
-    """Walk history newest-first; returns (entries, next_before cursor or None)."""
+    """Walk history newest-first; returns (entries, next_before cursor or None).
+
+    Raises UnknownCursorError if ``before`` is given but never matched a commit
+    during the walk - an unknown/bad cursor must not look like end-of-history.
+    """
     if crud.head_revision() is None:
         return [], None
     entries: list[LogEntry] = []
@@ -162,6 +174,8 @@ def read_log(
                     **fields,
                 )
             )
+        if skipping:
+            raise UnknownCursorError(f"before cursor never matched a commit: {before!r}")
     next_before = entries[-1].sha if entries and not exhausted else None
     return entries, next_before
 

@@ -65,6 +65,27 @@ def _actions(request: Request) -> ActionStore:
     return ActionStore(_gitcrud(request))
 
 
+def _warn_auto_merge(
+    request: Request, *, actor: str, resource: str, commit_sha: str | None
+) -> None:
+    """WARN the conversion for a governance-class write, mirroring helm's badge path.
+
+    No response badge here (some of these endpoints are 201/204) - just the loud
+    conversion WARN the spec requires on every mutation that would otherwise have
+    been PR-mode.
+    """
+    settings = request.app.state.settings
+    state = resolve_state(_gitcrud(request), environment=settings.env, mode=settings.gitops.mode)
+    apply_auto_merge(
+        state,
+        environment=settings.env,
+        rbac_class="governance",
+        actor=actor,
+        resource=resource,
+        commit_sha=commit_sha,
+    )
+
+
 @router.get("/actions", dependencies=[Depends(require_action("governance:read"))])
 async def list_actions(user: CurrentUser, request: Request) -> list[str]:
     return _actions(request).list()
@@ -124,6 +145,7 @@ async def invoke_action(
             rbac_class="governance",
             actor=user.user_id,
             resource=f"action/{name}",
+            commit_sha=res.commit_sha,
         )
     return InvokeResponse(
         dry_run=res.dry_run,
@@ -140,8 +162,15 @@ async def invoke_action(
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def create_action(body: ActionDef, user: CurrentUser, request: Request) -> ActionDef:
-    _actions(request).save(body, user.user_id)
+    res = _actions(request).save(body, user.user_id)
     audit_resource_change(user.user_id, "action", body.name, "created")
+    if res.changed:
+        _warn_auto_merge(
+            request,
+            actor=user.user_id,
+            resource=f"action/{body.name}",
+            commit_sha=res.commit_sha,
+        )
     return body
 
 
@@ -152,10 +181,14 @@ async def create_action(body: ActionDef, user: CurrentUser, request: Request) ->
 )
 async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
     try:
-        _actions(request).delete(name, user.user_id)
+        res = _actions(request).delete(name, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "action", name, "deleted")
+    if res.changed:
+        _warn_auto_merge(
+            request, actor=user.user_id, resource=f"action/{name}", commit_sha=res.commit_sha
+        )
 
 
 @router.post(
@@ -167,8 +200,15 @@ async def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request
 ) -> ProtectedPolicy:
     gc = _gitcrud(request)
-    gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id)
+    res = gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id)
     audit_resource_change(user.user_id, "policy", body.name, "created")
+    if res.changed:
+        _warn_auto_merge(
+            request,
+            actor=user.user_id,
+            resource=f"policy/{body.name}",
+            commit_sha=res.commit_sha,
+        )
     return body
 
 
@@ -180,10 +220,14 @@ async def create_policy(
 async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
     gc = _gitcrud(request)
     try:
-        gc.delete(_POLICY_CLASS, name, user.user_id)
+        res = gc.delete(_POLICY_CLASS, name, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "policy", name, "deleted")
+    if res.changed:
+        _warn_auto_merge(
+            request, actor=user.user_id, resource=f"policy/{name}", commit_sha=res.commit_sha
+        )
 
 
 @router.post(

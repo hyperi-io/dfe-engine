@@ -112,6 +112,26 @@ class TestAutoMergedBadge:
         assert resp.status_code == 200, resp.text
         assert resp.json()["auto_merged"] is False
 
+    def test_noop_write_not_badged_or_warned(self, client, app, admin_headers, tmp_path):
+        # auto-merge effective-ON: a repeat write with the SAME value is a no-op
+        # commit (res.changed False) - must not badge, must not WARN.
+        self._enable(client, app, admin_headers, tmp_path)
+        first = client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 10},
+            headers=admin_headers,
+        )
+        assert first.status_code == 200, first.text
+        second = client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 10},
+            headers=admin_headers,
+        )
+        assert second.status_code == 200, second.text
+        body = second.json()
+        assert body["changed"] is False
+        assert body["auto_merged"] is False
+
     def test_action_invoke_badged(self, client, app, admin_headers, tmp_path):
         # governance class always resolves to PR mode -> badge when ON
         self._enable(client, app, admin_headers, tmp_path)
@@ -135,3 +155,25 @@ class TestAutoMergedBadge:
         res = client.post("/api/v1/governance/actions/scale-receiver/invoke", headers=admin_headers)
         assert res.status_code == 200, res.text
         assert res.json()["auto_merged"] is True
+
+    def test_create_action_succeeds_with_auto_merge_on(self, client, app, admin_headers, tmp_path):
+        # spec: the conversion WARN extends to admin CRUD too - create_action still
+        # succeeds (201) when auto-merge is ON and would otherwise have been PR-mode.
+        self._enable(client, app, admin_headers, tmp_path)
+        action = {
+            "name": "scale-loader",
+            "description": "scale loader",
+            "required_action": "action:invoke:scale-loader",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "loader-default",
+                    "path": "keda.maxReplicas",
+                    "value": 9,
+                }
+            ],
+        }
+        created = client.post(
+            "/api/v1/governance/admin/actions", json=action, headers=admin_headers
+        )
+        assert created.status_code == 201, created.text

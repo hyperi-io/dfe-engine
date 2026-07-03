@@ -24,7 +24,7 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.auto_merge import AutoMergeState, resolve_state, set_stored
-from dfe_engine.gitcrud.log import LogEntry, group_log, read_log
+from dfe_engine.gitcrud.log import LogEntry, UnknownCursorError, group_log, read_log
 
 router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"])
 
@@ -50,9 +50,11 @@ def _gitcrud(request: Request) -> GitCrud:
     return gc
 
 
-def _state(request: Request) -> AutoMergeState:
+def _state(request: Request, *, warn: bool = True) -> AutoMergeState:
     settings = request.app.state.settings
-    return resolve_state(_gitcrud(request), environment=settings.env, mode=settings.gitops.mode)
+    return resolve_state(
+        _gitcrud(request), environment=settings.env, mode=settings.gitops.mode, warn=warn
+    )
 
 
 def _status(state: AutoMergeState) -> AutoMergeStatus:
@@ -71,7 +73,8 @@ def _status(state: AutoMergeState) -> AutoMergeStatus:
 )
 async def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus:
     """Auto-merge status for the UI banner: stored flag, gate verdict, net effect."""
-    return _status(_state(request))
+    # warn=False: the UI polls this - a stranded flag must not WARN per poll.
+    return _status(_state(request, warn=False))
 
 
 @router.put(
@@ -84,7 +87,9 @@ async def put_auto_merge(
 ) -> AutoMergeStatus:
     """Toggle auto-merge. Enabling requires the deployment gate; disabling always works."""
     gc = _gitcrud(request)
-    state = _state(request)
+    # warn=False both calls: the stranded-flag case on enable is already refused
+    # below with a 403 that carries the reason - no need to also WARN here.
+    state = _state(request, warn=False)
     if body.enabled and not state.allowed:
         raise HTTPException(403, detail={"code": "auto_merge_forbidden", "message": state.reason})
     if body.enabled:
@@ -93,7 +98,7 @@ async def put_auto_merge(
     audit_resource_change(
         user.user_id, "gitops", "auto-merge", "updated", {"enabled": body.enabled}
     )
-    return _status(_state(request))
+    return _status(_state(request, warn=False))
 
 
 class LogEntryModel(BaseModel):
@@ -165,9 +170,12 @@ async def get_log(
     applied/pending; without it every entry is 'committed'.
     """
     gc = _gitcrud(request)
-    entries, next_before = read_log(
-        gc, limit=limit, before=before, applied_revision=applied_revision
-    )
+    try:
+        entries, next_before = read_log(
+            gc, limit=limit, before=before, applied_revision=applied_revision
+        )
+    except UnknownCursorError as exc:
+        raise HTTPException(400, detail={"code": "unknown_cursor", "message": str(exc)}) from exc
     if group_by is not None:
         return GroupedLogResponse(
             groups=[

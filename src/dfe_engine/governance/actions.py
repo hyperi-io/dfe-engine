@@ -20,6 +20,7 @@ from typing import Any
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
 from dfe_engine.gitcrud.commit_policy import validate_change
+from dfe_engine.gitops.repo import PublishResult
 
 from .models import ActionDef
 from .policies import PolicyStore
@@ -53,8 +54,8 @@ class ActionStore:
     def get(self, name: str) -> ActionDef:
         return ActionDef.model_validate(self._crud.get(_ACTION_CLASS, name))
 
-    def save(self, action: ActionDef, actor: str) -> None:
-        self._crud.put(
+    def save(self, action: ActionDef, actor: str) -> PublishResult:
+        return self._crud.put(
             _ACTION_CLASS,
             action.name,
             action.model_dump(),
@@ -62,8 +63,8 @@ class ActionStore:
             message=f"action({action.name}): define by {actor}",
         )
 
-    def delete(self, name: str, actor: str) -> None:
-        self._crud.delete(_ACTION_CLASS, name, actor)
+    def delete(self, name: str, actor: str) -> PublishResult:
+        return self._crud.delete(_ACTION_CLASS, name, actor)
 
     def invoke(
         self,

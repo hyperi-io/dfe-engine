@@ -50,6 +50,25 @@ class TestGate:
         assert "DFE_ENV" in reason
 
 
+class TestStoredFlagBrokenFile:
+    """A hand-edited gitops.yaml that is broken must never be read as ON."""
+
+    def _write(self, crud, content: str) -> None:
+        path = crud.repo_path / "governance" / "settings" / "gitops.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+
+    def test_malformed_yaml_does_not_raise(self, crud):
+        self._write(crud, "[not: a mapping")
+        state = resolve_state(crud, environment="production", mode="team")
+        assert state.stored is False
+
+    def test_list_doc_does_not_raise(self, crud):
+        self._write(crud, "- one\n- two\n")
+        state = resolve_state(crud, environment="production", mode="team")
+        assert state.stored is False
+
+
 class TestStoredFlag:
     def test_default_off(self, crud):
         state = resolve_state(crud, environment="dev", mode="team")

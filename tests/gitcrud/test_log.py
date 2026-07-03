@@ -6,7 +6,7 @@ import pytest
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
-from dfe_engine.gitcrud.log import group_log, read_log
+from dfe_engine.gitcrud.log import UnknownCursorError, group_log, read_log
 from dfe_engine.gitcrud.registry import default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
@@ -62,6 +62,11 @@ class TestReadLog:
         page2, _ = read_log(crud, limit=2, before=cursor)
         assert len(page2) == 2
         assert {e.sha for e in page1}.isdisjoint({e.sha for e in page2})
+
+    def test_unknown_cursor_raises(self, crud):
+        _commit_var(crud, "receiver-default", "keda.maxReplicas", 1, "derek")
+        with pytest.raises(UnknownCursorError):
+            read_log(crud, before="deadbeef" * 5)
 
     def test_applied_vs_pending(self, crud):
         first = _commit_var(crud, "receiver-default", "keda.maxReplicas", 1, "derek")

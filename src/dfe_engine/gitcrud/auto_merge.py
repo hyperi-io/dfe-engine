@@ -59,18 +59,39 @@ def gate(environment: str, mode: str) -> tuple[bool, str]:
 
 
 def stored_flag(crud: GitCrud) -> bool:
-    """The committed flag; absent resource/key means OFF."""
+    """The committed flag; absent resource/key means OFF.
+
+    Fail-safe: a hand-edited gitops.yaml that is malformed YAML (ruamel's
+    ParserError/ScannerError zoo) or a non-mapping doc (list/str -> AttributeError
+    on .get) must NEVER be read as ON. Catch broadly on purpose here - a broken
+    file returning False is always safe; the alternative is a 500 on startup and
+    every read/write.
+    """
     try:
-        return bool(crud.get(CLASS, NAME).get(KEY, False))
+        doc = crud.get(CLASS, NAME)
+        return bool(doc.get(KEY, False))
     except ResourceNotFoundError:
+        return False
+    except Exception as exc:
+        logger.warning(
+            "auto-merge flag file is unreadable; treating as OFF",
+            error=str(exc),
+        )
         return False
 
 
-def resolve_state(crud: GitCrud, *, environment: str, mode: str) -> AutoMergeState:
-    """stored AND gate -> effective; WARNs when the flag is stranded ON."""
+def resolve_state(
+    crud: GitCrud, *, environment: str, mode: str, warn: bool = True
+) -> AutoMergeState:
+    """stored AND gate -> effective; WARNs when the flag is stranded ON.
+
+    ``warn=False`` for read-only polling paths (the UI polls GET) so a stranded
+    flag does not WARN on every poll - keep warn=True on write/badge paths and
+    the startup banner.
+    """
     stored = stored_flag(crud)
     allowed, reason = gate(environment, mode)
-    if stored and not allowed:
+    if stored and not allowed and warn:
         logger.warning(
             "auto-merge is ON in gitops but the deployment gate refuses it; "
             "auto-merge is effectively OFF",
@@ -106,11 +127,12 @@ def apply_auto_merge(
     protected: bool = False,
     actor: str,
     resource: str,
+    commit_sha: str | None = None,
 ) -> bool:
     """True when auto-merge converts a would-be PR write into a direct commit.
 
-    Loud by design: every conversion WARNs with actor + resource so an
-    auto-merged deployment is unmissable in the logs. Writes that were direct
+    Loud by design: every conversion WARNs with actor + resource + commit SHA so
+    an auto-merged deployment is unmissable in the logs. Writes that were direct
     anyway return False (no badge, no noise).
     """
     if not state.effective:
@@ -122,6 +144,7 @@ def apply_auto_merge(
         "AUTO-MERGE: direct commit to main in lieu of a PR",
         actor=actor,
         resource=resource,
+        commit_sha=commit_sha,
     )
     return True
 
