@@ -29,8 +29,8 @@ from typing import Any
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
-from scalo.logger import logger
 from pydantic import BaseModel
+from scalo.logger import logger
 
 from dfe_engine.api.deps import (
     ClickHouseClient,

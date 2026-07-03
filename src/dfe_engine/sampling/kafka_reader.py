@@ -55,7 +55,7 @@ def read_recent(
 ) -> list[str]:
     """Read up to ``limit`` newest messages across all partitions of ``topic``."""
     try:
-        from confluent_kafka import Consumer, KafkaError, TopicPartition
+        from confluent_kafka import Consumer, KafkaError, TopicPartition  # ty: ignore[unresolved-import]
     except ImportError as exc:  # pragma: no cover - confluent-kafka is a hard dep here
         raise SamplerError(
             "Kafka sampling needs confluent-kafka (already a dfe-engine dependency)."
@@ -131,7 +131,7 @@ def assignments_start_at_end(assignments: list[Any], partition: int, hi: int) ->
 
 def build_source(conf: dict[str, Any], topic: str, *, max_messages: int, group_suffix: str) -> Any:
     """A bounded logreducer ``KafkaSource`` over ``topic`` (earliest, no commit)."""
-    from logreducer.kafka import KafkaSource
+    from logreducer.kafka import KafkaSource  # ty: ignore[unresolved-import]
 
     return KafkaSource(
         conf,

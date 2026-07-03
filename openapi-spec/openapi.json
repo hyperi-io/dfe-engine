@@ -415,7 +415,7 @@
           "Groups"
         ],
         "summary": "List Groups",
-        "description": "List all groups (admin only).",
+        "description": "List groups visible to the caller (own memberships + scope grants).",
         "operationId": "list_groups_api_v1_auth_groups_get",
         "responses": {
           "200": {
@@ -444,7 +444,7 @@
           "Groups"
         ],
         "summary": "Create Group",
-        "description": "Create a new RBAC group (admin only).",
+        "description": "Create a new RBAC group at a scope.",
         "operationId": "create_group_api_v1_auth_groups_post",
         "requestBody": {
           "content": {
@@ -491,7 +491,7 @@
           "Groups"
         ],
         "summary": "Get Group",
-        "description": "Get a single group by name (admin only).",
+        "description": "Get a single group by name (404 when not visible to the caller).",
         "operationId": "get_group_api_v1_auth_groups__name__get",
         "parameters": [
           {
@@ -537,7 +537,7 @@
           "Groups"
         ],
         "summary": "Update Group",
-        "description": "Update group roles, description, or members (admin only).",
+        "description": "Update group roles, description, or members (group:write at the group's scope).",
         "operationId": "update_group_api_v1_auth_groups__name__put",
         "parameters": [
           {
@@ -593,7 +593,7 @@
           "Groups"
         ],
         "summary": "Delete Group",
-        "description": "Delete a group (admin only).",
+        "description": "Delete a group (checked at the group's scope).",
         "operationId": "delete_group_api_v1_auth_groups__name__delete",
         "parameters": [
           {
@@ -634,7 +634,7 @@
           "Groups"
         ],
         "summary": "Add Member",
-        "description": "Add a member to a group (admin only, idempotent).",
+        "description": "Add a member to a group (idempotent; checked at the group's scope).",
         "operationId": "add_member_api_v1_auth_groups__name__members_post",
         "parameters": [
           {
@@ -692,7 +692,7 @@
           "Groups"
         ],
         "summary": "Remove Member",
-        "description": "Remove a member from a group (admin only).",
+        "description": "Remove a member from a group (checked at the group's scope).",
         "operationId": "remove_member_api_v1_auth_groups__name__members__username__delete",
         "parameters": [
           {
@@ -1572,7 +1572,7 @@
           "Organisations"
         ],
         "summary": "List Orgs",
-        "description": "List all organisations.",
+        "description": "List organisations visible to the caller.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
         "operationId": "list_orgs_api_v1_orgs_get",
         "responses": {
           "200": {
@@ -1648,7 +1648,7 @@
           "Organisations"
         ],
         "summary": "Get Org",
-        "description": "Get a single organisation by name.",
+        "description": "Get a single organisation by name (org:read at that org's scope).",
         "operationId": "get_org_api_v1_orgs__name__get",
         "parameters": [
           {
@@ -5440,6 +5440,190 @@
         ]
       }
     },
+    "/api/v1/sources/{source}/sample": {
+      "post": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Sample Source",
+        "description": "Sample a registered source. The path ``source`` wins over any in the body.",
+        "operationId": "sample_source_api_v1_sources__source__sample_post",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sample": {
+      "post": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Sample Adhoc",
+        "description": "Ad-hoc sample - supply an explicit ``table``/``topic`` (or a ``source``).",
+        "operationId": "sample_adhoc_api_v1_sample_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/samples/{task_id}": {
+      "get": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Get Sample",
+        "description": "Poll a sample task's status and result.",
+        "operationId": "get_sample_api_v1_samples__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/samples": {
+      "get": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "List Samples",
+        "description": "List recent sample tasks (most recent first).",
+        "operationId": "list_samples_api_v1_samples_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Samples Api V1 Samples Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/pipeline/templates": {
       "get": {
         "tags": [
@@ -8379,6 +8563,397 @@
         ]
       }
     },
+    "/api/v1/repository/preferences": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Get Preferences",
+        "description": "Effective merged preferences for the caller (system -> org -> group -> user).",
+        "operationId": "get_preferences_api_v1_repository_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Patch Preferences",
+        "description": "Apply a JSON merge patch to the caller's USER preference layer.\n\nThe theme toggle is one call: ``PATCH {\"theme\": \"dark\"}``. ``null``\nremoves a user-layer key (falling back to the inherited value).",
+        "operationId": "patch_preferences_api_v1_repository_preferences_patch",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "RFC 7396 JSON merge patch",
+                "title": "Patch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "List Objects",
+        "description": "List object metadata in a (scope, scope_id, namespace).",
+        "operationId": "list_objects_api_v1_repository_objects__scope___scope_id___namespace__get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ObjectEntry"
+                  },
+                  "title": "Response List Objects Api V1 Repository Objects  Scope   Scope Id   Namespace  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}/{key}": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Get Object",
+        "description": "Raw object bytes with the stored Content-Type and ETag headers.",
+        "operationId": "get_object_api_v1_repository_objects__scope___scope_id___namespace___key__get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Put Object",
+        "description": "Store raw bytes (body) under a scope-aligned key.",
+        "operationId": "put_object_api_v1_repository_objects__scope___scope_id___namespace___key__put",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectMetadata"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Delete Object",
+        "description": "Tombstone an object (INSERT with is_deleted=1, never a mutation).",
+        "operationId": "delete_object_api_v1_repository_objects__scope___scope_id___namespace___key__delete",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/config/client": {
       "get": {
         "tags": [
@@ -9391,6 +9966,12 @@
             "description": "Human-readable description",
             "default": ""
           },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "description": "'system' (roles bind system-wide) or 'org:<name>' (group exists only inside that org; roles bind at that org's scope)",
+            "default": "system"
+          },
           "members": {
             "items": {
               "type": "string"
@@ -10286,6 +10867,10 @@
             },
             "type": "array",
             "title": "Members"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
           }
         },
         "type": "object",
@@ -10293,7 +10878,8 @@
           "name",
           "description",
           "roles",
-          "members"
+          "members",
+          "scope"
         ],
         "title": "GroupResponse"
       },
@@ -11659,6 +12245,101 @@
         },
         "type": "array"
       },
+      "ObjectEntry": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "content_type",
+          "size",
+          "updated_by",
+          "updated_at",
+          "etag"
+        ],
+        "title": "ObjectEntry",
+        "description": "Metadata for one key in a namespace listing."
+      },
+      "ObjectMetadata": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "scope_id": {
+            "type": "string",
+            "title": "Scope Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "scope_id",
+          "namespace",
+          "key",
+          "content_type",
+          "size",
+          "updated_by",
+          "updated_at",
+          "etag"
+        ],
+        "title": "ObjectMetadata",
+        "description": "Metadata for a stored object (PUT response)."
+      },
       "OrgResponse": {
         "properties": {
           "name": {
@@ -12479,6 +13160,32 @@
         ],
         "title": "PipelineTemplate",
         "description": "A discovered pipeline template."
+      },
+      "PreferencesResponse": {
+        "properties": {
+          "preferences": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Preferences"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "preferences"
+        ],
+        "title": "PreferencesResponse",
+        "description": "Effective merged preferences plus the caller's user-layer etag."
       },
       "PromoteFieldRequest": {
         "properties": {
@@ -13488,6 +14195,26 @@
         "title": "RuleUpdateRequest",
         "description": "Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."
       },
+      "SampleBackend": {
+        "type": "string",
+        "enum": [
+          "clickhouse",
+          "kafka"
+        ],
+        "title": "SampleBackend",
+        "description": "Where the data is read from."
+      },
+      "SampleMode": {
+        "type": "string",
+        "enum": [
+          "recent",
+          "random",
+          "smart",
+          "anomaly"
+        ],
+        "title": "SampleMode",
+        "description": "How to pick the sample.\n\n- ``recent``  - newest rows first (fast tail; ClickHouse ORDER BY ts DESC,\n  Kafka reads from the partition high-watermark backwards).\n- ``random``  - uniform-ish random rows (fair distribution, no recency bias).\n- ``smart``   - logreducer representative/diverse sample (default). Gated.\n- ``anomaly`` - logreducer isolation-forest outliers (the weird events). Gated."
+      },
       "SampleRecord": {
         "properties": {
           "key": {
@@ -13517,6 +14244,237 @@
           "value"
         ],
         "title": "SampleRecord"
+      },
+      "SampleRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SampleMode",
+            "default": "smart"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/SampleBackend",
+            "default": "clickhouse"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit",
+            "description": "Rows to return (defaults to sampler.default_limit)"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Registered source name"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table",
+            "description": "Explicit ClickHouse table (overrides source's table)"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic",
+            "description": "Explicit Kafka topic (overrides source's land topic)"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter",
+            "description": "Trusted SQL WHERE predicate (ClickHouse backend only)"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "Lower time bound (ISO 8601) on the timestamp column"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until",
+            "description": "Upper time bound (ISO 8601) on the timestamp column"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for random mode (determinism)"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level",
+            "description": "logreducer level override: standard | enhanced | maximum"
+          },
+          "wait": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait",
+            "description": "Seconds to block for inline completion before returning pending"
+          }
+        },
+        "type": "object",
+        "title": "SampleRequest",
+        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` is a trusted SQL\npredicate (ClickHouse backend only), consistent with the query-authoring\nsurface - callers already hold the sampler scope."
+      },
+      "SampleResult": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SampleMode"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/SampleBackend"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Resolved table or topic sampled",
+            "default": ""
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Rows returned",
+            "default": 0
+          },
+          "requested_limit": {
+            "type": "integer",
+            "title": "Requested Limit",
+            "default": 0
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines",
+            "description": "Raw event strings (_json / Kafka message values)"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "Parsed JSON objects (best-effort; skips non-JSON)"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys",
+            "description": "Top-level keys discovered across the sample"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "True when more rows were available than returned",
+            "default": false
+          },
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats",
+            "description": "Mode-specific stats (scan counts, logreducer stop reason)"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Any caveat about how the sample was taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "backend"
+        ],
+        "title": "SampleResult",
+        "description": "The sampled data + provenance."
       },
       "SampleRowsResponse": {
         "properties": {
@@ -13581,6 +14539,49 @@
         ],
         "title": "SampleRowsResponse",
         "description": "Random sample rows for a source, scoped to its match rule."
+      },
+      "SampleSubmitResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID; poll via GET /samples/{task_id}"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "pending | running | completed | failed | cancelled"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SampleResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present once completed"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Present on failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "SampleSubmitResponse",
+        "description": "Envelope returned by a sample submit and by the poll endpoint."
       },
       "ScaffoldRequest": {
         "properties": {
