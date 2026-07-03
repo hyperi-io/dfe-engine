@@ -415,7 +415,7 @@
           "Groups"
         ],
         "summary": "List Groups",
-        "description": "List all groups (admin only).",
+        "description": "List groups visible to the caller (own memberships + scope grants).",
         "operationId": "list_groups_api_v1_auth_groups_get",
         "responses": {
           "200": {
@@ -444,7 +444,7 @@
           "Groups"
         ],
         "summary": "Create Group",
-        "description": "Create a new RBAC group (admin only).",
+        "description": "Create a new RBAC group at a scope.",
         "operationId": "create_group_api_v1_auth_groups_post",
         "requestBody": {
           "content": {
@@ -491,7 +491,7 @@
           "Groups"
         ],
         "summary": "Get Group",
-        "description": "Get a single group by name (admin only).",
+        "description": "Get a single group by name (404 when not visible to the caller).",
         "operationId": "get_group_api_v1_auth_groups__name__get",
         "parameters": [
           {
@@ -537,7 +537,7 @@
           "Groups"
         ],
         "summary": "Update Group",
-        "description": "Update group roles, description, or members (admin only).",
+        "description": "Update group roles, description, or members (group:write at the group's scope).",
         "operationId": "update_group_api_v1_auth_groups__name__put",
         "parameters": [
           {
@@ -593,7 +593,7 @@
           "Groups"
         ],
         "summary": "Delete Group",
-        "description": "Delete a group (admin only).",
+        "description": "Delete a group (checked at the group's scope).",
         "operationId": "delete_group_api_v1_auth_groups__name__delete",
         "parameters": [
           {
@@ -634,7 +634,7 @@
           "Groups"
         ],
         "summary": "Add Member",
-        "description": "Add a member to a group (admin only, idempotent).",
+        "description": "Add a member to a group (idempotent; checked at the group's scope).",
         "operationId": "add_member_api_v1_auth_groups__name__members_post",
         "parameters": [
           {
@@ -692,7 +692,7 @@
           "Groups"
         ],
         "summary": "Remove Member",
-        "description": "Remove a member from a group (admin only).",
+        "description": "Remove a member from a group (checked at the group's scope).",
         "operationId": "remove_member_api_v1_auth_groups__name__members__username__delete",
         "parameters": [
           {
@@ -1572,7 +1572,7 @@
           "Organisations"
         ],
         "summary": "List Orgs",
-        "description": "List all organisations.",
+        "description": "List organisations visible to the caller.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
         "operationId": "list_orgs_api_v1_orgs_get",
         "responses": {
           "200": {
@@ -1648,7 +1648,7 @@
           "Organisations"
         ],
         "summary": "Get Org",
-        "description": "Get a single organisation by name.",
+        "description": "Get a single organisation by name (org:read at that org's scope).",
         "operationId": "get_org_api_v1_orgs__name__get",
         "parameters": [
           {
@@ -7190,6 +7190,397 @@
         ]
       }
     },
+    "/api/v1/repository/preferences": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Get Preferences",
+        "description": "Effective merged preferences for the caller (system -> org -> group -> user).",
+        "operationId": "get_preferences_api_v1_repository_preferences_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Patch Preferences",
+        "description": "Apply a JSON merge patch to the caller's USER preference layer.\n\nThe theme toggle is one call: ``PATCH {\"theme\": \"dark\"}``. ``null``\nremoves a user-layer key (falling back to the inherited value).",
+        "operationId": "patch_preferences_api_v1_repository_preferences_patch",
+        "parameters": [
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": true,
+                "description": "RFC 7396 JSON merge patch",
+                "title": "Patch"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PreferencesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "List Objects",
+        "description": "List object metadata in a (scope, scope_id, namespace).",
+        "operationId": "list_objects_api_v1_repository_objects__scope___scope_id___namespace__get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ObjectEntry"
+                  },
+                  "title": "Response List Objects Api V1 Repository Objects  Scope   Scope Id   Namespace  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/repository/objects/{scope}/{scope_id}/{namespace}/{key}": {
+      "get": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Get Object",
+        "description": "Raw object bytes with the stored Content-Type and ETag headers.",
+        "operationId": "get_object_api_v1_repository_objects__scope___scope_id___namespace___key__get",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Put Object",
+        "description": "Store raw bytes (body) under a scope-aligned key.",
+        "operationId": "put_object_api_v1_repository_objects__scope___scope_id___namespace___key__put",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ObjectMetadata"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Repository"
+        ],
+        "summary": "Delete Object",
+        "description": "Tombstone an object (INSERT with is_deleted=1, never a mutation).",
+        "operationId": "delete_object_api_v1_repository_objects__scope___scope_id___namespace___key__delete",
+        "parameters": [
+          {
+            "name": "scope",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope"
+            }
+          },
+          {
+            "name": "scope_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Scope Id"
+            }
+          },
+          {
+            "name": "namespace",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Namespace"
+            }
+          },
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/health/live": {
       "get": {
         "tags": [
@@ -8047,6 +8438,12 @@
             "description": "Human-readable description",
             "default": ""
           },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "description": "'system' (roles bind system-wide) or 'org:<name>' (group exists only inside that org; roles bind at that org's scope)",
+            "default": "system"
+          },
           "members": {
             "items": {
               "type": "string"
@@ -8878,6 +9275,10 @@
             },
             "type": "array",
             "title": "Members"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
           }
         },
         "type": "object",
@@ -8885,7 +9286,8 @@
           "name",
           "description",
           "roles",
-          "members"
+          "members",
+          "scope"
         ],
         "title": "GroupResponse"
       },
@@ -9987,6 +10389,101 @@
         },
         "type": "array"
       },
+      "ObjectEntry": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "content_type",
+          "size",
+          "updated_by",
+          "updated_at",
+          "etag"
+        ],
+        "title": "ObjectEntry",
+        "description": "Metadata for one key in a namespace listing."
+      },
+      "ObjectMetadata": {
+        "properties": {
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "scope_id": {
+            "type": "string",
+            "title": "Scope Id"
+          },
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "content_type": {
+            "type": "string",
+            "title": "Content Type"
+          },
+          "size": {
+            "type": "integer",
+            "title": "Size"
+          },
+          "updated_by": {
+            "type": "string",
+            "title": "Updated By"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Updated At"
+          },
+          "etag": {
+            "type": "string",
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "scope",
+          "scope_id",
+          "namespace",
+          "key",
+          "content_type",
+          "size",
+          "updated_by",
+          "updated_at",
+          "etag"
+        ],
+        "title": "ObjectMetadata",
+        "description": "Metadata for a stored object (PUT response)."
+      },
       "OrgResponse": {
         "properties": {
           "name": {
@@ -10812,6 +11309,32 @@
         ],
         "title": "PipelineTemplate",
         "description": "A discovered pipeline template."
+      },
+      "PreferencesResponse": {
+        "properties": {
+          "preferences": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Preferences"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag"
+          }
+        },
+        "type": "object",
+        "required": [
+          "preferences"
+        ],
+        "title": "PreferencesResponse",
+        "description": "Effective merged preferences plus the caller's user-layer etag."
       },
       "PromoteFieldRequest": {
         "properties": {
@@ -12879,12 +13402,26 @@
             "description": "Version creation date (YYYY-MM-DD)"
           },
           "header": {
-            "$ref": "#/components/schemas/SourceHeader",
-            "description": "Common schema header configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceHeader"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Common schema header configuration (None when the version did not author one)"
           },
           "schema": {
-            "$ref": "#/components/schemas/SourceSchema",
-            "description": "Schema configuration"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceSchema"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schema configuration (None when the version did not author one)"
           },
           "mapping_standards": {
             "items": {

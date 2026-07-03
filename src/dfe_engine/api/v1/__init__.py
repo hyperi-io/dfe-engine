@@ -16,6 +16,7 @@ from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
+from dfe_engine.api.v1.repository import router as repository_router
 from dfe_engine.api.v1.roles import router as roles_router
 from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.schemas import router as schemas_router
@@ -57,5 +58,6 @@ v1_router.include_router(discovery_router)
 v1_router.include_router(schemas_router)
 v1_router.include_router(sigma_router)
 v1_router.include_router(cel_router)
+v1_router.include_router(repository_router)
 
 __all__ = ["v1_router"]
