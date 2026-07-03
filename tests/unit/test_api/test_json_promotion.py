@@ -271,6 +271,7 @@ class TestDiscoverJsonPaths:
         assert path0["column"]["name"] == "user_id"
         assert path0["column"]["type"] == "integer"
         assert path0["column"]["expr"] == "@copy: _json.user.id"
+        assert path0["column"]["_field_type"] == "promoted"
         # Rows restricted to this source via its match rule.
         sql, params = ch.calls[0]
         assert f"FROM `{db}`.`{landing}`" in sql

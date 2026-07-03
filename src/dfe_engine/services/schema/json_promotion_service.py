@@ -33,6 +33,7 @@ from dfe_engine.source.models import SchemaColumn
 # Standard JSON column name across all schema profiles (timeseries, minimal,
 # passthrough). Single source of truth -- import this rather than hard-coding.
 JSON_COLUMN = "_json"
+PROMOTED_FIELD_TYPE = "promoted"
 
 # Requested CH index family -> schema use_case (drives DDL index generation via
 # DDLGenerator._index_def). The use_case is validated against the column's
@@ -538,6 +539,7 @@ def build_promotion_columns(
             use_case=use_case,
             expr=ExpressionBuilder.copy(copy_cel),
             comment=f"Promoted from {JSON_COLUMN}.{path}",
+            _field_type=PROMOTED_FIELD_TYPE,
         )
 
         errors = column.validate_against_registry(type_registry)

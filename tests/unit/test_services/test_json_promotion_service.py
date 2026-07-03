@@ -438,6 +438,7 @@ class TestBuildPromotionColumns:
         assert column.use_case == "bloom"
         assert column.type == "string"
         assert column.comment == "Promoted from _json.user.email"
+        assert column.field_type == "promoted"
 
     def test_index_use_case_invalid_for_primitive_errors(self):
         # minmax -> range use_case, which is not valid for a string primitive.
