@@ -8,7 +8,7 @@
 
 """Ensure the schemas and config storage directories exist, seeding schemas once.
 
-Schemas are seeded from the image-baked ``dfe-schemas`` submodule only when the schemas directory has no ``.seeded`` marker, so redeployments never re-seed; config is only ensured to exist. Both directories fall back to a baked default when their environment variable is unset and are expected to sit on a persistent volume.
+Schemas are seeded from the image-baked ``dfe-schemas`` submodule only when the schemas directory has no ``.seeded`` marker, so redeployments never re-seed; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from hyperi_pylib.logger import logger
 from dfe_engine.settings import DFESettings
 
 DEFAULT_CONFIG_DIR = "/app/config"
-DEFAULT_SCHEMAS_DIR = "/app/schemas"
 DEFAULT_SCHEMAS_SEED_DIR = "/app/schemas-seed"
 SEED_DIR_ENV_VAR = "DFE_SCHEMAS_SEED_DIR"
 SEED_MARKER_NAME = ".seeded"
@@ -52,18 +51,22 @@ def _resolve_dir(*, configured: str, default: str) -> Path:
 
 
 def ensure_storage(*, settings: DFESettings) -> None:
-    """Ensure config and schemas directories exist and seed schemas on first run.
+    """Ensure the config directory exists and, when configured, seed schemas on first run.
 
-    Any unset directory setting is filled with its baked default so the downstream registry bootstrap observes the effective paths.
+    The config directory is filled with its baked default when unset. The schemas directory is bootstrapped only when ``schemas.schemas_dir`` is set; when it is unset the schemas bootstrap is skipped entirely, so the downstream registry bootstrap (which is itself gated on a configured directory) simply observes no schemas rather than an invented absolute default path.
     """
     config_dir = _resolve_dir(configured=settings.config_dir, default=DEFAULT_CONFIG_DIR)
-    schemas_dir = _resolve_dir(configured=settings.schemas.schemas_dir, default=DEFAULT_SCHEMAS_DIR)
+    _ensure_dir(path=config_dir)
+    settings.config_dir = str(config_dir)
+
+    if not (settings.schemas.schemas_dir):
+        logger.info("Schemas directory not configured; skipping schema storage bootstrap")
+        return
+
+    schemas_dir = Path(settings.schemas.schemas_dir)
     seed_dir = Path(os.environ.get(SEED_DIR_ENV_VAR, DEFAULT_SCHEMAS_SEED_DIR))
 
-    _ensure_dir(path=config_dir)
     _ensure_dir(path=schemas_dir)
-
-    settings.config_dir = str(config_dir)
     settings.schemas.schemas_dir = str(schemas_dir)
 
     marker = schemas_dir / SEED_MARKER_NAME

@@ -82,3 +82,10 @@ class TestEnsureStorage:
         ensure_storage(settings=settings)
         assert settings.config_dir == str(config_dir)
         assert settings.schemas.schemas_dir == str(schemas_dir)
+
+    def test_unset_schemas_dir_skips_schema_bootstrap(self, config_dir, seed_dir):
+        settings = DFESettings(config_dir=str(config_dir))
+        assert settings.schemas.schemas_dir == ""
+        ensure_storage(settings=settings)
+        assert config_dir.is_dir()
+        assert settings.schemas.schemas_dir == ""
