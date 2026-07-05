@@ -42,6 +42,7 @@ from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     Source,
     SourceSummaryObject,
+    SourceVersion,
     SourceVersionGetResponse,
     SourceWriteRequest,
 )
@@ -177,6 +178,68 @@ class SourceDeployResponse(BaseModel):
     ddl_failed: list[dict[str, str]] = Field(default_factory=list)
 
 
+class SourceBuildVersionSummary(BaseModel):
+    """Persisted build artifact summary for one source version."""
+
+    built_at: str
+    validation_errors: list[str] = Field(default_factory=list)
+    column_count: int = 0
+
+
+class SourcePlanVersionSummary(BaseModel):
+    """Persisted plan artifact summary for one source version."""
+
+    planned_at: str
+    table_exists: bool = False
+    validation_errors: list[str] = Field(default_factory=list)
+    ready: bool = False
+    statements_count: int = 0
+
+
+class SourceDeployVersionSummary(BaseModel):
+    """Persisted deploy artifact summary for one source version."""
+
+    deployed_at: str
+    success: bool
+    ddl_executed_count: int = 0
+    ddl_failed_count: int = 0
+
+
+class SourceVersionDetail(SourceVersion):
+    """Source version snapshot plus pipeline artifact status."""
+
+    source_build: SourceBuildVersionSummary | None = Field(
+        default=None,
+        description="Last schema build for this version (source-builds)",
+    )
+    source_plan: SourcePlanVersionSummary | None = Field(
+        default=None,
+        description="Last deploy plan for this version (source-plans)",
+    )
+    source_deployment: SourceDeployVersionSummary | None = Field(
+        default=None,
+        description="Last deploy run for this version (source-deploys)",
+    )
+
+
+class SourceDetailResponse(Source):
+    """Full source definition with per-version build/plan/deploy status."""
+
+    versions: dict[str, SourceVersionDetail] = Field(
+        default_factory=dict,
+        description="Version id → configuration snapshot and pipeline artifacts",
+    )
+
+
+class SourceVersionGetDetailResponse(SourceVersionGetResponse):
+    """Single-version GET with build/plan/deploy status on ``version``."""
+
+    version: SourceVersionDetail = Field(
+        ...,
+        description="Configuration snapshot for ``selected`` plus pipeline artifacts",
+    )
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -267,7 +330,7 @@ async def create_source(
 
 @router.get(
     "/{name}/versions",
-    response_model=SourceVersionGetResponse,
+    response_model=SourceVersionGetDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source_version(
@@ -280,9 +343,7 @@ async def get_source_version(
         description="Source version id to return (required)",
     ),
 ):
-    """Get one immutable source version snapshot by id."""
-    from dfe_engine.source.registry import SourceNotFoundError
-
+    """Get one immutable source version snapshot by id, with build/plan/deploy status."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -303,8 +364,10 @@ async def get_source_version(
             },
         )
 
+    store = SourceDeploymentStore.from_settings(get_settings())
     version_ids = sorted(source.versions.keys())
-    return SourceVersionGetResponse(
+    snap = source.versions[version]
+    return SourceVersionGetDetailResponse(
         source=source.source,
         display_name=source.display_name,
         description=source.description,
@@ -313,7 +376,7 @@ async def get_source_version(
         deployed_version=source.deployed_version,
         selected=version,
         versions=version_ids,
-        version=source.versions[version],
+        version=_version_detail_from_snapshot(source.source, version, snap, store),
     )
 
 
@@ -706,13 +769,11 @@ async def deploy_source(
 
 @router.get(
     "/{name}",
-    response_model=Source,
+    response_model=SourceDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
-    """Get a full source definition by name."""
-    from dfe_engine.source.registry import SourceNotFoundError
-
+    """Get a full source definition by name, including build/plan/deploy per version."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -722,8 +783,9 @@ async def get_source(name: str, user: CurrentUser, registry: SourceReg):
                 "code": "not_found",
                 "message": f"Source {name!r} not found",
             },
-        )
-    return source
+        ) from None
+    store = SourceDeploymentStore.from_settings(get_settings())
+    return _to_source_detail_response(source, store)
 
 
 @router.put(
@@ -884,6 +946,63 @@ def _resolve_source_version(
             },
         )
     return source, version_id
+
+
+def _version_detail_from_snapshot(
+    source_name: str,
+    version_id: str,
+    snap: SourceVersion,
+    store: SourceDeploymentStore,
+) -> SourceVersionDetail:
+    build = store.load_build(source_name, version_id)
+    plan = store.load_plan(source_name, version_id)
+    deploy = store.load_deploy(source_name, version_id)
+    return SourceVersionDetail(
+        **snap.model_dump(mode="json"),
+        source_build=(
+            SourceBuildVersionSummary(
+                built_at=build.built_at,
+                validation_errors=list(build.validation_errors),
+                column_count=build.column_count,
+            )
+            if build
+            else None
+        ),
+        source_plan=(
+            SourcePlanVersionSummary(
+                planned_at=plan.planned_at,
+                table_exists=plan.table_exists,
+                validation_errors=list(plan.validation_errors),
+                ready=plan.ready,
+                statements_count=len(plan.statements),
+            )
+            if plan
+            else None
+        ),
+        source_deployment=(
+            SourceDeployVersionSummary(
+                deployed_at=deploy.deployed_at,
+                success=deploy.success,
+                ddl_executed_count=len(deploy.ddl_executed),
+                ddl_failed_count=len(deploy.ddl_failed),
+            )
+            if deploy
+            else None
+        ),
+    )
+
+
+def _to_source_detail_response(
+    source: Source,
+    store: SourceDeploymentStore,
+) -> SourceDetailResponse:
+    versions: dict[str, SourceVersionDetail] = {}
+    for version_id, snap in source.versions.items():
+        versions[version_id] = _version_detail_from_snapshot(source.source, version_id, snap, store)
+    return SourceDetailResponse(
+        **source.model_dump(mode="json", exclude={"versions"}),
+        versions=versions,
+    )
 
 
 def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
