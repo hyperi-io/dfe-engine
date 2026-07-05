@@ -215,6 +215,14 @@ class SchemaBuilderV2:
         cfg = self._build_ddl_config(source)
         return self._ddl_gen.generate_alter_modify_column(source.table_name, column, cfg)
 
+    def build_ddl_config_for_version(self, source: Source, version_id: str) -> DDLConfig:
+        """DDL config for a specific source version snapshot."""
+        if version_id not in source.versions:
+            raise SchemaBuildError(
+                f"Source version '{version_id}' is not defined for source '{source.source}'"
+            )
+        return self._build_ddl_config_for_snapshot(source.versions[version_id])
+
     # ── Internal: view generation ──────────────────────────────────
 
     def _generate_view_ddls(

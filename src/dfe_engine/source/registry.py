@@ -263,6 +263,24 @@ class SourceRegistry:
 
         return self.save_source(updated, created_by=created_by, description=description)
 
+    def set_deployed_version(
+        self,
+        source_name: str,
+        version_id: str,
+        *,
+        created_by: str | None = None,
+        description: str | None = None,
+    ) -> Source:
+        """Record which source version is deployed to ClickHouse runtime."""
+        source = self.get_source(source_name)
+        if version_id not in source.versions:
+            raise SourceValidationError(
+                f"Version '{version_id}' is not defined for source '{source_name}'"
+            )
+        updated = source.model_copy(update={"deployed_version": version_id})
+        msg = description or f"source: deploy {source_name} version {version_id}"
+        return self.save_source(updated, created_by=created_by, description=msg)
+
     def delete_source(self, source_name: str) -> None:
         """Delete a source definition.
 

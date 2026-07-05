@@ -340,9 +340,24 @@ class SourceSettings(BaseModel):
 
     Environment variables:
     - DFE_SOURCES_DIR -> source.sources_dir
+    - DFE_SOURCE_BUILDS_DIR -> source.builds_dir
+    - DFE_SOURCE_PLANS_DIR -> source.plans_dir
+    - DFE_SOURCE_DEPLOYS_DIR -> source.deploys_dir
     """
 
     sources_dir: str = Field(default="", description="YAML directory for Source definitions (SSoT)")
+    builds_dir: str = Field(
+        default="",
+        description="Persisted schema build artifacts (source-builds)",
+    )
+    plans_dir: str = Field(
+        default="",
+        description="ClickHouse deploy dry-run plans (source-plans)",
+    )
+    deploys_dir: str = Field(
+        default="",
+        description="ClickHouse deploy run results (source-deploys)",
+    )
 
 
 class FieldMapSettings(BaseModel):
@@ -692,6 +707,12 @@ def _get_env_overrides() -> dict:
     # Source settings
     if val := _get_env("DFE_SOURCES_DIR"):
         overrides["source"]["sources_dir"] = val
+    if val := _get_env("DFE_SOURCE_BUILDS_DIR"):
+        overrides["source"]["builds_dir"] = val
+    if val := _get_env("DFE_SOURCE_PLANS_DIR"):
+        overrides["source"]["plans_dir"] = val
+    if val := _get_env("DFE_SOURCE_DEPLOYS_DIR"):
+        overrides["source"]["deploys_dir"] = val
 
     # FieldMap settings
     if val := _get_env("DFE_FIELDMAPS_DIR"):
@@ -777,6 +798,9 @@ def _get_env_overrides() -> dict:
         _config_dir_subdirs = {
             ("services", "config_yaml_dir"): "services",
             ("source", "sources_dir"): "sources",
+            ("source", "builds_dir"): "source-builds",
+            ("source", "plans_dir"): "source-plans",
+            ("source", "deploys_dir"): "source-deploys",
             ("fieldmap", "fieldmaps_dir"): "fieldmaps",
             ("deployment", "config_dir"): "deployment",
             ("hunts", "hunt_dir"): "hunts",
