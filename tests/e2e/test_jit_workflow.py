@@ -19,6 +19,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    SchemasSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -29,10 +30,12 @@ def jit_settings(tmp_path):
     (tmp_path / "sources").mkdir()
     (tmp_path / "services").mkdir()
     (tmp_path / "auth").mkdir()
+    (tmp_path / "schemas").mkdir()
     return DFESettings(
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+        schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
         auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
         api=APISettings(jwt_secret="jit-test-secret-key-32-chars-lo!"),
     )

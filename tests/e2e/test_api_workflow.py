@@ -34,6 +34,7 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     DFESettings,
+    SchemasSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -52,6 +53,8 @@ def e2e_settings(tmp_path: Path) -> DFESettings:
     pipelines_out.mkdir()
     templates_dir = tmp_path / "custom_templates"
     templates_dir.mkdir()
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
     (tmp_path / "dfe_package.yaml").write_text(
         f"""global_settings:
   output: {pipelines_out}
@@ -66,6 +69,7 @@ ingestion_pipelines: {{}}
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
+        schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
         auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
         api=APISettings(
             jwt_secret="e2e-test-secret-key-32-chars-long!",
