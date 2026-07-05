@@ -107,17 +107,25 @@ class ClickHouseSettings(BaseModel):
         description="Database the client connection authenticates against (its default db)",
     )
     data_database: str = Field(
-        default="",
+        default="dfe",
         description=(
-            "Database where DFE data tables live (landing table, per-source tables). "
-            "Falls back to `database` when empty. Lets the connection authenticate "
-            "against one database while DFE tables are qualified against another -- "
-            "read it via `effective_data_database`, never directly."
+            "Database where DFE data tables live (landing table, per-source tables), "
+            "from DFE_CLICKHOUSE_DATA_DATABASE (default `dfe`). Lets the connection "
+            "authenticate against one database while DFE tables are qualified against "
+            "another -- read it via `effective_data_database`, never directly."
         ),
     )
     landing_table: str = Field(
         default="default",
         description="Catch-all table where un-split source data lands (db.landing_table)",
+    )
+    default_table_profile: str = Field(
+        default="timeseries",
+        description="Schema profile the bootstrapped landing table is built from (DFE_DEFAULT_TABLE_PROFILE)",
+    )
+    bootstrap_tables: bool = Field(
+        default=True,
+        description="Create the DFE database, landing table, and hunt results table on startup",
     )
     secure: bool = Field(default=True)
     verify: bool = Field(default=False)
@@ -566,6 +574,10 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["data_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
         overrides["clickhouse"]["landing_table"] = val
+    if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
+        overrides["clickhouse"]["default_table_profile"] = val
+    if val := _get_env("DFE_CLICKHOUSE_BOOTSTRAP_TABLES"):
+        overrides["clickhouse"]["bootstrap_tables"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_CLICKHOUSE_SECURE", "CLICKHOUSE_SECURE"):
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
