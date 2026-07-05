@@ -18,6 +18,7 @@ from dfe_engine.settings import (
     AuthSettings,
     DFESettings,
     HuntsSettings,
+    SchemasSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -36,11 +37,14 @@ def api_settings(tmp_path: Path) -> DFESettings:
     hunts_dir.mkdir()
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
+    schemas_dir = tmp_path / "schemas"
+    schemas_dir.mkdir()
 
     return DFESettings(
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
+        schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
         hunts=HuntsSettings(rules_dir=str(rules_dir), hunt_dir=str(hunts_dir)),
         auth=AuthSettings(
             enabled=True,
