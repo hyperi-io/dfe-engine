@@ -239,6 +239,10 @@ class TestGetSource:
         data = resp.json()
         assert data["source"] == "test_source"
         assert data["display_name"] == "Test Source"
+        ver = data["versions"]["1.0.0"]
+        assert ver["source_build"] is None
+        assert ver["source_plan"] is None
+        assert ver["source_deployment"] is None
 
     def test_get_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.get("/api/v1/sources/nonexistent", headers=admin_headers)
@@ -263,6 +267,9 @@ class TestGetSourceVersion:
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
         assert body["version"]["schema"]["engine"] == "MergeTree"
+        assert body["version"]["source_build"] is None
+        assert body["version"]["source_plan"] is None
+        assert body["version"]["source_deployment"] is None
 
     def test_get_version_after_update_preserves_history(
         self, client: TestClient, admin_headers: dict, sample_source: dict

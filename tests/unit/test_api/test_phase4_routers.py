@@ -250,6 +250,132 @@ class TestSchemasRouter:
             _registries.clear()
             reset_settings()
 
+    def test_plan_not_found(self, client, admin_headers, sample_source):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.get(
+            "/api/v1/sources/test_source/plan?version=1.0.0",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+
+    def test_source_plan_persisted(self, tmp_path, monkeypatch):
+        import shutil
+
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token, get_clickhouse_client
+        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+            reset_settings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+        reset_settings()
+
+        class _FakeCh:
+            def execute(self, query: str, *args, **kwargs):
+                if "system.tables" in query:
+                    return []
+                if "system.columns" in query:
+                    return []
+                return []
+
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        common_header = schemas_root / "common-header"
+        common_header.mkdir()
+        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        monkeypatch.setenv("DFE_CONFIG_DIR", str(tmp_path))
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        monkeypatch.setenv("DFE_SOURCES_DIR", str(sources_dir))
+        reset_settings()
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [
+                            {"name": "alpha", "type": "string", "use_case": "dimension"},
+                        ]
+                    }
+                },
+            },
+            schemas_root / "meta_cols.yaml",
+        )
+
+        yaml_dump(
+            {
+                "source": "plan_src",
+                "enabled": True,
+                "match": {"field": "tags.collector.type", "value": "plan_src"},
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "minimal", "version": "1.0.0"},
+                        "schema": {
+                            "meta_schema": "meta_cols.yaml",
+                            "meta_schema_version": "1.0.0",
+                            "engine": "MergeTree",
+                        },
+                    }
+                },
+            },
+            sources_dir / "plan_src.yaml",
+        )
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-plan"),
+        )
+        (tmp_path / "services").mkdir()
+        (tmp_path / "auth").mkdir()
+        app = create_app(settings)
+        app.dependency_overrides[get_clickhouse_client] = lambda: _FakeCh()
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                plan_resp = tc.post("/api/v1/sources/plan_src/plan", headers=headers)
+                assert plan_resp.status_code == 200
+                body = plan_resp.json()
+                assert body["source_name"] == "plan_src"
+                assert body["version"] == "1.0.0"
+                assert body["ready"] is True
+                assert body["statements"]
+
+                get_plan = tc.get(
+                    "/api/v1/sources/plan_src/plan?version=1.0.0",
+                    headers=headers,
+                )
+                assert get_plan.status_code == 200
+                assert get_plan.json()["planned_at"] == body["planned_at"]
+
+                assert (tmp_path / "source-plans" / "plan_src.yaml").is_file()
+                assert (tmp_path / "source-builds" / "plan_src.yaml").is_file()
+                plan_doc = yaml_load(tmp_path / "source-plans" / "plan_src.yaml")
+                assert plan_doc["versions"]["1.0.0"]
+        finally:
+            app.dependency_overrides.clear()
+            _registries.clear()
+            reset_settings()
+
     def test_requires_auth(self, client):
         resp = client.get("/api/v1/sources/test/columns")
         assert resp.status_code == 401
