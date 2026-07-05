@@ -34,9 +34,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings: DFESettings = app.state.settings
     health: HealthManager = app.state.health_manager
 
+    from dfe_engine.bootstrap import ensure_storage
+
+    ensure_storage(settings=settings)
+
     from dfe_engine.api.deps import bootstrap_registries, shutdown_registries
 
     bootstrap_registries(settings)
+
+    from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
+
+    bootstrap_clickhouse(settings=settings)
 
     # Bootstrap auth stores
     from dfe_engine.auth.bootstrap import bootstrap_auth
