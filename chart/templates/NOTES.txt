@@ -3,7 +3,7 @@ DFE Engine API server deployed.
 Access the API:
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
-  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/api/v1/system/health
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/health/ready
 {{- end }}
 {{- else if contains "NodePort" .Values.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "dfe-engine.fullname" . }})
@@ -18,7 +18,7 @@ Access the API:
 {{- end }}
 
 Swagger UI: /docs
-Health check: /api/v1/system/health
+Health check: /health/ready (liveness: /health/live)
 
 {{- if eq .Values.jwt.secret "dev-secret-key-change-in-production" }}
 

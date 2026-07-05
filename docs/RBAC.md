@@ -6,12 +6,17 @@
 
 ## Implementation Status
 
-| Phase | Scope | Status |
-|-------|-------|--------|
-| **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
-| **Phase 2** | ConnectionRegistry, TenantScopedClient, multi-tenant CH | Done |
-| **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
-| **Phase 4** | Schema-less service discovery, service surfaces | Not started |
+| Area | Scope | Status |
+|------|-------|--------|
+| **RBAC roles** | 7-role model (renamed 2026-07), config-driven `hyperdx:` block, cumulative resolution, back-compat aliases | Done |
+| **Tenant isolation** | Fixed CH users + ONE row policy per `_org_id` table + `TenantScopedClient` (custom-settings model) | Done |
+| **HyperDX** | GA one-team default + per-org `tenant_reader` connection setting + role-driven scope-gate | Done |
+| **Org-domain chain** | email domain -> claimed org -> `org_analyst` group -> `org_ids` -> CH row policy | Done |
+| **Auth paths** | OIDC headers + API key + JWT Bearer + disabled; store-side group union on the OIDC path | Done |
+| **Schema-less service discovery** | Service-surface YAML + metrics manifest cache | Not started |
+
+OIDC provider config + copy-paste worked examples (EntraID, on-prem AD, Google,
+Okta, Keycloak): [OIDC.md](OIDC.md). Sigma detection pipeline: [SIGMA.md](SIGMA.md).
 
 ---
 
@@ -239,29 +244,213 @@ group file in `config/auth/groups/` inherits that group's roles.
 ### 2.2 Role Definitions
 
 Roles are defined in `src/dfe_engine/auth/resources/roles.yaml` (built-in,
-shipped with the package). Custom roles can be loaded from a separate YAML
-file via `RoleConfig.load(path)`.
+shipped with the package; copied to `{auth_dir}/../rbac/roles.yaml` on first
+boot if absent). Custom roles load from a separate YAML via `RoleConfig.load(path)`.
 
-7 built-in roles, flat hierarchy (no inheritance):
+7 built-in roles (`resource_type: core`), FLAT (no inheritance). A principal's
+effective permissions are the UNION of every role across every group they belong
+to. The 2026-07 rename retired the old names (`infra_admin`, `infra_viewer`,
+`data_analyst_viewer`, `customer_viewer`); back-compat aliases keep them
+resolving (section 2.2.4).
 
 ```mermaid
-graph LR
-    subgraph "Global Roles"
-        ADMIN["admin<br/>permissions: *"]
-        DA["data_analyst<br/>hunt, query, source,<br/>fieldmap, alert,<br/>schema:read, transforms"]
-        DAV["data_analyst_viewer<br/>read-only subset of<br/>data_analyst"]
-        DV["data_viewer<br/>query:execute,<br/>source:read,<br/>dashboard:read"]
-        IA["infra_admin<br/>config, service,<br/>helm, deployment,<br/>argo"]
-        IV["infra_viewer<br/>read-only subset of<br/>infra_admin"]
+graph TB
+    subgraph global["Global roles (system scope)"]
+        ADMIN["admin<br/>permissions: *<br/>hyperdx: full"]
+        DA["data_analyst<br/>hunt/query/source/rule/<br/>fieldmap/alert/transform *<br/>+ schema, sampler<br/>hyperdx: full"]
+        DARO["data_analyst_ro<br/>read-only analyst surface<br/>hyperdx: full"]
+        DV["data_viewer<br/>query:execute, source:read,<br/>sampler:read, dashboard:read<br/>hyperdx: full"]
+        INFRA["infra<br/>config/service/helm/deploy/<br/>argo/org/group/repository *<br/>+ hunt:*<br/>hyperdx: otel"]
+        INFRARO["infra_ro<br/>read-only infra surface<br/>hyperdx: otel"]
     end
-
-    subgraph "Scoped Roles"
-        CV["customer_viewer<br/>org-restricted<br/>data viewer<br/>(scoped: true)"]
+    subgraph scoped["Scoped roles (org scope)"]
+        OA["org_analyst<br/>query:execute, source:read,<br/>sampler:read, dashboard:read<br/>scoped: true<br/>hyperdx: org-scoped"]
     end
-
     style ADMIN fill:#c33,color:#fff
-    style CV fill:#36c,color:#fff
+    style OA fill:#36c,color:#fff
 ```
+
+What the rename changed, beyond names:
+- `infra` (was `infra_admin`) GAINED `hunt:*` (infra now owns hunts) + `hyperdx: otel` (the HyperDX OTel self-monitoring stream).
+- `data_analyst` GAINED `hyperdx: full` (the full HyperDX ClickHouse surface).
+- `org_analyst` (was `customer_viewer`) is the ONLY `scoped: true` role; it binds
+  per-org and its `hyperdx: org-scoped` drives tenant isolation (sections 5, 8).
+
+#### 2.2.1 Config-driven `hyperdx:` block
+
+Each role carries an OPTIONAL `hyperdx:` block (`HyperdxAccess` model, `roles.py`).
+It is the SINGLE config-driven source of a role's HyperDX capability - the
+provisioner/reconciler reads it, so adding or changing HyperDX access is a
+`roles.yaml` edit, not code:
+
+```yaml
+# roles.yaml (excerpt)
+org_analyst:
+  description: "Org-scoped analyst - own org's data only"
+  scoped: true
+  resource_type: core
+  permissions: [query:execute, source:read, sampler:read, dashboard:read]
+  hyperdx:
+    access: org-scoped        # full | otel | org-scoped | none
+    tenant_scoped: true       # inject the per-org DFE_current_tenant_id setting
+```
+
+| Field | Value | Meaning |
+|---|---|---|
+| `access` | `full` | Every CH db (dfe, otel, system read-only) - the full HyperDX surface |
+| | `otel` | The HyperDX OTel self-monitoring stream only (infra) |
+| | `org-scoped` | Only the org's tenant-filtered connection (row-policy isolated) |
+| | `none` (or block absent) | No HyperDX provisioning at all |
+| `tenant_scoped` | bool | Inject the per-org `DFE_current_tenant_id` connection setting |
+
+There is deliberately NO `ch_connection` field - the CH connection is resolved
+from the user-privilege precedence (section 5.2), not pinned per role.
+
+Per-role `hyperdx` from `roles.yaml`:
+
+| Role | `access` | `tenant_scoped` |
+|---|---|---|
+| admin | full | false |
+| data_analyst | full | false |
+| data_analyst_ro | full | false |
+| data_viewer | full | false |
+| infra | otel | false |
+| infra_ro | otel | false |
+| org_analyst | org-scoped | true |
+
+#### 2.2.2 Cumulative resolution (widest-access-wins)
+
+Roles are cumulative, so a principal's effective HyperDX access is resolved
+across ALL their roles by `RoleConfig.effective_hyperdx(role_names)`:
+
+```mermaid
+flowchart TD
+    ROLES["principal roles<br/>e.g. [org_analyst, data_viewer]"] --> COLLECT["collect declared hyperdx blocks<br/>(drop access=none / absent)"]
+    COLLECT -->|none contribute| NONE["access = none<br/>(no provisioning)"]
+    COLLECT --> WIDEST["widest access wins<br/>rank: full 0 &lt; otel 1<br/>&lt; org-scoped 2 &lt; none 3"]
+    WIDEST --> TS{"ALL contributing<br/>org-scoped?"}
+    TS -->|yes| SCOPED["tenant_scoped = true"]
+    TS -->|no| UNSCOPED["tenant_scoped = false<br/>(a wider role lifts the org limit)"]
+    SCOPED --> OUT["HyperdxAccess(access, tenant_scoped)"]
+    UNSCOPED --> OUT
+```
+
+Key rule: `tenant_scoped` is true ONLY if EVERY contributing role is
+`org-scoped`. So a user who is both `org_analyst` AND `data_viewer` resolves to
+`access=full, tenant_scoped=false` - the wider `data_viewer: full` LIFTS the org
+restriction. Give tenant-only users ONLY `org_analyst` (never also a global
+HyperDX role) or they escape their tenant boundary at the HyperDX layer.
+
+#### 2.2.3 Default group -> role bindings
+
+`auth/bootstrap.py` seeds four groups on first boot (`_DEFAULT_GROUPS`), only if
+the groups dir is empty; the seeded `admin` account joins `dfe-admins`:
+
+| Default group | Role | Intended user |
+|---|---|---|
+| `dfe-admins` | `admin` | Platform administrators (full access) |
+| `dfe-analysts` | `data_analyst` | Detection engineers / analysts (author + run) |
+| `dfe-viewers` | `data_viewer` | Dashboard / query consumers (HyperDX) |
+| `dfe-infra` | `infra` | Infra / deployment / hunt operators |
+
+`data_analyst_ro`, `infra_ro`, and `org_analyst` ship but bind to no default
+group. Attach them to custom groups as needed - or, for `org_analyst`, it is
+auto-bound per-org by the JIT org-domain chain (section 7.3).
+
+#### 2.2.4 Back-compat aliases
+
+The rename ships a one-release alias shim (`ROLE_ALIASES`, `roles.py`). A literal
+role name always wins; an alias only fills in when the literal is absent:
+
+| Old name | New name |
+|---|---|
+| `infra_admin` | `infra` |
+| `infra_viewer` | `infra_ro` |
+| `data_analyst_viewer` | `data_analyst_ro` |
+| `customer_viewer` | `org_analyst` |
+
+Both permission resolution (`_lookup`) and the connection registry
+(`get_connection_name`) are alias-aware, so an old group file resolving
+`customer_viewer` maps to `org_analyst` -> `tenant_reader`, never the admin
+fallback. Migrate group files to the new names within the release.
+
+#### 2.2.5 Per-role reference
+
+Each entry lists the exact `roles.yaml` patterns, the HyperDX block, and what a
+holder can/cannot reach (wildcards expand via section 2.4).
+
+**admin** - group `dfe-admins`
+- Patterns: `*`; hyperdx: `full`
+- Can: everything, all orgs. Sole holder of account/group/api-key admin + the
+  CH-RBAC reconcile + gitops governance surface.
+
+**data_analyst** - group `dfe-analysts`
+- Patterns: `hunt:*`, `query:*`, `source:*`, `sampler:read`, `fieldmap:*`,
+  `alert:*`, `rule:*`, `schema:read`, `schema:write`, `transform:*`, `org:read`;
+  hyperdx: `full`
+- Can: full CRUD + execute on hunts/rules/queries (incl `query:raw` via
+  `query:*`)/sources/fieldmaps/alerts/transforms; build+read schemas; sample;
+  read org metadata; full HyperDX (gained in the rename).
+- Cannot: config/deployment/helm/argo/infra; account/group admin; repository.
+
+**data_analyst_ro** - no default group
+- Patterns: `hunt:read`, `query:read`, `query:execute`, `source:read`,
+  `sampler:read`, `fieldmap:read`, `alert:read`, `rule:read`, `schema:read`,
+  `org:read`; hyperdx: `full`
+- Can: view every analyst surface, run existing queries/views, sample, full
+  HyperDX read. Served by the `dfe_analyst_ro` readonly CH user (no tenant filter).
+- Cannot: any write/author; `query:raw`.
+
+**data_viewer** - group `dfe-viewers`
+- Patterns: `query:execute`, `source:read`, `sampler:read`, `dashboard:read`,
+  `org:read`; hyperdx: `full`
+- Can: run parameterized views, read sources, sample, and `dashboard:read` (the
+  scope the dfe-ui uses for the embedded HyperDX link), full HyperDX. The minimal
+  dashboard-consumer role.
+- Cannot: author anything; raw SQL; infra.
+
+**infra** - group `dfe-infra` (was `infra_admin`)
+- Patterns: `hunt:*`, `config:*`, `service:*:config:*`, `service:*:metrics:read`,
+  `helm:*`, `deployment:*`, `argo:*`, `org:*`, `group:*`, `repository:*`;
+  hyperdx: `otel`
+- Can: manage service configs/deployments/helm compile+DDL/Argo; full org+group+
+  repository admin; run hunts (GAINED in the rename); read service metrics; the
+  HyperDX OTel self-monitoring stream only.
+- Cannot: analyst data authoring (query/source/rule/fieldmap/alert beyond hunts);
+  the full HyperDX data surface.
+
+**infra_ro** - no default group (was `infra_viewer`)
+- Patterns: `config:read`, `service:*:config:read`, `service:*:metrics:read`,
+  `helm:compile`, `deployment:read`, `argo:applications:get`,
+  `argo:projects:get`, `service-surface:read`, `service:read`, `org:read`;
+  hyperdx: `otel`
+- Can: read infra config/service/deployment/Argo state, dry-run helm compile,
+  OTel stream.
+- Cannot: any infra write.
+
+**org_analyst** - scoped, no default group (was `customer_viewer`; auto-bound per org)
+- Patterns: `query:execute`, `source:read`, `sampler:read`, `dashboard:read`;
+  `scoped: true`; hyperdx: `org-scoped`, `tenant_scoped: true`
+- Can: the same read/execute surface as `data_viewer` but ORG-RESTRICTED.
+  `scoped: true` binds it at `org:<name>` scope; only `query:execute` is a
+  TENANT_ACTION, so reads resolve org-scoped and the `dfe_tenant_reader` CH user +
+  row policy filter rows to the principal's `org_ids`. The tenant dashboard role,
+  auto-bound by the org-domain JIT chain (section 7.3).
+- Cannot: cross-org; author; infra. NOTE there is still NO org-scoped AUTHOR
+  (write) role - `org_analyst` is read/execute only.
+
+#### 2.2.6 Known grant gaps (current-state)
+
+These are known and affect what a role can actually REACH (verify against
+`roles.yaml` when they bite):
+
+- `infra` lacks `helmvars:*` and the bare `service:write` / `service:delete` /
+  `service:validate` actions (the `service:*:config:*` mid-wildcard requires a
+  `config` segment) - some helm-var overrides and service mutations stay admin-only.
+- `service-surface` (roles.yaml) vs `service_surface` (router) hyphen/underscore
+  mismatch leaves `infra_ro`'s `service-surface:read` grant inert.
+- The `API_ENFORCED_ACTIONS` catalogue in `auth/engine.py` can drift from the
+  live `require_action` set - treat it as advisory.
 
 ### 2.3 Permission Taxonomy
 
@@ -430,15 +619,26 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 - `dfe-admins` → roles: `[admin]`
 - `dfe-analysts` → roles: `[data_analyst]`
 - `dfe-viewers` → roles: `[data_viewer]`
-- `dfe-infra` → roles: `[infra_admin]`
+- `dfe-infra` → roles: `[infra]`
 
-**Account:** `admin` (password: `changeme`, group: `dfe-admins`)
-
-Startup logs a warning if the default password is still in use.
+**Account:** `admin`, joined to `dfe-admins`. Password sourcing:
+- Dev posture (`DFE_ENV=dev|test|...`): default `changeme`; a warning is logged
+  while it is still in use.
+- Non-dev posture with an EMPTY account store and unset `DFE_ADMIN_PASSWORD`:
+  the engine generates a random password (`secrets.token_urlsafe(24)`), logs it
+  ONCE at boot, and stores only the bcrypt hash. Capture it from that first log
+  line (or pre-seed `DFE_ADMIN_PASSWORD`). This replaces the old baked-in
+  `changeme` for production.
 
 ---
 
 ## 4. OIDC Provider Integration
+
+This section is the in-RBAC summary. For the full provider-config reference, the
+infra contract (Envoy SecurityPolicy, secrets, IAM), and COPY-PASTE worked
+`{name}.yaml` examples (EntraID, on-prem Active Directory via a broker, Google
+Workspace, Okta, Keycloak) plus how each provider's groups map into DFE roles,
+see [OIDC.md](OIDC.md).
 
 ### 4.1 Architecture
 
@@ -550,21 +750,39 @@ Instead of creating a CH user per customer org, use the ClickHouse custom
 settings pattern with a small fixed set of users:
 
 ```sql
--- ONE row policy per tenant-scoped table
-CREATE ROW POLICY tenant_filter ON dfe.events
-    FOR SELECT USING org_id = getSetting('current_tenant_id')
-    TO dfe_reader;
+-- ONE RESTRICTIVE row policy per _org_id table, targeting the fixed reader.
+-- Multi-org via a comma-joined list; empty setting -> 0 rows (fail closed).
+CREATE ROW POLICY OR REPLACE dfe_tenant_filter ON dfe.events
+    AS RESTRICTIVE FOR SELECT
+    USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)
+    TO dfe_tenant_reader;
 
--- dfe-engine injects tenant per query via connection setting
-SET current_tenant_id = 'acme';
-SELECT * FROM dfe.events;  -- automatically filtered to acme rows
+-- dfe-engine injects the tenant per query (TenantScopedClient). The reader is
+-- readonly with DFE_current_tenant_id CHANGEABLE_IN_READONLY, so it can set the
+-- one setting while staying read-only.
+SELECT * FROM dfe.events SETTINGS DFE_current_tenant_id = 'acme';  -- acme rows only
 ```
 
+**REQUIRED CH SERVER CONFIG (deploy, not reconciler DDL):** the row policy reads
+`getSetting('DFE_current_tenant_id')`, a CUSTOM setting, which ClickHouse only
+accepts when the server config.xml declares the prefix:
+
+```xml
+<custom_settings_prefixes>DFE_</custom_settings_prefixes>
+```
+
+Without it, CH rejects every `DFE_*` setting (both `CREATE USER ... SETTINGS` and
+each per-query `SETTINGS`) and tenant scoping cannot apply. This is CH server
+config owned by the DEPLOYER - dfe-infra (ClickHouse chart values / users.d
+overlay) and dfe-docker (container config.xml) - NOT something the engine
+reconciler sets. Also surfaced in `.env.example`.
+
 **Benefits:**
-- 3-5 CH users total (by privilege level), not N per org
-- One row policy per tenant-scoped table, not per org
-- Scales to thousands of orgs without CH user sprawl
-- If the setting is omitted, the query fails (fail-closed)
+- A small fixed set of CH users by privilege, not N per org
+- ONE row policy per `_org_id` table, not per (org, table)
+- Scales to thousands of orgs without CH user sprawl or per-tenant DDL
+- Empty / unset setting -> zero rows (fail closed); the engine sets it to `''`
+  for an org-scoped principal with no orgs, never omits it
 
 ### 5.2 Connection Architecture
 
@@ -575,7 +793,7 @@ flowchart TD
     end
 
     subgraph "ConnectionRegistry"
-        PREC["Privilege Precedence<br/>admin → infra_admin → data_analyst<br/>→ data_analyst_viewer → data_viewer<br/>→ infra_viewer → customer_viewer"]
+        PREC["Privilege Precedence<br/>admin → data_analyst → data_analyst_ro<br/>→ data_viewer → infra → infra_ro<br/>→ org_analyst (alias-aware)"]
         CACHE["Client Cache<br/>(lazy-loaded)"]
     end
 
@@ -583,7 +801,6 @@ flowchart TD
         ADMIN_CH["dfe_admin<br/>(unrestricted)"]
         ANALYST_CH["dfe_analyst<br/>(read-write)"]
         RO_CH["dfe_analyst_ro<br/>(read-only)"]
-        VIEWER_CH["dfe_viewer<br/>(read-only)"]
         TENANT_CH["dfe_tenant_reader<br/>(row-filtered)"]
     end
 
@@ -592,7 +809,6 @@ flowchart TD
     CACHE --> ADMIN_CH
     CACHE --> ANALYST_CH
     CACHE --> RO_CH
-    CACHE --> VIEWER_CH
     CACHE -->|wrap in TenantScopedClient| TENANT_CH
 ```
 
@@ -600,12 +816,16 @@ flowchart TD
 
 ```yaml
 connections:
+  # default = the admin connection. Its user is the deployment's CH superuser
+  # (the dfe_admin identity), deliberately NOT minted so it authenticates before
+  # the first reconcile. dfe_analyst / dfe_analyst_ro / dfe_tenant_reader ARE
+  # minted by the reconciler (secrets seam -> the *_PASSWORD envs).
   default:
     host: clickhouse.clickhouse.svc.cluster.local
     port: 8123
     database: dfe
-    user: dfe_admin
-    password_env: CH_ADMIN_PASSWORD
+    user: default
+    password_env: CH_DEFAULT_PASSWORD
 
   analyst:
     user: dfe_analyst
@@ -615,56 +835,146 @@ connections:
     user: dfe_analyst_ro
     password_env: CH_ANALYST_RO_PASSWORD
 
-  viewer:
-    user: dfe_viewer
-    password_env: CH_VIEWER_PASSWORD
-
   tenant_reader:
     user: dfe_tenant_reader
     password_env: CH_TENANT_READER_PASSWORD
 
 role_connections:
   admin: default
+  infra: default
   data_analyst: analyst
-  data_analyst_viewer: analyst_ro
-  data_viewer: viewer
-  infra_admin: default
-  infra_viewer: analyst_ro
-  customer_viewer: tenant_reader
+  data_analyst_ro: analyst_ro
+  data_viewer: analyst_ro
+  infra_ro: analyst_ro
+  org_analyst: tenant_reader
 ```
 
 ### 5.4 TenantScopedClient
 
-Wraps the clickhouse-connect client to inject `current_tenant_id` into every
-query's settings. For users with multiple `org_ids`, all queries are scoped
-to their permitted orgs.
+Wraps the clickhouse-connect client to inject `DFE_current_tenant_id` into every
+query's settings - ALWAYS (fail closed). For a principal with multiple `org_ids`
+the value is the comma-joined list, so queries are scoped to exactly their
+permitted orgs; with no org_ids it is `''` (zero rows), never omitted.
 
 ```python
 class TenantScopedClient:
     def query(self, sql, ...):
-        settings = {"current_tenant_id": self.tenant_id}
+        settings = {"DFE_current_tenant_id": ",".join(self.org_ids)}
         return self._client.query(sql, settings=settings, ...)
 ```
 
 ### 5.5 Row Policies
 
-Only tables with an `org_id` column get row policies. Discovery:
+Only tables with an `_org_id` column get the tenant row policy. Discovery:
 ```sql
 SELECT table FROM system.columns
-WHERE database = 'dfe' AND name = 'org_id'
+WHERE database = 'dfe' AND name = '_org_id'
 ```
 
 System, metadata, and audit tables are excluded.
 
+### 5.6 End-to-end tenant isolation chain
+
+This is the whole chain from an external login to filtered ClickHouse rows. It
+is the load-bearing isolation path - every link must hold or the org escapes its
+tenant.
+
+```mermaid
+flowchart TD
+    LOGIN["OIDC login<br/>X-Oidc-Subject: user@acme.com"] --> ENVOY[Envoy Gateway sets X-Oidc-* headers]
+    ENVOY --> JIT["jit.ensure_account()<br/>_email_domain -> 'acme.com'"]
+    JIT --> FIND["OrgRegistry.find_by_domain('acme.com')"]
+    FIND -->|claimed by org 'acme'| GRP["create/join group org_acme_com<br/>scope = org:acme<br/>roles = [org_analyst]<br/>org_ids = acme.org_ids"]
+    FIND -->|unclaimed| NOGRP["group scope=system<br/>roles=[] (no grants)"]
+    GRP --> UNION["OIDC path unions header groups<br/>+ store-side groups<br/>(_merge_group_resolutions)"]
+    UNION --> CTX["AuthContext.org_ids = acme.org_ids<br/>grant: org_analyst @ org:acme"]
+    CTX --> REQ["read request (query:execute)<br/>authorised org-scoped (TENANT_ACTION)"]
+    REQ --> RCLIENT["registry.read_client_for_user()<br/>role -> CH user dfe_tenant_reader"]
+    RCLIENT --> TSC["TenantScopedClient injects<br/>SETTINGS DFE_current_tenant_id = join(org_ids)"]
+    TSC --> POLICY["CH RESTRICTIVE row policy dfe_tenant_filter:<br/>USING has(splitByChar(',',<br/>getSetting('DFE_current_tenant_id')), _org_id)"]
+    POLICY --> ROWS["only acme rows returned<br/>(unset/empty setting -> 0 rows, fail closed)"]
+    style ROWS fill:#4a4,color:#fff
+    style NOGRP fill:#fa0,color:#fff
+```
+
+Every link is covered by code: JIT + `find_by_domain` (auth/jit.py, orgs/registry.py),
+the OIDC group union (api/deps.py `_merge_group_resolutions`), the CH-user resolution
+(connections/registry.py `read_client_for_user`), the per-query setting injection
+(connections/tenant.py `TenantScopedClient`), and the row policy (governance/ch/render.py).
+`query:execute` is the only `TENANT_ACTION`; every non-tenant action is a plain
+system-scope check. The tenant boundary itself is enforced SOLELY at the CH
+row-policy layer - see the two boundaries in section 6.
+
 ---
 
-## 6. Org Lifecycle
+## 6. Two Authority Boundaries: Data vs Operations
 
-### 6.1 Org Registry
+DFE has TWO independent security boundaries. Conflating them is the classic
+mistake, so document both explicitly.
 
-YAML-backed CRUD via `OrgRegistry`. One file per org in `config/orgs/`.
+```mermaid
+flowchart LR
+    subgraph data["DATA boundary (tenant isolation)"]
+        direction TB
+        Q["any CH query"] --> RP["ClickHouse RESTRICTIVE row policy<br/>getSetting('DFE_current_tenant_id')"]
+        RP --> FILT["rows filtered to the caller's org_ids<br/>at QUERY TIME"]
+    end
+    subgraph ops["OPERATIONS boundary (service power)"]
+        direction TB
+        W["git write to dfe-deploy repo"] --> ARGO["Argo CD syncs the commit"]
+        ARGO --> CLUSTER["cluster / pod / scaling / pipeline change"]
+    end
+    style data fill:#e8f0ff
+    style ops fill:#fff0e8
+```
 
-### 6.2 Org Creation Flow
+| | DATA boundary | OPERATIONS boundary |
+|---|---|---|
+| What it governs | Tenant data reads | Infra/service/pod/scaling/pipeline config |
+| Enforced by | ClickHouse row policies at query time (section 5) | The dfe-deploy git repo (branch protection, repo access, PR review, the auto-merge posture gate) |
+| Engine RBAC role | `org_analyst` etc. + `dfe_tenant_reader` CH user | `infra` (the governed window) |
+| Bypass path | none - there is NO query path that omits the setting | direct commit to dfe-deploy BYPASSES engine RBAC entirely |
+
+### 6.1 The deploy-repo is the ultimate operational authority
+
+The `infra` role's power flows: dfe-engine -> commit to the dfe-deploy repo ->
+Argo CD -> cluster action. dfe-engine RBAC governs who makes infra/service
+changes THROUGH the engine (the governed window). But DIRECT write access to
+dfe-deploy bypasses dfe-engine RBAC completely: a hand-edited file -> Argo ->
+action. So **dfe-deploy commit access == full operational/service power**
+(equal-to-or-exceeding `infra`), regardless of any dfe-engine role. It MUST be
+governed at the GIT layer (branch protection, repo access, PR review, the
+auto-merge posture gate) - engine RBAC alone does NOT constrain a direct
+committer. This is the gitops-survivability principle: the deploy repo is the
+source of truth and authority; the engine is a window over it.
+
+### 6.2 Operations is NOT data
+
+CRITICAL distinction: deploy-repo write is OPERATIONAL/service power, NOT tenant
+DATA access. There is no ClickHouse query path from a git commit, so deploy-repo
+access grants ZERO tenant data reads. Tenant data is isolated by the CH row
+policies (the custom-settings model, section 5) at query time, independent of
+git. So:
+- The deploy-repo boundary governs OPERATIONS (what runs, how it scales).
+- The CH row-policy boundary governs DATA (which rows a principal can read).
+
+An operator with full dfe-deploy write can reshape the cluster but still cannot
+read another org's rows without going through a tenant-scoped CH query path -
+and every such path injects the row-policy setting.
+
+---
+
+## 7. Org Lifecycle
+
+### 7.1 Org Registry
+
+YAML-backed CRUD via `OrgRegistry`. One file per org in `config/orgs/`. An org's
+`domains` list (the email domains it claims) drives the JIT org-domain chain
+(7.3); it is SEPARATE from `org_ids` (the tenant IDs used in the CH row-policy
+filter). `find_by_domain` is case-insensitive and, on multiple claimants,
+deterministically picks the name-sorted-first org and logs a warning.
+
+### 7.2 Org Creation Flow
 
 ```mermaid
 sequenceDiagram
@@ -691,28 +1001,98 @@ With the custom settings pattern, adding an org does NOT require creating a
 CH user or row policy. The existing `tenant_reader` user + existing row
 policies handle it. dfe-engine just needs to know the org_ids to inject.
 
----
+### 7.3 Org-domain association (JIT)
 
-## 7. HyperDX Integration
+The auth half of the isolation chain (5.6). On an external user's FIRST login,
+`jit.ensure_account` derives the email domain (`_email_domain`) and:
+- if a managed org CLAIMS the domain (`OrgRegistry.find_by_domain`): create/join
+  a group `org_<domain>` (e.g. `org_acme_com`) with `scope = org:<name>`,
+  `roles = [org_analyst]`, `org_ids = org.org_ids`;
+- if the domain is UNCLAIMED: create the group `scope = system`, `roles = []`,
+  `org_ids = []` - the account exists but gets no grants until an org claims the
+  domain or an admin assigns roles.
 
-### 7.1 Strategy
-
-- **Bootstrap:** `generate_default_connections_json()` produces `DEFAULT_CONNECTIONS` env var for HyperDX Helm chart
-- **Runtime:** `HyperDXClient` calls HyperDX internal API for team/connection CRUD
-- **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls logged as warnings
-
-### 7.2 Team Mapping
-
-| DFE Role Scope | HyperDX Team | CH Connection | Tenant Setting |
-|----------------|-------------|---------------|----------------|
-| admin | `dfe-admin` | `default` | None (unrestricted) |
-| data_analyst | `dfe-analysts` | `analyst` | None |
-| data_viewer | `dfe-viewers` | `viewer` | None |
-| customer_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
+Idempotent: the group is created once per domain; later same-domain users just
+`add_member`. The OIDC auth path then UNIONS this store-side group's grants +
+`org_ids` into the live `AuthContext` (`_merge_group_resolutions`), so the org
+binding reaches the request even though the IdP only sent header groups.
 
 ---
 
-## 8. Argo CD RBAC Export
+## 8. HyperDX Integration
+
+### 8.1 Strategy
+
+- **Bootstrap:** `generate_default_connections_json()` produces the
+  `DEFAULT_CONNECTIONS` env var for the HyperDX Helm chart.
+- **Runtime:** `HyperDXClient` calls the HyperDX internal API for team/connection CRUD.
+- **Failures:** Non-fatal. First failure sets `_connected=False`, subsequent calls
+  logged as warnings. Org CRUD still succeeds; provisioning is retried in the
+  background.
+
+### 8.2 Team model - GA one-team (default) vs per-group
+
+Two postures, switched by `DFE_HYPERDX_PER_GROUP` (default `false` = GA):
+
+```mermaid
+flowchart TD
+    START["provisioned user"] --> POSTURE{DFE_HYPERDX_PER_GROUP}
+    POSTURE -->|false GA default| GA["ONE shared team = DFE_GA_TEAM_NAME (default 'dfe')<br/>every user joins it"]
+    GA --> GACONN["isolation is NOT the team -<br/>it is the per-connection<br/>DFE_current_tenant_id setting<br/>on the shared dfe_tenant_reader"]
+    POSTURE -->|true post-GA| PG["per-org team customer-&lt;org&gt;<br/>provisioned per org"]
+    style GA fill:#4a4,color:#fff
+```
+
+GA rationale: the shared `dfe_tenant_reader` CH user + a per-connection
+`DFE_current_tenant_id` isolates orgs WITHOUT a team per org, so it scales to
+thousands of orgs with no per-tenant team sprawl. `DFE_HYPERDX_PER_GROUP=true`
+is the post-GA richer model.
+
+### 8.3 Scope-gate from the role's hyperdx block
+
+HyperDX provisioning is gated on the role config, NOT hardcoded. `jit.resolve_hyperdx_team`
+computes `RoleConfig.effective_hyperdx(roles)` (section 2.2.2); if `access == none`
+it returns `""` and NO team/connection/invite is provisioned. So a role's
+`hyperdx:` block is the single switch for its HyperDX capability - a YAML edit,
+not code.
+
+### 8.4 The per-org connection (tenant_reader + setting)
+
+Per-org HyperDX connections point at the shared `dfe_tenant_reader` CH user and
+carry the tenant setting, replacing the retired per-group `dfe_grp_<group>` users:
+
+| DFE principal | HyperDX team | CH user | Connection setting |
+|---|---|---|---|
+| admin | GA team (`dfe`) | `dfe_admin` | none (unrestricted) |
+| data_analyst | GA team (`dfe`) | `dfe_analyst` | none |
+| data_viewer | GA team (`dfe`) | `dfe_analyst_ro` | none |
+| org_analyst (acme) | GA team (`dfe`) | `dfe_tenant_reader` | `DFE_current_tenant_id=<acme org_ids>` |
+
+`build_hyperdx_connections_json` emits `clickhouseSettings { DFE_current_tenant_id:
+join(org_ids) }` per org connection; an empty value fails closed (0 rows).
+
+### 8.5 Two fork dependencies
+
+The upstream HyperDX fork must carry two changes for the per-org setting to take
+effect (handover for the fork maintainer):
+
+1. **Merge connection settings into every query.** The fork `ConnectionSchema`
+   has no generic settings map (only `hyperdxSettingPrefix`), so
+   `connection.clickhouseSettings` is currently INERT - the fork strips unknown
+   keys (forward-safe, but the tenant setting never reaches CH). The fork must
+   MERGE `connection.clickhouseSettings` into every proxied CH query's
+   `clickhouse_settings`. The mechanism exists (`node.ts` accepts per-query
+   `clickhouse_settings`); the wiring is the small merge.
+2. **Source -> connection fan-out** under per-org connections is a fork concern
+   (a source must resolve to the caller's org connection).
+
+Until (1) lands in the fork, HyperDX tenant isolation is enforced only if the
+fork applies the setting; the dfe-engine + `TenantScopedClient` path (section 5)
+is already proven end to end against real ClickHouse.
+
+---
+
+## 9. Argo CD RBAC Export
 
 ```mermaid
 flowchart LR
@@ -728,7 +1108,7 @@ bindings. Unknown argo actions logged as warnings (not errors).
 
 ---
 
-## 9. Audit Logging
+## 10. Audit Logging
 
 Every authorisation decision is logged for compliance (SOC 2, GDPR) via
 structured OTel log events (`hyperi_pylib.logger`).
@@ -747,7 +1127,7 @@ No custom ClickHouse audit table — standard OTel log ingestion is used.
 
 ---
 
-## 10. AuthContext Model
+## 11. AuthContext Model
 
 ```python
 class AuthContext(BaseModel):
@@ -767,7 +1147,7 @@ the context.
 
 ---
 
-## 11. Settings
+## 12. Settings
 
 ```python
 class AuthSettings(BaseModel):
@@ -788,7 +1168,7 @@ Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
 
 ---
 
-## 12. Module Map
+## 13. Module Map
 
 ```mermaid
 graph TD
@@ -864,7 +1244,7 @@ graph TD
 
 ---
 
-## 13. Remaining Work (Phase 4)
+## 14. Remaining Work
 
 ### Schema-Less Service Discovery
 
@@ -880,7 +1260,7 @@ remains in place. Phase 4 replaces it with:
 
 ---
 
-## 14. Edge Cases
+## 15. Edge Cases
 
 | Scenario | Behaviour |
 |----------|-----------|
@@ -893,7 +1273,7 @@ remains in place. Phase 4 replaces it with:
 
 ---
 
-## 15. Non-Goals
+## 16. Non-Goals
 
 - Per-metric RBAC granularity (access is per-service, not per-metric)
 - Per-setting RBAC granularity (access is per-service config, not per-key)
@@ -905,7 +1285,7 @@ remains in place. Phase 4 replaces it with:
 
 ---
 
-## 16. Breaking Changes from Pre-2.2
+## 17. Breaking Changes from Pre-2.2
 
 | What | Old | New |
 |------|-----|-----|
@@ -921,7 +1301,7 @@ remains in place. Phase 4 replaces it with:
 
 ---
 
-## 17. References
+## 18. References
 
 - [ClickHouse Custom Settings + Row Policy (Highlight)](https://www.highlight.io/blog/row-level-security)
 - [API Key Prefix Pattern (Seam)](https://github.com/seamapi/prefixed-api-key)

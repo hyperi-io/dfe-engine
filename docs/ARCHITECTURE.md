@@ -303,8 +303,9 @@ Guarded by `DFE_ORG_PROVISIONING_ENABLED`, non-fatal on error:
 
 - `orgs/ch_provisioner.py` - per-org ClickHouse user + database for tenants with
   `dedicated_database=True`.
-- `connections/reconciler.py` - ensures static CH users + row policies (tenant
-  isolation via a `current_tenant_id` setting on tables with an `org_id` column).
+- `governance/ch/reconciler.py` - ensures the fixed CH users by privilege + ONE
+  row policy per `_org_id` table (tenant isolation via the `DFE_current_tenant_id`
+  custom setting; needs `custom_settings_prefixes=DFE_` on the CH server).
 - `hyperdx/` - HyperDX tenant connection provisioning.
 
 ---

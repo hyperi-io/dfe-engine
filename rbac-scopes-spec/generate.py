@@ -1,4 +1,4 @@
-"""Export RBAC scope constants as TypeScript from ``scope_constants.py``.
+"""Export RBAC scope constants as TypeScript from the scope catalogue.
 
 Run after any scope catalog changes::
 
@@ -6,6 +6,11 @@ Run after any scope catalog changes::
 
 Output is written to ``rbac-scopes-spec/scopes/index.ts`` for review and is
 copied into ``dfe-ui`` ``packages/dfe-engine-types/scopes/`` by CI.
+
+Source of truth: the ``scopes_dict`` literal in ``dfe_engine.auth.rbac_scopes``.
+This used to be 26 per-category ``*_scopes`` dicts in a sibling
+``scope_constants`` module; they were merged into one flat dict, so this reads
+the single ``scopes_dict`` now. Parsed with the AST (no import side effects).
 """
 
 from __future__ import annotations
@@ -16,7 +21,8 @@ from pathlib import Path
 from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-SCOPE_CONSTANTS = REPO_ROOT / "src/dfe_engine/auth/rbac_scopes/scope_constants.py"
+SCOPES_MODULE = REPO_ROOT / "src/dfe_engine/auth/rbac_scopes/__init__.py"
+SCOPES_VAR = "scopes_dict"
 DEFAULT_OUT_DIR = Path(__file__).parent / "scopes"
 
 
@@ -27,46 +33,35 @@ def _literal(node: ast.AST) -> Any:
         keys = [_literal(k) for k in node.keys]
         values = [_literal(v) for v in node.values]
         if any(k is Ellipsis for k in keys):
-            raise ValueError("unsupported dict key in scope_constants.py")
+            raise ValueError("unsupported dict key in scopes_dict")
         return dict(zip(keys, values, strict=True))
     raise ValueError(f"unsupported AST node: {type(node).__name__}")
 
 
-def _parse_scope_groups(source_path: Path) -> list[tuple[str, dict[str, str]]]:
+def _parse_scopes(source_path: Path) -> dict[str, str]:
     tree = ast.parse(source_path.read_text())
-    groups: list[tuple[str, dict[str, str]]] = []
     for node in tree.body:
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
             continue
-        name = node.targets[0].id
-        if not name.endswith("_scopes"):
+        if node.targets[0].id != SCOPES_VAR:
             continue
         value = _literal(node.value)
         if not isinstance(value, dict):
-            raise ValueError(f"{name} must be a dict literal")
-        groups.append((name, value))
-    if not groups:
-        raise ValueError(f"no *_scopes dicts found in {source_path}")
-    return groups
+            raise ValueError(f"{SCOPES_VAR} must be a dict literal")
+        return value
+    raise ValueError(f"no {SCOPES_VAR} dict found in {source_path}")
 
 
-def _render_ts(groups: list[tuple[str, dict[str, str]]]) -> str:
+def _render_ts(scopes: dict[str, str]) -> str:
     lines = [
-        "// Auto-generated from dfe-engine scope_constants.py. Do not edit.",
+        "// Auto-generated from dfe-engine rbac_scopes (scopes_dict). Do not edit.",
         "",
+        "export const scopes = {",
     ]
-    for name, scopes in groups:
-        lines.append(f"const {name} = {{")
-        for key, val in scopes.items():
-            lines.append(f'  {key}: "{val}",')
-        lines.append("} as const;")
-        lines.append("")
-
-    lines.append("export const scopes = {")
-    for name, _ in groups:
-        lines.append(f"  ...{name},")
+    for key, val in scopes.items():
+        lines.append(f'  {key}: "{val}",')
     lines.append("} as const;")
     lines.append("")
     lines.append("export type RbacScope = (typeof scopes)[keyof typeof scopes];")
@@ -84,12 +79,12 @@ def main() -> None:
         help=f"Directory for index.ts (default: {DEFAULT_OUT_DIR})",
     )
     args = parser.parse_args()
-    groups = _parse_scope_groups(SCOPE_CONSTANTS)
+    scopes = _parse_scopes(SCOPES_MODULE)
     out_dir = args.output_dir
     out_dir.mkdir(parents=True, exist_ok=True)
     out_file = out_dir / "index.ts"
-    out_file.write_text(_render_ts(groups))
-    print(f"RBAC scope constants written to {out_file} ({len(groups)} groups)")
+    out_file.write_text(_render_ts(scopes))
+    print(f"RBAC scope constants written to {out_file} ({len(scopes)} scopes)")
 
 
 if __name__ == "__main__":

@@ -137,44 +137,48 @@ Two more governance pieces keep authz itself in git: `rbac_source` loads roles a
 groups FROM the gitops tree, and `auth_sync` mirrors them back INTO it. Accounts and
 API keys hold secret material, so they stay out of git (that is an ESO job).
 
-## ClickHouse data RBAC -- one user per group
+## ClickHouse data RBAC -- fixed users + row-policy isolation
 
-`governance/ch_rbac.py`. Access control in HyperDX's app layer cannot contain a bad
-query. Quotas and resource limits can, and those live on the ClickHouse user. So a
-group maps to exactly one ClickHouse user carrying three controls:
+`governance/ch/`. Access control in HyperDX's app layer cannot contain a bad query.
+Quotas, resource limits, and row policies can, and those live on the ClickHouse
+user. The engine-upgrade redesign RETIRED the old one-user-per-group model
+(`dfe_grp_<group>`, which broke CH connection pooling at scale) in favour of a
+small FIXED set of users by privilege plus ONE row policy per tenant table.
+Authoritative reference: [RBAC.md](RBAC.md) section 5. Summary:
 
 ```mermaid
 graph LR
-    Group["RBAC group - e.g. soc-ro"]
-    User["ClickHouse user - dfe_grp_soc-ro"]
-    Grants["GRANTs + row policies - what data"]
+    Reader["dfe_tenant_reader - shared, readonly"]
+    Setting["per-query DFE_current_tenant_id - which org(s)"]
+    Policy["ONE row policy per _org_id table - getSetting filter"]
     Profile["Settings profile - per-query limits"]
     Quota["Quota - rate and volume"]
 
-    Group --> User
-    User --> Grants
-    User --> Profile
-    User --> Quota
+    Reader --> Setting
+    Setting --> Policy
+    Reader --> Profile
+    Reader --> Quota
 ```
 
-`build_group_sql` renders the `CREATE USER` + `GRANT` + `CREATE SETTINGS PROFILE` +
-`CREATE QUOTA` (identifiers backtick-quoted, so a hyphenated group name is a valid
-CH name). The primary path is `ddl_artifact`, which emits that as a gitops DDL file
-under `ddl/ch-rbac/<group>.sql` -- applied by the same migration runner as the schema
-DDL, with the read-only core tiers supplied from dfe-schemas. The imperative
-`GroupChProvisioner` is the secondary, direct path. HyperDX then selects the
-connection bound to the user's group, so every query runs as that user and CH itself
-is the enforcing boundary.
+The reconciler (`governance/ch/reconciler.py`) mints the fixed users (`dfe_analyst`,
+`dfe_analyst_ro`, `dfe_tenant_reader`; `dfe_admin` is the deployment superuser, not
+minted) via `render_fixed_users`, plus quota tiers, service roles, and
+`render_tenant_policies` -- ONE `RESTRICTIVE` row policy per `_org_id` table
+`USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)`. These
+emit as a gitops DDL artifact applied by the same migration runner as the schema
+DDL (core tiers from dfe-schemas). Tenant isolation is then a per-query
+`DFE_current_tenant_id` setting injected by `TenantScopedClient`, NOT a user per
+org -- so it scales to thousands of orgs with no per-tenant DDL. Requires the CH
+server `custom_settings_prefixes=DFE_` (a deploy prerequisite).
 
-This applies to **hunts too**, and it is the same mechanism. A hunt worker does not
-connect to ClickHouse as an unbounded account -- it runs its query as a CH user
-carrying a quota and a settings profile. The primary job there is a cost guard: a
-dumb or runaway hunt query (a full-table scan, an unbounded join) is killed by the
-quota or the `max_memory_usage`/`max_execution_time`/`max_rows_to_read` limits
-rather than taking the cluster down. The grants are a security scope on top if a
-hunt should only ever see certain data. So the per-group CH user has two consumers --
-interactive queries through HyperDX, and hunt execution -- and CH is the safety
-boundary for both.
+This applies to **hunts too**. A hunt worker does not connect to ClickHouse as an
+unbounded account -- it runs as a fixed CH user carrying a quota and a settings
+profile. The primary job there is a cost guard: a dumb or runaway hunt query (a
+full-table scan, an unbounded join) is killed by the quota or the
+`max_memory_usage`/`max_execution_time`/`max_rows_to_read` limits rather than
+taking the cluster down. Row policies are the data-scope boundary on top. So CH
+itself is the enforcing safety boundary for both interactive HyperDX queries and
+hunt execution.
 
 ## The hunt runner
 

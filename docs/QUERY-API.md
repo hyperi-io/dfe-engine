@@ -736,14 +736,6 @@ Query metadata is embedded in Arrow schema metadata:
 
 ---
 
-## SDK Documentation
-
-- [Python SDK](./QUERY-API-PYTHON.md) - Python client with pandas integration
-- [TypeScript SDK](./QUERY-API-TYPESCRIPT.md) - TypeScript client with React Query
-- [Rust SDK](./QUERY-API-RUST.md) - Rust client with arrow-rs
-
----
-
 ## Security Properties
 
 | Property | How Achieved |
