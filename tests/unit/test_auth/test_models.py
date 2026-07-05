@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.auth.models import AuthContext, AuthorizationError, AuthzRequest, AuthzResult
+from dfe_engine.auth.models import AuthContext, AuthorizationError, AuthzResult
 
 
 class TestAuthContext:
@@ -71,17 +71,6 @@ class TestAuthzResult:
     def test_denied(self):
         r = AuthzResult(allowed=False, reason="no role grants 'config:write'")
         assert not r.allowed
-
-
-class TestAuthzRequest:
-    def test_create(self):
-        req = AuthzRequest(
-            principal='User::"alice"',
-            action='Action::"config:read"',
-            resource='ServiceConfig::"receiver-production"',
-        )
-        assert req.principal == 'User::"alice"'
-        assert req.context == {}
 
 
 class TestAuthorizationError:

@@ -171,9 +171,12 @@ class ClickHouseAdapter(DatasourceAdapter):
             return False
 
     def close(self) -> None:
+        # Close only what this adapter OWNS: its restricted view client. The
+        # ClickHouseManager is a process-wide, first-call-wins singleton shared
+        # by every adapter/caller, so this adapter must NOT tear it down (and it
+        # has no close() method anyway -- teardown is reset_instance()/_cleanup,
+        # a global lifecycle concern). Just drop our reference to it.
         if self._restricted_client:
             self._restricted_client.close()
             self._restricted_client = None
-        if self._manager:
-            self._manager.close()
-            self._manager = None
+        self._manager = None

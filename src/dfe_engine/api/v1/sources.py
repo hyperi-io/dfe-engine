@@ -308,42 +308,9 @@ async def get_source_schema_columns(
 
     Use ``per_page=-1`` to return all columns in one page.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
-        )
-
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
+    source, version_id, builder = _source_version_builder(registry, name, version)
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
     except SchemaBuildError as exc:
@@ -379,42 +346,9 @@ async def build_source_schema(
     Runs the v2 YAML → DDL pipeline and returns the generated DDL
     without executing it against ClickHouse.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
-        )
-
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
+    source, version_id, builder = _source_version_builder(registry, name, version)
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
     except SchemaBuildError as exc:
@@ -466,42 +400,9 @@ async def deploy_source_schema(
     NOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never
     deployed.
     """
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError
 
-    try:
-        source = registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    version_id = version or source.runtime_version_id()
-    if version_id not in source.versions:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"Version '{version_id}' not found for source '{name}'",
-            },
-        )
-
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
+    source, version_id, builder = _source_version_builder(registry, name, version)
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
     except SchemaBuildError as exc:
@@ -547,7 +448,9 @@ async def deploy_source_schema(
     from dfe_engine.settings import get_clickhouse_config
 
     try:
-        ch = ClickHouseManager.get_instance(get_clickhouse_config(settings)).get_clickhouse_client()
+        ch = ClickHouseManager.get_instance(
+            get_clickhouse_config(get_settings())
+        ).get_clickhouse_client()
     except Exception as exc:
         raise HTTPException(
             status_code=503,
@@ -693,6 +596,13 @@ async def bulk_action(
 
     for name in body.sources:
         try:
+            # Precheck existence like the single-source DELETE route does - the
+            # bulk body is an unchecked list of names, so a traversal / unknown
+            # name must be a clean per-item failure, never an arbitrary-file touch
+            # (F-SOURCES-TRAVERSAL; the registry also containment-checks the path).
+            if not registry.source_exists(name):
+                failed.append({"source": name, "error": f"Source {name!r} not found"})
+                continue
             if body.action == "delete":
                 registry.delete_source(name)
             else:
@@ -722,6 +632,54 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 
 
 # ── Helpers ──────────────────────────────────────────────────
+
+
+def _source_version_builder(registry: Any, name: str, version: str | None):
+    """Shared prologue for the /columns, /build and /deploy schema endpoints.
+
+    Resolves the source (404 not_found), the target version defaulting to the
+    runtime version (404 not_found), asserts the version snapshot carries schema
+    files (404 no_schema), then constructs the ``SchemaBuilderV2``. Returns
+    ``(source, version_id, builder)``. The three 404 codes/messages were byte-for-byte
+    identical across all three callers, so they live here once.
+    """
+    from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
+    from dfe_engine.source.type_registry import TypeRegistry
+
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Source '{name}' not found"},
+        ) from None
+
+    version_id = version or source.runtime_version_id()
+    if version_id not in source.versions:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Version '{version_id}' not found for source '{name}'",
+            },
+        )
+
+    snap = source.versions[version_id]
+    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "no_schema",
+                "message": f"Source '{name}' version '{version_id}' has no schema configured",
+            },
+        )
+
+    settings = get_settings()
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    return source, version_id, builder
 
 
 def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:

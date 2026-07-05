@@ -1,11 +1,11 @@
 #  Project:      dfe-engine
 #  File:         hunt_runner/models.py
-#  Purpose:      Hunt spec + runtime state models
+#  Purpose:      Hunt spec model
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Hunt definition (gitops) + runtime coordination state (ClickHouse)."""
+"""Hunt definition (gitops config)."""
 
 from __future__ import annotations
 
@@ -23,13 +23,3 @@ class HuntSpec(BaseModel):
     target_table: str = ""
     # FIXED watermark field - the always-present common-header column (Derek).
     timestamp_field: str = "timestamp_load"
-
-
-class HuntState(BaseModel):
-    """Per-hunt runtime coordination state (lives in ClickHouse, not gitops)."""
-
-    hunt_id: str
-    status: str = "idle"  # idle | running | deferred
-    last_completed_at: int | None = None
-    overrun_count: int = 0
-    too_aggressive: bool = False

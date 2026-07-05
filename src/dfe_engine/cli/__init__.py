@@ -8,7 +8,7 @@
 
 """Auth management CLI subcommands for ``dfe-api``.
 
-Uses hyperi-pylib CLI framework (Typer + Rich output helpers).
+Uses scalo CLI framework (Typer + Rich output helpers).
 
 Registered via :meth:`DfeApiApp.register_commands` and exposed as::
 
@@ -38,15 +38,20 @@ from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.settings import is_dev_posture
 
 
 def _get_stores() -> tuple[AccountStore, GroupStore, APIKeyStore]:
     """Initialise auth stores from the configured directory."""
     config_dir = os.environ.get("DFE_CONFIG_DIR", "./config")
     auth_dir = os.environ.get("DFE_AUTH_DIR", str(Path(config_dir) / "auth"))
-    admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
+    # None when unset -> bootstrap_auth generates a random admin password in a
+    # non-dev posture instead of seeding 'changeme' (F-ADMIN-CHANGEME).
+    admin_pw = os.environ.get("DFE_ADMIN_PASSWORD")
     account_store, group_store, api_key_store, _, _ = bootstrap_auth(
-        Path(auth_dir), default_admin_password=admin_pw
+        Path(auth_dir),
+        default_admin_password=admin_pw,
+        dev_posture=is_dev_posture(os.environ.get("DFE_ENV", "production")),
     )
     return account_store, group_store, api_key_store
 

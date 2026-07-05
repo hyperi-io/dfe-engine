@@ -28,8 +28,15 @@ import asyncio
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import (
+    CurrentUser,
+    SourceReg,
+    TenantClient,
+    check_action,
+    require_action,
+)
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
+from dfe_engine.auth import AuthContext
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.sampling import GATED_MODES, Sampler, SampleRequest, SamplerError, SampleResult
@@ -77,15 +84,28 @@ async def _submit(
     request: Request,
     ch: object,
     source_registry: object,
-    user_id: str,
+    user: AuthContext,
 ) -> SampleSubmitResponse:
     sampler = _sampler(request)
     manager = _task_manager(request)
     cfg = request.app.state.settings.sampler
 
+    # A caller-supplied `table`/`filter` is raw SQL interpolated into the query, so
+    # it requires `query:raw` - NOT the broad `sampler:read` that read-only viewers
+    # hold. `query:raw` is held only by admin-class principals, whose fixed CH user
+    # (dfe_admin) is targeted by NO row policy, so the interpolation runs
+    # unrestricted (every org) - exactly why it must be walled off from viewers.
+    # Sampling a REGISTERED source (no table/filter) stays `sampler:read` and runs
+    # on the acting user's fixed client (row-filtered for org_analyst). Without
+    # this a viewer reaches an arbitrary-SQL sink and reads every org
+    # (F-SAMPLER-SQLI).
+    if req.table is not None or req.filter is not None:
+        check_action(request, user, scopes_dict["query_raw"])
+
     try:
-        # Fail fast on a bad target (missing source, no table/topic) rather than
-        # burying it in a background task the caller then has to poll for.
+        # Fail fast on a bad target (missing source, no table/topic, or a `table`
+        # override that is not a bare db.table identifier) rather than burying it
+        # in a background task the caller then has to poll for.
         sampler.resolve_or_raise(req, source_registry)
     except SamplerError as exc:
         raise HTTPException(
@@ -94,7 +114,7 @@ async def _submit(
 
     info = manager.submit("sampler:sample", sampler.run, req, ch, source_registry)
     audit_resource_change(
-        user_id, "sampler", req.source or req.table or req.topic or "", "executed"
+        user.user_id, "sampler", req.source or req.table or req.topic or "", "executed"
     )
 
     # Decide how long to block for inline completion.
@@ -133,12 +153,12 @@ async def sample_source(
     body: SampleRequest,
     request: Request,
     user: CurrentUser,
-    ch: ClickHouseClient,
+    ch: TenantClient,
     source_registry: SourceReg,
 ) -> SampleSubmitResponse:
     """Sample a registered source. The path ``source`` wins over any in the body."""
     req = body.model_copy(update={"source": source})
-    return await _submit(req, request, ch, source_registry, user.user_id)
+    return await _submit(req, request, ch, source_registry, user)
 
 
 @router.post("/sample", response_model=SampleSubmitResponse, dependencies=[_READ])
@@ -146,18 +166,21 @@ async def sample_adhoc(
     body: SampleRequest,
     request: Request,
     user: CurrentUser,
-    ch: ClickHouseClient,
+    ch: TenantClient,
     source_registry: SourceReg,
 ) -> SampleSubmitResponse:
     """Ad-hoc sample - supply an explicit ``table``/``topic`` (or a ``source``)."""
-    return await _submit(body, request, ch, source_registry, user.user_id)
+    return await _submit(body, request, ch, source_registry, user)
 
 
 @router.get("/samples/{task_id}", response_model=SampleSubmitResponse, dependencies=[_READ])
 async def get_sample(task_id: str, request: Request, user: CurrentUser) -> SampleSubmitResponse:
     """Poll a sample task's status and result."""
     info = _task_manager(request).get(task_id)
-    if info is None:
+    # Guard the kind: _to_response validates info.result as a SampleResult, so a
+    # wrong-kind task id (e.g. a completed hunt task) would 500 on validation.
+    # Treat a non-sampler id the same as a missing one -> 404.
+    if info is None or not info.kind.startswith("sampler:"):
         raise HTTPException(404, detail={"code": "not_found", "message": "sample task not found"})
     return _to_response(info)
 

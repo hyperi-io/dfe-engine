@@ -1,3 +1,11 @@
+#  Project:      dfe-engine
+#  File:         hunts/rule_registry.py
+#  Purpose:      CRUD for hunt detection rules (API-persisted YAML)
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
 """Rule Registry — CRUD for hunt detection rules (API-persisted YAML).
 
 Separate from ``hunts.rule_repo_dir`` (Jinja2 templates for scheduled hunts).
@@ -170,6 +178,7 @@ class RuleRegistry:
                     "source_db": rule.source_db,
                     "source_table": rule.source_table,
                     "hunt_name": rule.hunt_name,
+                    "sigma_rule_id": rule.sigma_rule_id,
                     "created_at": rule.created_at,
                 }
             )

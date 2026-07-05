@@ -4,10 +4,9 @@ import pytest
 
 from dfe_engine.deployment.models.common import TShirtSize
 from dfe_engine.deployment.sizing import (
-    DEFAULT_SIZES,
     RESOURCE_SIZES,
-    _ensure_compat_dicts,
     apply_sizing,
+    get_default_size,
     get_resources,
     get_service_overrides,
 )
@@ -145,15 +144,11 @@ class TestApplySizing:
 
 
 class TestDefaultSizes:
-    @pytest.fixture(autouse=True)
-    def _init_defaults(self):
-        _ensure_compat_dicts()
-
     def test_receiver_default(self):
-        assert DEFAULT_SIZES["receiver"] == TShirtSize.small
+        assert get_default_size("receiver") == TShirtSize.small
 
     def test_loader_default(self):
-        assert DEFAULT_SIZES["loader"] == TShirtSize.medium
+        assert get_default_size("loader") == TShirtSize.medium
 
     def test_archiver_default(self):
-        assert DEFAULT_SIZES["archiver"] == TShirtSize.small
+        assert get_default_size("archiver") == TShirtSize.small

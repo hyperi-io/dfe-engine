@@ -98,10 +98,8 @@ class HelmServiceValues(BaseModel):
 class CompilationResult(BaseModel):
     """Result of compiling Helm values for all services.
 
-    NOTE: ``argo_*`` are still GENERATED for now but no longer PUBLISHED to the
-    deploy repo -- dfe-infra's ApplicationSets own deployment; the engine writes
-    only overlay values + DDL (see gitops/artifacts.py). The argo_* generation is
-    dead-weight to be removed once the appset git-generator is the sole path.
+    dfe-infra's ApplicationSets own deployment; the engine writes only overlay
+    values + DDL (see gitops/artifacts.py).
     """
 
     helm_values: dict[str, HelmServiceValues] = Field(
@@ -110,9 +108,5 @@ class CompilationResult(BaseModel):
     )
     ddl_statements: list[str] = Field(default_factory=list)
     kafka_topics: list[dict[str, Any]] = Field(default_factory=list)
-    argo_rbac_csv: str = Field(default="")
-    argo_appproject_roles: list[dict[str, Any]] = Field(default_factory=list)
-    argo_applications: list[dict[str, Any]] = Field(default_factory=list)
-    argo_appproject: dict[str, Any] = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     errors: list[str] = Field(default_factory=list)

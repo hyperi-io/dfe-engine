@@ -48,6 +48,36 @@ def test_subject_over_50_rejected():
         validate_subject("cfg(x): " + "y" * 60)
 
 
+def test_build_message_budget_truncates_long_subject():
+    # the verified 53-char case ('cfg(receiver-default): set clickhouse_max_connections')
+    # must fit 50, stay conforming, and keep a non-empty summary - NOT raise (500).
+    ctx = CommitContext(
+        ctype="cfg",
+        scope="receiver-default",
+        summary="set clickhouse_max_connections",
+        actor="derek",
+    )
+    subject = build_message(ctx).splitlines()[0]
+    assert len(subject) <= 50
+    assert subject.startswith("cfg(receiver-default): set clickhouse")
+    validate_subject(subject)  # still conforming (type + ascii + length)
+
+
+def test_build_message_trims_scope_when_needed_keeps_summary():
+    ctx = CommitContext(ctype="cfg", scope="x" * 80, summary="set y", actor="a")
+    subject = build_message(ctx).splitlines()[0]
+    assert len(subject) <= 50
+    # summary is never dropped to empty (read_log's subject regex needs it)
+    assert subject.endswith("set y") or subject.split(": ", 1)[1]
+
+
+def test_build_message_still_raises_on_non_ascii():
+    # a genuinely invalid message (non-ASCII) is a hard error the API maps to 422,
+    # NOT something truncation papers over.
+    with pytest.raises(CommitPolicyError):
+        build_message(CommitContext(ctype="cfg", scope="x", summary="use an em-dash —", actor="a"))
+
+
 def test_non_ascii_subject_rejected():
     with pytest.raises(CommitPolicyError):
         validate_subject("cfg(x): use an em—dash")

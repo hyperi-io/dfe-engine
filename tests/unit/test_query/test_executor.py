@@ -232,6 +232,46 @@ class TestViewExecutorSQL:
         sql = client.query.call_args[0][0]
         assert "LIMIT 25 OFFSET 50" in sql
 
+    def test_offset_pagination_inner_limit_covers_window(self):
+        """Page 2+ of a view with a declared limit param: the inner view limit
+        must be bound to offset + page size, or the outer LIMIT/OFFSET slices
+        an already-truncated inner result and the page comes back empty."""
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(offset=50, limit=25)
+        executor.execute("analytics/events", params={}, auth=auth, options=options)
+
+        call_kwargs = client.query.call_args
+        sql = call_kwargs[0][0]
+        params_sent = call_kwargs.kwargs.get("parameters", call_kwargs[1].get("parameters", {}))
+        assert params_sent["limit"] == 75  # inner window = offset + page size
+        assert "LIMIT 25 OFFSET 50" in sql  # outer slice is still the page
+
+    def test_first_page_inner_limit_is_page_size(self):
+        """offset=0 keeps the inner limit at the page size (no outer clause)."""
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(offset=0, limit=25)
+        executor.execute("analytics/events", params={}, auth=auth, options=options)
+
+        call_kwargs = client.query.call_args
+        params_sent = call_kwargs.kwargs.get("parameters", call_kwargs[1].get("parameters", {}))
+        assert params_sent["limit"] == 25
+
     def test_execution_error_wrapped(self):
         view_def = _make_view_def()
         catalog = MagicMock(spec=ViewCatalog)
@@ -244,6 +284,83 @@ class TestViewExecutorSQL:
         auth = _make_auth(roles=["admin"])
         with pytest.raises(ViewExecutionError, match="Failed to execute"):
             executor.execute("analytics/events", params={}, auth=auth)
+
+
+class TestViewExecutorKeyset:
+    """Keyset pagination: order_by must be allowlisted, after_key must be bound.
+
+    Regression for F-QUERY-ORDERBY - a free-string order_by was interpolated raw
+    into the outer wrapper query (SQL injection on the tenant-isolated executor),
+    and after_key emitted a bare, never-bound {_after_key} placeholder.
+    """
+
+    def test_order_by_injection_rejected(self):
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(after_key=1, order_by="1 UNION ALL SELECT * FROM dfe.landing -- ")
+        with pytest.raises(ViewExecutionError, match="Invalid order_by"):
+            executor.execute("analytics/events", params={}, auth=auth, options=options)
+        # The injection is rejected BEFORE any SQL reaches ClickHouse.
+        client.query.assert_not_called()
+
+    def test_order_by_quoted_or_dotted_rejected(self):
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        for bad in ("id; DROP TABLE t", "`id`", "id, secret", "col DESC"):
+            options = QueryOptions(after_key=1, order_by=bad)
+            with pytest.raises(ViewExecutionError, match="Invalid order_by"):
+                executor.execute("analytics/events", params={}, auth=auth, options=options)
+        client.query.assert_not_called()
+
+    def test_valid_order_by_emits_and_binds_after_key(self):
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(after_key=100, order_by="created_at", order_dir="asc")
+        executor.execute("analytics/events", params={}, auth=auth, options=options)
+
+        call = client.query.call_args
+        sql = call[0][0]
+        params_sent = call.kwargs.get("parameters", call[1].get("parameters", {}))
+        # order_by is interpolated as a bare identifier; after_key is a real
+        # server-side bound parameter (typed), not a literal.
+        assert "WHERE created_at > {_after_key:Int64}" in sql
+        assert "ORDER BY created_at asc" in sql
+        assert params_sent["_after_key"] == 100
+
+    def test_keyset_desc_uses_lt_operator(self):
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(after_key="2026-01-01", order_by="ts", order_dir="desc")
+        executor.execute("analytics/events", params={}, auth=auth, options=options)
+
+        sql = client.query.call_args[0][0]
+        # String cursor binds as String; desc uses the < operator.
+        assert "WHERE ts < {_after_key:String}" in sql
+        assert "ORDER BY ts desc" in sql
 
 
 class TestViewExecutorMetadata:

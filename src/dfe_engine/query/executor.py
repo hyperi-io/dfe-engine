@@ -17,6 +17,7 @@ Security enforcement:
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any
@@ -30,6 +31,34 @@ from dfe_engine.query.models import (
     ViewDefinition,
 )
 from dfe_engine.query.result import QueryResult
+
+# A keyset ORDER BY / WHERE column is interpolated into the outer wrapper query -
+# ClickHouse binds VALUES, not identifiers, so a column name cannot be a bound
+# parameter and MUST instead be allowlisted. A free-string order_by is otherwise a
+# SQL-injection sink on this path (F-QUERY-ORDERBY): the wrapper runs as the
+# restricted reader which holds NO org role and is targeted by NO row policy, so an
+# injected order_by reads every org's rows. Accept only a single bare column
+# identifier; reject anything with whitespace, quotes, parens, commas, operators or
+# SQL comments before it reaches the SQL string.
+_SAFE_ORDER_BY = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _after_key_ch_type(value: Any) -> str:
+    """ClickHouse bind type for a keyset ``after_key`` cursor value.
+
+    ``after_key`` compares against the order column, so its literal must bind with a
+    type ClickHouse will compare: a bare String bind would make ``col > 'literal'``
+    a type error on a numeric column. Infer from the Python value and fall back to
+    String (which also covers ISO date/uuid/text order keys). bool is checked
+    before int because ``bool`` is a subclass of ``int``.
+    """
+    if isinstance(value, bool):
+        return "Bool"
+    if isinstance(value, int):
+        return "Int64"
+    if isinstance(value, float):
+        return "Float64"
+    return "String"
 
 
 class ViewExecutionError(Exception):
@@ -182,11 +211,29 @@ class ViewExecutor:
 
         param_names = {p.name for p in view_def.parameters}
         if "limit" in param_names:
-            final["limit"] = self._resolve_limit(options)
+            page_size = self._resolve_limit(options)
+            offset = options.offset or 0
+            if offset > 0 and options.after_key is None:
+                # Offset pagination: the inner view limit must cover the whole
+                # requested window (offset + page size), or the outer
+                # LIMIT/OFFSET in _build_sql slices an already-truncated inner
+                # result and page 2+ comes back silently empty.
+                final["limit"] = offset + page_size
+            else:
+                final["limit"] = page_size
         if "time_from" in param_names and options.time_from:
             final["time_from"] = options.time_from
         if "time_to" in param_names and options.time_to:
             final["time_to"] = options.time_to
+
+        # Keyset pagination binds the cursor value server-side (F-QUERY-ORDERBY):
+        # the outer wrapper's WHERE {col} > {_after_key:T} is a bound parameter,
+        # never an interpolated literal. Add it only when the keyset SQL branch
+        # will actually fire (both after_key and order_by present), matching
+        # _build_sql's condition exactly so clickhouse-connect is never handed an
+        # unreferenced parameter.
+        if options.after_key is not None and options.order_by:
+            final["_after_key"] = options.after_key
 
         return final
 
@@ -211,12 +258,14 @@ class ViewExecutor:
             return f"SELECT * FROM {view_call}"
 
         if options.after_key is not None and options.order_by:
+            order_col = self._validate_order_by(options.order_by)
             order_dir = options.order_dir or "asc"
             op = ">" if order_dir == "asc" else "<"
+            key_type = _after_key_ch_type(options.after_key)
             return (
                 f"SELECT * FROM {view_call} "
-                f"WHERE {options.order_by} {op} {{_after_key}} "
-                f"ORDER BY {options.order_by} {order_dir} "
+                f"WHERE {order_col} {op} {{_after_key:{key_type}}} "
+                f"ORDER BY {order_col} {order_dir} "
                 f"LIMIT {limit}"
             )
 
@@ -224,6 +273,19 @@ class ViewExecutor:
             return f"SELECT * FROM {view_call} LIMIT {limit} OFFSET {offset}"
 
         return f"SELECT * FROM {view_call} LIMIT {limit}"
+
+    def _validate_order_by(self, order_by: str) -> str:
+        """Allowlist a keyset ``order_by`` to a single bare column identifier.
+
+        The column is interpolated into the outer wrapper query (ClickHouse cannot
+        bind an identifier), so a free string is a SQL-injection sink. Reject
+        anything that is not one unquoted column identifier (F-QUERY-ORDERBY).
+        """
+        if not _SAFE_ORDER_BY.match(order_by):
+            raise ViewExecutionError(
+                f"Invalid order_by {order_by!r}: keyset order_by must be a bare column identifier"
+            )
+        return order_by
 
     def _resolve_limit(self, options: QueryOptions) -> int:
         if options.limit is not None:

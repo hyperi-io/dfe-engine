@@ -16,12 +16,69 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBinding
+from dfe_engine.governance.ch.models import FIXED_USERS, ChServiceRole, ChTier
 from dfe_engine.governance.ch.reconciler import (
     ChRbacReconciler,
-    _default_tier_name,
+    bindings_from_groups,
     compute_drops,
+    load_catalogue_from_gitcrud,
+    reconcile_ch_rbac,
 )
+
+
+class _FakeCH:
+    """A minimal duck-typed ClickHouse admin client for reconcile() unit tests.
+
+    Task-sanctioned fake (NO live CH): ``query`` answers the three discovery reads
+    from canned rows; ``command`` records every executed statement so a test can
+    assert what the reconciler DID (or did NOT) emit.
+    """
+
+    def __init__(
+        self,
+        *,
+        columns: list[tuple[str, str]] | None = None,
+        roles: list[str] | None = None,
+        policies: list[tuple[str, str, str]] | None = None,
+    ) -> None:
+        self._columns = columns or []
+        self._roles = roles or []
+        self._policies = policies or []
+        self.commands: list[str] = []
+
+    def query(self, sql: str, parameters: dict | None = None):
+        if "system.columns" in sql:
+            rows: list = list(self._columns)
+        elif "system.roles" in sql:
+            rows = [(r,) for r in self._roles]
+        elif "system.row_policies" in sql:
+            rows = list(self._policies)
+        else:
+            rows = []
+        return SimpleNamespace(result_rows=rows)
+
+    def command(self, stmt: str) -> None:
+        self.commands.append(stmt)
+
+
+class _FakeSecrets:
+    """In-memory scalo.secrets seam - lets reconcile() mint deterministic hashes."""
+
+    def __init__(self) -> None:
+        self._store: dict[str, str] = {}
+
+    def exists(self, path: str) -> bool:
+        return path in self._store
+
+    def get(self, path: str) -> str:
+        return self._store[path]
+
+    def put(self, path: str, value: str) -> None:
+        self._store[path] = value
+
+
+def _analyst_default() -> ChTier:
+    return ChTier(name="analyst_tier_2", kind="analyst", default=True, grants=["SELECT ON dfe.*"])
 
 
 def _org(name: str, ids: list[str]) -> SimpleNamespace:
@@ -31,22 +88,6 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
 def _rec() -> ChRbacReconciler:
     # render_all is pure - it never touches the client.
     return ChRbacReconciler(admin_client=None)
-
-
-class TestDefaultTierName:
-    def test_flagged_default_wins(self):
-        tiers = [
-            ChTier(name="a1", kind="analyst"),
-            ChTier(name="a2", kind="analyst", default=True),
-        ]
-        assert _default_tier_name(tiers, "analyst") == "a2"
-
-    def test_first_of_kind_when_no_default(self):
-        tiers = [ChTier(name="a1", kind="analyst"), ChTier(name="a2", kind="analyst")]
-        assert _default_tier_name(tiers, "analyst") == "a1"
-
-    def test_empty_when_kind_absent(self):
-        assert _default_tier_name([ChTier(name="a1", kind="analyst")], "hunt") == ""
 
 
 class TestRenderAll:
@@ -62,79 +103,77 @@ class TestRenderAll:
             ChTier(name="hunt_tier_2", kind="hunt", default=True, grants=["INSERT ON dfe_hunts.*"]),
         ]
         service_roles = [ChServiceRole(name="loader", mint_user=True, grants=["INSERT ON dfe.*"])]
-        orgs = [_org("acme", ["acme"])]
-        bindings = [
-            GroupChBinding(group="soc", org="acme"),  # org-scoped, default tier
-            GroupChBinding(group="admin"),  # unrestricted, default tier
-            GroupChBinding(group="nohash"),  # no minted secret -> skipped
-        ]
-        return tiers, service_roles, orgs, bindings
+        return tiers, service_roles
+
+    def _fixed_hashes(self):
+        return {fu.name: f"h_{fu.name}" for fu in FIXED_USERS}
 
     def test_full_composition_and_order(self):
-        tiers, service_roles, orgs, bindings = self._inputs()
+        tiers, service_roles = self._inputs()
         stmts = _rec().render_all(
             tiers=tiers,
             service_roles=service_roles,
-            orgs=orgs,
-            bindings=bindings,
             org_tables=[("dfe", "events")],
             service_hashes={"loader": "svchash"},
-            group_hashes={"soc": "sochash", "admin": "adminhash"},  # 'nohash' absent
+            fixed_hashes=self._fixed_hashes(),
         )
         s = "\n".join(stmts)
-        # ordering: tier role -> org role -> group user
-        assert s.index("dfe_analyst_tier_2_role") < s.index("dfe_org_acme_role")
-        assert s.index("dfe_org_acme_role") < s.index("dfe_grp_soc")
+        # ordering: tier role -> service user -> fixed user -> tenant policy
+        assert s.index("dfe_analyst_tier_2_role") < s.index("`dfe_loader`")
+        assert s.index("`dfe_tenant_reader`") < s.index("CREATE ROW POLICY OR REPLACE")
         # minted service user rendered
         assert "CREATE USER IF NOT EXISTS `dfe_loader`" in s
         assert "GRANT `dfe_loader_role` TO `dfe_loader`" in s
-        # org-scoped user: default analyst tier + org role
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_soc`" in s
-        assert "GRANT `dfe_org_acme_role` TO `dfe_grp_soc`" in s
-        # unrestricted user: tier only, no org grant
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin`" in s
-        assert "GRANT `dfe_org_acme_role` TO `dfe_grp_admin`" not in s
-        # binding without a minted secret is skipped
-        assert "dfe_grp_nohash" not in s
+        # fixed users minted (grants straight to the user)
+        assert "CREATE USER IF NOT EXISTS `dfe_analyst`" in s
+        assert "CREATE USER IF NOT EXISTS `dfe_tenant_reader`" in s
+        # ONE tenant policy on the discovered _org_id table, to the reader
+        assert (
+            "CREATE ROW POLICY OR REPLACE `dfe_tenant_filter` ON `dfe`.`events` "
+            "AS RESTRICTIVE FOR SELECT USING "
+            "has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id) "
+            "TO `dfe_tenant_reader`" in s
+        )
+        # NO retired per-org / per-group objects survive the model change
+        assert "dfe_org_" not in s
+        assert "dfe_grp_" not in s
 
-    def test_explicit_tier_overrides_default(self):
-        tiers, _service, _orgs, _b = self._inputs()
-        b = [GroupChBinding(group="hunter", tier="hunt_tier_2")]
+    def test_no_secrets_renders_roles_and_policy_but_no_users(self):
+        # Empty hashes (no secrets store) -> tiers + roles + tenant policy, no users.
+        tiers, service_roles = self._inputs()
         stmts = _rec().render_all(
             tiers=tiers,
-            service_roles=[],
-            orgs=[],
-            bindings=b,
-            org_tables=[],
+            service_roles=service_roles,
+            org_tables=[("dfe", "events")],
             service_hashes={},
-            group_hashes={"hunter": "h"},
+            fixed_hashes={},
         )
-        assert "GRANT `dfe_hunt_tier_2_role` TO `dfe_grp_hunter`" in "\n".join(stmts)
+        s = "\n".join(stmts)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_loader_role`" in s  # role still rendered
+        assert "CREATE USER" not in s  # nothing minted
+        assert "CREATE ROW POLICY OR REPLACE `dfe_tenant_filter`" in s  # policy still rendered
 
-    def test_org_role_skipped_if_org_unknown(self):
-        tiers, _service, _orgs, _b = self._inputs()
-        b = [GroupChBinding(group="x", org="ghost")]  # no Org 'ghost' exists
+    def test_no_org_tables_no_policies(self):
+        tiers, service_roles = self._inputs()
         stmts = _rec().render_all(
             tiers=tiers,
-            service_roles=[],
-            orgs=[],
-            bindings=b,
+            service_roles=service_roles,
             org_tables=[],
             service_hashes={},
-            group_hashes={"x": "h"},
+            fixed_hashes=self._fixed_hashes(),
         )
-        assert "dfe_org_ghost_role" not in "\n".join(stmts)
+        s = "\n".join(stmts)
+        assert "CREATE ROW POLICY" not in s
+        assert "CREATE USER IF NOT EXISTS `dfe_tenant_reader`" in s  # users still rendered
 
     def test_non_mint_service_role_no_user(self):
         r = [ChServiceRole(name="query_reader", grants=["SELECT ON dfe.*"])]
         stmts = _rec().render_all(
             tiers=[],
             service_roles=r,
-            orgs=[],
-            bindings=[],
             org_tables=[],
             service_hashes={},
-            group_hashes={},
+            fixed_hashes={},
         )
         s = "\n".join(stmts)
         assert "CREATE ROLE IF NOT EXISTS `dfe_query_reader_role`" in s
@@ -142,32 +181,185 @@ class TestRenderAll:
 
 
 class TestComputeDrops:
-    def test_stale_role_and_policy_dropped_policies_first(self):
-        existing_roles = {"dfe_org_acme_role", "dfe_org_gone_role"}
+    def test_retired_per_org_objects_dropped_policies_first(self):
+        # The fixed-user model desires NO per-org objects, so every legacy
+        # dfe_rowpol_* policy + dfe_org_* role is dropped wholesale.
+        existing_roles = {"dfe_org_acme_role", "dfe_org_gone_role", "keep_me"}
         existing_policies = [
             ("dfe_rowpol_acme_dfe_events", "dfe", "events"),
             ("dfe_rowpol_gone_dfe_events", "dfe", "events"),
         ]
-        orgs = [_org("acme", ["acme"])]
-        drops = compute_drops(existing_roles, existing_policies, orgs, [("dfe", "events")])
+        drops = compute_drops(existing_roles, existing_policies, [("dfe", "events")])
+        assert any("DROP ROW POLICY IF EXISTS `dfe_rowpol_acme_dfe_events`" in d for d in drops)
         assert any("DROP ROW POLICY IF EXISTS `dfe_rowpol_gone_dfe_events`" in d for d in drops)
+        assert any("DROP ROLE IF EXISTS `dfe_org_acme_role`" in d for d in drops)
         assert any("DROP ROLE IF EXISTS `dfe_org_gone_role`" in d for d in drops)
-        assert all("acme" not in d for d in drops)  # the live org is untouched
+        assert all("keep_me" not in d for d in drops)  # non-dfe role untouched
         # policies drop before roles (a policy targets a role)
         pol_i = next(i for i, d in enumerate(drops) if "ROW POLICY" in d)
         role_i = next(i for i, d in enumerate(drops) if "DROP ROLE" in d)
         assert pol_i < role_i
 
-    def test_no_drops_when_all_desired(self):
-        existing_roles = {"dfe_org_acme_role"}
-        existing_policies = [("dfe_rowpol_acme_dfe_events", "dfe", "events")]
-        orgs = [_org("acme", ["acme"])]
-        assert compute_drops(existing_roles, existing_policies, orgs, [("dfe", "events")]) == []
+    def test_stale_tenant_filter_dropped_off_non_org_table_only(self):
+        # dfe_tenant_filter on a table that no longer carries _org_id is dropped;
+        # the one on a live _org_id table is kept.
+        existing_policies = [
+            ("dfe_tenant_filter", "dfe", "events"),  # still an _org_id table -> keep
+            ("dfe_tenant_filter", "dfe", "legacy"),  # no longer -> drop
+        ]
+        drops = compute_drops(set(), existing_policies, [("dfe", "events")])
+        assert any("`dfe_tenant_filter` ON `dfe`.`legacy`" in d for d in drops)
+        assert all("`dfe`.`events`" not in d for d in drops)  # live table untouched
 
-    def test_ignores_non_dfe_objects(self):
-        existing_roles = {"some_other_role", "dfe_org_gone_role"}
-        existing_policies = [("handmade_policy", "dfe", "events")]
-        drops = compute_drops(existing_roles, existing_policies, [], [])
-        assert all("some_other_role" not in d for d in drops)
-        assert all("handmade_policy" not in d for d in drops)
-        assert any("dfe_org_gone_role" in d for d in drops)
+    def test_no_drops_when_clean(self):
+        # Only the desired tenant policy on a live table, no legacy objects.
+        drops = compute_drops(set(), [("dfe_tenant_filter", "dfe", "events")], [("dfe", "events")])
+        assert drops == []
+
+    def test_ignores_handmade_objects(self):
+        drops = compute_drops({"some_other_role"}, [("handmade_policy", "dfe", "events")], [])
+        assert drops == []
+
+
+class TestReconcile:
+    """reconcile() mints the fixed users + applies ONE tenant policy per discovered
+    _org_id table, and cleans up the retired per-org objects."""
+
+    def test_mints_fixed_users_and_applies_tenant_policy(self):
+        ch = _FakeCH(columns=[("dfe", "events")])
+        result = ChRbacReconciler(ch, secrets_store=_FakeSecrets()).reconcile(
+            tiers=[_analyst_default()],
+            service_roles=[],
+            orgs=[_org("acme", ["acme"])],
+        )
+        applied = "\n".join(ch.commands)
+        assert "CREATE USER IF NOT EXISTS `dfe_tenant_reader`" in applied
+        assert "CREATE USER IF NOT EXISTS `dfe_analyst`" in applied
+        # secret minted per fixed user at ch/fixed/<user>
+        assert all(f"fixed/{fu.name}" in result.minted for fu in FIXED_USERS)
+        assert "CREATE ROW POLICY OR REPLACE `dfe_tenant_filter` ON `dfe`.`events`" in applied
+        assert result.errors == []
+
+    def test_no_secrets_store_skips_users_keeps_policy(self):
+        ch = _FakeCH(columns=[("dfe", "events")])
+        result = ChRbacReconciler(ch).reconcile(  # no secrets_store
+            tiers=[_analyst_default()],
+            service_roles=[],
+            orgs=[],
+        )
+        applied = "\n".join(ch.commands)
+        assert "CREATE USER" not in applied
+        assert result.minted == []
+        assert "CREATE ROW POLICY OR REPLACE `dfe_tenant_filter`" in applied
+
+    def test_drops_retired_per_org_objects(self):
+        ch = _FakeCH(
+            columns=[("dfe", "events")],
+            roles=["dfe_org_gone_role"],
+            policies=[("dfe_rowpol_gone_dfe_events", "dfe", "events")],
+        )
+        result = ChRbacReconciler(ch, secrets_store=_FakeSecrets()).reconcile(
+            tiers=[_analyst_default()],
+            service_roles=[],
+            orgs=[],
+        )
+        applied = "\n".join(ch.commands)
+        assert "DROP ROLE IF EXISTS `dfe_org_gone_role`" in applied
+        assert "DROP ROW POLICY IF EXISTS `dfe_rowpol_gone_dfe_events`" in applied
+        assert any("dfe_org_gone_role" in d for d in result.dropped)
+
+
+class TestBindingsFromGroups:
+    """The group->org resolver still used by HyperDX + org lifecycle."""
+
+    def _grp(self, name: str, org_ids: list[str]) -> SimpleNamespace:
+        return SimpleNamespace(name=name, org_ids=org_ids)
+
+    def test_group_with_org_id_binds_to_org_name(self):
+        orgs = [_org("acme", ["acme"]), _org("globex", ["gx-1", "gx-2"])]
+        groups = [self._grp("soc", ["acme"]), self._grp("ir", ["gx-2"])]
+        bindings = bindings_from_groups(groups, orgs)
+        by_group = {b.group: b for b in bindings}
+        assert by_group["soc"].org == "acme"
+        assert by_group["soc"].user() == "dfe_grp_soc"
+        assert by_group["ir"].org == "globex"  # resolved via a tenant org_id, not the name
+        assert by_group["ir"].tier == ""  # no tier axis on a group -> default at render
+
+    def test_group_without_org_ids_yields_no_binding(self):
+        # No org-scoped access -> no CH data user (never an implicit unrestricted one).
+        assert bindings_from_groups([self._grp("admins", [])], [_org("acme", ["acme"])]) == []
+
+    def test_ambiguous_multi_org_group_is_skipped(self):
+        # Two distinct orgs on one group can't be one CH user (double org grant fails
+        # closed), so the derivation refuses it rather than mislabel it.
+        orgs = [_org("acme", ["acme"]), _org("globex", ["globex"])]
+        groups = [self._grp("both", ["acme", "globex"])]
+        assert bindings_from_groups(groups, orgs) == []
+
+    def test_unknown_org_ref_yields_no_binding(self):
+        assert bindings_from_groups([self._grp("x", ["nope"])], [_org("acme", ["acme"])]) == []
+
+    def test_multi_tenant_single_org_binds_once(self):
+        # A group referencing several org_ids that all belong to ONE org -> one binding.
+        orgs = [_org("globex", ["gx-1", "gx-2"])]
+        bindings = bindings_from_groups([self._grp("ops", ["gx-1", "gx-2"])], orgs)
+        assert len(bindings) == 1
+        assert bindings[0].org == "globex"
+
+
+class TestCatalogueFromGitcrud:
+    """The e join: load ch_tiers / ch_service_roles from gitcrud, else fall back to
+    the seeded DEFAULT_* - proven end to end through reconcile_ch_rbac."""
+
+    def _crud(self, tmp_path):
+        # Real local gitops repo (dulwich, no network) + the default registry which
+        # already registers ch_tiers/ch_service_roles as versioned classes.
+        from dfe_engine.gitcrud import GitCrud, VersionedDoc, default_registry
+        from dfe_engine.gitops.repo import GitopsRepo
+
+        repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+        crud = GitCrud(repo, default_registry())
+        return crud, VersionedDoc(crud)
+
+    def test_gitcrud_tiers_override_seeds(self, tmp_path):
+        crud, vdoc = self._crud(tmp_path)
+        vdoc.save_draft(
+            "ch_tiers",
+            "custom_tier",
+            {
+                "name": "custom_tier",
+                "kind": "analyst",
+                "default": True,
+                "grants": ["SELECT ON dfe.*"],
+            },
+            actor="kaz",
+        )
+        vdoc.publish("ch_tiers", "custom_tier", actor="kaz")
+
+        tiers, service_roles = load_catalogue_from_gitcrud(crud)
+        assert [t.name for t in tiers] == ["custom_tier"]
+        assert service_roles == []  # none published -> empty (caller keeps the seeds)
+
+        ch = _FakeCH(columns=[("dfe", "events")])
+        result = reconcile_ch_rbac(ch, orgs=[], gitcrud=crud)
+        applied = "\n".join(result.statements)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_custom_tier_role`" in applied
+        assert "dfe_analyst_tier_1_role" not in applied  # seeds NOT used for tiers
+        # service roles had none published -> seeds still apply
+        assert "CREATE ROLE IF NOT EXISTS `dfe_loader_role`" in applied
+
+    def test_no_gitcrud_uses_seeds(self):
+        ch = _FakeCH(columns=[("dfe", "events")])
+        result = reconcile_ch_rbac(ch, orgs=[])  # no gitcrud handle
+        applied = "\n".join(result.statements)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`" in applied
+        assert "CREATE ROLE IF NOT EXISTS `dfe_loader_role`" in applied
+
+    def test_empty_gitcrud_falls_back_to_seeds(self, tmp_path):
+        crud, _vdoc = self._crud(tmp_path)  # nothing published
+        tiers, service_roles = load_catalogue_from_gitcrud(crud)
+        assert tiers == []
+        assert service_roles == []
+        ch = _FakeCH(columns=[("dfe", "events")])
+        result = reconcile_ch_rbac(ch, orgs=[], gitcrud=crud)
+        assert "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`" in "\n".join(result.statements)

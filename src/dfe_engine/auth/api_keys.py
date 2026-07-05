@@ -129,7 +129,13 @@ class APIKeyStore:
 
     def list(self) -> list[APIKey]:
         """Return all stored keys sorted by name."""
-        keys = [self._load_key(f) for f in sorted(self._keys_dir.glob("*.yaml"))]
+        # Skip empty/truncated leftovers (a crashed non-atomic writer) -
+        # _load_key returns None for those rather than crashing.
+        keys: list[APIKey] = []
+        for f in sorted(self._keys_dir.glob("*.yaml")):
+            key_meta = self._load_key(f)
+            if key_meta is not None:
+                keys.append(key_meta)
         return keys
 
     def verify(self, submitted_key: str) -> APIKey | None:
@@ -186,12 +192,18 @@ class APIKeyStore:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _load_key(self, path: Path) -> APIKey:
+    def _load_key(self, path: Path) -> APIKey | None:
         """Load an APIKey from a YAML file.
 
         The key name is derived from the filename stem, not stored in YAML.
+
+        Returns None when the file parses to nothing - a truncated/empty file
+        left by a crashed non-atomic writer parses to None, and that must be
+        treated as "no key" instead of raising on ``data["name"]``.
         """
-        data: dict = yaml_load(path)
+        data = yaml_load(path)
+        if not data:
+            return None
         data["name"] = path.stem
         return APIKey(**data)
 
@@ -214,6 +226,6 @@ class APIKeyStore:
         """Scan all key files to find one matching the given short_token."""
         for key_file in self._keys_dir.glob("*.yaml"):
             key_meta = self._load_key(key_file)
-            if key_meta.short_token == short_token:
+            if key_meta is not None and key_meta.short_token == short_token:
                 return key_meta
         return None

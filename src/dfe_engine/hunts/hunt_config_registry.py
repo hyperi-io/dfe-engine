@@ -1,3 +1,11 @@
+#  Project:      dfe-engine
+#  File:         hunts/hunt_config_registry.py
+#  Purpose:      Hunt config YAML CRUD - scheduled hunt definitions
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
 """Hunt config registry — CRUD for scheduled hunt YAML definitions.
 
 Persists hunt configuration files under ``hunts.hunt_dir`` (first path when comma-separated).

@@ -19,12 +19,13 @@ admins (governance:write). Everything commits to gitops via the engine.
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, check_action, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
@@ -113,17 +114,24 @@ async def invoke_action(
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
 
-    # Per-action RBAC: the action declares the permission needed to run it.
-    decision = authorize(user, action.required_action, role_config=request.app.state.role_config)
-    if not decision.allowed:
-        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+    # Per-action RBAC: the action declares the permission needed to run it. Use
+    # check_action (not a bare authorize) so this matches every sibling endpoint:
+    # it honours the auth-enabled flag and emits the permission-denied audit event.
+    check_action(request, user, action.required_action)
 
     policy = getattr(request.app.state, "policy_store", None)
     override = authorize(
         user, "helmvars:override", role_config=request.app.state.role_config
     ).allowed
     try:
-        res = store.invoke(name, user.user_id, policy=policy, dry_run=dry_run, override=override)
+        res = await asyncio.to_thread(
+            store.invoke,
+            name,
+            user.user_id,
+            policy=policy,
+            dry_run=dry_run,
+            override=override,
+        )
     except ProtectedVarError as exc:
         raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
     except ActionForbiddenError as exc:
@@ -162,7 +170,7 @@ async def invoke_action(
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def create_action(body: ActionDef, user: CurrentUser, request: Request) -> ActionDef:
-    res = _actions(request).save(body, user.user_id)
+    res = await asyncio.to_thread(_actions(request).save, body, user.user_id)
     audit_resource_change(user.user_id, "action", body.name, "created")
     if res.changed:
         _warn_auto_merge(
@@ -181,7 +189,7 @@ async def create_action(body: ActionDef, user: CurrentUser, request: Request) ->
 )
 async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
     try:
-        res = _actions(request).delete(name, user.user_id)
+        res = await asyncio.to_thread(_actions(request).delete, name, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "action", name, "deleted")
@@ -200,7 +208,7 @@ async def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request
 ) -> ProtectedPolicy:
     gc = _gitcrud(request)
-    res = gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id)
+    res = await asyncio.to_thread(gc.put, _POLICY_CLASS, body.name, body.model_dump(), user.user_id)
     audit_resource_change(user.user_id, "policy", body.name, "created")
     if res.changed:
         _warn_auto_merge(
@@ -220,7 +228,7 @@ async def create_policy(
 async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
     gc = _gitcrud(request)
     try:
-        res = gc.delete(_POLICY_CLASS, name, user.user_id)
+        res = await asyncio.to_thread(gc.delete, _POLICY_CLASS, name, user.user_id)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "policy", name, "deleted")
@@ -235,24 +243,20 @@ async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
-    """Reconcile CH quota tiers + service roles + per-org row policies into
-    ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
-    governance:write.
+    """Reconcile CH quota tiers + service roles + fixed users + the per-table
+    DFE_current_tenant_id row policies into ClickHouse, minting the service + fixed
+    user secrets via the secrets seam. Idempotent. governance:write.
     """
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
     from dfe_engine.governance.ch import reconcile_ch_rbac
     from dfe_engine.secrets import build_secrets
-    from dfe_engine.settings import load_settings
+    from dfe_engine.settings import get_clickhouse_config
 
-    settings = load_settings()
-    ch_cfg = {
-        "ch_host": settings.clickhouse.host,
-        "ch_port": settings.clickhouse.port,
-        "ch_username": settings.clickhouse.username,
-        "ch_password": settings.clickhouse.password,
-        "ch_secure": settings.clickhouse.secure,
-        "ch_verify": settings.clickhouse.verify,
-    }
+    # Use the settings the app was built with (app.state), NOT a fresh
+    # load_settings() re-read of the environment - every sibling handler reads
+    # app-state settings, so a mid-flight env change must not diverge here.
+    settings = request.app.state.settings
+    ch_cfg = get_clickhouse_config(settings)
     try:
         admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
     except Exception as exc:

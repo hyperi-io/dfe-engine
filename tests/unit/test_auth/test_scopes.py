@@ -15,6 +15,8 @@ from pydantic import ValidationError
 
 from dfe_engine.auth import Scope
 from dfe_engine.auth.groups import Group, GroupStore, validate_group_scope
+from dfe_engine.auth.rbac_scopes import scopes_dict
+from dfe_engine.auth.roles import permission_matches
 
 SYSTEM = Scope()
 ORG_ACME = Scope(type="org", id="acme")
@@ -67,6 +69,21 @@ class TestScopeCovers:
         assert str(GROUP_ACME) == "group:acme/analysts"
         assert str(GROUP_SYSTEM) == "group:analysts"
         assert str(USER_ALICE) == "user:alice"
+
+
+class TestAccountResetPasswordScope:
+    """FIX 6: reset-password action is singular so 'account:*' covers it."""
+
+    def test_reset_password_action_is_singular(self):
+        assert scopes_dict["account_reset_password"] == "account:reset_password"
+
+    def test_account_wildcard_covers_reset_password(self):
+        assert permission_matches("account:*", scopes_dict["account_reset_password"]) is True
+
+    def test_account_wildcard_would_miss_old_plural(self):
+        # Regression guard: the old 'accounts:reset_password' spelling was NOT
+        # covered by 'account:*', which is the whole reason for the rename.
+        assert permission_matches("account:*", "accounts:reset_password") is False
 
 
 class TestGroupScopeValidation:

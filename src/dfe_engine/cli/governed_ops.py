@@ -19,8 +19,14 @@ import json
 import typer
 
 from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_change
 from dfe_engine.gitcrud.factory import build_gitcrud
-from dfe_engine.governance import ActionStore
+from dfe_engine.governance import (
+    ActionForbiddenError,
+    ActionStore,
+    PolicyStore,
+    ProtectedVarError,
+)
 from dfe_engine.settings import load_settings
 
 governed_app = typer.Typer(help="Governed Ops: helm vars + defined actions over gitops.")
@@ -61,9 +67,27 @@ def helm_get(name: str) -> None:
 
 
 @helm_app.command("set")
-def helm_set(name: str, path: str, value: str, actor: str = "cli") -> None:
-    """Set a helm var (-> gitops commit). VALUE is parsed as JSON when possible."""
-    res = _crud().set_key("helmvars", name, path, _parse(value), actor)
+def helm_set(name: str, path: str, value: str, actor: str = "cli", override: bool = False) -> None:
+    """Set a helm var (-> gitops commit). VALUE is parsed as JSON when possible.
+
+    Applies the SAME guards as the /helm API (the module contract): the
+    immutability validators (no floating image / controller-owned replicaCount)
+    and the protected-var policy. --override is the break-glass helmvars:override
+    equivalent. A refused write exits non-zero (CI/scripts must see the failure).
+    """
+    gc = _crud()
+    val = _parse(value)
+    try:
+        validate_change(path, val)
+    except CommitPolicyError as exc:
+        typer.echo(f"policy violation: {exc}", err=True)
+        raise typer.Exit(1) from exc
+    try:
+        PolicyStore(gc).enforce("helmvars", name, path, override=override)
+    except ProtectedVarError as exc:
+        typer.echo(f"protected var (use --override to force): {exc}", err=True)
+        raise typer.Exit(1) from exc
+    res = gc.set_key("helmvars", name, path, val, actor)
     typer.echo(res.commit_sha or "(unchanged)")
 
 
@@ -75,9 +99,22 @@ def action_list() -> None:
 
 
 @action_app.command("invoke")
-def action_invoke(name: str, actor: str = "cli", dry_run: bool = False) -> None:
-    """Invoke a defined action (use --dry-run to preview the diff)."""
-    res = ActionStore(_crud()).invoke(name, actor, dry_run=dry_run)
+def action_invoke(
+    name: str, actor: str = "cli", dry_run: bool = False, override: bool = False
+) -> None:
+    """Invoke a defined action (use --dry-run to preview the diff).
+
+    Enforces the protected-var policy like the API (POST .../invoke); --override
+    is the break-glass equivalent. A refused invoke exits non-zero.
+    """
+    gc = _crud()
+    try:
+        res = ActionStore(gc).invoke(
+            name, actor, policy=PolicyStore(gc), dry_run=dry_run, override=override
+        )
+    except (ProtectedVarError, ActionForbiddenError, CommitPolicyError) as exc:
+        typer.echo(f"refused: {exc}", err=True)
+        raise typer.Exit(1) from exc
     for d in res.diff:
         typer.echo(f"{d['cls']}/{d['name']}:{d['path']}  {d['old']!r} -> {d['new']!r}")
     typer.echo(f"dry_run={res.dry_run} changed={res.changed} commit={res.commit_sha or '-'}")
@@ -85,8 +122,9 @@ def action_invoke(name: str, actor: str = "cli", dry_run: bool = False) -> None:
 
 @governed_app.command("reconcile-ch-rbac")
 def reconcile_ch_rbac_cmd() -> None:
-    """Reconcile CH quota tiers + service roles + per-org row policies into
-    ClickHouse (mints the service-user secrets via the secrets seam). Idempotent.
+    """Reconcile CH quota tiers + service roles + fixed users + the per-table
+    DFE_current_tenant_id row policies into ClickHouse (mints the service + fixed
+    user secrets via the secrets seam). Idempotent.
     """
     from pathlib import Path
 
@@ -118,6 +156,10 @@ def reconcile_ch_rbac_cmd() -> None:
     )
     for err in result.errors:
         typer.echo(f"  error: {err}", err=True)
+    # Partial reconcile is a failure the caller (CI/scripts) must see - exit
+    # non-zero when any statement errored, don't mask it behind a 0 exit.
+    if result.errors:
+        raise typer.Exit(1)
 
 
 def register_governed_ops_commands(app: typer.Typer) -> None:

@@ -229,3 +229,29 @@ class TestDeleteAccount:
     def test_delete_requires_admin(self, client, viewer_headers):
         resp = client.delete("/api/v1/auth/accounts/admin", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_delete_removes_username_from_groups(self, client, admin_headers):
+        """FIX 4: deleting an account clears it from every group's members list."""
+        client.post(
+            "/api/v1/auth/accounts",
+            json={
+                "username": "multigroup",
+                "password": "pw",
+                "groups": ["dfe-viewers", "dfe-analysts"],
+            },
+            headers=admin_headers,
+        )
+        for group in ("dfe-viewers", "dfe-analysts"):
+            members = client.get(f"/api/v1/auth/groups/{group}", headers=admin_headers).json()[
+                "members"
+            ]
+            assert "multigroup" in members
+
+        resp = client.delete("/api/v1/auth/accounts/multigroup", headers=admin_headers)
+        assert resp.status_code == 204
+
+        for group in ("dfe-viewers", "dfe-analysts"):
+            members = client.get(f"/api/v1/auth/groups/{group}", headers=admin_headers).json()[
+                "members"
+            ]
+            assert "multigroup" not in members

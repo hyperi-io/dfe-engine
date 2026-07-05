@@ -126,7 +126,14 @@ class AccountStore:
         Returns:
             List of Account objects (order is filesystem-dependent).
         """
-        return [self._read(p) for p in sorted(self._dir.glob("*.yaml"))]
+        # Skip files that parse to nothing (empty/truncated leftovers from a
+        # crashed writer) - _read returns None for those rather than crashing.
+        accounts: list[Account] = []
+        for p in sorted(self._dir.glob("*.yaml")):
+            account = self._read(p)
+            if account is not None:
+                accounts.append(account)
+        return accounts
 
     def update(self, username: str, **fields: object) -> Account:
         """Update mutable fields on an existing account.
@@ -218,12 +225,13 @@ class AccountStore:
             True if the password matches, False otherwise.
         """
         path = self._path(username)
-        if not path.exists():
-            # Timing-safe rejection: still run bcrypt to prevent oracle attacks
+        account = self._read(path) if path.exists() else None
+        if account is None:
+            # Unknown user OR an empty/truncated file: still run bcrypt against a
+            # dummy hash to keep the timing constant and avoid username enumeration.
             bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
             return False
 
-        account = self._read(path)
         return bcrypt.checkpw(
             password.encode("utf-8"),
             account.password_hash.encode("utf-8"),
@@ -236,13 +244,20 @@ class AccountStore:
     def _path(self, username: str) -> Path:
         return self._dir / f"{username}.yaml"
 
-    def _read(self, path: Path) -> Account:
+    def _read(self, path: Path) -> Account | None:
         """Load an Account from a YAML file.
 
         The username is derived from the filename stem — it is not stored
         inside the YAML body.
+
+        Returns None when the file parses to nothing. A non-atomic writer
+        (or a crash before atomic writes landed) can leave a truncated/empty
+        file; yaml_load then returns None. Treat that as "no account" instead
+        of raising a TypeError on ``data["username"]``.
         """
-        data: dict = yaml_load(path)
+        data = yaml_load(path)
+        if not data:
+            return None
         data["username"] = path.stem
         return Account.model_validate(data)
 

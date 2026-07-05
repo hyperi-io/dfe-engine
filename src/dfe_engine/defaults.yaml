@@ -12,7 +12,6 @@ clickhouse:
   database: "default"
   secure: true
   verify: false
-  connections_min: 10
   connections_max: 300
 
 # Hunt scheduler settings

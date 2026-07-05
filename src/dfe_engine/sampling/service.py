@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from typing import Any
 
@@ -40,6 +41,32 @@ from .models import (
     SamplerError,
     SampleResult,
 )
+
+# An explicit ``table`` override is interpolated into ``FROM {target}`` on the
+# shared ADMIN client (ClickHouse cannot bind an identifier), so it MUST be a
+# bare - optionally backtick-quoted - ``db.table``, never free SQL. Without this a
+# caller could pass ``(SELECT ... FROM dfe_internal.repository) AS t`` and read
+# every org past any row policy (F-SAMPLER-SQLI). The router additionally gates
+# any table/filter behind ``query:raw``; this is the identifier-shape check that
+# also protects the CLI path. Accept ``db.table``/``table`` with each part a bare
+# identifier or a backtick-quoted one; reject whitespace, quotes-other-than-bare
+# backticks, parens, commas, semicolons and operators.
+_IDENT = r"(?:`[A-Za-z_][A-Za-z0-9_]*`|[A-Za-z_][A-Za-z0-9_]*)"
+_SAFE_TABLE = re.compile(rf"^{_IDENT}(?:\.{_IDENT})?$")
+
+
+def _validate_table_override(table: str) -> str:
+    """Return ``table`` if it is a bare db.table identifier, else raise.
+
+    See ``_SAFE_TABLE`` - this is the sole gate turning caller-supplied
+    ``req.table`` into an interpolated FROM target (F-SAMPLER-SQLI).
+    """
+    if not _SAFE_TABLE.match(table):
+        raise SamplerError(
+            f"Invalid table {table!r}: must be a bare db.table identifier "
+            "(optionally backtick-quoted), not free SQL"
+        )
+    return table
 
 
 class Sampler:
@@ -79,11 +106,7 @@ class Sampler:
         gated = req.mode in GATED_MODES
         _progress(task, 30, f"Sampling ({req.mode.value}, {req.backend.value})")
         if gated:
-            async with self._semaphore():
-                _progress(task, 40, "Running logreducer")
-                lines, stats, note = await asyncio.to_thread(
-                    self._reduce_sample, req, ch, target, source_label, limit
-                )
+            lines, stats, note = await self._run_gated(req, ch, target, source_label, limit, task)
         else:
             lines, stats, note = await asyncio.to_thread(
                 self._fast_sample, req, ch, target, source_label, limit
@@ -93,6 +116,36 @@ class Sampler:
         result = self._format(req, target, limit, lines, stats, note)
         _progress(task, 100, "Done")
         return result.model_dump()
+
+    async def _run_gated(
+        self,
+        req: SampleRequest,
+        ch: Any,
+        target: str,
+        source_label: str | None,
+        limit: int,
+        task: Any,
+    ) -> tuple[list[str], dict[str, Any], str | None]:
+        """Run a gated (logreducer) sample under the memory gate.
+
+        WHY the manual acquire + shield + done-callback release: asyncio.to_thread
+        is NOT cancellable. If this coroutine is cancelled (client disconnect /
+        task cancel) the logreducer worker thread keeps running and holding its
+        max_memory_gb budget. Releasing the gate on cancel (as ``async with
+        semaphore`` would) lets another gated run start while the old thread is
+        still resident, blowing past the max_concurrent x max_memory_gb ceiling.
+        So: acquire the gate, shield the worker so cancelling us never marks it
+        done early, and release ONLY from a done-callback that fires when the
+        thread genuinely finishes (success or error).
+        """
+        sem = self._semaphore()
+        await sem.acquire()
+        _progress(task, 40, "Running logreducer")
+        worker = asyncio.ensure_future(
+            asyncio.to_thread(self._reduce_sample, req, ch, target, source_label, limit)
+        )
+        worker.add_done_callback(lambda _f: sem.release())
+        return await asyncio.shield(worker)
 
     def resolve_or_raise(self, req: SampleRequest, source_registry: Any) -> str:
         """Validate the request's target up front, returning the resolved target.
@@ -114,7 +167,7 @@ class Sampler:
         """
         if req.backend == SampleBackend.CLICKHOUSE:
             if req.table:
-                return req.table, req.source
+                return _validate_table_override(req.table), req.source
             if req.source:
                 src = self._get_source(source_registry, req.source)
                 db = self._ch.effective_data_database
@@ -180,7 +233,12 @@ class Sampler:
         suffix = uuid.uuid4().hex[:8]
         if req.mode == SampleMode.RECENT:
             lines = kr.read_recent(conf, topic, limit=limit, group_suffix=suffix)
-            return lines, {"read": len(lines), "truncated": len(lines) >= limit}, None
+            # A bounded tail read returns the NEWEST `limit` messages. With the
+            # per-partition shortfall now redistributed, we fill the window
+            # whenever the topic holds at least `limit` messages -- that is a
+            # complete recent sample, so truncated is False. truncated=True only
+            # signals we fell short (the topic genuinely has fewer than asked).
+            return lines, {"read": len(lines), "truncated": len(lines) < limit}, None
         # RANDOM over Kafka: read a bounded window from the earliest offset, then
         # sample it. There is no server-side random on a topic, so this is a fair
         # sample of the window, not of all history - say so.
@@ -243,11 +301,23 @@ class Sampler:
             timestamp_field=self._cfg.timestamp_field,
         )
         sql = ch_reader.scan_query(target, where=where, scan_rows=self._cfg.max_scan_rows)
+        # The gated path streams via logreducer's ClickHouseSource on the UNWRAPPED
+        # native client (block streaming), so it bypasses the TenantScopedClient's
+        # setting handling. A readonly fixed user (dfe_analyst_ro / dfe_tenant_reader)
+        # would REJECT the per-query max_execution_time (not CHANGEABLE_IN_READONLY),
+        # so drop it for them and lean on their profile bound. NB the native client
+        # also bypasses tenant injection - unreachable today (sampler:read is not a
+        # tenant action), a noted follow-up if it ever becomes one.
+        settings = (
+            None
+            if getattr(ch, "readonly", False)
+            else {"max_execution_time": self._cfg.max_execution_time}
+        )
         return ClickHouseSource(
             ch_reader._raw_client(ch),
             sql,
             parameters=params or None,
-            settings={"max_execution_time": self._cfg.max_execution_time},
+            settings=settings,
         )
 
     # ── formatting ─────────────────────────────────────────────

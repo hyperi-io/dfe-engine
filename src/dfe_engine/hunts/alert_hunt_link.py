@@ -1,3 +1,11 @@
+#  Project:      dfe-engine
+#  File:         hunts/alert_hunt_link.py
+#  Purpose:      Link alert destinations into hunt YAML alerts.destinations
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
 """Link API-managed alert destinations to hunt YAML ``alerts.destinations``."""
 
 from __future__ import annotations
@@ -47,10 +55,12 @@ def delete_destinations_owned_by_hunt(
         if data.get("hunt_name") != hunt_name:
             continue
         hunts_using = hunt_registry.hunt_names_referencing_destination(dest_name)
-        if len(hunts_using) > 1:
-            _clear_hunt_name_if_owned(store, dest_name, data, hunt_name)
-            continue
-        if len(hunts_using) == 1 and hunts_using[0] != hunt_name:
+        # Still referenced by another hunt -> only clear our marker; delete when
+        # this hunt is the sole (or last) referrer.
+        used_by_other = len(hunts_using) > 1 or (
+            len(hunts_using) == 1 and hunts_using[0] != hunt_name
+        )
+        if used_by_other:
             _clear_hunt_name_if_owned(store, dest_name, data, hunt_name)
             continue
         store.delete(dest_name, ALERT_DEST_DATA_KEY)

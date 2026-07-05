@@ -1,3 +1,11 @@
+#  Project:      dfe-engine
+#  File:         source/engine_registry.py
+#  Purpose:      Permitted ClickHouse table engines (validated set)
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
 """Engine Registry — canonical set of permitted ClickHouse table engines.
 
 Restricts the table engine a source may use to a predefined, validated set,

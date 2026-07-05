@@ -106,6 +106,14 @@ def run(
     reload_every: int = typer.Option(
         20, help="Reload hunt specs (and rebuild the runner) every N ticks (0 = never)."
     ),
+    worker_id: str = typer.Option(
+        "",
+        "--worker-id",
+        help=(
+            "Lease-owner id for this worker. Default derives hostname-pid, unique "
+            "per pod - claimants sharing an id would double-run."
+        ),
+    ),
 ) -> None:
     """Run the long-lived pull-based worker until SIGTERM/SIGINT.
 
@@ -117,7 +125,7 @@ def run(
     """
     settings = load_settings()
     ch, db = _build_ch(settings)
-    coord = ChCoordinator(ch, database=db)
+    coord = ChCoordinator(ch, database=db, worker_id=worker_id or None)
     coord.ensure_schema()
     worker = HuntWorker(ch, coord)
     hunt_dir = settings.hunts.hunt_dir

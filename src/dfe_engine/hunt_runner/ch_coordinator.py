@@ -32,10 +32,28 @@ Tables (all ReplacingMergeTree, bounded to ~1 row/hunt after merge):
 
 from __future__ import annotations
 
+import itertools
+import os
+import socket
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
+
+# Distinguishes coordinators built in the SAME process (tests, embedded use);
+# hostname+pid already separates pods.
+_WORKER_SEQ = itertools.count()
+
+
+def default_worker_id() -> str:
+    """A lease-owner id unique per pod/process (and per coordinator instance).
+
+    Every claimant MUST have a distinct owner: the insert-and-resolve settle
+    resolves the winner as (latest claimed, then min owner), so two claimants
+    sharing an id would BOTH resolve as the winner -> double-run. hostname+pid
+    separates pods; the counter separates instances within one process.
+    """
+    return f"{socket.gethostname()}-{os.getpid()}-{next(_WORKER_SEQ)}"
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,7 +82,9 @@ class ChCoordinator:
         ch: a clickhouse-connect client.
         database: the data database (settings.clickhouse.effective_data_database).
             NEVER hardcode 'dfe' here - the caller passes the resolved name.
-        worker_id: this worker's stable id, used as the lease owner.
+        worker_id: this worker's lease-owner id. Defaults to a derived
+            hostname-pid-seq id so every pod/process is a distinct claimant
+            (a SHARED id breaks the settle's never-double-run guarantee).
         lease_seconds: how long a claim is held before it becomes reclaimable.
         settle_seconds: the insert-and-resolve settle window.
         clock: injectable epoch-seconds source (defaults to time.time).
@@ -76,7 +96,7 @@ class ChCoordinator:
         ch: Any,
         database: str,
         *,
-        worker_id: str = "worker-0",
+        worker_id: str | None = None,
         lease_seconds: int = 300,
         settle_seconds: float = 0.75,
         clock: Callable[[], float] = time.time,
@@ -86,7 +106,7 @@ class ChCoordinator:
             raise ValueError("ChCoordinator requires an explicit data database")
         self._ch = ch
         self._db = database
-        self._worker_id = worker_id
+        self._worker_id = worker_id or default_worker_id()
         self._lease_seconds = lease_seconds
         self._settle = settle_seconds
         self._clock = clock

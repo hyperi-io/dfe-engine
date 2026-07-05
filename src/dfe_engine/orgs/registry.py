@@ -27,6 +27,9 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
+
+from scalo.logger import logger
 
 from dfe_engine.orgs.models import Org
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -53,6 +56,8 @@ class OrgRegistry:
         name: str,
         org_ids: list[str] | None = None,
         display_name: str = "",
+        *,
+        domains: list[str] | None = None,
     ) -> Org:
         """Create a new organisation.
 
@@ -60,6 +65,7 @@ class OrgRegistry:
             name: Unique org name (used as filename stem).
             org_ids: Tenant IDs for ClickHouse row-level security.
             display_name: Human-readable label.
+            domains: Email domains this org claims (lowercased on write).
 
         Returns:
             The newly created Org.
@@ -76,6 +82,7 @@ class OrgRegistry:
             name=name,
             display_name=display_name,
             org_ids=org_ids or [],
+            domains=_normalise_domains(domains),
             enabled=True,
             created_at=now,
             updated_at=now,
@@ -105,10 +112,41 @@ class OrgRegistry:
         """
         return [self._read(p) for p in sorted(self._dir.glob("*.yaml"))]
 
+    def find_by_domain(self, domain: str) -> Org | None:
+        """Return the org that claims *domain* (case-insensitive), or None.
+
+        A domain should be claimed by AT MOST ONE org, so this is the
+        email-domain -> org resolver JIT uses to bind an external login to its
+        tenant scope. Unclaimed domain -> None (the caller then provisions a
+        domain group with no org_ids -> no tenant access).
+
+        Tie-break: if two+ orgs list the same domain (a misconfiguration), we log
+        a warning and pick DETERMINISTICALLY the org whose name sorts first
+        (ascending), so resolution is stable across runs and independent of
+        filesystem ordering.
+        """
+        target = domain.strip().lower()
+        if not target:
+            return None
+        matches = sorted(
+            (o for o in self.list() if target in o.domains),
+            key=lambda o: o.name,
+        )
+        if not matches:
+            return None
+        if len(matches) > 1:
+            logger.warning(
+                "Email domain claimed by multiple orgs; picking first by name",
+                domain=target,
+                orgs=[o.name for o in matches],
+                chosen=matches[0].name,
+            )
+        return matches[0]
+
     def update(self, name: str, **fields: object) -> Org:
         """Update mutable fields on an existing org.
 
-        Permitted fields: ``display_name``, ``org_ids``, ``enabled``,
+        Permitted fields: ``display_name``, ``org_ids``, ``domains``, ``enabled``,
         ``hyperdx_team_id``, ``hyperdx_team_api_key_env``, ``ch_password_env``.
 
         Args:
@@ -132,6 +170,11 @@ class OrgRegistry:
             update_dict["display_name"] = fields["display_name"]
         if "org_ids" in fields:
             update_dict["org_ids"] = fields["org_ids"]
+        if "domains" in fields:
+            # model_copy(update=...) skips validators, so normalise here - this is
+            # the "lowercase on set" point for the update path. fields is
+            # **object, so narrow the domains value back to the list it must be.
+            update_dict["domains"] = _normalise_domains(cast("list[str] | None", fields["domains"]))
         if "enabled" in fields:
             update_dict["enabled"] = fields["enabled"]
         if "hyperdx_team_id" in fields:
@@ -191,3 +234,22 @@ class OrgRegistry:
 def _now() -> str:
     """Return the current UTC time as an ISO 8601 string."""
     return datetime.now(UTC).isoformat()
+
+
+def _normalise_domains(domains: list[str] | None) -> list[str]:
+    """Lowercase + strip email domains, dropping blanks and duplicates.
+
+    Order-preserving so the stored list reads back in the order supplied. This is
+    the single "lowercase on set" point shared by create() and update() so a
+    domain matches ``find_by_domain`` regardless of the case it was entered in.
+    """
+    if not domains:
+        return []
+    seen: set[str] = set()
+    result: list[str] = []
+    for raw in domains:
+        cleaned = str(raw).strip().lower()
+        if cleaned and cleaned not in seen:
+            seen.add(cleaned)
+            result.append(cleaned)
+    return result

@@ -90,7 +90,7 @@ class TestAuditLoginSuccess:
             user_id="apikey:ci-pipeline",
             auth_path="api_key",
             client_ip="10.0.0.2",
-            roles=["infra_viewer"],
+            roles=["infra_ro"],
         )
         _, kwargs = mock_logger.info.call_args
         assert kwargs["user_id"] == "apikey:ci-pipeline"

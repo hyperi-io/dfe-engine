@@ -14,6 +14,23 @@ Uses the shared conftest fixtures (client, admin_headers, viewer_headers).
 from __future__ import annotations
 
 # ---------------------------------------------------------------------------
+# App wiring (lifespan)
+# ---------------------------------------------------------------------------
+
+
+class TestAppWiring:
+    """Task E: the app lifespan builds OrgLifecycleManager WITH the secrets seam."""
+
+    def test_org_lifecycle_has_secrets_store_and_hyperdx_flags(self, client):
+        # The `client` fixture enters the TestClient context, running the lifespan
+        # that constructs app.state.org_lifecycle.
+        manager = client.app.state.org_lifecycle
+        assert manager._secrets is not None  # secrets_store wired (per-org conn creds)
+        assert manager._per_group is False  # DFE_HYPERDX_PER_GROUP GA default
+        assert manager._ga_team_name == "dfe"
+
+
+# ---------------------------------------------------------------------------
 # POST /api/v1/orgs
 # ---------------------------------------------------------------------------
 
@@ -257,3 +274,142 @@ class TestDeleteOrg:
         )
         resp = client.delete("/api/v1/orgs/acme", headers=viewer_headers)
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Domains (Task A) - request/response carry email domains, lowercased
+# ---------------------------------------------------------------------------
+
+
+class TestOrgDomains:
+    def test_create_org_with_domains_lowercased(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "domains": ["Acme.com", "ACME.io"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["domains"] == ["acme.com", "acme.io"]
+
+    def test_create_org_domains_default_empty(self, client, admin_headers):
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        assert resp.status_code == 201
+        assert resp.json()["domains"] == []
+
+    def test_get_org_returns_domains(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "domains": ["acme.com"]},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/orgs/acme", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["domains"] == ["acme.com"]
+
+    def test_update_org_adds_and_removes_domains(self, client, admin_headers):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "domains": ["acme.com"]},
+            headers=admin_headers,
+        )
+        resp = client.put(
+            "/api/v1/orgs/acme",
+            json={"domains": ["Acme.com", "acme.io"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["domains"] == ["acme.com", "acme.io"]
+
+        resp = client.put(
+            "/api/v1/orgs/acme",
+            json={"domains": ["acme.io"]},
+            headers=admin_headers,
+        )
+        assert resp.json()["domains"] == ["acme.io"]
+
+
+# ---------------------------------------------------------------------------
+# Org CRUD -> background CH RBAC reconcile (Task D)
+# ---------------------------------------------------------------------------
+
+
+class TestOrgCrudReconcile:
+    """Org CRUD schedules an idempotent background reconcile when CH is configured
+    AND DFE_ORG_PROVISIONING_ENABLED; never blocks or fails the CRUD."""
+
+    def _patch_reconcile(self, monkeypatch, *, raises=False):
+        """Patch the CH boundary (no live CH) + record reconcile_ch_rbac calls."""
+        from types import SimpleNamespace
+
+        import dfe_engine.governance.ch as ch_mod
+        import dfe_engine.secrets as secrets_mod
+        from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+
+        calls: list[dict] = []
+
+        stub = SimpleNamespace(get_clickhouse_client=lambda: SimpleNamespace(_client=object()))
+        monkeypatch.setattr(ClickHouseManager, "get_instance", staticmethod(lambda cfg: stub))
+        monkeypatch.setattr(secrets_mod, "build_secrets", lambda cfg: None)
+
+        def _recorder(*args, **kwargs):
+            calls.append(kwargs)
+            if raises:
+                raise RuntimeError("ClickHouse unavailable")
+            return SimpleNamespace(statements=[], dropped=[], minted=[], errors=[])
+
+        monkeypatch.setattr(ch_mod, "reconcile_ch_rbac", _recorder)
+        return calls
+
+    def test_create_org_schedules_reconcile_when_enabled(self, client, admin_headers, monkeypatch):
+        monkeypatch.setenv("DFE_ORG_PROVISIONING_ENABLED", "true")
+        calls = self._patch_reconcile(monkeypatch)
+
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        assert resp.status_code == 201
+        assert len(calls) == 1
+        assert "orgs" in calls[0]  # reconcile fed the current org list
+
+    def test_update_org_schedules_reconcile_when_enabled(self, client, admin_headers, monkeypatch):
+        client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        monkeypatch.setenv("DFE_ORG_PROVISIONING_ENABLED", "true")
+        calls = self._patch_reconcile(monkeypatch)
+
+        resp = client.put("/api/v1/orgs/acme", json={"display_name": "Acme"}, headers=admin_headers)
+        assert resp.status_code == 200
+        assert len(calls) == 1
+
+    def test_delete_org_schedules_reconcile_when_enabled(self, client, admin_headers, monkeypatch):
+        client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        monkeypatch.setenv("DFE_ORG_PROVISIONING_ENABLED", "true")
+        calls = self._patch_reconcile(monkeypatch)
+
+        resp = client.delete("/api/v1/orgs/acme", headers=admin_headers)
+        assert resp.status_code == 204
+        assert len(calls) == 1
+
+    def test_reconcile_error_does_not_fail_crud(self, client, admin_headers, monkeypatch):
+        monkeypatch.setenv("DFE_ORG_PROVISIONING_ENABLED", "true")
+        calls = self._patch_reconcile(monkeypatch, raises=True)
+
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        # Reconcile blew up in the background but the CRUD still succeeded.
+        assert resp.status_code == 201
+        assert len(calls) == 1
+        assert client.get("/api/v1/orgs/acme", headers=admin_headers).status_code == 200
+
+    def test_provisioning_off_does_not_reconcile(self, client, admin_headers, monkeypatch):
+        monkeypatch.delenv("DFE_ORG_PROVISIONING_ENABLED", raising=False)
+        calls = self._patch_reconcile(monkeypatch)
+
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        assert resp.status_code == 201
+        assert calls == []  # gate closed -> no reconcile scheduled
+
+    def test_clickhouse_not_configured_does_not_reconcile(self, client, admin_headers, monkeypatch):
+        monkeypatch.setenv("DFE_ORG_PROVISIONING_ENABLED", "true")
+        monkeypatch.setattr(client.app.state.settings.clickhouse, "host", "")
+        calls = self._patch_reconcile(monkeypatch)
+
+        resp = client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        assert resp.status_code == 201
+        assert calls == []  # CH not configured -> no reconcile scheduled

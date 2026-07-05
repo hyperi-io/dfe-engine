@@ -19,13 +19,23 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError, get_path, set_path
-from dfe_engine.gitcrud.commit_policy import validate_change
+from dfe_engine.gitcrud.commit_policy import CommitContext, build_message, validate_change
 from dfe_engine.gitops.repo import PublishResult
 
 from .models import ActionDef
 from .policies import PolicyStore
 
 _ACTION_CLASS = "actions"
+
+
+def _action_message(name: str, verb: str, actor: str) -> str:
+    """Conforming commit message for an action op ('action' is an ALLOWED type).
+
+    Routes through build_message so the DFE-Actor trailer is present (else the
+    audit log falls back to the git author 'dfe-engine'); ``define`` / ``invoke``
+    / ``delete`` name the op in the summary.
+    """
+    return build_message(CommitContext(ctype="action", scope=name, summary=verb, actor=actor))
 
 
 class ActionForbiddenError(PermissionError):
@@ -60,11 +70,13 @@ class ActionStore:
             action.name,
             action.model_dump(),
             actor,
-            message=f"action({action.name}): define by {actor}",
+            message=_action_message(action.name, "define", actor),
         )
 
     def delete(self, name: str, actor: str) -> PublishResult:
-        return self._crud.delete(_ACTION_CLASS, name, actor)
+        return self._crud.delete(
+            _ACTION_CLASS, name, actor, message=_action_message(name, "delete", actor)
+        )
 
     def invoke(
         self,
@@ -115,7 +127,7 @@ class ActionStore:
             return InvokeResult(dry_run=True, changed=False, commit_sha=None, diff=diff)
 
         items = [(cls, nm, doc) for (cls, nm), doc in docs.items()]
-        res = self._crud.put_many(items, actor, f"action({action.name}): invoke by {actor}")
+        res = self._crud.put_many(items, actor, _action_message(action.name, "invoke", actor))
         return InvokeResult(
             dry_run=False, changed=res.changed, commit_sha=res.commit_sha, diff=diff
         )

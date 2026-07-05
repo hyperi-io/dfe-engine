@@ -80,3 +80,15 @@ class TestOrgModel:
         restored = Org.model_validate(data)
         assert restored.hyperdx_team_id == "team-abc"
         assert restored.ch_password_env == "DFE_ACME_CH_PASSWORD"
+
+    def test_domains_default_empty_and_independent(self):
+        org1 = Org(name="one")
+        org2 = Org(name="two")
+        assert org1.domains == []
+        org1.domains.append("acme.com")
+        assert org2.domains == []  # default_factory, not a shared reference
+
+    def test_domains_roundtrip(self):
+        org = Org(name="acme", domains=["acme.com", "acme.io"])
+        restored = Org.model_validate(org.model_dump())
+        assert restored.domains == ["acme.com", "acme.io"]

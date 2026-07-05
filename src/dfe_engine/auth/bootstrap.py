@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import importlib.resources
+import secrets  # stdlib CSPRNG for the first-boot admin password - NOT dfe_engine.secrets
 import shutil
 from pathlib import Path
 
@@ -34,21 +35,29 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 
-# Default password that triggers a startup warning
+# Convenience admin password, seeded ONLY in a dev posture when DFE_ADMIN_PASSWORD
+# is unset. A non-dev posture NEVER seeds this well-known default - it would be a
+# shipped default credential (CWE-1392/CWE-798); it generates a random one instead.
 _DEFAULT_PASSWORD = "changeme"
+
+# Entropy for a generated first-boot admin password. token_urlsafe emits ~1.3 chars
+# per byte, so 24 bytes -> a 32-char, 192-bit password shown once in the logs.
+_GENERATED_PW_BYTES = 24
 
 # Default group definitions: name -> (roles, description)
 _DEFAULT_GROUPS: dict[str, tuple[list[str], str]] = {
     "dfe-admins": (["admin"], "Full administrative access"),
     "dfe-analysts": (["data_analyst"], "Hunt, query, source CRUD"),
     "dfe-viewers": (["data_viewer"], "Dashboard and query access"),
-    "dfe-infra": (["infra_admin"], "Service and deployment management"),
+    "dfe-infra": (["infra"], "Service and deployment management"),
 }
 
 
 def bootstrap_auth(
     auth_dir: Path,
-    default_admin_password: str = _DEFAULT_PASSWORD,
+    default_admin_password: str | None = None,
+    *,
+    dev_posture: bool = True,
 ) -> tuple[AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
     """Bootstrap auth stores with sensible defaults.
 
@@ -57,7 +66,12 @@ def bootstrap_auth(
 
     Args:
         auth_dir: Root directory for auth config files.
-        default_admin_password: Password for the seeded admin account.
+        default_admin_password: Password for the seeded admin account, or None when
+            the operator did not supply one (DFE_ADMIN_PASSWORD unset). None + dev
+            posture falls back to the convenience default; None + non-dev posture
+            generates a random one-time password (never a shipped default).
+        dev_posture: True for a dev/test/local posture. Only consulted when
+            default_admin_password is None - it selects the unset-password fallback.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
@@ -91,15 +105,13 @@ def bootstrap_auth(
         _seed_groups(group_store)
         logger.info("Seeded default groups")
 
-    # Seed admin account if accounts dir is empty
+    # Seed admin account if accounts dir is empty. Password choice + logging are
+    # handled together so the generated-password line is emitted exactly once, only
+    # when a fresh admin is actually seeded.
     if not list(accounts_dir.glob("*.yaml")):
-        _seed_admin(account_store, group_store, default_admin_password)
-        if default_admin_password == _DEFAULT_PASSWORD:
-            logger.warning(
-                "Admin account seeded with default password '%s'"
-                " — change in production (set DFE_ADMIN_PASSWORD)",
-                _DEFAULT_PASSWORD,
-            )
+        password, generated = _resolve_admin_password(default_admin_password, dev_posture)
+        _seed_admin(account_store, group_store, password)
+        _log_admin_seed(password, generated=generated)
 
     return account_store, group_store, api_key_store, role_store, role_config
 
@@ -127,3 +139,42 @@ def _seed_admin(
     account_store.create("admin", password, groups=["dfe-admins"])
     # Also register admin as a member of the dfe-admins group
     group_store.add_member("dfe-admins", "admin")
+
+
+def _resolve_admin_password(supplied: str | None, dev_posture: bool) -> tuple[str, bool]:
+    """Pick the first-boot admin password; return (password, was_generated).
+
+    - supplied (DFE_ADMIN_PASSWORD set): honour it verbatim - the operator's call.
+    - unset + dev posture: the convenience default, so local dev stays frictionless.
+    - unset + non-dev posture: a random password. Shipping a usable well-known
+      default outside dev is CWE-1392 (use of default credentials), so generate one
+      and surface it once (see _log_admin_seed) rather than ship 'changeme'.
+    """
+    if supplied is not None:
+        return supplied, False
+    if dev_posture:
+        return _DEFAULT_PASSWORD, False
+    return secrets.token_urlsafe(_GENERATED_PW_BYTES), True
+
+
+def _log_admin_seed(password: str, *, generated: bool) -> None:
+    """Announce the first-boot admin seed - loudly when it was generated.
+
+    A generated password is shown ONCE here (the Jenkins/ArgoCD/Vault bootstrap
+    pattern): it is recoverable only from this first-boot log line. The Account
+    model carries no must-change marker to force a reset, so the warning tells the
+    operator to rotate it immediately. The password is functional output, not prose.
+    """
+    if generated:
+        logger.warning(
+            "No DFE_ADMIN_PASSWORD in a non-dev posture: generated a random one-time "
+            "admin password. Log in as 'admin' and change it IMMEDIATELY - shown only "
+            "once here: %s",
+            password,
+        )
+    elif password == _DEFAULT_PASSWORD:
+        logger.warning(
+            "Admin account seeded with the well-known default password '%s' - set "
+            "DFE_ADMIN_PASSWORD before any real deployment",
+            _DEFAULT_PASSWORD,
+        )

@@ -15,7 +15,7 @@ def test_api_key(app) -> str:
     group_store = app.state.group_store
     # Create a group for the key (may already exist from bootstrap)
     if group_store.get("test-infra-ops") is None:
-        group_store.create("test-infra-ops", roles=["infra_admin"])
+        group_store.create("test-infra-ops", roles=["infra"])
     _, full_key = store.create("test-ci-key", groups=["test-infra-ops"])
     return full_key
 
@@ -32,7 +32,7 @@ class TestApiKeyAuthentication:
         assert resp.status_code == 200
         data = resp.json()
         assert data["user_id"] == "apikey:test-ci-key"
-        assert "infra_admin" in data["roles"]
+        assert "infra" in data["roles"]
         assert "test-infra-ops" in data["groups"]
 
     def test_invalid_api_key_returns_401(self, client: TestClient):

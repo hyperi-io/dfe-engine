@@ -4,6 +4,9 @@ roles:
     resource_type: core
     permissions:
       - "*"
+    hyperdx:
+      access: full
+      tenant_scoped: false
   data_analyst:
     description: "Hunt, query, source, fieldmap CRUD"
     resource_type: core
@@ -19,7 +22,10 @@ roles:
       - "schema:write"
       - "transform:*"
       - "org:read"
-  data_analyst_viewer:
+    hyperdx:
+      access: full
+      tenant_scoped: false
+  data_analyst_ro:
     description: "Same scope as data_analyst, read-only"
     resource_type: core
     permissions:
@@ -33,6 +39,9 @@ roles:
       - "rule:read"
       - "schema:read"
       - "org:read"
+    hyperdx:
+      access: full
+      tenant_scoped: false
   data_viewer:
     description: "HyperDX dashboards and query execution"
     resource_type: core
@@ -42,10 +51,14 @@ roles:
       - "sampler:read"
       - "dashboard:read"
       - "org:read"
-  infra_admin:
-    description: "Service configs, deployments, helm, Argo CD, orgs, groups"
+    hyperdx:
+      access: full
+      tenant_scoped: false
+  infra:
+    description: "Hunts, service configs, deployments, helm, Argo CD, orgs, groups"
     resource_type: core
     permissions:
+      - "hunt:*"
       - "config:*"
       - "service:*:config:*"
       - "service:*:metrics:read"
@@ -55,7 +68,10 @@ roles:
       - "org:*"
       - "group:*"
       - "repository:*"
-  infra_viewer:
+    hyperdx:
+      access: otel
+      tenant_scoped: false
+  infra_ro:
     description: "Infrastructure read-only"
     resource_type: core
     permissions:
@@ -69,7 +85,10 @@ roles:
       - "service-surface:read"
       - "service:read"
       - "org:read"
-  customer_viewer:
+    hyperdx:
+      access: otel
+      tenant_scoped: false
+  org_analyst:
     description: "Org-restricted data viewer"
     resource_type: core
     permissions:
@@ -78,3 +97,6 @@ roles:
       - "sampler:read"
       - "dashboard:read"
     scoped: true
+    hyperdx:
+      access: org-scoped
+      tenant_scoped: true

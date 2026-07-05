@@ -78,8 +78,8 @@ class TestCreate:
         assert (store._keys_dir / "ci-pipeline.yaml").exists()
 
     def test_groups_stored(self, store: APIKeyStore) -> None:
-        key_meta, _full_key = store.create("ci-pipeline", groups=["infra_admin"])
-        assert key_meta.groups == ["infra_admin"]
+        key_meta, _full_key = store.create("ci-pipeline", groups=["infra"])
+        assert key_meta.groups == ["infra"]
 
     def test_description_stored(self, store: APIKeyStore) -> None:
         key_meta, _full_key = store.create("ci-pipeline", description="Used by GitHub Actions")
@@ -185,10 +185,10 @@ class TestVerify:
         assert result.name == "terraform"
 
     def test_valid_key_correct_groups(self, store: APIKeyStore) -> None:
-        _meta, full_key = store.create("ci-pipeline", groups=["infra_admin", "data_analyst"])
+        _meta, full_key = store.create("ci-pipeline", groups=["infra", "data_analyst"])
         result = store.verify(full_key)
         assert result is not None
-        assert result.groups == ["infra_admin", "data_analyst"]
+        assert result.groups == ["infra", "data_analyst"]
 
     def test_invalid_long_token_returns_none(self, store: APIKeyStore) -> None:
         _meta, full_key = store.create("ci-pipeline")

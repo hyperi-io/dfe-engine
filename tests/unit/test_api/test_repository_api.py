@@ -367,3 +367,57 @@ class TestValidation:
         resp = client.get(f"{OBJECTS}/user/user1/blobs/raw", headers=user1)
         assert resp.headers["Content-Type"].startswith("application/octet-stream")
         assert resp.content == b"\x00\x01binary"
+
+
+# ── org_ids claim is NOT trusted (F-REPO-ORGIDS) ─────────────
+
+
+class TestOrgIdsClaimNotTrusted:
+    """Repository org reads key off LIVE membership, never the signed JWT org_ids
+    claim (which /auth/refresh would otherwise self-perpetuate)."""
+
+    def test_stale_org_claim_alone_does_not_grant_read(
+        self, repo_setup, admin_headers, api_settings
+    ):
+        client = repo_setup
+        assert (
+            client.put(
+                f"{OBJECTS}/org/acme/ui/welcome", content=b"hi acme", headers=admin_headers
+            ).status_code
+            == 200
+        )
+        client.put(f"{OBJECTS}/org/globex/ui/welcome", content=b"hi globex", headers=admin_headers)
+        # globexuser is a LIVE member of globex only; forge a token that also carries
+        # a stale org_ids=['acme'] claim.
+        token = create_access_token(
+            data={"sub": "globexuser", "org_ids": ["acme", "globex"]}, settings=api_settings
+        )
+        hdr = {"Authorization": f"Bearer {token}"}
+        # Own live org still reads...
+        assert client.get(f"{OBJECTS}/org/globex/ui/welcome", headers=hdr).status_code == 200
+        # ...but the claim-only acme org is hidden (404, not disclosed).
+        assert client.get(f"{OBJECTS}/org/acme/ui/welcome", headers=hdr).status_code == 404
+
+    def test_removed_member_loses_read_despite_stale_claim(
+        self, repo_setup, admin_headers, api_settings
+    ):
+        client = repo_setup
+        assert (
+            client.put(
+                f"{OBJECTS}/org/acme/ui/welcome", content=b"hi acme", headers=admin_headers
+            ).status_code
+            == 200
+        )
+        # orguser is a live acme member; mint a token that (like /auth/refresh) also
+        # carries org_ids=['acme'].
+        token = create_access_token(
+            data={"sub": "orguser", "org_ids": ["acme"]}, settings=api_settings
+        )
+        hdr = {"Authorization": f"Bearer {token}"}
+        assert client.get(f"{OBJECTS}/org/acme/ui/welcome", headers=hdr).status_code == 200
+        # Remove orguser from acme entirely (syncs group file + account.groups).
+        resp = client.delete(f"{GROUPS}/acme-analysts/members/orguser", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        # The SAME stale token still carries org_ids=['acme'], but live membership is
+        # gone -> the read is denied.
+        assert client.get(f"{OBJECTS}/org/acme/ui/welcome", headers=hdr).status_code == 404

@@ -31,6 +31,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.hunts.alert_hunt_link import delete_destinations_owned_by_hunt
 from dfe_engine.hunts.hunt_config_registry import (
     HuntConfigNotFoundError,
+    HuntConfigRegistry,
     default_display_name,
     resolve_display_name,
 )
@@ -55,6 +56,19 @@ def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
 
 def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
+
+
+def _merge_rule_overrides(stored_rules: Any, rule_names: list[str]) -> list[dict[str, Any]]:
+    """Rebuild ``rules`` for an update, preserving stored per-rule overrides.
+
+    The write API accepts rule NAMES only; per-rule overrides (target_table_name,
+    source, initial_checkpoint_lookback_minutes) are set by editing hunt YAML -
+    the documented YAML-edit path. An update must not silently discard them, so
+    every requested name keeps its stored entry (if any); new names get a bare
+    entry, and removed names drop with their overrides.
+    """
+    stored = {entry["rule_name"]: entry for entry in _rules_from_stored(stored_rules)}
+    return [dict(stored.get(name, {"rule_name": name})) for name in rule_names]
 
 
 router = APIRouter(prefix="/hunts", tags=["hunts"])
@@ -205,10 +219,15 @@ def _active_hunt_leases(request: Request) -> int:
     """
     try:
         from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-        from dfe_engine.settings import get_settings
+        from dfe_engine.settings import get_clickhouse_config, get_settings
 
-        db = get_settings().clickhouse.effective_data_database
-        client = ClickHouseManager.get_instance().get_clickhouse_client()
+        settings = get_settings()
+        db = settings.clickhouse.effective_data_database
+        # Pass the settings-derived config: a bare get_instance() would bind
+        # the process-wide singleton to localhost defaults on first call.
+        client = ClickHouseManager.get_instance(
+            get_clickhouse_config(settings)
+        ).get_clickhouse_client()
         rows = client.query(
             "SELECT countIf(lu > toInt64(now())) FROM ("
             f"SELECT hunt_id, argMax(lease_until, claimed) AS lu "
@@ -231,6 +250,17 @@ def _hunt_row_to_summary(row: dict[str, Any]) -> HuntSummary:
         source_table=row.get("source_table", ""),
         target_table=row.get("target_table", ""),
     )
+
+
+def _load_hunt_or_404(registry: HuntConfigRegistry, name: str) -> dict[str, Any]:
+    """Return the stored hunt config, or raise 404 when the file stem is absent."""
+    try:
+        return registry.get(name)
+    except HuntConfigNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
+        ) from None
 
 
 # ── Endpoints ───────────────────────────────────────────────
@@ -334,13 +364,7 @@ async def get_hunt(
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
     """Get full hunt configuration by file name."""
-    try:
-        config = registry.get(name)
-    except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+    config = _load_hunt_or_404(registry, name)
     return HuntDetailResponse.from_stored_config(name, config)
 
 
@@ -356,15 +380,12 @@ async def update_hunt(
     registry: HuntConfigReg,
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration."""
-    try:
-        registry.get(name)
-    except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+    existing = _load_hunt_or_404(registry, name)
 
     config = body.to_config_dict(hunt_name=name)
+    # The request carries rule NAMES only - carry each kept rule's stored YAML
+    # overrides across the rewrite instead of flattening to bare entries.
+    config["rules"] = _merge_rule_overrides(existing.get("rules"), body.rules)
     registry.save(
         name,
         config,
@@ -387,13 +408,7 @@ async def delete_hunt(
     alert_store: OptionalAlertDestStore,
 ):
     """Delete a hunt configuration."""
-    try:
-        registry.get(name)
-    except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+    _load_hunt_or_404(registry, name)
     if alert_store is not None:
         delete_destinations_owned_by_hunt(alert_store, registry, name)
     registry.delete(name)
@@ -419,13 +434,7 @@ async def trigger_hunt(
     execution from the API (enqueue a one-shot fire the runner claims) is not wired
     yet, so this returns 501 after validating the hunt exists.
     """
-    try:
-        registry.get(name)
-    except HuntConfigNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Hunt '{name}' not found"},
-        ) from None
+    _load_hunt_or_404(registry, name)
     raise HTTPException(
         status_code=501,
         detail={

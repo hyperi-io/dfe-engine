@@ -22,20 +22,26 @@ class TestConnectionConfigLoader:
 
     def test_load_default_returns_valid_config(self) -> None:
         config = ConnectionConfigLoader.load_default()
-        assert "default" in config.connections
-        assert "tenant_reader" in config.connections
+        # the four fixed-user connections
+        assert set(config.connections) == {"default", "analyst", "analyst_ro", "tenant_reader"}
         assert config.connections["default"].host == "localhost"
         assert config.connections["default"].port == 8123
         assert config.connections["default"].database == "dfe"
+        # default = the CH superuser (dfe_admin identity), not minted
         assert config.connections["default"].user == "default"
         assert config.connections["default"].password_env == "CH_DEFAULT_PASSWORD"
+        assert config.connections["analyst"].user == "dfe_analyst"
+        assert config.connections["analyst_ro"].user == "dfe_analyst_ro"
         assert config.connections["tenant_reader"].user == "dfe_tenant_reader"
 
     def test_load_default_role_connections(self) -> None:
         config = ConnectionConfigLoader.load_default()
         assert config.role_connections["admin"] == "default"
-        assert config.role_connections["customer_viewer"] == "tenant_reader"
-        assert config.role_connections["data_analyst"] == "default"
+        assert config.role_connections["infra"] == "default"
+        assert config.role_connections["org_analyst"] == "tenant_reader"
+        assert config.role_connections["data_analyst"] == "analyst"
+        assert config.role_connections["data_analyst_ro"] == "analyst_ro"
+        assert config.role_connections["data_viewer"] == "analyst_ro"
 
     def test_load_from_file(self, tmp_path: Path) -> None:
         yaml_content = """\

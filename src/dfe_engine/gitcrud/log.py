@@ -111,7 +111,11 @@ def _changed_files(entry) -> list[str]:
     files: list[str] = []
     for change in entry.changes():
         tc = change if not isinstance(change, list) else change[0]
-        p = tc.new.path or tc.old.path
+        # dulwich uses new=None for deletes and old=None for adds (no null
+        # TreeEntry sentinel) - guard both sides before touching .path
+        new_path = tc.new.path if tc.new else None
+        old_path = tc.old.path if tc.old else None
+        p = new_path or old_path
         if p:
             files.append(p.decode())
     return sorted(set(files))

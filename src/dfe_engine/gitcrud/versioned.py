@@ -32,10 +32,22 @@ from __future__ import annotations
 import copy
 from typing import Any
 
+from .commit_policy import CommitContext, build_message, type_for_class
 from .engine import GitCrud, ResourceNotFoundError
 
 _VERSIONS = "versions"
 _SPEC = "spec"
+
+
+def _versioned_message(cls: str, name: str, actor: str, summary: str) -> str:
+    """Conforming commit message for a versioned write (type mapped from cls).
+
+    Routes through build_message so the subject uses an ALLOWED type (not the raw
+    class name) and carries the DFE-Actor trailer - read_log then reads it as
+    conforming + attributed instead of falling back to 'dfe-engine'.
+    """
+    ctx = CommitContext(ctype=type_for_class(cls), scope=name, summary=summary, actor=actor)
+    return build_message(ctx)
 
 
 class VersionConflictError(Exception):
@@ -152,7 +164,7 @@ class VersionedDoc:
         }
         env["draft"] = doc
         env["status"] = "draft"
-        return self._save(cls, name, env, actor, f"{cls}({name}): draft by {actor}")
+        return self._save(cls, name, env, actor, _versioned_message(cls, name, actor, "draft"))
 
     def publish(self, cls: str, name: str, actor: str, message: str = "") -> int:
         """Freeze the draft as the next immutable version; return its number."""
@@ -168,7 +180,9 @@ class VersionedDoc:
         env["current"] = new_ver
         env["draft"] = None
         env["status"] = "published"
-        self._save(cls, name, env, actor, f"{cls}({name}): publish v{new_ver} by {actor}")
+        self._save(
+            cls, name, env, actor, _versioned_message(cls, name, actor, f"publish v{new_ver}")
+        )
         return new_ver
 
     def rollback(self, cls: str, name: str, version: int, actor: str) -> None:
@@ -180,7 +194,9 @@ class VersionedDoc:
             raise ValueError(f"{cls}/{name}: no version {version}")
         env["current"] = int(version)
         env["status"] = "published"
-        self._save(cls, name, env, actor, f"{cls}({name}): rollback to v{version} by {actor}")
+        self._save(
+            cls, name, env, actor, _versioned_message(cls, name, actor, f"rollback to v{version}")
+        )
 
     def set_deployed(self, cls: str, name: str, version: int, actor: str) -> None:
         """Record which version is actually reconciled onto the cluster."""
@@ -188,4 +204,6 @@ class VersionedDoc:
         if env is None:
             raise ResourceNotFoundError(f"{cls}/{name}")
         env["deployed"] = int(version)
-        self._save(cls, name, env, actor, f"{cls}({name}): mark deployed v{version} by {actor}")
+        self._save(
+            cls, name, env, actor, _versioned_message(cls, name, actor, f"mark deployed v{version}")
+        )

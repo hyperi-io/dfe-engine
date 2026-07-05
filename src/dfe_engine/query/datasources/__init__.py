@@ -109,8 +109,16 @@ def register_adapter(name: str):
     return decorator
 
 
-def get_adapter(datasource: str) -> DatasourceAdapter:
-    """Get adapter instance for datasource URI (e.g. 'clickhouse:default')."""
+def get_adapter(datasource: str, config: dict[str, Any] | None = None) -> DatasourceAdapter:
+    """Get adapter instance for datasource URI (e.g. 'clickhouse:default').
+
+    Args:
+        datasource: URI of the form ``scheme:target``.
+        config: Optional adapter connection config. For the clickhouse scheme
+            pass the settings-derived config (``get_clickhouse_config``) -
+            without it the adapter binds the process-wide ClickHouseManager
+            singleton to localhost defaults.
+    """
     scheme, _, target = datasource.partition(":")
     target = target or "default"
 
@@ -118,7 +126,7 @@ def get_adapter(datasource: str) -> DatasourceAdapter:
         available = ", ".join(_adapters.keys())
         raise ValueError(f"Unknown datasource scheme: {scheme}. Available: {available}")
 
-    return _adapters[scheme](target)
+    return _adapters[scheme](target, config)
 
 
 def list_adapters() -> list[str]:

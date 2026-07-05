@@ -8,8 +8,8 @@ and rewrites it for hunt execution:
 3. Extract the detection logic (WHERE clause without time bounds)
 
 The rewriter does NOT generate the final INSERT INTO ... SELECT —
-that's done by HuntResultSchema.build_insert_select(). This module
-handles the parsing/cleaning of user-supplied SQL.
+the hunt runner does that. This module handles the parsing/cleaning
+of user-supplied SQL.
 
 Usage:
     from dfe_engine.hunts.rule_rewriter import RuleRewriter
@@ -105,8 +105,7 @@ class RuleRewriter:
 
     The rewriter extracts the detection logic from a user's SQL SELECT,
     stripping time bounds and SELECT * patterns. The cleaned output
-    is then passed to HuntResultSchema.build_insert_select() for
-    final SQL generation.
+    feeds the hunt runner's final SQL generation.
     """
 
     def __init__(

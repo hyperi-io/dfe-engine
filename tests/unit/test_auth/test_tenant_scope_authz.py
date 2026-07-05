@@ -43,18 +43,18 @@ def _allowed(user: AuthContext, action: str, scope: Scope | None = None) -> bool
 
 
 def test_org_scoped_viewer_reaches_query_execute():
-    # customer_viewer is the documented org-scoped role; query:execute is its core,
+    # org_analyst is the documented org-scoped role; query:execute is its core,
     # org-isolated capability (ViewExecutor injects org_id + tenant_isolated guard).
-    u = _org_user("customer_viewer")
+    u = _org_user("org_analyst")
     assert _allowed(u, "query:execute")
 
 
 def test_org_scoped_grant_denied_shared_config_and_raw_data():
-    # The over-grant the adversarial re-verify caught. customer_viewer's grant also
+    # The over-grant the adversarial re-verify caught. org_analyst's grant also
     # lists source:read / sampler:read, but those are NOT tenant actions, so they
     # resolve system-only and are denied at org scope (shared config / admin-client
     # raw reads - not org-isolated).
-    u = _org_user("customer_viewer")
+    u = _org_user("org_analyst")
     assert not _allowed(u, "source:read")
     assert not _allowed(u, "sampler:read")
     # An org-scoped ADMIN (org-bound '*') still cannot mutate global config or read
@@ -76,7 +76,7 @@ def test_org_scoped_grant_denied_shared_config_and_raw_data():
 
 def test_cross_org_denied():
     # An explicit request for another org's scope never passes for an acme grant.
-    u = _org_user("customer_viewer", org="acme")
+    u = _org_user("org_analyst", org="acme")
     assert not _allowed(u, "query:execute", Scope(type="org", id="other"))
 
 

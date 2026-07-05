@@ -12,7 +12,50 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.auth.roles import RoleConfig, RoleDefinition, permission_matches
+from dfe_engine.auth.roles import (
+    ROLE_ALIASES,
+    RoleConfig,
+    RoleDefinition,
+    permission_matches,
+)
+
+# ---------------------------------------------------------------------------
+# _normalize_role_raw (resource-type alias) tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeResourceType:
+    def test_hyphenated_resource_type_is_honoured(self):
+        """FIX 5: a custom role authored with 'resource-type' (hyphen) keeps its type.
+
+        The hyphen alias must fold onto the canonical 'resource_type'; before the
+        fix the alias was ignored and the role defaulted to 'custom'.
+        """
+        data = {
+            "roles": {
+                "my_custom_role": {
+                    "description": "Custom",
+                    "permissions": ["source:read"],
+                    "resource-type": "core",
+                }
+            }
+        }
+        config = RoleConfig._from_data(data)
+        assert config.roles["my_custom_role"].resource_type == "core"
+
+    def test_underscore_spelling_still_works(self):
+        data = {
+            "roles": {
+                "my_custom_role": {
+                    "description": "Custom",
+                    "permissions": ["source:read"],
+                    "resource_type": "core",
+                }
+            }
+        }
+        config = RoleConfig._from_data(data)
+        assert config.roles["my_custom_role"].resource_type == "core"
+
 
 # ---------------------------------------------------------------------------
 # permission_matches tests
@@ -129,7 +172,7 @@ class TestRoleConfig:
                 description="Hunt and query",
                 permissions=["hunt:*", "query:*", "source:read"],
             ),
-            "infra_admin": RoleDefinition(
+            "infra": RoleDefinition(
                 description="Infrastructure",
                 permissions=["config:*", "argo:*", "service:*:config:*"],
             ),
@@ -160,19 +203,19 @@ class TestRoleConfig:
         assert config.has_permission("data_analyst", "query:execute") is True
 
     def test_has_permission_trailing_wildcard_argo(self, config):
-        assert config.has_permission("infra_admin", "argo:applications:sync") is True
-        assert config.has_permission("infra_admin", "argo:projects:get") is True
+        assert config.has_permission("infra", "argo:applications:sync") is True
+        assert config.has_permission("infra", "argo:projects:get") is True
 
     def test_has_permission_service_scoped(self, config):
-        assert config.has_permission("infra_admin", "service:dfe-loader:config:read") is True
-        assert config.has_permission("infra_admin", "service:dfe-receiver:config:write") is True
+        assert config.has_permission("infra", "service:dfe-loader:config:read") is True
+        assert config.has_permission("infra", "service:dfe-receiver:config:write") is True
 
     def test_has_permission_unknown_role(self, config):
         assert config.has_permission("nonexistent_role", "config:read") is False
 
     def test_has_permission_config_wildcard(self, config):
-        assert config.has_permission("infra_admin", "config:read") is True
-        assert config.has_permission("infra_admin", "config:write") is True
+        assert config.has_permission("infra", "config:read") is True
+        assert config.has_permission("infra", "config:write") is True
 
 
 # ---------------------------------------------------------------------------
@@ -302,7 +345,7 @@ roles:
       - "config:read"
       - "source:read"
     scoped: false
-  customer_viewer:
+  org_analyst:
     description: "Scoped viewer"
     permissions:
       - "query:execute"
@@ -315,7 +358,7 @@ roles:
 
         assert "admin" in config.roles
         assert "viewer" in config.roles
-        assert "customer_viewer" in config.roles
+        assert "org_analyst" in config.roles
 
     def test_load_parses_role_definitions(self, tmp_path):
         yaml_content = """
@@ -359,7 +402,7 @@ roles:
     def test_load_and_check_permissions(self, tmp_path):
         yaml_content = """
 roles:
-  infra_admin:
+  infra:
     description: "Infrastructure admin"
     permissions:
       - "config:*"
@@ -369,9 +412,9 @@ roles:
         config_file.write_text(yaml_content)
 
         config = RoleConfig.load(config_file)
-        assert config.has_permission("infra_admin", "config:read") is True
-        assert config.has_permission("infra_admin", "argo:applications:sync") is True
-        assert config.has_permission("infra_admin", "source:read") is False
+        assert config.has_permission("infra", "config:read") is True
+        assert config.has_permission("infra", "argo:applications:sync") is True
+        assert config.has_permission("infra", "source:read") is False
 
 
 # ---------------------------------------------------------------------------
@@ -389,11 +432,11 @@ class TestLoadBuiltin:
         expected_roles = {
             "admin",
             "data_analyst",
-            "data_analyst_viewer",
+            "data_analyst_ro",
             "data_viewer",
-            "infra_admin",
-            "infra_viewer",
-            "customer_viewer",
+            "infra",
+            "infra_ro",
+            "org_analyst",
         }
         assert set(config.roles.keys()) == expected_roles
 
@@ -402,24 +445,31 @@ class TestLoadBuiltin:
         assert config.has_permission("admin", "anything") is True
         assert "*" in config.roles["admin"].permissions
 
-    def test_builtin_infra_admin_grants_argo(self):
+    def test_builtin_infra_grants_argo(self):
         config = RoleConfig.load_builtin()
-        assert config.has_permission("infra_admin", "argo:applications:sync") is True
-        assert config.has_permission("infra_admin", "argo:projects:get") is True
+        assert config.has_permission("infra", "argo:applications:sync") is True
+        assert config.has_permission("infra", "argo:projects:get") is True
 
-    def test_builtin_infra_admin_grants_service_config(self):
+    def test_builtin_infra_grants_hunt(self):
+        """infra owns hunts (hunt:* added in the 2026-07 role model)."""
         config = RoleConfig.load_builtin()
-        assert config.has_permission("infra_admin", "service:dfe-loader:config:read") is True
-        assert config.has_permission("infra_admin", "service:dfe-loader:config:write") is True
+        assert config.has_permission("infra", "hunt:read") is True
+        assert config.has_permission("infra", "hunt:write") is True
+        assert config.has_permission("infra", "hunt:execute") is True
 
-    def test_builtin_infra_viewer_read_only_service(self):
+    def test_builtin_infra_grants_service_config(self):
         config = RoleConfig.load_builtin()
-        assert config.has_permission("infra_viewer", "service:dfe-loader:config:read") is True
-        assert config.has_permission("infra_viewer", "service:dfe-loader:config:write") is False
+        assert config.has_permission("infra", "service:dfe-loader:config:read") is True
+        assert config.has_permission("infra", "service:dfe-loader:config:write") is True
 
-    def test_builtin_customer_viewer_is_scoped(self):
+    def test_builtin_infra_ro_read_only_service(self):
         config = RoleConfig.load_builtin()
-        assert config.roles["customer_viewer"].scoped is True
+        assert config.has_permission("infra_ro", "service:dfe-loader:config:read") is True
+        assert config.has_permission("infra_ro", "service:dfe-loader:config:write") is False
+
+    def test_builtin_org_analyst_is_scoped(self):
+        config = RoleConfig.load_builtin()
+        assert config.roles["org_analyst"].scoped is True
 
     def test_builtin_data_analyst_grants_hunt(self):
         config = RoleConfig.load_builtin()
@@ -428,14 +478,143 @@ class TestLoadBuiltin:
         assert config.has_permission("data_analyst", "schema:write") is True
         assert config.has_permission("data_analyst", "schema:delete") is False
 
-    def test_builtin_data_analyst_viewer_read_only(self):
+    def test_builtin_data_analyst_ro_read_only(self):
         config = RoleConfig.load_builtin()
-        assert config.has_permission("data_analyst_viewer", "hunt:read") is True
-        assert config.has_permission("data_analyst_viewer", "hunt:write") is False
-        assert config.has_permission("data_analyst_viewer", "schema:write") is False
-        assert config.has_permission("data_analyst_viewer", "schema:delete") is False
+        assert config.has_permission("data_analyst_ro", "hunt:read") is True
+        assert config.has_permission("data_analyst_ro", "hunt:write") is False
+        assert config.has_permission("data_analyst_ro", "schema:write") is False
+        assert config.has_permission("data_analyst_ro", "schema:delete") is False
 
     def test_builtin_data_viewer_limited(self):
         config = RoleConfig.load_builtin()
         assert config.has_permission("data_viewer", "query:execute") is True
         assert config.has_permission("data_viewer", "hunt:read") is False
+
+
+# ---------------------------------------------------------------------------
+# HyperDX capability block (config-driven) + cumulative resolver
+# ---------------------------------------------------------------------------
+
+
+class TestHyperdxAccessParsing:
+    def test_builtin_roles_declare_hyperdx(self):
+        config = RoleConfig.load_builtin()
+        assert config.hyperdx_for("admin").access == "full"
+        assert config.hyperdx_for("infra").access == "otel"
+        assert config.hyperdx_for("infra_ro").access == "otel"
+        assert config.hyperdx_for("data_analyst").access == "full"
+        assert config.hyperdx_for("data_analyst_ro").access == "full"
+        assert config.hyperdx_for("data_viewer").access == "full"
+
+    def test_org_analyst_is_tenant_scoped(self):
+        config = RoleConfig.load_builtin()
+        hdx = config.hyperdx_for("org_analyst")
+        assert hdx.access == "org-scoped"
+        assert hdx.tenant_scoped is True
+
+    def test_role_without_block_returns_none(self):
+        config = RoleConfig(
+            roles={"plain": RoleDefinition(description="No hdx", permissions=["source:read"])}
+        )
+        assert config.hyperdx_for("plain") is None
+
+    def test_hyperdx_parsed_from_yaml(self, tmp_path):
+        yaml_content = """
+roles:
+  ops:
+    description: "Ops"
+    permissions:
+      - "config:read"
+    hyperdx:
+      access: otel
+      tenant_scoped: false
+"""
+        config_file = tmp_path / "roles.yaml"
+        config_file.write_text(yaml_content)
+        config = RoleConfig.load(config_file)
+        assert config.roles["ops"].hyperdx.access == "otel"
+        assert config.roles["ops"].hyperdx.tenant_scoped is False
+
+
+class TestEffectiveHyperdx:
+    def test_no_roles_is_none(self):
+        config = RoleConfig.load_builtin()
+        eff = config.effective_hyperdx([])
+        assert eff.access == "none"
+        assert eff.tenant_scoped is False
+
+    def test_widest_access_wins(self):
+        config = RoleConfig.load_builtin()
+        # org_analyst (org-scoped) + data_viewer (full) -> full wins.
+        eff = config.effective_hyperdx(["org_analyst", "data_viewer"])
+        assert eff.access == "full"
+        assert eff.tenant_scoped is False
+
+    def test_otel_beats_org_scoped(self):
+        config = RoleConfig.load_builtin()
+        eff = config.effective_hyperdx(["org_analyst", "infra"])
+        assert eff.access == "otel"
+        assert eff.tenant_scoped is False
+
+    def test_all_org_scoped_stays_tenant_scoped(self):
+        config = RoleConfig.load_builtin()
+        # Only org-scoped roles -> tenant_scoped holds (per-org bindings).
+        eff = config.effective_hyperdx(["org_analyst"])
+        assert eff.access == "org-scoped"
+        assert eff.tenant_scoped is True
+
+    def test_roles_without_hyperdx_ignored(self):
+        config = RoleConfig(
+            roles={
+                "plain": RoleDefinition(description="No hdx", permissions=["source:read"]),
+            }
+        )
+        eff = config.effective_hyperdx(["plain"])
+        assert eff.access == "none"
+
+
+# ---------------------------------------------------------------------------
+# ROLE_ALIASES back-compat shim (old role name -> new)
+# ---------------------------------------------------------------------------
+
+
+class TestRoleAliases:
+    def test_alias_map_shape(self):
+        assert ROLE_ALIASES == {
+            "infra_admin": "infra",
+            "infra_viewer": "infra_ro",
+            "data_analyst_viewer": "data_analyst_ro",
+            "customer_viewer": "org_analyst",
+        }
+
+    def test_old_infra_admin_resolves_infra_grants(self):
+        """A group still referencing 'infra_admin' resolves the 'infra' grants."""
+        config = RoleConfig.load_builtin()
+        # argo:* is an existing infra grant; hunt:* is the newly-added one.
+        assert config.has_permission("infra_admin", "argo:applications:sync") is True
+        assert config.has_permission("infra_admin", "hunt:read") is True
+
+    def test_old_names_resolve_via_resolve_permissions(self):
+        config = RoleConfig.load_builtin()
+        perms = config.resolve_permissions(["customer_viewer"])
+        assert "query:execute" in perms
+
+    def test_old_name_resolves_hyperdx(self):
+        config = RoleConfig.load_builtin()
+        hdx = config.hyperdx_for("customer_viewer")
+        assert hdx is not None
+        assert hdx.access == "org-scoped"
+
+    def test_literal_name_wins_over_alias(self):
+        """A config that literally (re)defines an old name keeps its own grants."""
+        config = RoleConfig(
+            roles={
+                "infra_admin": RoleDefinition(
+                    description="Legacy literal",
+                    permissions=["source:read"],
+                ),
+            }
+        )
+        # Literal wins: resolves the custom role, not the aliased 'infra'.
+        assert config.has_permission("infra_admin", "source:read") is True
+        assert config.has_permission("infra_admin", "argo:applications:sync") is False

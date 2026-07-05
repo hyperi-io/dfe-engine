@@ -110,30 +110,6 @@ def get_default_size(service: str) -> TShirtSize:
         return TShirtSize.small
 
 
-# Backward-compatible module-level dicts (lazy-built from plugins)
-_compat_init_done = False
-KEDA_DEFAULTS: dict[str, dict[str, Any]] = {}
-DEFAULT_SIZES: dict[str, TShirtSize] = {}
-
-
-def _ensure_compat_dicts() -> None:
-    """Populate backward-compatible dicts from plugins (once)."""
-    global _compat_init_done
-    if _compat_init_done:
-        return
-    _compat_init_done = True
-
-    from dfe_engine.services.plugins import all_plugins
-
-    for name, p in all_plugins().items():
-        if p.keda_defaults:
-            KEDA_DEFAULTS[name] = p.keda_defaults.copy()
-        try:
-            DEFAULT_SIZES[name] = TShirtSize(p.default_size)
-        except ValueError:
-            DEFAULT_SIZES[name] = TShirtSize.small
-
-
 def apply_sizing(service: str, size: TShirtSize | str) -> tuple[dict[str, Any], dict[str, Any]]:
     """Apply t-shirt sizing to get both deployment and service config overrides.
 
@@ -147,7 +123,6 @@ def apply_sizing(service: str, size: TShirtSize | str) -> tuple[dict[str, Any], 
     Raises:
         ValueError: Unknown service or size='custom' without explicit resources
     """
-    _ensure_compat_dicts()
     from dfe_engine.services.plugins import valid_services
 
     services = valid_services()

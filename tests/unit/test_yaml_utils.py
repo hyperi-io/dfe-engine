@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from dfe_engine.yaml_utils import deep_merge
+import pytest
+
+from dfe_engine import yaml_utils
+from dfe_engine.yaml_utils import deep_merge, yaml_dump, yaml_load
 
 
 class TestDeepMerge:
@@ -55,3 +58,33 @@ class TestDeepMerge:
         base = {}
         deep_merge(base, {"a": 1})
         assert base == {"a": 1}
+
+
+class TestYamlDumpAtomic:
+    def test_roundtrip(self, tmp_path):
+        target = tmp_path / "data.yaml"
+        yaml_dump({"username": "alice", "enabled": True}, target)
+        assert yaml_load(target) == {"username": "alice", "enabled": True}
+
+    def test_interrupted_dump_leaves_original_intact(self, tmp_path, monkeypatch):
+        """A crash partway through serialisation must not corrupt the target.
+
+        The atomic write serialises to a temp file then os.replace()s it; if
+        the dump raises, os.replace is never reached so the original file is
+        byte-for-byte untouched and no partial temp is left behind.
+        """
+        target = tmp_path / "data.yaml"
+        yaml_dump({"username": "alice", "enabled": True}, target)
+        original = target.read_text()
+
+        def boom(data, stream):
+            stream.write("partial: tru")  # half a document, then crash
+            raise RuntimeError("interrupted mid-dump")
+
+        monkeypatch.setattr(yaml_utils._yaml_rt, "dump", boom)
+        with pytest.raises(RuntimeError):
+            yaml_dump({"username": "bob"}, target)
+
+        assert target.read_text() == original
+        leftovers = [p.name for p in tmp_path.iterdir() if p.name != "data.yaml"]
+        assert leftovers == []

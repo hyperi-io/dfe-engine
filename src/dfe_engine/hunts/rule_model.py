@@ -131,6 +131,23 @@ class Rule(BaseModel):
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source name for registry")
     warnings: list[str] = Field(default_factory=list, description="Parse warnings")
+    sigma_rule_id: str | None = Field(
+        default=None,
+        description=(
+            "Back-reference to the Sigma catalogue rule id this rule was generated "
+            "from (None for hand-authored rules). Set by the sigma propagator."
+        ),
+    )
+    sigma_provenance: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Generation marker for a Sigma-bound rule: the source it targets, the "
+            "upstream change signal + local-edit/drift state captured from the "
+            "catalogue at generation time, and a hash of the generated WHERE clause "
+            "(used to detect a later hand-edit of the binding). None for "
+            "hand-authored rules."
+        ),
+    )
     created_at: str = Field(
         default_factory=lambda: datetime.now(UTC).isoformat(),
         description="Creation timestamp (ISO 8601)",
@@ -232,8 +249,6 @@ class Rule(BaseModel):
             if cel_errors:
                 errors.append(f"CEL filter validation failed: {'; '.join(cel_errors)}")
 
-        if self.had_select_star:
-            # Warning, not error — the system rewrites to lean output
-            pass
-
+        # had_select_star is deliberately not an error: the system rewrites
+        # SELECT * to lean output.
         return errors

@@ -11,7 +11,7 @@
 Designed for the TS UI use case: user types a CEL expression in a text
 field, the UI POSTs the string, and gets back a structured result with:
 
-- Whether the syntax is valid (via real CEL parser from hyperi-pylib)
+- Whether the syntax is valid (via real CEL parser from scalo)
 - Profile violations (DFE-disallowed functions)
 - The performance tier (Tier 1 / 2 / 3) — unique to dfe-engine
 - Referenced fields (for Tier 2/3)

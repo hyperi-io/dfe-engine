@@ -118,6 +118,27 @@ class TestGet:
         account = store.get("alice")
         assert account.enabled is False
 
+    def test_get_empty_file_returns_none(self, store, tmp_path):
+        """An empty/truncated file (crashed non-atomic writer) reads as missing.
+
+        yaml_load returns None for an empty file; get() must return None rather
+        than raise TypeError on data["username"].
+        """
+        (store._dir / "ghost.yaml").write_text("")
+        assert store.get("ghost") is None
+
+    def test_list_skips_empty_file(self, store):
+        """A truncated leftover file is skipped, not surfaced as a broken row."""
+        store.create("alice", "password123")
+        (store._dir / "corrupt.yaml").write_text("")
+        usernames = [a.username for a in store.list()]
+        assert usernames == ["alice"]
+
+    def test_verify_password_empty_file_returns_false(self, store):
+        """verify_password treats an empty file as an unknown user, not a crash."""
+        (store._dir / "ghost.yaml").write_text("")
+        assert store.verify_password("ghost", "whatever") is False
+
 
 # ---------------------------------------------------------------------------
 # AccountStore.list

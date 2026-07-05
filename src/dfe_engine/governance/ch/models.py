@@ -8,10 +8,16 @@
 """Config models for the ClickHouse RBAC machinery (gitcrud, versioned).
 
 A TIER is "how much you can consume + what you can do" (grants + settings profile
-+ quota). A SERVICE ROLE is a fixed identity (loader/query_reader/hunt_runner). A
-GROUP BINDING ties an RBAC group's CH user to one tier axis + at most one org
-axis. Org roles are NOT modelled here - they are derived from the Org registry by
-the reconciler (one role + row policy set per Org).
++ quota). A SERVICE ROLE is a fixed identity (loader/query_reader/hunt_runner).
+
+Tenant isolation uses the PRODUCTION-STANDARD custom-settings model (PostHog /
+Grafana / LaunchDarkly), NOT a CH user per group or a row policy per (org, table):
+a SMALL FIXED set of users by privilege (``ChFixedUser`` / ``FIXED_USERS``) plus
+ONE row policy per ``_org_id`` table driven by the ``DFE_current_tenant_id``
+custom setting (rendered by ``render_tenant_policies``). Adding the thousandth org
+is zero DDL - the reader user and the per-table policy already exist; the engine
+just injects that org's id into the per-query setting. This REPLACES the retired
+per-org role + per-group user minting.
 
 CH object naming (spec 5.1): a tier ``analyst_tier_2`` yields role
 ``dfe_analyst_tier_2_role``, profile ``dfe_analyst_tier_2_profile``, quota
@@ -24,19 +30,38 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-# ---- CH object naming (deterministic, so drops are computable) ------------
-
 _GiB = 1024**3
 
+# ---- Fixed-user tenant-scoping model (custom settings) --------------------
+#
+# The custom-settings model's SSoT. The tenant axis is ONE row policy per
+# ``_org_id`` table (render_tenant_policies), driven by a per-query custom
+# setting, targeting the single row-filtered reader - not a policy per (org,
+# table) and not a CH user per group.
 
-def org_role_name(org: str) -> str:
-    """CH role that carries an org's restrictive row policies."""
-    return f"dfe_org_{org}_role"
+# The ONE custom setting the tenant row policy reads. It MUST be server-allowed
+# via ``<custom_settings_prefixes>DFE_</custom_settings_prefixes>`` in the CH
+# config.xml - a DEPLOY prerequisite (dfe-infra CH chart / dfe-docker), NOT
+# reconciler DDL. Without the prefix, CH rejects both ``CREATE USER ... SETTINGS
+# DFE_current_tenant_id`` and every per-query ``SETTINGS DFE_current_tenant_id``,
+# so tenant scoping cannot apply. See docs/RBAC.md section 5 + .env.example.
+TENANT_SETTING = "DFE_current_tenant_id"
 
+# The single row-policy short-name reused on every ``_org_id`` table. A CH
+# row-policy name is scoped per-table, so the same name on two tables is two
+# distinct policies (one filter definition, applied everywhere).
+TENANT_POLICY_NAME = "dfe_tenant_filter"
 
-def org_policy_name(org: str, db: str, table: str) -> str:
-    """Deterministic row-policy name for (org, table) - lets the reconciler diff."""
-    return f"dfe_rowpol_{org}_{db}_{table}"
+# The four fixed CH identities by privilege. ``dfe_admin`` is the deployment's CH
+# superuser standing in as the admin data identity (the ``default`` connection +
+# the reconciler's own admin_client); it is deliberately NOT minted, so the admin
+# connection authenticates even before the first reconcile and the engine never
+# auto-provisions a GRANT-ALL user. The other three ARE minted by the reconciler
+# via the scalo.secrets seam (see FIXED_USERS).
+ADMIN_USER = "dfe_admin"
+ANALYST_USER = "dfe_analyst"
+ANALYST_RO_USER = "dfe_analyst_ro"
+TENANT_READER_USER = "dfe_tenant_reader"
 
 
 # ---- Config models --------------------------------------------------------
@@ -97,18 +122,45 @@ class ChServiceRole(BaseModel):
         return f"dfe_{self.name}"
 
 
-class GroupChBinding(BaseModel):
-    """An RBAC group's CH identity, composed from the two reusable role axes.
+class ChFixedUser(BaseModel):
+    """One of the small fixed set of CH users distinguished only by PRIVILEGE.
 
-    Inline grants/settings/quota are GONE (they moved to tiers, spec 6.4): a
-    binding is just a group -> (tier, org) pointer. Empty ``tier`` resolves to the
-    default analyst tier; empty ``org`` means unrestricted (no org role granted).
+    Not per-org, not per-group. The tenant axis is ONE row policy per ``_org_id``
+    table (render_tenant_policies) driven by the ``DFE_current_tenant_id`` custom
+    setting, targeting only ``tenant_filtered`` users; every other fixed user is
+    targeted by NO policy and therefore sees ALL rows (the CH restrictive-only
+    property). Fields:
+
+    - ``grants``   : the GRANTs applied straight to the user (no intermediate
+      role - the proof grants directly; fewer objects, matches PostHog/Grafana).
+    - ``readonly`` : set the CH ``readonly = 1`` profile bit (belt-and-braces on
+      top of SELECT-only grants).
+    - ``tenant_filtered`` : the row-filtered reader. Additionally makes
+      ``DFE_current_tenant_id`` CHANGEABLE_IN_READONLY so it can be set per query
+      while the user stays read-only, and is the user the tenant policy targets.
+    """
+
+    name: str
+    grants: list[str] = Field(default_factory=list)
+    readonly: bool = False
+    tenant_filtered: bool = False
+
+
+class GroupChBinding(BaseModel):
+    """An RBAC group's resolved org axis (a group -> single-org pointer).
+
+    Under the fixed-user model the reconciler no longer mints a CH user per group,
+    so this is no longer a CH-minting binding: it is retained ONLY as the group ->
+    org resolver that ``bindings_from_groups`` produces for the HyperDX connection
+    builder + org lifecycle (which still need "which one org does this group map
+    to"). ``tier`` is vestigial. See the Phase 3 follow-up: HyperDX should move to
+    the ``dfe_tenant_reader`` user + a per-connection ``DFE_current_tenant_id``.
     """
 
     group: str
     ch_user: str = ""  # defaults to dfe_grp_{group}
-    tier: str = ""  # -> dfe_{tier}_role (empty = the default analyst tier)
-    org: str = ""  # -> dfe_org_{org}_role (empty = unrestricted)
+    tier: str = ""  # vestigial (no per-group tier axis under the fixed-user model)
+    org: str = ""  # resolved Org NAME (empty = no single-org resolution)
 
     def user(self) -> str:
         return self.ch_user or f"dfe_grp_{self.group}"
@@ -206,5 +258,37 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
         name="hunt_runner",
         mint_user=False,
         grants=["SELECT ON dfe_hunts.*", "INSERT ON dfe_hunts.*"],
+    ),
+]
+
+# The MINTED fixed users by privilege (the custom-settings tenant model). Three,
+# not four: ``dfe_admin`` (ADMIN_USER) is the deployment's CH superuser / the
+# ``default`` connection, never minted here (bootstrap-safe, no auto GRANT-ALL).
+# The reconciler mints these via the secrets seam and grants them directly; the
+# tenant row policy (render_tenant_policies) targets only dfe_tenant_reader.
+FIXED_USERS: list[ChFixedUser] = [
+    # data_analyst -> read + write the engine data DBs (no readonly).
+    ChFixedUser(
+        name=ANALYST_USER,
+        grants=[
+            "SELECT ON dfe.*",
+            "SELECT ON dfe_hunts.*",
+            "INSERT ON dfe.*",
+            "INSERT ON dfe_hunts.*",
+        ],
+    ),
+    # data_analyst_ro / data_viewer / infra_ro -> read-only the engine data DBs.
+    ChFixedUser(
+        name=ANALYST_RO_USER,
+        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
+        readonly=True,
+    ),
+    # org_analyst -> read-only AND row-filtered to the caller's org(s) by the ONE
+    # tenant row policy via DFE_current_tenant_id (empty setting = 0 rows).
+    ChFixedUser(
+        name=TENANT_READER_USER,
+        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
+        readonly=True,
+        tenant_filtered=True,
     ),
 ]

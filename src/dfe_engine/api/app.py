@@ -21,7 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
-from dfe_engine.settings import DFESettings, load_settings
+from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
 
 
 @asynccontextmanager
@@ -51,9 +51,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             auth_dir_str = str(Path("config") / "auth")
 
     auth_dir = Path(auth_dir_str)
-    default_admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
+    # None (not "changeme") when unset, so bootstrap_auth refuses to ship a usable
+    # default admin password in a non-dev posture and generates one instead
+    # (F-ADMIN-CHANGEME).
+    admin_pw = os.environ.get("DFE_ADMIN_PASSWORD")
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
-        auth_dir, default_admin_password=default_admin_pw
+        auth_dir,
+        default_admin_password=admin_pw,
+        dev_posture=is_dev_posture(settings.env),
     )
     app.state.account_store = account_store
     app.state.group_store = group_store
@@ -100,7 +105,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Loaded connection config from %s", str(conn_config_path))
     else:
         conn_config = ConnectionConfigLoader.load_default()
-    app.state.connection_registry = ConnectionRegistry(conn_config)
+    # Seed the registry's host/port from settings: all fixed CH users share ONE
+    # cluster, so host/port come from settings (matching the admin manager the
+    # direct-read endpoints used before) while the per-connection USER carries the
+    # privilege. The shared conn_config (also handed to the org lifecycle) is left
+    # untouched.
+    app.state.connection_registry = ConnectionRegistry(
+        conn_config,
+        ch_host=settings.clickhouse.host,
+        ch_port=settings.clickhouse.port,
+    )
 
     # Bootstrap org registry
     from dfe_engine.orgs.registry import OrgRegistry
@@ -134,11 +148,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
-    # Org ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
-    # Reconciles the seeded quota tiers + service roles + per-org roles/row
-    # policies on _org_id into ClickHouse. Default-off so startup is unaffected;
-    # fully non-fatal. Group bindings + user secret-minting are a follow-on
-    # (reconcile via the CLI / governance API with a secrets store configured).
+    # ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
+    # Reconciles the seeded quota tiers + service roles + fixed users by privilege
+    # + ONE DFE_current_tenant_id row policy per _org_id table into ClickHouse.
+    # Default-off so startup is unaffected; fully non-fatal. The service + fixed
+    # user secrets are minted only when a secrets store is configured (below).
     if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
         try:
             from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
@@ -154,8 +168,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "ch_verify": settings.clickhouse.verify,
             }
             admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
-            # The secrets store mints the loader / query_reader service users;
-            # without it only tiers, roles and org row policies reconcile.
+            # The secrets store mints the service + fixed users; without it only
+            # tiers, roles and the tenant row policies reconcile.
             reconcile_ch_rbac(
                 admin_client,
                 secrets_store=build_secrets(settings.secrets),
@@ -165,7 +179,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         except Exception:
             logger.exception("CH RBAC reconcile failed; continuing without it")
 
-    # Bootstrap org lifecycle manager
+    # Secrets seam (scalo.secrets) for the secrets the engine mints. Guarded: a
+    # misconfigured backend must not break startup - the org lifecycle then mints
+    # each HyperDX connection with an empty dfe_tenant_reader password (non-fatal,
+    # filled on the next publish once the reconciler has minted the secret).
+    from dfe_engine.secrets import build_secrets
+
+    try:
+        secrets_store = build_secrets(settings.secrets)
+    except Exception as exc:
+        logger.warning("Secrets seam unavailable", error=str(exc))
+        secrets_store = None
+    # Stash for request-time consumers (e.g. sigma providers resolving a git-token /
+    # api-key secret path). None -> providers requiring a secret degrade with a clear
+    # warning; no-auth providers (SigmaHQ public repo, Valhalla demo key) still work.
+    app.state.dfe_secrets = secrets_store
+
+    # Bootstrap org lifecycle manager. secrets_store feeds the per-org HyperDX
+    # connection's dfe_tenant_reader password; per_group/ga_team_name select the
+    # HyperDX team model (GA one-team vs per-org).
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 
     hdx_client = getattr(app.state, "hyperdx_client", None)
@@ -173,9 +205,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         registry=app.state.org_registry,
         hyperdx_client=hdx_client,
         connection_config=conn_config,
+        secrets_store=secrets_store,
+        per_group=settings.hyperdx.per_group,
+        ga_team_name=settings.hyperdx.ga_team_name,
     )
 
-    # Bootstrap JIT provisioner
+    # Bootstrap JIT provisioner. role_config drives the HyperDX scope gate (Task C:
+    # no HyperDX user for a principal whose effective access is none); per_group /
+    # ga_team_name select the team model (Task D).
     from dfe_engine.auth.jit import JitProvisioner
 
     app.state.jit_provisioner = JitProvisioner(
@@ -183,6 +220,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         group_store=group_store,
         hyperdx_client=getattr(app.state, "hyperdx_client", None),
         org_registry=getattr(app.state, "org_registry", None),
+        role_config=role_config,
+        per_group=settings.hyperdx.per_group,
+        ga_team_name=settings.hyperdx.ga_team_name,
     )
 
     # Bootstrap task manager for async background tasks
@@ -194,6 +234,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from dfe_engine.sampling import Sampler
 
     app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
+
+    # Query-views executor (parameterized ClickHouse views). Guarded: a CH
+    # connection failure degrades /queries/views* to 503 (not_configured)
+    # instead of blocking startup; auto_bootstrap applies the builtin views.
+    from dfe_engine.query.bootstrap import build_view_executor
+
+    app.state.view_executor = None
+    if settings.clickhouse.host:
+        try:
+            app.state.view_executor = build_view_executor(
+                settings, auto_bootstrap=settings.query_views.auto_bootstrap
+            )
+            logger.info("Query view executor ready")
+        except Exception as exc:
+            logger.warning("Query view executor unavailable", error=str(exc))
 
     health.set_started()
     health.set_ready()
@@ -219,13 +274,20 @@ def create_app(
     """
     settings = settings or load_settings()
 
+    # Swagger/ReDoc + the raw OpenAPI schema enumerate every route (incl.
+    # gitops/governance/admin). Serve them ONLY in a dev posture; a non-dev deploy
+    # returns 404 so the surface is not advertised to any client that reaches the
+    # port (F-DOCS-EXPOSED). The app.openapi() METHOD stays callable for offline
+    # spec generation - only the HTTP routes are gated.
+    serve_docs = is_dev_posture(settings.env)
     app = FastAPI(
         title="DFE Engine API",
         description="Data Fusion Engine — configuration, scheduling, and query API",
         version=_get_version(),
         lifespan=lifespan,
-        docs_url="/docs",
-        redoc_url="/redoc",
+        docs_url="/docs" if serve_docs else None,
+        redoc_url="/redoc" if serve_docs else None,
+        openapi_url="/openapi.json" if serve_docs else None,
     )
 
     app.state.settings = settings

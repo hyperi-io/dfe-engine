@@ -205,7 +205,7 @@ async def update_account(
     "/{username}/reset-password",
     status_code=200,
     dependencies=[
-        Depends(require_action(scopes_dict["accounts_reset_password"])),
+        Depends(require_action(scopes_dict["account_reset_password"])),
     ],
 )
 async def reset_password(
@@ -239,11 +239,21 @@ async def delete_account(
 ):
     """Delete an account (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
+    from dfe_engine.auth.membership import sync_group_members_for_account_groups_change
 
     store: AccountStore = request.app.state.account_store
-    if store.get(username) is None:
+    group_store = request.app.state.group_store
+    existing = store.get(username)
+    if existing is None:
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.delete(username)
+    # Create/update sync membership both ways; delete must too, or the username
+    # is left dangling in every Group.members list it belonged to.
+    sync_group_members_for_account_groups_change(
+        group_store,
+        username,
+        removed=existing.groups,
+    )

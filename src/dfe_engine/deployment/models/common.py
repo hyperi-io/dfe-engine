@@ -156,6 +156,10 @@ class PodConfig(BaseModel):
     node_selector: dict[str, str] = Field(default_factory=dict)
     tolerations: list[dict[str, str]] = Field(default_factory=list)
     affinity: dict = Field(default_factory=dict)
+    image_pull_policy: str = Field(
+        default="IfNotPresent",
+        description="Container imagePullPolicy (Always/IfNotPresent/Never)",
+    )
 
 
 class K8sServiceConfig(BaseModel):

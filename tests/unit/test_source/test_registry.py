@@ -310,3 +310,48 @@ class TestSingleton:
             assert r1 is r2
         finally:
             SourceRegistry.reset_instance()
+
+
+# ---------------------------------------------------------------------------
+# Path traversal (F-SOURCES-TRAVERSAL)
+# ---------------------------------------------------------------------------
+
+
+class TestPathTraversal:
+    """A source name is a single flat filename stem. A name with ``..``, a path
+    separator or a NUL byte must never let get/save/delete read/write/unlink a
+    file OUTSIDE the sources directory - e.g. bulk-deleting
+    ``../../governance/rbac/roles/admin`` unlinking that policy file."""
+
+    @pytest.mark.parametrize(
+        "bad",
+        [
+            "../victim",
+            "../../governance/rbac/roles/admin",
+            "a/b",
+            "..",
+            ".",
+            "a\x00b",
+            "a\\b",
+        ],
+    )
+    def test_get_and_delete_reject_traversal_names(self, registry: SourceRegistry, bad):
+        with pytest.raises(SourceValidationError):
+            registry.get_source(bad)
+        with pytest.raises(SourceValidationError):
+            registry.delete_source(bad)
+
+    def test_delete_traversal_does_not_unlink_outside_file(
+        self, registry: SourceRegistry, sources_dir
+    ):
+        victim = sources_dir.parent / "victim.yaml"
+        victim.write_text("keep: me\n", encoding="utf-8")
+        with pytest.raises(SourceValidationError):
+            registry.delete_source("../victim")
+        assert victim.exists()
+
+    def test_normal_name_still_round_trips(self, registry: SourceRegistry):
+        registry.save_source(_make_source("normal_src", match_value="normal_src"))
+        assert registry.get_source("normal_src").source == "normal_src"
+        registry.delete_source("normal_src")
+        assert not registry.source_exists("normal_src")

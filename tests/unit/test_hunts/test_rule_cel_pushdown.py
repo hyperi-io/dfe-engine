@@ -11,7 +11,6 @@ Three creation paths:
 
 import pytest
 
-from dfe_engine.hunts.hunt_output import HuntResultSchema
 from dfe_engine.hunts.rule_model import Rule, RuleCreate
 
 # ── RuleCreate validation ────────────────────────────────────────
@@ -658,91 +657,6 @@ class TestSerialization:
         data = rule.model_dump(mode="json")
         rule2 = Rule.model_validate(data)
         assert rule2.cel_filter is None
-
-
-# ── Integration with HuntResultSchema ────────────────────────────
-
-
-class TestBuildInsertSelect:
-    """CEL-transpiled WHERE clauses work with build_insert_select()."""
-
-    def test_cel_where_in_insert_select(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Insert Select",
-                cel_filter='severity == "critical" && amount > 10000',
-                source="payment_events",
-            ),
-            rule_id="is_01",
-        )
-        schema = HuntResultSchema()
-        sql = schema.build_insert_select(
-            target_db="acme",
-            target_table="hunt_results",
-            source_db="acme",
-            source_table="payment_events",
-            where_clause=rule.where_clause,
-            rule_id=rule.rule_id,
-            rule_name=rule.name,
-            hunt_name="payment_hunt",
-            severity=rule.severity,
-        )
-        assert "INSERT INTO acme.hunt_results" in sql
-        assert "FROM acme.payment_events" in sql
-        assert "severity = 'critical'" in sql
-        assert "amount > 10000" in sql
-        assert "{timestamp_condition}" in sql
-
-    def test_combined_where_in_insert_select(self):
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Combined IS",
-                user_sql="SELECT * FROM db.events WHERE event_type = 'login'",
-                cel_filter="failed_count > 3",
-            ),
-            rule_id="cis_01",
-        )
-        schema = HuntResultSchema()
-        sql = schema.build_insert_select(
-            target_db="acme",
-            target_table="hunt_results",
-            source_db="acme",
-            source_table="events",
-            where_clause=rule.where_clause,
-            rule_id=rule.rule_id,
-            rule_name=rule.name,
-            hunt_name="login_hunt",
-            severity=rule.severity,
-        )
-        assert "event_type = 'login'" in sql
-        assert "failed_count > 3" in sql
-        assert "AND" in sql
-
-    def test_cel_only_empty_sql_where(self):
-        """CEL-only rule: no SQL WHERE to AND with."""
-        rule = Rule.from_create(
-            RuleCreate(
-                name="Pure CEL",
-                cel_filter="error_count > 0",
-                source="logs",
-            ),
-            rule_id="pure_01",
-        )
-        schema = HuntResultSchema()
-        sql = schema.build_insert_select(
-            target_db="org1",
-            target_table="results",
-            source_db="org1",
-            source_table="logs",
-            where_clause=rule.where_clause,
-            rule_id=rule.rule_id,
-            rule_name=rule.name,
-            hunt_name="error_hunt",
-            severity=rule.severity,
-        )
-        assert "error_count > 0" in sql
-        # Should have timestamp_condition AND the CEL filter
-        assert "{timestamp_condition}" in sql
 
 
 # ── to_rule_info() ───────────────────────────────────────────────

@@ -31,7 +31,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed
 from dfe_engine.auth import Scope
-from dfe_engine.auth.groups import Group, validate_group_scope
+from dfe_engine.auth.groups import Group, GroupStore, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/groups", tags=["Groups"])
@@ -76,6 +76,17 @@ class GroupResponse(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────
 
 
+def _get_group_or_404(store: GroupStore, name: str) -> Group:
+    """Return the named group or raise the standard 404 (shared by every by-name endpoint)."""
+    group = store.get(name)
+    if group is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
+    return group
+
+
 def _scope_of(group: Group) -> Scope:
     org = group.scope_org
     return Scope(type="org", id=org) if org else Scope()
@@ -110,7 +121,6 @@ async def create_group(
 ):
     """Create a new RBAC group at a scope."""
     from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     try:
@@ -160,8 +170,6 @@ async def list_groups(
     request: Request,
 ):
     """List groups visible to the caller (own memberships + scope grants)."""
-    from dfe_engine.auth.groups import GroupStore
-
     store: GroupStore = request.app.state.group_store
     return [_response(g) for g in store.list() if _visible(request, user, g)]
 
@@ -173,11 +181,9 @@ async def get_group(
     request: Request,
 ):
     """Get a single group by name (404 when not visible to the caller)."""
-    from dfe_engine.auth.groups import GroupStore
-
     store: GroupStore = request.app.state.group_store
-    group = store.get(name)
-    if group is None or not _visible(request, user, group):
+    group = _get_group_or_404(store, name)
+    if not _visible(request, user, group):
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
@@ -194,17 +200,11 @@ async def update_group(
 ):
     """Update group roles, description, or members (group:write at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _get_group_or_404(store, name)
     check_action(request, user, scopes_dict["group_write"], scope=_scope_of(existing))
     update_fields: dict[str, object] = {}
     if body.roles is not None:
@@ -212,12 +212,8 @@ async def update_group(
     if body.description is not None:
         update_fields["description"] = body.description
     if body.members is not None:
-        seen: set[str] = set()
-        deduped: list[str] = []
-        for username in body.members:
-            if username not in seen:
-                seen.add(username)
-                deduped.append(username)
+        # dict.fromkeys preserves first-seen order while dropping duplicates.
+        deduped = list(dict.fromkeys(body.members))
         update_fields["members"] = deduped
         old_members = set(existing.members)
         new_members = set(deduped)
@@ -242,17 +238,11 @@ async def add_member(
 ):
     """Add a member to a group (idempotent; checked at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _get_group_or_404(store, name)
     check_action(request, user, scopes_dict["group_add_member"], scope=_scope_of(existing))
     store.add_member(name, body.username)
     sync_account_groups_for_membership_change(
@@ -273,17 +263,11 @@ async def remove_member(
 ):
     """Remove a member from a group (checked at the group's scope)."""
     from dfe_engine.auth.accounts import AccountStore
-    from dfe_engine.auth.groups import GroupStore
     from dfe_engine.auth.membership import sync_account_groups_for_membership_change
 
     store: GroupStore = request.app.state.group_store
     account_store: AccountStore = request.app.state.account_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _get_group_or_404(store, name)
     check_action(request, user, scopes_dict["group_remove_member"], scope=_scope_of(existing))
     store.remove_member(name, username)
     sync_account_groups_for_membership_change(
@@ -302,15 +286,8 @@ async def delete_group(
     request: Request,
 ):
     """Delete a group (checked at the group's scope)."""
-    from dfe_engine.auth.groups import GroupStore
-
     store: GroupStore = request.app.state.group_store
-    existing = store.get(name)
-    if existing is None:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Group '{name}' not found"},
-        )
+    existing = _get_group_or_404(store, name)
     check_action(request, user, scopes_dict["group_delete"], scope=_scope_of(existing))
     try:
         store.delete(name)

@@ -576,3 +576,58 @@ def test_multi_value_field_mappings(clickhouse_backend: SqlBackend):
     assert "client.ip" in generated_query[0]
     assert "1.2.3.4" in generated_query[0]
     assert "OR" in generated_query[0]
+
+
+class TestLiteralEscaping:
+    """F-SIGMA-ESCAPING: every value interpolated into a single-quoted ClickHouse
+    literal must escape the backslash BEFORE the quote, so a crafted value cannot
+    break out of the literal. Each site routes through _escape_value."""
+
+    def test_escape_value_backslash_quote_wildcard(self, clickhouse_backend):
+        # quote doubled
+        assert clickhouse_backend._escape_value("a'b") == "a''b"
+        # backslash doubled (was the gap - CH honours C-style backslash escapes)
+        assert clickhouse_backend._escape_value("a\\b") == "a\\\\b"
+        # backslash FIRST then quote: a lone \' cannot break out
+        assert clickhouse_backend._escape_value("\\'") == "\\\\''"
+        # wildcards are literal-safe and preserved (LIKE handling is separate)
+        assert clickhouse_backend._escape_value("a*b%c") == "a*b%c"
+
+    def test_match_expression_escapes_quote(self, clickhouse_backend):
+        out = clickhouse_backend._create_match_expression("f", "x' OR '1'='1")
+        assert out == "match(f, 'x'' OR ''1''=''1')"
+        # the lone single quote never survives to break the literal
+        assert "x' OR" not in out
+
+    def test_match_expression_escapes_backslash(self, clickhouse_backend):
+        assert clickhouse_backend._create_match_expression("f", "a\\'b") == "match(f, 'a\\\\''b')"
+
+    def test_regex_condition_routes_through_escape(self, clickhouse_backend):
+        # A plain regex value is unchanged (no quote/backslash) - existing behaviour.
+        assert (
+            clickhouse_backend._create_match_expression("f", "foo.*bar") == "match(f, 'foo.*bar')"
+        )
+
+    def test_cidr_expression_escapes(self, clickhouse_backend):
+        assert clickhouse_backend._create_cidr_expression("f", "x'y") == "cidrmatch(f, 'x''y')"
+        # a normal CIDR literal is unchanged
+        assert (
+            clickhouse_backend._create_cidr_expression("f", "10.0.0.0/8")
+            == "cidrmatch(f, '10.0.0.0/8')"
+        )
+
+    def test_like_expression_escapes_backslash_and_quote(self, clickhouse_backend):
+        assert (
+            clickhouse_backend._create_like_expression("f", "a\\'b", "contains")
+            == "f ILIKE '%a\\\\''b%'"
+        )
+
+    def test_text_search_branch_escapes(self):
+        backend = SqlBackend(
+            schema_metadata={"message": {"type": "text", "index_type": "text_search"}}
+        )
+        out = backend._handle_field_value_expression("message", "x'y")
+        assert "idx_ngram_bf 'x''y'" in out
+        assert "ILIKE '%x''y%'" in out
+        # no unescaped single quote breaks the literal
+        assert "'x'y'" not in out

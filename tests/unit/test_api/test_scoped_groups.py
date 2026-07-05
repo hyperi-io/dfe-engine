@@ -156,7 +156,7 @@ class TestOrgReads:
         assert scoped_setup.get(f"{ORGS}/globex", headers=headers).status_code == 403
 
     def test_system_viewer_lists_all_orgs(self, scoped_setup, viewer_headers):
-        # data_analyst_viewer (system scope via dfe-viewers) carries org:read
+        # data_analyst_ro (system scope via dfe-viewers) carries org:read
         resp = scoped_setup.get(ORGS, headers=viewer_headers)
         assert resp.status_code == 200
         assert {o["name"] for o in resp.json()} == {"acme", "globex"}

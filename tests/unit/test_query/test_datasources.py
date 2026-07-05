@@ -159,7 +159,9 @@ class TestClickHouseAdapter:
         adapter = ClickHouseAdapter("default")
         adapter._manager = mock_manager
         adapter.close()
-        mock_manager.close.assert_called_once()
+        # The manager is a shared process-wide singleton; the adapter must NOT
+        # tear it down -- just drop its reference.
+        mock_manager.close.assert_not_called()
         assert adapter._manager is None
 
 
@@ -232,3 +234,25 @@ class TestAdapterConfig:
 
         adapter = SimpleAdapter("default")
         assert adapter.config == {}
+
+
+class TestClickHouseAdapterClose:
+    """close() owns only the restricted view client. The ClickHouseManager is a
+    shared process-wide singleton with no close() method, so the adapter must not
+    call it (AttributeError) nor tear the shared connection down."""
+
+    def test_close_does_not_touch_shared_manager(self):
+        adapter = ClickHouseAdapter("default")
+        # Sentinel manager with NO close() -> old code raised AttributeError.
+        sentinel = object()
+        adapter._manager = sentinel
+        adapter.close()
+        assert adapter._manager is None  # reference dropped, not torn down
+
+    def test_close_closes_restricted_client(self):
+        adapter = ClickHouseAdapter("default")
+        restricted = MagicMock()
+        adapter._restricted_client = restricted
+        adapter.close()
+        restricted.close.assert_called_once()
+        assert adapter._restricted_client is None

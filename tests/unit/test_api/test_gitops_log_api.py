@@ -69,6 +69,31 @@ class TestGitopsLogApi:
         )
         assert resp.status_code == 422
 
+    def test_log_read_is_offloaded_off_the_event_loop(
+        self, client, app, admin_headers, tmp_path, monkeypatch
+    ):
+        # SYNC-IN-ASYNC: the blocking full-history walk must run via asyncio.to_thread
+        # so it does not stall the single-worker event loop.
+        _wire_gitcrud(app, tmp_path)
+        client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 3},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.gitops as gitops_mod
+
+        offloaded: list = []
+        real = gitops_mod.asyncio.to_thread
+
+        async def _spy(fn, *a, **k):
+            offloaded.append(getattr(fn, "__name__", ""))
+            return await real(fn, *a, **k)
+
+        monkeypatch.setattr(gitops_mod.asyncio, "to_thread", _spy)
+        resp = client.get("/api/v1/gitops/log", headers=admin_headers)
+        assert resp.status_code == 200
+        assert "read_log" in offloaded
+
     def test_unknown_cursor_rejected(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
         client.put(

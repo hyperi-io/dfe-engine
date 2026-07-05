@@ -57,11 +57,36 @@ def test_required_action_pinned_raises():
 def test_set_state_writes_the_dial_and_commits(crud):
     res = set_state(crud, "receiver", LifecycleState.STOPPED, "bob")
     assert res.commit_sha
-    assert crud.get("helmvars", "receiver")["state"] == "stopped"
+    assert crud.get("helmvars", "receiver-default-values")["state"] == "stopped"
     # transition again -> new commit, dial updated
     res2 = set_state(crud, "receiver", LifecycleState.PAUSED, "bob")
     assert res2.commit_sha != res.commit_sha
-    assert crud.get("helmvars", "receiver")["state"] == "paused"
+    assert crud.get("helmvars", "receiver-default-values")["state"] == "paused"
+
+
+def test_set_state_targets_consumed_overlay_file(crud):
+    """The dial must land in values/<service>-<instance>-values.yaml - the only
+    shape dfe-infra's ApplicationSet globs. A bare values/<service>.yaml is
+    consumed by nothing."""
+    set_state(crud, "receiver", LifecycleState.STOPPED, "bob")
+    consumed = crud.repo_path / "values" / "receiver-default-values.yaml"
+    assert consumed.is_file()
+    assert not (crud.repo_path / "values" / "receiver.yaml").exists()
+
+
+def test_set_state_respects_instance(crud):
+    set_state(crud, "receiver", LifecycleState.PAUSED, "bob", instance="production")
+    assert crud.get("helmvars", "receiver-production-values")["state"] == "paused"
+
+
+def test_set_state_preserves_existing_overlay_values(crud):
+    """state is one top-level key in the shared overlay - never a clobber."""
+    crud.put("helmvars", "receiver-default-values", {"replicas": 2}, "seed")
+    set_state(crud, "receiver", LifecycleState.STOPPED, "bob")
+    assert crud.get("helmvars", "receiver-default-values") == {
+        "replicas": 2,
+        "state": "stopped",
+    }
 
 
 def test_set_state_pinned_service_is_refused(crud):

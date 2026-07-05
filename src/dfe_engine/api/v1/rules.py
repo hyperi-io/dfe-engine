@@ -246,14 +246,7 @@ async def validate_rule_sql(
 
     return SqlValidationResponse(
         valid=len(errors) == 0,
-        errors=[
-            SqlValidationError(
-                message=e.message,
-                position=getattr(e, "position", None),
-                suggestion=getattr(e, "suggestion", None),
-            )
-            for e in errors
-        ],
+        errors=_map_sql_errors(errors),
     )
 
 

@@ -50,9 +50,12 @@ def engine_deployment_contract() -> DeploymentContract:
         binary_name="dfe-api",
         description="DFE Engine -- REST API and config control plane for the Data Fusion Engine",
         metrics_port=8000,
+        # Probes are served by scalo's health router (create_health_router in
+        # api/app.py): /health/live, /health/ready, /health/startup. There is
+        # no /api/v1/system/health route.
         health=HealthContract(
-            liveness_path="/api/v1/system/health",
-            readiness_path="/api/v1/system/health",
+            liveness_path="/health/live",
+            readiness_path="/health/ready",
             metrics_path="/metrics",
         ),
         env_prefix="DFE",
@@ -61,12 +64,15 @@ def engine_deployment_contract() -> DeploymentContract:
         image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.12",
         entrypoint_args=["run"],
+        # Env names must be the ones the settings loader actually reads
+        # (settings._get_env_overrides): DFE_CLICKHOUSE_PASSWORD and
+        # DFE_API_JWT_SECRET. Nothing parses a DFE__SECTION__KEY form.
         secrets=[
             SecretGroupContract(
                 group_name="clickhouse",
                 env_vars=[
                     SecretEnvContract(
-                        env_var="DFE__CLICKHOUSE__PASSWORD",
+                        env_var="DFE_CLICKHOUSE_PASSWORD",
                         key_name="password",
                         secret_key="clickhouse-password",  # noqa: S106 -- K8s Secret data key, not a credential
                     ),
@@ -76,7 +82,7 @@ def engine_deployment_contract() -> DeploymentContract:
                 group_name="jwt",
                 env_vars=[
                     SecretEnvContract(
-                        env_var="DFE__AUTH__JWT_SECRET",
+                        env_var="DFE_API_JWT_SECRET",
                         key_name="secret",
                         secret_key="jwt-secret",  # noqa: S106 -- K8s Secret data key, not a credential
                     ),

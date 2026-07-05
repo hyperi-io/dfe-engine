@@ -18,8 +18,10 @@ API. Every change is a git commit (commit != deployment - Argo reconciles).
 
 from __future__ import annotations
 
+import asyncio
+
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
@@ -48,6 +50,9 @@ class ServiceInfo(BaseModel):
 
 class LifecycleRequest(BaseModel):
     state: LifecycleState
+    # Deployment instance of the consumed overlay file (the deployment
+    # registry's default instance naming). Pattern guards the file path.
+    instance: str = Field(default="default", pattern=r"^[a-zA-Z0-9_-]+$")
 
 
 class LifecycleResponse(BaseModel):
@@ -55,8 +60,10 @@ class LifecycleResponse(BaseModel):
     state: str
     changed: bool
     commit_sha: str | None = None
-    # commit != deployment: an approval/merge + Argo reconcile sit in between.
-    pending_reconcile: bool = True
+    # commit != deployment: merge + Argo reconcile (and, until the dfe-infra
+    # chart contract for the `state` dial lands, the chart consuming it) sit
+    # in between. False when the dial already held this value (no-op write).
+    pending_reconcile: bool = False
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -69,9 +76,9 @@ def _gitcrud(request: Request) -> GitCrud:
     return gc
 
 
-def _current_state(gc: GitCrud, svc: ServiceLifecycle) -> str:
+def _current_state(gc: GitCrud, svc: ServiceLifecycle, instance: str = "default") -> str:
     try:
-        return str(gc.get(svc.cls, svc.resource).get(svc.path, "running"))
+        return str(gc.get(svc.cls, svc.overlay_resource(instance)).get(svc.path, "running"))
     except ResourceNotFoundError:
         return "running"  # no dial yet = default running
 
@@ -110,7 +117,10 @@ async def set_lifecycle(
 
     gc = _gitcrud(request)
     try:
-        res = set_state(gc, name, body.state, user.user_id)
+        # set_state commits (+ pushes) via dulwich - offload off the event loop.
+        res = await asyncio.to_thread(
+            set_state, gc, name, body.state, user.user_id, instance=body.instance
+        )
     except LifecycleError as exc:
         raise HTTPException(403, detail={"code": "forbidden", "message": str(exc)}) from exc
     audit_resource_change(
@@ -128,5 +138,10 @@ async def set_lifecycle(
             commit_sha=res.commit_sha,
         )
     return LifecycleResponse(
-        name=name, state=body.state.value, changed=res.changed, commit_sha=res.commit_sha
+        name=name,
+        state=body.state.value,
+        changed=res.changed,
+        commit_sha=res.commit_sha,
+        # Honest: only a dial that actually moved is awaiting reconcile.
+        pending_reconcile=res.changed,
     )

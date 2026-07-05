@@ -41,7 +41,7 @@ def stores(auth_dirs: tuple[Path, Path]) -> tuple[AccountStore, GroupStore]:
     group_store.create("dfe-admins", roles=["admin"], description="Admins")
     group_store.create("dfe-analysts", roles=["data_analyst"], description="Analysts")
     group_store.create("dfe-viewers", roles=["data_viewer"], description="Viewers")
-    group_store.create("dfe-infra", roles=["infra_admin"], description="Infra")
+    group_store.create("dfe-infra", roles=["infra"], description="Infra")
 
     # Create accounts
     account_store.create("admin", "admin-secret", groups=["dfe-admins"])
@@ -80,8 +80,8 @@ class TestAuthentication:
     def test_authenticate_operator_success(self, provider: LocalAuthProvider):
         auth = provider.authenticate("operator", "operator-secret")
         assert auth.user_id == "operator"
-        # operator is in dfe-analysts (data_analyst) + dfe-infra (infra_admin)
-        assert sorted(auth.roles) == ["data_analyst", "infra_admin"]
+        # operator is in dfe-analysts (data_analyst) + dfe-infra (infra)
+        assert sorted(auth.roles) == ["data_analyst", "infra"]
 
     def test_authenticate_viewer_success(self, provider: LocalAuthProvider):
         auth = provider.authenticate("viewer", "viewer-secret")
@@ -207,15 +207,15 @@ class TestIntegration:
 
     def test_authenticate_then_authorize_operator_partial(self, provider: LocalAuthProvider):
         auth = provider.authenticate("operator", "operator-secret")
-        # operator has data_analyst + infra_admin roles
-        # infra_admin has config:* so config:read is allowed
+        # operator has data_analyst + infra roles
+        # infra has config:* so config:read is allowed
         assert authorize(auth, "config:read", enabled=True).allowed
-        # infra_admin has helm:* so helm:compile is allowed
+        # infra has helm:* so helm:compile is allowed
         assert authorize(auth, "helm:compile", enabled=True).allowed
-        # helm:execute_ddl is also under helm:* for infra_admin
+        # helm:execute_ddl is also under helm:* for infra
         assert authorize(auth, "helm:execute_ddl", enabled=True).allowed
-        # admin-only action that neither data_analyst nor infra_admin have
-        # (there is no such action in the current role set since infra_admin
+        # admin-only action that neither data_analyst nor infra have
+        # (there is no such action in the current role set since infra
         # has broad argo:* — test a truly restricted action instead)
         # data_analyst cannot write config
         auth_viewer = provider.authenticate("viewer", "viewer-secret")

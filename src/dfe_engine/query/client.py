@@ -126,37 +126,12 @@ class QueryClient:
         """Get ViewExecutor, creating it lazily if possible."""
         if self._view_executor is None:
             try:
-                from dfe_engine.query.catalog import ViewCatalog
-                from dfe_engine.query.datasources.clickhouse import ClickHouseAdapter
-                from dfe_engine.query.executor import ViewExecutor
+                from dfe_engine.query.bootstrap import build_view_executor
                 from dfe_engine.settings import get_settings
 
-                settings = get_settings()
-                qv = settings.query_views
-
-                # `target` selects the connection (auth db); catalog/executor
-                # qualify view + table lookups against the data database.
-                adapter = ClickHouseAdapter(target=settings.clickhouse.database)
-                restricted_client = adapter.get_restricted_client()
-                admin_client = adapter.manager.get_clickhouse_client()
-                data_db = settings.clickhouse.effective_data_database
-
-                catalog = ViewCatalog(
-                    client=admin_client,
-                    database=data_db,
-                    cache_ttl=qv.catalog_cache_ttl,
-                    view_prefix=qv.view_prefix,
-                )
-
-                self._view_executor = ViewExecutor(
-                    restricted_client=restricted_client,
-                    catalog=catalog,
-                    database=data_db,
-                    default_limit=qv.default_limit,
-                    max_limit=qv.max_limit,
-                    default_timeout=qv.default_timeout,
-                    max_timeout=qv.max_timeout,
-                )
+                # Same composition the API lifespan uses (query/bootstrap.py);
+                # no auto_bootstrap here - DDL apply is a startup concern.
+                self._view_executor = build_view_executor(get_settings())
             except Exception:
                 return None
 
@@ -191,28 +166,33 @@ class QueryClient:
         params: dict[str, Any] | None,
         options: QueryOptions,
     ) -> QueryResult:
-        """Execute query via HTTP API (JSON response)."""
+        """Execute a NAMED parameterized view via the tenant view-execute path.
+
+        HTTP mode addresses queries by LABEL (namespace/name) and never sends
+        SQL. The label maps to POST /queries/views/{label}/execute, which injects
+        org_id server-side and needs only ``query:execute``. It must NOT hit
+        /queries/raw: that endpoint runs ``request.query`` verbatim as SQL (so a
+        label like 'analytics/user_activity' is not valid SQL there) and demands
+        the admin ``query:raw`` permission. Raw is reserved for genuine raw-SQL.
+        """
         response = self.http_client.post(
-            "/api/v1/queries/raw",
+            f"/api/v1/queries/views/{query_label}/execute",
             json={
-                "datasource": "clickhouse:default",
-                "query": query_label,
-                "params": params,
+                "params": params or {},
                 "options": options.model_dump(exclude_none=True),
             },
         )
         response.raise_for_status()
 
         data = response.json()
-        metadata = QueryMetadata(
-            row_count=int(response.headers.get("X-Row-Count", len(data.get("rows", [])))),
-            query_duration_ms=int(response.headers.get("X-Query-Duration-Ms", 0)),
-            query_label=query_label,
-            datasource=response.headers.get("X-Datasource", "clickhouse"),
-        )
-
         rows = data.get("rows", [])
         columns = data.get("columns", list(rows[0].keys()) if rows else [])
+        metadata = QueryMetadata(
+            row_count=int(data.get("row_count", len(rows))),
+            query_duration_ms=int(data.get("query_duration_ms", 0)),
+            query_label=query_label,
+            datasource="clickhouse",
+        )
         return QueryResult(rows=rows, columns=columns, metadata=metadata)
 
     def close(self) -> None:

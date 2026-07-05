@@ -261,23 +261,6 @@ class TestWriteAll:
             f2 = out2 / f1.name
             assert f1.read_text() == f2.read_text(), f"Non-deterministic: {f1.name}"
 
-    def test_write_includes_rbac_csv(self, tmp_path, environment):
-        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
-        compiler._env = environment
-
-        result = CompilationResult(
-            helm_values={},
-            argo_rbac_csv="p, role:dfe-admin, *, *, dfe/*, allow\n",
-        )
-
-        output_dir = tmp_path / "helm-values"
-        written = compiler.write_all(result, output_dir)
-
-        rbac_path = output_dir / "argocd-rbac-policy.csv"
-        assert rbac_path in written
-        assert rbac_path.exists()
-        assert "role:dfe-admin" in rbac_path.read_text()
-
 
 # ---------------------------------------------------------------------------
 # OTEL env var injection
@@ -487,106 +470,32 @@ class TestMergeOverrides:
 
 
 # ---------------------------------------------------------------------------
-# Argo CD Application + AppProject generation
+# Pod node placement + image pull policy reach the chart (regression)
 # ---------------------------------------------------------------------------
 
 
-class TestArgoAppGeneration:
-    def test_argo_disabled_skips_generation(self, environment):
-        """When argo.enabled is False, no Application CRDs are generated."""
-        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
-        compiler._env = environment
+class TestPodPlacement:
+    def test_node_selector_and_pull_policy_reach_chart(self, tmp_path, environment):
+        """PodConfig.node_selector / image_pull_policy must land on the chart's
+        nodeScheduling.nodeSelector and image.pullPolicy. model_dump emits
+        snake_case, so the old camelCase lookups silently dropped both dials."""
+        from dfe_engine.deployment.models import ArchiverDeploymentConfig
+        from dfe_engine.deployment.registry import DeploymentConfigRegistry
+        from dfe_engine.services.registry import ServiceConfigRegistry
 
-        # Default environment has argo.enabled=False
-        assert environment.argo.enabled is False
+        deploy_reg = DeploymentConfigRegistry(config_directory=tmp_path / "deploy")
+        svc_reg = ServiceConfigRegistry(config_directory=tmp_path / "svc", refresh_interval=0)
+        try:
+            data = ArchiverDeploymentConfig().model_dump(mode="json")
+            data["pod"]["node_selector"] = {"disktype": "ssd"}
+            data["pod"]["image_pull_policy"] = "Always"
+            deploy_reg.save_config("archiver", data, instance="production")
 
-        result = CompilationResult(
-            helm_values={"receiver-production": _sv()},
-        )
-        # No argo_applications should be present by default
-        assert result.argo_applications == []
-        assert result.argo_appproject == {}
+            compiler = HelmValuesCompiler(deploy_reg, svc_reg, None, environment)
+            values = compiler.compile_service("archiver", "production")
 
-
-class TestWriteArgoManifests:
-    def test_write_applications(self, tmp_path, environment):
-        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
-        compiler._env = environment
-
-        result = CompilationResult(
-            helm_values={},
-            argo_applications=[
-                {
-                    "apiVersion": "argoproj.io/v1alpha1",
-                    "kind": "Application",
-                    "metadata": {
-                        "name": "dfe-receiver-production",
-                        "namespace": "argocd",
-                    },
-                    "spec": {"project": "dfe"},
-                },
-                {
-                    "apiVersion": "argoproj.io/v1alpha1",
-                    "kind": "Application",
-                    "metadata": {
-                        "name": "dfe-loader-production",
-                        "namespace": "argocd",
-                    },
-                    "spec": {"project": "dfe"},
-                },
-            ],
-        )
-
-        output_dir = tmp_path / "output"
-        written = compiler.write_all(result, output_dir)
-
-        apps_dir = output_dir / "applications"
-        assert apps_dir.exists()
-
-        receiver_path = apps_dir / "dfe-receiver-production.yaml"
-        loader_path = apps_dir / "dfe-loader-production.yaml"
-        assert receiver_path in written
-        assert loader_path in written
-        assert receiver_path.exists()
-        assert loader_path.exists()
-
-        data = yaml_load(receiver_path)
-        assert data["kind"] == "Application"
-        assert data["metadata"]["name"] == "dfe-receiver-production"
-
-    def test_write_appproject(self, tmp_path, environment):
-        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
-        compiler._env = environment
-
-        result = CompilationResult(
-            helm_values={},
-            argo_appproject={
-                "apiVersion": "argoproj.io/v1alpha1",
-                "kind": "AppProject",
-                "metadata": {"name": "dfe", "namespace": "argocd"},
-                "spec": {
-                    "description": "DFE Engine - test",
-                    "sourceRepos": ["https://example.com"],
-                },
-            },
-        )
-
-        output_dir = tmp_path / "output"
-        written = compiler.write_all(result, output_dir)
-
-        project_path = output_dir / "appproject-dfe.yaml"
-        assert project_path in written
-        assert project_path.exists()
-
-        data = yaml_load(project_path)
-        assert data["kind"] == "AppProject"
-        assert data["metadata"]["name"] == "dfe"
-
-    def test_no_applications_dir_when_empty(self, tmp_path, environment):
-        compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
-        compiler._env = environment
-
-        result = CompilationResult(helm_values={})
-        compiler.write_all(result, tmp_path / "output")
-
-        assert not (tmp_path / "output" / "applications").exists()
+            assert values.nodeScheduling["nodeSelector"] == {"disktype": "ssd"}
+            assert values.image.pullPolicy == "Always"
+        finally:
+            svc_reg.close()
+            deploy_reg.close()

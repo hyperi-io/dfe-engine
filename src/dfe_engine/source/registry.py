@@ -149,6 +149,38 @@ class SourceRegistry:
     # CRUD Operations
     # -----------------------------------------------------------------
 
+    @staticmethod
+    def _validate_source_name(source_name: str) -> str:
+        """Refuse a source name that could escape the sources directory.
+
+        ``source_name`` reaches get/save/delete from the API - the bulk-delete
+        body is an unchecked list of names. A name with ``..``, a path separator
+        or a NUL byte would let a read/write/unlink land OUTSIDE the sources
+        directory (F-SOURCES-TRAVERSAL): e.g. bulk-deleting
+        ``../../governance/rbac/roles/admin`` unlinks that policy file. A source
+        name is a single flat filename stem - reject anything that is not.
+        """
+        if not source_name or source_name in (".", ".."):
+            raise SourceValidationError(f"Invalid source name: {source_name!r}")
+        if "/" in source_name or "\\" in source_name or "\x00" in source_name:
+            raise SourceValidationError(
+                f"Invalid source name (path separator or NUL): {source_name!r}"
+            )
+        return source_name
+
+    def _source_yaml_path(self, source_name: str) -> Path:
+        """Filesystem path for a source, refusing any escape (mirrors SchemaRegistry).
+
+        Validates the name shape, then requires the resolved path to stay within
+        the resolved sources directory before any write/unlink (F-SOURCES-TRAVERSAL).
+        """
+        self._validate_source_name(source_name)
+        candidate = self._sources_directory / f"{source_name}.yaml"
+        base = self._sources_directory.resolve(strict=False)
+        if not candidate.resolve(strict=False).is_relative_to(base):
+            raise SourceValidationError("Source path escapes the sources directory")
+        return candidate
+
     def get_source(self, source_name: str) -> Source:
         """Get a source definition.
 
@@ -160,7 +192,11 @@ class SourceRegistry:
 
         Raises:
             SourceNotFoundError: Source not found.
+            SourceValidationError: Name is not a bare filename stem (traversal).
         """
+        # Reads go through the store's key cache, but validate the name shape so a
+        # traversal key can never reach it (F-SOURCES-TRAVERSAL).
+        self._validate_source_name(source_name)
         config_data = self._store.get(source_name)
         if config_data is None:
             raise SourceNotFoundError(f"Source not found: {source_name!r}")
@@ -200,9 +236,9 @@ class SourceRegistry:
         # Validate uniqueness and match conflicts
         self._validate_save(source)
 
-        # Serialize and write
+        # Serialize and write (containment-checked path - F-SOURCES-TRAVERSAL)
         config_data = source.to_yaml_dict()
-        yaml_path = self._sources_directory / f"{source.source}.yaml"
+        yaml_path = self._source_yaml_path(source.source)
         yaml_dump(config_data, yaml_path)
 
         # Git commit if git-aware
@@ -270,8 +306,13 @@ class SourceRegistry:
 
         Args:
             source_name: The _source label.
+
+        Raises:
+            SourceValidationError: Name is not a bare filename stem (traversal).
         """
-        yaml_path = self._sources_directory / f"{source_name}.yaml"
+        # Containment-checked path so a traversal name cannot unlink a file
+        # outside the sources directory (F-SOURCES-TRAVERSAL).
+        yaml_path = self._source_yaml_path(source_name)
 
         if not yaml_path.exists():
             logger.warning(f"Source file does not exist: {yaml_path}")

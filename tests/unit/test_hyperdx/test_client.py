@@ -21,7 +21,14 @@ import pytest
 
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
-from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
+from dfe_engine.hyperdx.client import (
+    HYPERDX_CONNECTIONS_PATH,
+    HYPERDX_SOURCES_PATH,
+    HyperDXClient,
+    SyncResult,
+    build_hyperdx_connections_json,
+    build_hyperdx_sources_json,
+)
 
 # ---------------------------------------------------------------------------
 # SyncResult
@@ -288,3 +295,159 @@ class TestSyncConnections:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_sync_skips_disabled_orgs(self):
         pass
+
+
+class TestRemoveMember:
+    """remove_member is the propagation counterpart to invite_member (5c.4)."""
+
+    @pytest.mark.asyncio
+    async def test_remove_member_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        result = await client.remove_member(team_api_key="team-key", email="user@corp.com")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_remove_member_does_not_latch_client_disconnected(self):
+        # Team-scoped like invite_member: a per-team API-key failure must NOT mark
+        # the whole client unreachable (mark_disconnected=False). base_url is
+        # unroutable so the request fails, but _connected stays True.
+        client = HyperDXClient(base_url="http://127.0.0.1:1", api_key="k")
+        result = await client.remove_member(team_api_key="team-key", email="user@corp.com")
+        assert result is False
+        assert client._connected is True
+
+
+# ---------------------------------------------------------------------------
+# build_hyperdx_connections_json (per-ORG DEFAULT_CONNECTIONS, tenant-reader model)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildHyperDXConnectionsJson:
+    """One CH connection per org: shared dfe_tenant_reader + baked-in tenant setting."""
+
+    def _base(self) -> ClickHouseConnection:
+        return ClickHouseConnection(
+            name="default", host="ch", port=8123, database="dfe", user="default"
+        )
+
+    def _secrets(self, tmp_path):
+        from dfe_engine.secrets import build_secrets
+        from dfe_engine.settings import SecretsSettings
+
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def test_connection_uses_tenant_reader_and_org_tenant_setting(self, tmp_path):
+        """Task A: an org connection authenticates as the SHARED dfe_tenant_reader and
+        carries DFE_current_tenant_id = the org's comma-joined org_ids."""
+        from types import SimpleNamespace
+
+        secrets = self._secrets(tmp_path)
+        secrets.put("ch/fixed/dfe_tenant_reader", "reader-pw")  # reconciler stores it here
+
+        orgs = [SimpleNamespace(name="acme", org_ids=["acme", "globex"])]
+        result = json.loads(
+            build_hyperdx_connections_json(orgs, base=self._base(), secrets_store=secrets)
+        )
+        assert len(result) == 1
+        conn = result[0]
+        assert conn["name"] == "acme"
+        assert conn["user"] == "dfe_tenant_reader"  # shared fixed reader, NOT dfe_grp_*
+        assert conn["password"] == "reader-pw"  # sourced from ch/fixed/dfe_tenant_reader
+        assert conn["clickhouseSettings"] == {"DFE_current_tenant_id": "acme,globex"}
+        assert conn["host"] == "ch"
+        assert conn["port"] == 8123
+        assert conn["database"] == "dfe"
+
+    def test_empty_org_ids_fails_closed_with_empty_setting(self, tmp_path):
+        """An org with no org_ids -> empty tenant setting -> row policy yields 0 rows."""
+        from types import SimpleNamespace
+
+        orgs = [SimpleNamespace(name="acme", org_ids=[])]
+        result = json.loads(
+            build_hyperdx_connections_json(
+                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
+            )
+        )
+        assert result[0]["clickhouseSettings"] == {"DFE_current_tenant_id": ""}
+
+    def test_disabled_org_skipped(self, tmp_path):
+        from types import SimpleNamespace
+
+        orgs = [
+            SimpleNamespace(name="acme", org_ids=["acme"], enabled=True),
+            SimpleNamespace(name="dormant", org_ids=["dormant"], enabled=False),
+        ]
+        result = json.loads(
+            build_hyperdx_connections_json(
+                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
+            )
+        )
+        assert [c["name"] for c in result] == ["acme"]
+
+    def test_missing_secret_yields_empty_password(self, tmp_path):
+        from types import SimpleNamespace
+
+        orgs = [SimpleNamespace(name="acme", org_ids=["acme"])]  # no secret seeded
+        result = json.loads(
+            build_hyperdx_connections_json(
+                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
+            )
+        )
+        assert len(result) == 1
+        assert result[0]["user"] == "dfe_tenant_reader"
+        assert result[0]["password"] == ""  # non-fatal: password lands next publish
+
+    def test_no_orgs_yields_empty_array(self, tmp_path):
+        assert (
+            build_hyperdx_connections_json(
+                [], base=self._base(), secrets_store=self._secrets(tmp_path)
+            )
+            == "[]"
+        )
+
+
+# ---------------------------------------------------------------------------
+# build_hyperdx_sources_json (DEFAULT_SOURCES, Task F)
+# ---------------------------------------------------------------------------
+
+
+class TestBuildHyperDXSourcesJson:
+    """One HyperDX `log` source per built source table, fixed DFE landing expressions."""
+
+    def test_one_log_source_per_table(self):
+        result = json.loads(build_hyperdx_sources_json([("dfe", "filebeat")], connection="acme"))
+        assert len(result) == 1
+        src = result[0]
+        assert src["name"] == "dfe.filebeat"
+        assert src["kind"] == "log"
+        assert src["connection"] == "acme"
+        assert src["from"] == {"databaseName": "dfe", "tableName": "filebeat"}
+        assert src["timestampValueExpression"] == "_timestamp_load"
+        assert src["defaultTableSelectExpression"] == "_timestamp_load, _json"
+        assert src["bodyExpression"] == "_json"
+
+    def test_multiple_tables(self):
+        result = json.loads(
+            build_hyperdx_sources_json(
+                [("dfe", "filebeat"), ("dfe", "crowdstrike")], connection="acme"
+            )
+        )
+        assert [s["name"] for s in result] == ["dfe.filebeat", "dfe.crowdstrike"]
+
+    def test_empty_yields_empty_array(self):
+        assert build_hyperdx_sources_json([], connection="acme") == "[]"
+
+    def test_idempotent_by_name(self):
+        """Re-emitting an unchanged set is byte-identical (gitops publish no-op)."""
+        a = build_hyperdx_sources_json([("dfe", "filebeat")], connection="acme")
+        b = build_hyperdx_sources_json([("dfe", "filebeat")], connection="acme")
+        assert a == b
+
+
+def test_hyperdx_connections_path_is_stable():
+    assert HYPERDX_CONNECTIONS_PATH == "hyperdx/connections.json"
+
+
+def test_hyperdx_sources_path_is_stable():
+    assert HYPERDX_SOURCES_PATH == "hyperdx/sources.json"

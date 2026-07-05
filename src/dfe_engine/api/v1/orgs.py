@@ -20,9 +20,10 @@ Read endpoints require org:read.
 
 from __future__ import annotations
 
+import os
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
@@ -32,6 +33,10 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 
 if TYPE_CHECKING:
     from dfe_engine.orgs.models import Org
+    from dfe_engine.settings import DFESettings
+
+# DFE_ORG_PROVISIONING_ENABLED truthy values (mirrors app.py startup reconcile gate).
+_PROVISIONING_TRUE = ("true", "1", "yes")
 
 router = APIRouter(prefix="/orgs", tags=["Organisations"])
 
@@ -46,11 +51,18 @@ class CreateOrgRequest(BaseModel):
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )
+    domains: list[str] = Field(
+        default_factory=list,
+        description="Email domains this org claims (lowercased); map external OIDC logins to this org",
+    )
 
 
 class UpdateOrgRequest(BaseModel):
     display_name: str | None = Field(None, description="Human-readable label")
     org_ids: list[str] | None = Field(None, description="Tenant IDs")
+    domains: list[str] | None = Field(
+        None, description="Email domains this org claims (lowercased)"
+    )
     enabled: bool | None = Field(None, description="Enable or disable the org")
 
 
@@ -58,6 +70,7 @@ class OrgResponse(BaseModel):
     name: str
     display_name: str
     org_ids: list[str]
+    domains: list[str]
     enabled: bool
     created_at: str
     updated_at: str
@@ -76,6 +89,7 @@ async def create_org(
     body: CreateOrgRequest,
     user: CurrentUser,
     request: Request,
+    background_tasks: BackgroundTasks,
 ):
     """Create a new customer organisation (admin only).
 
@@ -100,7 +114,12 @@ async def create_org(
         display_name=body.display_name,
         admin_id=user.user_id,
     )
+    # Domains are not part of the lifecycle create signature (phase-3 owned), so
+    # persist them via the registry once the org exists.
+    if body.domains:
+        org = registry.update(body.name, domains=body.domains)
 
+    _schedule_ch_reconcile(request, background_tasks)
     return _org_response(org)
 
 
@@ -164,6 +183,7 @@ async def update_org(
     body: UpdateOrgRequest,
     user: CurrentUser,
     request: Request,
+    background_tasks: BackgroundTasks,
 ):
     """Update an organisation (admin only)."""
     from dfe_engine.orgs.registry import OrgRegistry
@@ -182,6 +202,8 @@ async def update_org(
         update_fields["display_name"] = body.display_name
     if body.org_ids is not None:
         update_fields["org_ids"] = body.org_ids
+    if body.domains is not None:
+        update_fields["domains"] = body.domains
     if body.enabled is not None:
         update_fields["enabled"] = body.enabled
 
@@ -195,6 +217,7 @@ async def update_org(
                 detail={"code": "not_found", "message": f"Org '{name}' not found"},
             )
 
+    _schedule_ch_reconcile(request, background_tasks)
     return _org_response(org)
 
 
@@ -207,6 +230,7 @@ async def delete_org(
     name: str,
     user: CurrentUser,
     request: Request,
+    background_tasks: BackgroundTasks,
 ):
     """Delete an organisation (admin only)."""
     from dfe_engine.orgs.registry import OrgRegistry
@@ -223,6 +247,8 @@ async def delete_org(
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
     await lifecycle.delete_org(name, admin_id=user.user_id)
 
+    _schedule_ch_reconcile(request, background_tasks)
+
 
 # -- Helpers -----------------------------------------------------------------
 
@@ -233,25 +259,57 @@ def _org_response(org: Org) -> OrgResponse:
         name=org.name,
         display_name=org.display_name,
         org_ids=org.org_ids,
+        domains=org.domains,
         enabled=org.enabled,
         created_at=org.created_at,
         updated_at=org.updated_at,
     )
 
 
-# -- Background helpers (kept for reference; HyperDX now handled by lifecycle) --
+def _schedule_ch_reconcile(request: Request, background_tasks: BackgroundTasks) -> None:
+    """Schedule a background CH-RBAC reconcile after an org mutation.
+
+    No-op unless ClickHouse is configured AND DFE_ORG_PROVISIONING_ENABLED is set.
+    After the Phase-2 isolation pivot adding/removing an org needs NO per-org CH
+    DDL (the tenant axis is the fixed users + ONE row policy per ``_org_id`` table,
+    org-agnostic), so this reconcile is just an idempotent "ensure those fixed
+    objects exist + refresh the ``dfe_meta.orgs`` projection". It runs OFF the
+    request path (FastAPI background task) and is fully non-fatal: a CH error can
+    never block or fail the CRUD (see ``_run_ch_reconcile``).
+    """
+    settings: DFESettings = request.app.state.settings
+    if not settings.clickhouse.host:
+        return
+    if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() not in _PROVISIONING_TRUE:
+        return
+    registry = getattr(request.app.state, "org_registry", None)
+    orgs = registry.list() if registry is not None else []
+    background_tasks.add_task(_run_ch_reconcile, settings, orgs)
 
 
-async def _create_hyperdx_team(hdx_client: object, org_name: str) -> None:
-    """Fire-and-forget HyperDX team creation.  Logs warning on failure."""
+def _run_ch_reconcile(settings: DFESettings, orgs: list) -> None:
+    """Best-effort CH-RBAC reconcile body (runs in the background threadpool).
+
+    Builds the admin client + secrets store the same way the startup and
+    governance-endpoint reconciles do, then calls the ONE reconcile entry point.
+    Any failure (CH unreachable, secrets seam down, bad statement) is swallowed
+    and logged - the org CRUD that scheduled this has already returned.
+    """
     try:
-        from dfe_engine.hyperdx.client import HyperDXClient
+        from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+        from dfe_engine.governance.ch import reconcile_ch_rbac
+        from dfe_engine.secrets import build_secrets
+        from dfe_engine.settings import get_clickhouse_config
 
-        if isinstance(hdx_client, HyperDXClient):
-            await hdx_client.create_team(f"customer-{org_name}")
-    except Exception as exc:
-        logger.warning(
-            "Background HyperDX team creation failed (non-fatal)",
-            org=org_name,
-            error=str(exc),
+        admin_client = (
+            ClickHouseManager.get_instance(get_clickhouse_config(settings))
+            .get_clickhouse_client()
+            ._client
         )
+        reconcile_ch_rbac(
+            admin_client,
+            secrets_store=build_secrets(settings.secrets),
+            orgs=orgs,
+        )
+    except Exception:
+        logger.exception("Background CH RBAC reconcile after org mutation failed")

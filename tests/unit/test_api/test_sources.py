@@ -537,6 +537,39 @@ class TestBulkAction:
         )
         assert resp.status_code == 422
 
+    def test_bulk_delete_rejects_traversal_name(
+        self, client: TestClient, admin_headers: dict, api_settings
+    ):
+        """A traversal name in the bulk-delete list must NOT unlink a file outside
+        the sources directory - it is a clean per-item failure, while a legit
+        source in the same batch still deletes (F-SOURCES-TRAVERSAL)."""
+        from pathlib import Path
+
+        sources_dir = Path(api_settings.source.sources_dir)
+        victim = sources_dir.parent / "victim.yaml"
+        victim.write_text("keep: me\n", encoding="utf-8")
+
+        client.post(
+            "/api/v1/sources",
+            json={
+                "source": "bulk_ok",
+                "match": {"field": "tags.collector.type", "value": "bulk_ok"},
+            },
+            headers=admin_headers,
+        )
+
+        resp = client.post(
+            "/api/v1/sources/bulk",
+            json={"action": "delete", "sources": ["../victim", "bulk_ok"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert "bulk_ok" in data["succeeded"]
+        assert any(f["source"] == "../victim" for f in data["failed"])
+        # the traversal name never unlinked the outside file
+        assert victim.exists()
+
 
 class TestSeedSources:
     """POST /api/v1/sources/seed"""

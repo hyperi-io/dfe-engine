@@ -5,7 +5,7 @@ Usage::
     from dfe_engine.api import create_app
     app = create_app()
 
-Or via CLI (uses pylib DfeApp framework)::
+Or via CLI (uses scalo DfeApp framework)::
 
     dfe-api run          # start the API server
     dfe-api version      # show version
@@ -18,7 +18,7 @@ from dfe_engine.api.app import create_app
 
 
 class _DfeApiApp:
-    """Entry point adapter using hyperi-pylib DfeApp framework."""
+    """Entry point adapter using scalo DfeApp framework."""
 
     name = "dfe-api"
     env_prefix = "DFE_API"
@@ -82,7 +82,7 @@ class _DfeApiApp:
 def run_dev_server() -> None:
     """Entry point for ``dfe-api`` console script.
 
-    Delegates to hyperi-pylib DfeApp CLI framework which provides:
+    Delegates to scalo DfeApp CLI framework which provides:
     ``run``, ``version``, and ``config-check`` subcommands plus
     common flags (--config, --log-level, --verbose, --quiet).
     """

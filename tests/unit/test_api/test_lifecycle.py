@@ -56,7 +56,35 @@ def test_admin_can_stop_app_and_pause_backing(client, app, admin_headers, tmp_pa
     # a backing service, as admin (wildcard)
     rk = client.post("/api/v1/lifecycle/kafka", json={"state": "paused"}, headers=admin_headers)
     assert rk.status_code == 200, rk.text
-    assert app.state.gitcrud.get("helmvars", "kafka")["state"] == "paused"
+    assert app.state.gitcrud.get("helmvars", "kafka-default-values")["state"] == "paused"
+
+
+def test_lifecycle_writes_consumed_overlay_file(client, app, admin_headers, tmp_path):
+    """The dial lands in values/receiver-default-values.yaml (the file the
+    dfe-infra ApplicationSet actually globs), as a top-level `state:` key;
+    the never-consumed values/receiver.yaml must NOT appear."""
+    gc = _wire_gitcrud(app, tmp_path)
+    r = client.post("/api/v1/lifecycle/receiver", json={"state": "stopped"}, headers=admin_headers)
+    assert r.status_code == 200, r.text
+    consumed = gc.repo_path / "values" / "receiver-default-values.yaml"
+    assert consumed.is_file()
+    assert gc.get("helmvars", "receiver-default-values")["state"] == "stopped"
+    assert not (gc.repo_path / "values" / "receiver.yaml").exists()
+
+
+def test_lifecycle_pending_reconcile_reflects_reality(client, app, admin_headers, tmp_path):
+    """A no-op write (same state again) is not pending anything."""
+    _wire_gitcrud(app, tmp_path)
+    first = client.post(
+        "/api/v1/lifecycle/receiver", json={"state": "stopped"}, headers=admin_headers
+    )
+    assert first.json()["pending_reconcile"] is True
+    again = client.post(
+        "/api/v1/lifecycle/receiver", json={"state": "stopped"}, headers=admin_headers
+    )
+    assert again.status_code == 200, again.text
+    assert again.json()["changed"] is False
+    assert again.json()["pending_reconcile"] is False
 
 
 def test_pinned_service_has_no_lifecycle_api(client, app, admin_headers, tmp_path):

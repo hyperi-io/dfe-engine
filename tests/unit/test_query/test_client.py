@@ -37,7 +37,7 @@ class TestQueryClientInit:
 class TestQueryClientHttpMode:
     @pytest.fixture
     def mock_response(self):
-        """Create a mock HTTP response returning JSON."""
+        """Mock HTTP response shaped like the view-execute QueryResponse JSON."""
         response = MagicMock()
         response.status_code = 200
         response.json.return_value = {
@@ -47,16 +47,16 @@ class TestQueryClientHttpMode:
                 {"id": 3, "value": "c"},
             ],
             "columns": ["id", "value"],
+            "row_count": 3,
+            "query_duration_ms": 42,
         }
-        response.headers = {
-            "X-Row-Count": "3",
-            "X-Query-Duration-Ms": "42",
-            "X-Datasource": "clickhouse:default",
-        }
+        response.headers = {}
         response.raise_for_status = MagicMock()
         return response
 
-    def test_query_http(self, mock_response):
+    def test_query_http_uses_view_execute_path(self, mock_response):
+        # HTTP mode must hit the tenant view-execute endpoint with the label in
+        # the path, NOT post the label as SQL to /queries/raw.
         client = QueryClient(base_url="http://localhost:8000")
         mock_http = MagicMock()
         mock_http.post.return_value = mock_response
@@ -66,8 +66,11 @@ class TestQueryClientHttpMode:
 
         mock_http.post.assert_called_once()
         call_args = mock_http.post.call_args
-        assert call_args[0][0] == "/api/v1/queries/raw"
-        assert call_args[1]["json"]["query"] == "analytics/user_activity"
+        assert call_args[0][0] == "/api/v1/queries/views/analytics/user_activity/execute"
+        json_body = call_args[1]["json"]
+        assert "query" not in json_body
+        assert "datasource" not in json_body
+        assert set(json_body) == {"params", "options"}
 
         assert result.num_rows == 3
         assert result.metadata.query_duration_ms == 42

@@ -17,10 +17,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, TenantClient, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/discovery", tags=["discovery"])
@@ -57,35 +57,15 @@ class DatabaseInfo(BaseModel):
     engine: str = ""
 
 
-# ── Dependencies ────────────────────────────────────────────
-
-
-def _get_ch_client(request: Request):
-    """Get a ClickHouse client from connection registry or app state."""
-    conn_registry = getattr(request.app.state, "connection_registry", None)
-    if conn_registry is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "ClickHouse connection not configured",
-            },
-        )
-    try:
-        # "default" is the registry's fallback connection (see get_connection_name);
-        # discovery is an admin-level cross-database listing.
-        return conn_registry.get_client("default")
-    except Exception as exc:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "connection_error",
-                "message": f"Cannot connect to ClickHouse: {exc}",
-            },
-        )
-
-
 # ── Endpoints ───────────────────────────────────────────────
+#
+# The CH client is the acting user's privilege-appropriate fixed user (via the
+# TenantClient dependency), NOT a hardcoded admin ``default`` connection: an
+# org_analyst lists only the tables their row-filtered reader can see, and an
+# admin stays unrestricted. Discovery reads ``system.*`` metadata (no ``_org_id``,
+# so no row policy applies) - CH still scopes system.tables/columns visibility to
+# the objects the calling CH user has some grant on, which IS the least-privilege
+# win here. The dependency raises 503 when the registry is unset or CH is down.
 
 
 @router.get(
@@ -94,14 +74,13 @@ def _get_ch_client(request: Request):
     dependencies=[Depends(require_action(scopes_dict["discovery_read"]))],
 )
 async def list_databases(
-    request: Request,
     user: CurrentUser,
+    ch: TenantClient,
     _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[DatabaseInfo]:
     """List all ClickHouse databases."""
-    client = _get_ch_client(request)
     try:
-        result = client.query("SELECT name, engine FROM system.databases ORDER BY name")
+        result = ch.query("SELECT name, engine FROM system.databases ORDER BY name")
         return [
             DatabaseInfo(name=row[0], engine=row[1])
             for row in result.result_rows
@@ -117,14 +96,13 @@ async def list_databases(
     dependencies=[Depends(require_action(scopes_dict["discovery_read"]))],
 )
 async def list_tables(
-    request: Request,
     user: CurrentUser,
+    ch: TenantClient,
     database: str = Query("default", description="Database to list tables from"),
     engine: str | None = Query(None, description="Filter by engine type"),
     _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[TableInfo]:
     """List tables in a ClickHouse database."""
-    client = _get_ch_client(request)
     try:
         query = (
             "SELECT name, database, engine, total_rows, total_bytes, comment "
@@ -137,7 +115,7 @@ async def list_tables(
             params["eng"] = engine
         query += " ORDER BY name"
 
-        result = client.query(query, parameters=params)
+        result = ch.query(query, parameters=params)
         return [
             TableInfo(
                 name=row[0],
@@ -160,15 +138,14 @@ async def list_tables(
 )
 async def list_columns(
     table_name: str,
-    request: Request,
     user: CurrentUser,
+    ch: TenantClient,
     database: str = Query("default", description="Database containing the table"),
     _auth: None = Depends(require_action(scopes_dict["discovery_read"])),
 ) -> list[ColumnInfo]:
     """List columns for a specific table."""
-    client = _get_ch_client(request)
     try:
-        result = client.query(
+        result = ch.query(
             "SELECT name, type, default_kind, default_expression, comment "
             "FROM system.columns "
             "WHERE database = {db:String} AND table = {tbl:String} "

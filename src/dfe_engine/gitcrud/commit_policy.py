@@ -19,8 +19,10 @@ from dataclasses import dataclass, field
 from dfe_engine.settings import is_dev_posture
 
 # Gitops-operational commit types (NOT release fix/feat - deploy repo has no
-# semantic-release). See the standard.
-ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "seed"})
+# semantic-release). See the standard. 'lifecycle' is the start/stop/pause state
+# dial (governance/lifecycle.py) - kept a first-class type so its audit entries
+# read conforming and group distinctly rather than mis-parsing as non-conforming.
+ALLOWED_TYPES = frozenset({"cfg", "hunt", "rbac", "action", "ops", "schema", "seed", "lifecycle"})
 
 # Map a resource CLASS prefix -> its commit type.
 _CLASS_TYPE = {
@@ -58,13 +60,31 @@ class CommitContext:
     trailers_extra: dict[str, str] = field(default_factory=dict)
 
 
-def _is_ascii(text: str) -> bool:
-    return all(ord(c) < 128 for c in text)
+def _fit_subject(ctype: str, scope: str, summary: str, limit: int = _SUBJECT_MAX) -> str:
+    """Compose ``type(scope): summary`` trimmed to fit ``limit`` chars.
+
+    Ordinary file-name + var-leaf combos routinely exceed 50 (e.g.
+    ``cfg(receiver-default): set clickhouse_max_connections`` is 53), so we
+    budget-truncate rather than reject a legitimate write - raising here 500'd the
+    helm PUT (the standard wants the write to land, just conforming). The type is
+    never trimmed (short ALLOWED type, and read_log keys off it); summary yields
+    first, then scope, and summary keeps >=1 char so read_log's subject regex
+    (``: (?P<summary>.+)``) still matches (an empty summary reads non-conforming).
+    """
+    fixed = len(ctype) + len("(): ")
+    budget = max(limit - fixed, 2)  # >=1 char each for scope and summary
+    max_scope = budget - 1
+    if len(scope) > max_scope:
+        scope = scope[:max_scope]
+    summary = summary[: budget - len(scope)]
+    if not summary:
+        summary = "-"
+    return f"{ctype}({scope}): {summary}"
 
 
 def build_message(ctx: CommitContext) -> str:
     """Render the conforming commit message (subject + trailers + [skip ci])."""
-    subject = f"{ctx.ctype}({ctx.scope}): {ctx.summary}"
+    subject = _fit_subject(ctx.ctype, ctx.scope, ctx.summary)
     validate_subject(subject)
 
     trailers: list[str] = [f"DFE-Actor: {ctx.actor}"]
@@ -87,7 +107,7 @@ def build_message(ctx: CommitContext) -> str:
 
 def validate_subject(subject: str) -> None:
     """ASCII-only, <=50 chars, an allowed type prefix."""
-    if not _is_ascii(subject):
+    if not subject.isascii():
         raise CommitPolicyError(f"non-ASCII subject: {subject!r}")
     if len(subject) > _SUBJECT_MAX:
         raise CommitPolicyError(f"subject > {_SUBJECT_MAX} chars: {subject!r}")

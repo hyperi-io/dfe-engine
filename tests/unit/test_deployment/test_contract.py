@@ -39,18 +39,32 @@ class TestContractWellFormed:
 
     def test_contract_health_paths(self) -> None:
         contract = engine_deployment_contract()
-        # Engine uses the API server's health route, not rustlib's /healthz.
-        assert contract.health.liveness_path == "/api/v1/system/health"
-        assert contract.health.readiness_path == "/api/v1/system/health"
+        # Probes are served by scalo's health router mounted in api/app.py -
+        # /health/live + /health/ready. /api/v1/system/health does not exist.
+        assert contract.health.liveness_path == "/health/live"
+        assert contract.health.readiness_path == "/health/ready"
         assert contract.health.metrics_path == "/metrics"
 
     def test_contract_secrets(self) -> None:
         contract = engine_deployment_contract()
         groups = {g.group_name for g in contract.secrets}
         assert groups == {"clickhouse", "jwt"}
-        # ClickHouse password env must use the cascade-flat key with __ separators.
+        # Env names must be the ones the settings loader reads (nothing parses
+        # a DFE__SECTION__KEY form) - see _get_env_overrides in settings.py.
         clickhouse = next(g for g in contract.secrets if g.group_name == "clickhouse")
-        assert clickhouse.env_vars[0].env_var == "DFE__CLICKHOUSE__PASSWORD"
+        assert clickhouse.env_vars[0].env_var == "DFE_CLICKHOUSE_PASSWORD"
+        jwt = next(g for g in contract.secrets if g.group_name == "jwt")
+        assert jwt.env_vars[0].env_var == "DFE_API_JWT_SECRET"
+
+    def test_contract_secret_env_names_are_read_by_settings_loader(self, monkeypatch) -> None:
+        """The contract's env names must round-trip through load_settings."""
+        from dfe_engine.settings import load_settings
+
+        monkeypatch.setenv("DFE_CLICKHOUSE_PASSWORD", "ch-secret")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "jwt-secret-key-for-tests-hmac-32b")
+        settings = load_settings()
+        assert settings.clickhouse.password == "ch-secret"
+        assert settings.api.jwt_secret == "jwt-secret-key-for-tests-hmac-32b"
 
     def test_contract_no_keda(self) -> None:
         # dfe-engine is the control plane -- HPA on CPU is sufficient, no KEDA.
@@ -82,7 +96,7 @@ class TestArtefactGeneration:
 
         assert f"FROM {contract.base_image}" in stage
         assert "EXPOSE 8000" in stage
-        assert "/api/v1/system/health" in stage  # healthcheck path
+        assert "/health/live" in stage  # healthcheck path (scalo health router)
         assert 'org.opencontainers.image.title="dfe-engine"' in stage
 
     def test_container_manifest_is_valid_json(self) -> None:
@@ -175,6 +189,25 @@ class TestCommittedArtefactDrift:
     def test_committed_chart_yaml_name_matches_contract(self) -> None:
         chart = yaml.safe_load((PROJECT_ROOT / "chart" / "Chart.yaml").read_text())
         assert chart["name"] == engine_deployment_contract().app_name
+
+    def test_committed_dockerfile_healthcheck_hits_live_route(self) -> None:
+        """HEALTHCHECK must curl a route that exists (scalo /health/live) -
+        /api/v1/system/health was never served and marked containers unhealthy."""
+        text = (PROJECT_ROOT / "Dockerfile").read_text()
+        assert "/health/live" in text
+        assert "/api/v1/system/health" not in text
+
+    def test_committed_chart_probes_hit_scalo_health_routes(self) -> None:
+        text = (PROJECT_ROOT / "chart" / "templates" / "deployment.yaml").read_text()
+        assert "path: /health/live" in text
+        assert "path: /health/ready" in text
+        assert "path: /health/startup" in text
+        assert "/api/v1/system/health" not in text
+
+    def test_committed_chart_notes_have_no_dead_health_path(self) -> None:
+        text = (PROJECT_ROOT / "chart" / "templates" / "NOTES.txt").read_text()
+        assert "/api/v1/system/health" not in text
+        assert "/health/" in text
 
 
 # ---------------------------------------------------------------------------

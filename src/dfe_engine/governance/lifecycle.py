@@ -62,6 +62,16 @@ class ServiceLifecycle:
     cls: str = "helmvars"  # the GitCrud resource class
     path: str = "state"  # the dot-path of the dial within the resource
 
+    def overlay_resource(self, instance: str = "default") -> str:
+        """The CONSUMED per-instance overlay resource holding the dial.
+
+        dfe-infra's ApplicationSet globs only ``values/*-values.yaml``, so the
+        dial must land in the same ``<service>-<instance>-values`` file the
+        compiler emits (see gitops/artifacts.py) - a bare
+        ``values/<service>.yaml`` is read by nothing.
+        """
+        return f"{self.resource}-{instance}-values"
+
 
 # Built-in registry. dfe-* apps are operator-managed; a few backing services are
 # admin/infra-managed; critical cascade deps are pinned. Overridable from gitops
@@ -110,13 +120,15 @@ def set_state(
     name: str,
     state: LifecycleState,
     actor: str,
+    instance: str = "default",
     base_revision: str | None = None,
 ) -> PublishResult:
     """Write a service's lifecycle state to gitops (a helm-var dial) and commit.
 
-    Raises LifecycleError for a pinned service. The dial is committed to the deploy
-    repo; Argo reconciles it (commit != deployment). Returns the PublishResult
-    (commit sha), which the API surfaces to the caller.
+    Raises LifecycleError for a pinned service. The dial is a top-level ``state``
+    key in the CONSUMED per-instance overlay (``values/<service>-<instance>-
+    values.yaml``); Argo reconciles it (commit != deployment). Returns the
+    PublishResult (commit sha), which the API surfaces to the caller.
     """
     svc = resolve(name)
     if svc.tier == ServiceTier.PINNED:
@@ -124,7 +136,7 @@ def set_state(
     msg = f"lifecycle({name}): {state.value} by {actor}"
     return crud.set_key(
         svc.cls,
-        svc.resource,
+        svc.overlay_resource(instance),
         svc.path,
         state.value,
         actor,

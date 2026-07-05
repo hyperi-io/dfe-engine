@@ -83,16 +83,25 @@ def read_recent(
         if not partitions:
             return []
 
-        # Ceiling divide so the tail window covers `limit` across all partitions.
-        per_partition = max(1, -(-limit // len(partitions)))
-        assignments: list[Any] = []
+        # Watermarks first, THEN plan the tail. An even split (ceil(limit/nparts)
+        # each) undercounts badly on a skewed topic: with 2 shallow + 1 deep
+        # partition and limit=100 it seeks each to hi-34, so the shallow ones
+        # yield ~1 and the total is ~36, not ~100. Water-fill instead: give every
+        # partition a share of the budget capped by what it actually holds, and
+        # redistribute the shortfall from shallow partitions onto the deep ones.
+        lows: dict[int, int] = {}
         ends: dict[int, int] = {}
         for p in partitions:
             lo, hi = consumer.get_watermark_offsets(
                 TopicPartition(topic, p), timeout=metadata_timeout, cached=False
             )
+            lows[p] = lo
             ends[p] = hi
-            assignments.append(TopicPartition(topic, p, max(lo, hi - per_partition)))
+
+        takes = _plan_tail_takes({p: ends[p] - lows[p] for p in partitions}, limit)
+        assignments: list[Any] = [
+            TopicPartition(topic, p, max(lows[p], ends[p] - takes[p])) for p in partitions
+        ]
         consumer.assign(assignments)
 
         lines: list[str] = []
@@ -123,6 +132,41 @@ def read_recent(
         return lines[-limit:] if len(lines) > limit else lines
     finally:
         consumer.close()
+
+
+def _plan_tail_takes(available: dict[int, int], limit: int) -> dict[int, int]:
+    """Distribute a tail budget of ``limit`` messages across partitions.
+
+    Each partition gets an equal share of the remaining budget, capped by how
+    many messages it actually holds (``available``); the shortfall from shallow
+    partitions is redistributed onto deeper ones. Bounded: every pass either
+    drives the remaining budget to zero (each take strictly decreases it) or
+    retires at least one saturated partition, so it terminates.
+    """
+    takes: dict[int, int] = dict.fromkeys(available, 0)
+    active = [p for p, avail in available.items() if avail > 0]
+    remaining = limit
+    while remaining > 0 and active:
+        share = max(1, remaining // len(active))
+        progressed = False
+        for p in list(active):
+            room = available[p] - takes[p]
+            if room <= 0:
+                active.remove(p)
+                continue
+            take = min(share, room, remaining)
+            if take <= 0:
+                continue
+            takes[p] += take
+            remaining -= take
+            progressed = True
+            if takes[p] >= available[p]:
+                active.remove(p)
+            if remaining <= 0:
+                break
+        if not progressed:
+            break
+    return takes
 
 
 def assignments_start_at_end(assignments: list[Any], partition: int, hi: int) -> bool:

@@ -23,7 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
     QueryOptions,
@@ -207,6 +207,7 @@ async def execute_view(
 async def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
+    settings: Settings,
     _auth: None = Depends(require_action(scopes_dict["query_raw"])),
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
@@ -218,9 +219,15 @@ async def execute_raw_query(
     it must stay off the tenant-scoped view path.
     """
     from dfe_engine.query.datasources import get_adapter
+    from dfe_engine.settings import get_clickhouse_config
+
+    # The clickhouse adapter binds the process-wide manager singleton, so it
+    # must get the settings-derived config, never the localhost defaults.
+    scheme = request.datasource.partition(":")[0]
+    adapter_config = get_clickhouse_config(settings) if scheme == "clickhouse" else None
 
     try:
-        adapter = get_adapter(request.datasource)
+        adapter = get_adapter(request.datasource, config=adapter_config)
     except ValueError as exc:
         raise HTTPException(
             status_code=400,

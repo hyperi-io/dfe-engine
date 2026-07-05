@@ -113,8 +113,13 @@ class GroupStore:
         *,
         members: list[str] | None = None,
         scope: str = GROUP_SCOPE_SYSTEM,
+        org_ids: list[str] | None = None,
     ) -> Group:
         """Create a new group and persist it to YAML.
+
+        ``org_ids`` are the tenant IDs the group's members inherit (empty means no
+        org-scoped access); set them at create time so the group lands in ONE
+        write rather than create-then-update.
 
         Raises:
             ValueError: If a group with this name already exists, or the
@@ -135,6 +140,7 @@ class GroupStore:
             description=description,
             members=member_list,
             scope=scope,
+            org_ids=org_ids or [],
         )
         self._write(group)
         return group

@@ -192,7 +192,7 @@ def admin_headers(settings: DFESettings) -> dict[str, str]:
 @pytest.fixture
 def viewer_headers(settings: DFESettings) -> dict[str, str]:
     token = create_access_token(
-        data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
+        data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_ro"]},
         settings=settings,
     )
     return {"Authorization": f"Bearer {token}"}

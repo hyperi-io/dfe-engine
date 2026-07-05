@@ -5,53 +5,78 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""ClickHouse RBAC: quota tiers + per-org row isolation.
+"""ClickHouse RBAC: quota tiers + custom-settings tenant isolation.
 
-Two reusable role axes compose every CH identity (see
-docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md):
+The consumption axis is unchanged (quota TIER roles + fixed SERVICE roles; see
+docs/superpowers/specs/2026-07-01-ch-org-rbac-quota-tiers-design.md). The tenant
+axis is the PRODUCTION-STANDARD custom-settings model (docs/RBAC.md section 5):
 
-- a TIER role (consumption: grants + settings profile + quota), and
-- an ORG role (visibility: restrictive row policy on ``_org_id``), 0 or 1.
+- a SMALL FIXED set of CH users by PRIVILEGE (``FIXED_USERS`` + ``dfe_admin``),
+  and
+- ONE ``DFE_current_tenant_id``-driven RESTRICTIVE row policy per ``_org_id``
+  table (``render_tenant_policies``), targeting only ``dfe_tenant_reader``.
 
-The catalogue is gitcrud config, not code; the reconciler renders whatever tiers
-+ orgs exist into idempotent ClickHouse DDL.
+Adding an org is zero DDL; the engine injects the org id into the per-query
+setting. The catalogue is gitcrud config, not code; the reconciler renders it into
+idempotent ClickHouse DDL.
 """
 
 from .models import (
+    ADMIN_USER,
+    ANALYST_RO_USER,
+    ANALYST_USER,
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
+    FIXED_USERS,
+    TENANT_POLICY_NAME,
+    TENANT_READER_USER,
+    TENANT_SETTING,
+    ChFixedUser,
     ChServiceRole,
     ChTier,
     GroupChBinding,
-    org_policy_name,
-    org_role_name,
 )
-from .reconciler import ChRbacReconciler, ReconcileResult, compute_drops, reconcile_ch_rbac
+from .reconciler import (
+    ChRbacReconciler,
+    ReconcileResult,
+    bindings_from_groups,
+    compute_drops,
+    load_catalogue_from_gitcrud,
+    reconcile_ch_rbac,
+)
 from .render import (
-    render_group_user,
+    render_fixed_users,
     render_materialise,
-    render_org_role,
     render_service_role,
     render_service_user,
+    render_tenant_policies,
     render_tier,
 )
 
 __all__ = [
+    "ADMIN_USER",
+    "ANALYST_RO_USER",
+    "ANALYST_USER",
     "DEFAULT_SERVICE_ROLES",
     "DEFAULT_TIERS",
+    "FIXED_USERS",
+    "TENANT_POLICY_NAME",
+    "TENANT_READER_USER",
+    "TENANT_SETTING",
+    "ChFixedUser",
     "ChRbacReconciler",
     "ChServiceRole",
     "ChTier",
     "GroupChBinding",
     "ReconcileResult",
+    "bindings_from_groups",
     "compute_drops",
-    "org_policy_name",
-    "org_role_name",
+    "load_catalogue_from_gitcrud",
     "reconcile_ch_rbac",
-    "render_group_user",
+    "render_fixed_users",
     "render_materialise",
-    "render_org_role",
     "render_service_role",
     "render_service_user",
+    "render_tenant_policies",
     "render_tier",
 ]

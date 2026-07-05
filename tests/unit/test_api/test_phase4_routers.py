@@ -42,6 +42,39 @@ class TestDiscoveryRouter:
         resp = client.get("/api/v1/discovery/databases")
         assert resp.status_code == 401
 
+    def test_discovery_routes_through_tenant_scoped_client(self, client, app, admin_headers):
+        """Discovery acquires the acting user's fixed CH client via the dependency.
+
+        Overriding it with the tenant reader wrapper an org_analyst resolves to
+        proves the metadata read runs row-scoped (DFE_current_tenant_id injected),
+        not on a hardcoded admin ``default`` connection.
+        """
+        from dfe_engine.api.deps import get_tenant_scoped_clickhouse_client
+        from dfe_engine.connections.tenant import TenantScopedClient
+
+        class _Result:
+            def __init__(self, rows):
+                self.result_rows = rows
+
+        class _Rec:
+            def __init__(self):
+                self.last_settings = None
+
+            def query(self, sql, parameters=None, settings=None):
+                self.last_settings = settings
+                return _Result([["dfe", "Atomic"]])
+
+        rec = _Rec()
+        scoped = TenantScopedClient(rec, org_ids=["acme"], readonly=True)
+        app.dependency_overrides[get_tenant_scoped_clickhouse_client] = lambda: scoped
+        try:
+            resp = client.get("/api/v1/discovery/databases", headers=admin_headers)
+            assert resp.status_code == 200, resp.text
+            assert resp.json() == [{"name": "dfe", "engine": "Atomic"}]
+            assert rec.last_settings == {"DFE_current_tenant_id": "acme"}
+        finally:
+            app.dependency_overrides.pop(get_tenant_scoped_clickhouse_client, None)
+
 
 class TestSigmaRouter:
     """GET/POST /api/v1/sigma endpoints."""
@@ -877,7 +910,7 @@ class TestSchemasMetaWriteRouter:
             data={
                 "sub": "viewer",
                 "org_id": "test-org",
-                "roles": ["data_analyst_viewer"],
+                "roles": ["data_analyst_ro"],
             },
             settings=settings,
         )

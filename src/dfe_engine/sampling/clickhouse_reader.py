@@ -9,10 +9,14 @@
 
 All reads select ``toString(_json)`` as the first (and only) column so the
 result is a list of raw event strings - the shape both the parsed-row path and
-logreducer want. ``target`` is a TRUSTED, already-qualified identifier (e.g.
-``\\`db\\`.\\`events\\```); it is interpolated, not bound, because ClickHouse
-cannot bind table names. ``filter`` is likewise trusted SQL (the caller holds
-``sampler:read`` - same trust boundary as query authoring).
+logreducer want. ``target`` is interpolated, not bound, because ClickHouse cannot
+bind table names: for a registered source it is the engine-rendered
+``\\`db\\`.\\`events\\```, and for an explicit override it has ALREADY passed
+``service._validate_table_override`` (a bare db.table identifier). ``filter`` is
+raw SQL interpolated verbatim - the router gates any caller-supplied
+``table``/``filter`` behind ``query:raw`` (NOT the broad ``sampler:read`` that
+viewers hold), so this sink is only reachable by a raw-SQL-authorised caller
+(F-SAMPLER-SQLI).
 """
 
 from __future__ import annotations
@@ -41,7 +45,8 @@ def build_where(
 
     ``source_label`` filters the shared landing table by ``_source``; leave it
     None when sampling a per-source table (already scoped). Time bounds bind
-    server-side; ``filter_sql`` is trusted and interpolated verbatim.
+    server-side; ``filter_sql`` is raw SQL interpolated verbatim, reachable only
+    behind the router's ``query:raw`` gate (F-SAMPLER-SQLI).
     """
     clauses: list[str] = []
     params: dict[str, Any] = {}
@@ -88,15 +93,25 @@ def read_random(
     seed: int | None,
     max_execution_time: int,
 ) -> list[str]:
-    """Uniform-ish random ``limit`` rows via ``ORDER BY rand()``.
+    """Random ``limit`` rows.
 
-    A seed makes it reproducible. This is a full scan of the filtered set (CH has
-    no cheap unseeded reservoir without a ``SAMPLE BY`` key), bounded by
-    ``max_execution_time``; for very large tables prefer a tighter ``filter`` or
-    time window.
+    Unseeded uses ``ORDER BY rand()``. Seeded is reproducible via a deterministic
+    hash-based ordering keyed on the seed: CH's ``rand(x)`` IGNORES x for its RNG
+    (x only blocks common-subexpression elimination), so ``rand(seed)`` is NOT
+    reproducible. ``cityHash64(toString(_json), seed)`` gives a stable
+    pseudo-random permutation for the same data + seed -- a fixed sample per
+    seed, not statistical resampling, but it honours the reproducibility
+    contract (same approach scan_query already uses for its stable subset).
+
+    This is a full scan of the filtered set (CH has no cheap unseeded reservoir
+    without a ``SAMPLE BY`` key), bounded by ``max_execution_time``; for very
+    large tables prefer a tighter ``filter`` or time window.
     """
-    rand = f"rand({seed})" if seed is not None else "rand()"
-    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {rand} LIMIT {{lim:UInt64}}"
+    if seed is not None:
+        order = f"cityHash64(toString(_json), {int(seed)})"
+    else:
+        order = "rand()"
+    sql = f"SELECT toString(_json) FROM {target} {where} ORDER BY {order} LIMIT {{lim:UInt64}}"
     return _run(ch, sql, {**params, "lim": limit}, max_execution_time)
 
 

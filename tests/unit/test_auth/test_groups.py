@@ -41,6 +41,28 @@ class TestGroupStoreCreate:
         store.create("ops", roles=["operator"])
         assert (groups_dir / "ops.yaml").exists()
 
+    def test_create_with_org_ids(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        group = store.create("acme-viewers", roles=["org_analyst"], org_ids=["acme-tenant"])
+        assert group.org_ids == ["acme-tenant"]
+
+    def test_create_with_org_ids_persists_in_one_write(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        store.create(
+            "acme-viewers",
+            roles=["org_analyst"],
+            members=["alice"],
+            org_ids=["acme-tenant"],
+        )
+        reloaded = GroupStore(tmp_path / "groups").get("acme-viewers")
+        assert reloaded.org_ids == ["acme-tenant"]
+        assert reloaded.members == ["alice"]
+
+    def test_create_without_org_ids_defaults_empty(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        group = store.create("ops", roles=["operator"])
+        assert group.org_ids == []
+
     def test_create_duplicate_raises_value_error(self, tmp_path):
         store = GroupStore(tmp_path / "groups")
         store.create("admins", roles=["admin"])
@@ -317,7 +339,7 @@ class TestGroupSourceProvider:
 
     def test_group_org_ids(self, tmp_path):
         store = GroupStore(tmp_path / "groups")
-        store.create("acme-viewers", roles=["customer_viewer"])
+        store.create("acme-viewers", roles=["org_analyst"])
         store.update("acme-viewers", org_ids=["acme"])
         group = store.get("acme-viewers")
         assert group.org_ids == ["acme"]

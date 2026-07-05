@@ -9,7 +9,7 @@
 """
 DFE Engine Settings Module
 
-Provides centralized configuration management using hyperi-pylib settings cascade.
+Provides centralized configuration management using scalo settings cascade.
 Configuration priority: Environment Variables > Config Files > Defaults
 
 Environment variable mapping (DFE_ prefixed, with legacy fallbacks):
@@ -27,7 +27,6 @@ ClickHouse:
 - DFE_CLICKHOUSE_LANDING_TABLE (legacy: CLICKHOUSE_LANDING_TABLE) -> clickhouse.landing_table
 - DFE_CLICKHOUSE_SECURE (legacy: CLICKHOUSE_SECURE) -> clickhouse.secure (true/false)
 - DFE_CLICKHOUSE_VERIFY (legacy: CLICKHOUSE_VERIFY) -> clickhouse.verify (true/false)
-- DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 
 Hunts:
@@ -125,7 +124,6 @@ class ClickHouseSettings(BaseModel):
     )
     secure: bool = Field(default=True)
     verify: bool = Field(default=False)
-    connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
     # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
     # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
@@ -493,11 +491,9 @@ class HelmSettings(BaseModel):
     """Helm values compiler settings.
 
     Environment variables:
-    - DFE_HELM_OUTPUT_DIR -> helm.output_dir
     - DFE_HELM_ENVIRONMENT_FILE -> helm.environment_file
     """
 
-    output_dir: str = Field(default="", description="Output directory for compiled Helm values")
     environment_file: str = Field(default="", description="Path to environment config YAML")
 
 
@@ -506,13 +502,9 @@ class OIDCSettings(BaseModel):
 
     Environment variables:
     - DFE_AUTH_OIDC_PROVIDERS_DIR -> auth.oidc.providers_dir
-    - DFE_AUTH_OIDC_SYNC_ENABLED -> auth.oidc.sync_enabled
-    - DFE_AUTH_OIDC_SYNC_ON_STARTUP -> auth.oidc.sync_on_startup
     """
 
     providers_dir: str = Field(default="", description="OIDC provider config directory")
-    sync_enabled: bool = Field(default=True, description="Enable background group sync")
-    sync_on_startup: bool = Field(default=True, description="Sync on startup")
 
 
 class LocalAuthSettings(BaseModel):
@@ -559,6 +551,8 @@ class HyperDXSettings(BaseModel):
     - DFE_HYPERDX_BASE_URL -> hyperdx.base_url
     - DFE_HYPERDX_ENABLED -> hyperdx.enabled
     - DFE_HYPERDX_API_KEY_ENV -> hyperdx.api_key_env
+    - DFE_HYPERDX_PER_GROUP -> hyperdx.per_group
+    - DFE_GA_TEAM_NAME -> hyperdx.ga_team_name
     """
 
     base_url: str = Field(default="", description="HyperDX API base URL")
@@ -567,6 +561,19 @@ class HyperDXSettings(BaseModel):
         description="Env var for HyperDX API key",
     )
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
+    per_group: bool = Field(
+        default=False,
+        description=(
+            "Team model posture. False (GA default) = ONE shared HyperDX team "
+            "(ga_team_name) that every provisioned user joins; tenant isolation is "
+            "the per-connection DFE_current_tenant_id setting, not the team. True "
+            "(post-GA) = the richer per-org team (customer-<org>) per org."
+        ),
+    )
+    ga_team_name: str = Field(
+        default="dfe",
+        description="Name of the single shared HyperDX team used when per_group is False (GA).",
+    )
 
 
 class GitopsSettings(BaseModel):
@@ -765,6 +772,26 @@ class DFESettings(BaseModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def _warn_auth_disabled_in_production(self) -> "DFESettings":
+        # A non-dev posture with auth OFF means get_current_user falls to path 4
+        # and treats EVERY credential-less request as an anonymous admin - the same
+        # class of fail-open the jwt_secret guard prevents. We cannot hard-fail like
+        # that guard does: auth.enabled defaults False AND env defaults 'production',
+        # so this is the DEFAULT combo and raising would break every bare
+        # DFESettings()/load_settings() construction. Surface it LOUD instead so a
+        # real deploy that forgets DFE_AUTH_ENABLED=true cannot run wide open
+        # silently (F-AUTH-DEFAULT-OFF).
+        if not is_dev_posture(self.env) and not self.auth.enabled:
+            from scalo.logger import logger
+
+            logger.warning(
+                f"auth.enabled is FALSE in a non-dev posture (DFE_ENV={self.env!r}): "
+                "every request runs as an anonymous admin. Set DFE_AUTH_ENABLED=true "
+                "for any real deployment (or DFE_ENV=dev for local development)."
+            )
+        return self
+
 
 def _load_defaults() -> dict:
     """Load default configuration from defaults.yaml."""
@@ -821,8 +848,6 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
         overrides["clickhouse"]["verify"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MIN"):
-        overrides["clickhouse"]["connections_min"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
         overrides["clickhouse"]["connections_max"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
@@ -873,8 +898,15 @@ def _get_env_overrides() -> dict:
 
         try:
             overrides["hunts"]["alert_destinations"] = json.loads(val)
-        except json.JSONDecodeError:
-            pass
+        except json.JSONDecodeError as exc:
+            # Do not swallow silently: a typo'd destinations var otherwise
+            # disappears with no alert routing and no clue why. Name the var.
+            from scalo.logger import logger
+
+            logger.warning(
+                "DFE_HUNTS_ALERT_DESTINATIONS is not valid JSON; ignoring it",
+                error=str(exc),
+            )
     if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
         overrides["hunts"]["default_alert_cooldown"] = val
     if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):
@@ -999,8 +1031,6 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["config_dir"] = val
 
     # Helm settings
-    if val := _get_env("DFE_HELM_OUTPUT_DIR"):
-        overrides["helm"]["output_dir"] = val
     if val := _get_env("DFE_HELM_ENVIRONMENT_FILE"):
         overrides["helm"]["environment_file"] = val
 
@@ -1025,18 +1055,6 @@ def _get_env_overrides() -> dict:
     # OIDC settings (nested under auth.oidc)
     if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
         overrides["auth"].setdefault("oidc", {})["providers_dir"] = val
-    if val := _get_env("DFE_AUTH_OIDC_SYNC_ENABLED"):
-        overrides["auth"].setdefault("oidc", {})["sync_enabled"] = val.lower() in (
-            "true",
-            "1",
-            "yes",
-        )
-    if val := _get_env("DFE_AUTH_OIDC_SYNC_ON_STARTUP"):
-        overrides["auth"].setdefault("oidc", {})["sync_on_startup"] = val.lower() in (
-            "true",
-            "1",
-            "yes",
-        )
 
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):
@@ -1045,6 +1063,10 @@ def _get_env_overrides() -> dict:
         overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
         overrides["hyperdx"]["api_key_env"] = val
+    if val := _get_env("DFE_HYPERDX_PER_GROUP"):
+        overrides["hyperdx"]["per_group"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_GA_TEAM_NAME"):
+        overrides["hyperdx"]["ga_team_name"] = val
 
     # Gitops settings
     if val := _get_env("DFE_GITOPS_ENABLED"):
@@ -1127,13 +1149,23 @@ def _get_env_overrides() -> dict:
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """Deep merge two dicts. Override wins on conflicts."""
+    """Deep merge two dicts for settings precedence; *override* wins.
+
+    Unlike yaml_utils.deep_merge (which APPENDS lists), a list in *override*
+    REPLACES the one in *base*. Settings precedence is strict override
+    ("ENV > config file > defaults"): a list-valued setting (api.cors_origins,
+    hunts.alert_channels) supplied at a higher tier must SUPERSEDE the lower
+    tier, not concatenate onto it. This is scoped to the settings load path;
+    yaml_utils.deep_merge (used by the Helm/overlay compilers) keeps appending.
+    """
     import copy
 
-    from dfe_engine.yaml_utils import deep_merge
-
     result = copy.deepcopy(base)
-    deep_merge(result, override)
+    for key, val in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(val, dict):
+            result[key] = _deep_merge(result[key], val)
+        else:
+            result[key] = copy.deepcopy(val)
     return result
 
 

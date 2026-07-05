@@ -2,7 +2,7 @@
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
-- DirectoryConfigStore from hyperi-pylib provides:
+- DirectoryConfigStore from scalo provides:
   - In-memory caching with background polling refresh
   - Thread-safe reads via RLock
   - Optional git-aware writes (auto-commit, branch management, push)
@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import SingleQuotedScalarString
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
@@ -27,6 +29,45 @@ from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.services.plugins import get_plugin, valid_services
 from dfe_engine.services.validators import ValidationResult, validate_config
 from dfe_engine.yaml_utils import yaml_dump
+
+# WHY: yaml_dump writes with ruamel (YAML 1.2) but DirectoryConfigStore reads
+# back with PyYAML's safe_load (YAML 1.1). The two disagree on the legacy 1.1
+# implicit types: a bare string like 'off'/'no'/'yes'/'on'/'null' round-trips
+# through ruamel unquoted (1.2 keeps it a string), but PyYAML 1.1 coerces it to
+# a bool/None -- so a stored string 'off' comes back as False. Force-quote any
+# scalar the 1.1 reader would reinterpret so it survives the round trip. The
+# oracle is a ruamel loader pinned to YAML 1.1 (same resolver family as PyYAML),
+# which is more robust than hand-listing every 1.1 token (see the DirectoryConfig
+# YAML-1.1 gotcha in project memory).
+_yaml11_oracle = YAML(typ="safe", pure=True)
+_yaml11_oracle.version = (1, 1)  # type: ignore[assignment]
+
+
+def _reinterpreted_by_yaml11(value: str) -> bool:
+    """True if PyYAML's YAML 1.1 reader would parse *value* as a non-string."""
+    try:
+        parsed = _yaml11_oracle.load(value)
+    except Exception:
+        # Not a bare scalar (ruamel quotes truly special strings on dump anyway).
+        return False
+    return not (isinstance(parsed, str) and parsed == value)
+
+
+def quote_ambiguous_scalars(data: Any) -> Any:
+    """Recursively wrap YAML-1.1-ambiguous string scalars in single quotes.
+
+    Returns a structure ready for yaml_dump where any string the 1.1 reader would
+    coerce (bool/null/numeric family) is a SingleQuotedScalarString, so the
+    on-disk YAML keeps its quotes and the PyYAML reader returns the original
+    string unchanged.
+    """
+    if isinstance(data, dict):
+        return {k: quote_ambiguous_scalars(v) for k, v in data.items()}
+    if isinstance(data, list):
+        return [quote_ambiguous_scalars(v) for v in data]
+    if isinstance(data, str) and _reinterpreted_by_yaml11(data):
+        return SingleQuotedScalarString(data)
+    return data
 
 
 class ServiceConfigError(Exception):
@@ -220,9 +261,11 @@ class ServiceConfigRegistry:
 
         table = self._table_name(service, instance)
 
-        # Write YAML file directly (full document replacement)
+        # Write YAML file directly (full document replacement). Quote any
+        # YAML-1.1-ambiguous string scalars so the PyYAML-1.1 read path in
+        # DirectoryConfigStore returns them as strings, not coerced bools/null.
         yaml_path = self._config_directory / f"{table}.yaml"
-        yaml_dump(config_data, yaml_path)
+        yaml_dump(quote_ambiguous_scalars(config_data), yaml_path)
 
         # Git commit if the store is git-aware
         if self._store.is_git:

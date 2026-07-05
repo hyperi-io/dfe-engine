@@ -19,6 +19,7 @@ Usage:
     deep_merge(base, overrides)  # mutates base in-place
 """
 
+import os
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -76,15 +77,35 @@ def yaml_load_string(content: str) -> Any:
 
 def yaml_dump(data: Any, dest: str | Path) -> None:
     """
-    Dump data to a YAML file.
+    Dump data to a YAML file, atomically.
+
+    A plain ``open(path, "w")`` truncates the target BEFORE writing, so a
+    crash or a concurrent reader mid-write sees a truncated/empty file - which
+    then blows up the single-file YAML stores (AccountStore._read /
+    APIKeyStore._load_key parse None and raise). We serialize to a temp file in
+    the SAME directory (same filesystem, so rename is atomic) and os.replace()
+    it onto the target: a reader only ever sees the old complete file or the
+    new complete file, never a partial one, and a mid-dump crash leaves the
+    original untouched.
 
     Args:
         data: Data to serialize
         dest: Path to the output file
     """
     path = Path(dest)
-    with open(path, "w") as f:
-        _yaml_rt.dump(data, f)
+    # Hidden, pid-tagged temp so concurrent writers do not clobber each other's
+    # temp and a crashed writer's leftover is easy to spot / never picked up as
+    # a real file by the *.yaml globs the stores use.
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with open(tmp, "w") as f:
+            _yaml_rt.dump(data, f)
+        os.replace(tmp, path)
+    except BaseException:
+        # Never leave a half-written temp behind; the target is still intact
+        # because os.replace() was not reached.
+        tmp.unlink(missing_ok=True)
+        raise
 
 
 def yaml_dump_string(data: Any) -> str:

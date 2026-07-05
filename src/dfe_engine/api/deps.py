@@ -107,124 +107,66 @@ def shutdown_registries() -> None:
     _registries.clear()
 
 
-def get_schema_registry():
-    """FastAPI dependency: resolve SchemaRegistry singleton (meta schemas)."""
-    reg = _registries.get("meta_schema")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "SchemaRegistry not initialized — set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
-            },
-        )
-    return reg
+def _registry_dep(key: str, hint: str):
+    """Build the 'resolve _registries[key] singleton or raise 503 not_configured'
+    FastAPI dependency shared by every registry getter.
+
+    The getters differed ONLY by the dict key and the not_configured hint, so the
+    lookup-or-503 body lives here once. Each getter below is a distinct closure
+    bound to the SAME module-level name the ``Annotated`` aliases + ``Depends()``
+    call sites already reference, so nothing downstream changes (and each closure
+    is its own object, so FastAPI still keys/caches them independently).
+    """
+
+    def _get():
+        reg = _registries.get(key)
+        if reg is None:
+            raise HTTPException(
+                status_code=503,
+                detail={"code": "not_configured", "message": hint},
+            )
+        return reg
+
+    return _get
 
 
-def get_source_registry():
-    """FastAPI dependency: resolve SourceRegistry singleton."""
-    reg = _registries.get("source")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "SourceRegistry not initialized — set DFE_SOURCES_DIR",
-            },
-        )
-    return reg
-
-
-def get_service_config_registry():
-    """FastAPI dependency: resolve ServiceConfigRegistry singleton."""
-    reg = _registries.get("service_config")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "ServiceConfigRegistry not initialized"
-                " — set DFE_SERVICES_CONFIG_YAML_DIR",
-            },
-        )
-    return reg
-
-
-def get_field_map_registry():
-    """FastAPI dependency: resolve FieldMapRegistry singleton."""
-    reg = _registries.get("fieldmap")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "FieldMapRegistry not initialized — set DFE_FIELDMAPS_DIR",
-            },
-        )
-    return reg
-
-
-def get_alert_destinations_store():
-    """FastAPI dependency: resolve alert destinations DirectoryConfigStore."""
-    store = _registries.get("alert_destinations")
-    if store is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "Alert destinations not initialized"
-                " — set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
-            },
-        )
-    return store
+get_schema_registry = _registry_dep(
+    "meta_schema",
+    "SchemaRegistry not initialized — set DFE_SCHEMAS_DIR (schemas.schemas_dir)",
+)
+get_source_registry = _registry_dep(
+    "source",
+    "SourceRegistry not initialized — set DFE_SOURCES_DIR",
+)
+get_service_config_registry = _registry_dep(
+    "service_config",
+    "ServiceConfigRegistry not initialized — set DFE_SERVICES_CONFIG_YAML_DIR",
+)
+get_field_map_registry = _registry_dep(
+    "fieldmap",
+    "FieldMapRegistry not initialized — set DFE_FIELDMAPS_DIR",
+)
+get_alert_destinations_store = _registry_dep(
+    "alert_destinations",
+    "Alert destinations not initialized — set DFE_HUNTS_ALERT_DESTINATIONS_DIR",
+)
+get_deployment_config_registry = _registry_dep(
+    "deployment",
+    "DeploymentConfigRegistry not initialized — set DFE_DEPLOYMENT_CONFIG_DIR",
+)
+get_rule_registry = _registry_dep(
+    "rules",
+    "RuleRegistry not initialized — set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
+)
+get_hunt_config_registry = _registry_dep(
+    "hunt_configs",
+    "HuntConfigRegistry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
+)
 
 
 def get_alert_destinations_store_optional():
     """Optional alert destinations store (for hunt delete cascade)."""
     return _registries.get("alert_destinations")
-
-
-def get_deployment_config_registry():
-    """FastAPI dependency: resolve DeploymentConfigRegistry singleton."""
-    reg = _registries.get("deployment")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "DeploymentConfigRegistry not initialized"
-                " — set DFE_DEPLOYMENT_CONFIG_DIR",
-            },
-        )
-    return reg
-
-
-def get_rule_registry():
-    """FastAPI dependency: resolve RuleRegistry singleton."""
-    reg = _registries.get("rules")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "RuleRegistry not initialized — set DFE_HUNTS_RULES_DIR (hunts.rules_dir)",
-            },
-        )
-    return reg
-
-
-def get_hunt_config_registry():
-    """FastAPI dependency: resolve HuntConfigRegistry singleton."""
-    reg = _registries.get("hunt_configs")
-    if reg is None:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "not_configured",
-                "message": "HuntConfigRegistry not initialized — set DFE_HUNTS_DIR (hunts.hunt_dir)",
-            },
-        )
-    return reg
 
 
 SchemaReg = Annotated[Any, Depends(get_schema_registry)]
@@ -317,6 +259,29 @@ def _resolve_roles_from_groups(
     """Resolve (roles, org_ids) from group names — see _resolve_group_grants."""
     resolution = _resolve_group_grants(groups, group_store)
     return resolution.roles, resolution.org_ids
+
+
+def _merge_group_resolutions(*resolutions: GroupResolution) -> GroupResolution:
+    """Union roles, org_ids, and scoped grants across several resolutions.
+
+    Used by the OIDC path to combine the IdP-header groups with the acting
+    account's STORE-side group memberships: each side contributes, neither
+    replaces the other. Grants dedupe by (role, scope) so a role bound at the
+    same scope by both sides lands once.
+    """
+    roles: set[str] = set()
+    org_ids: set[str] = set()
+    grants: list[ScopedGrant] = []
+    seen_grants: set[tuple[str, str]] = set()
+    for resolution in resolutions:
+        roles.update(resolution.roles)
+        org_ids.update(resolution.org_ids)
+        for grant in resolution.grants:
+            key = (grant.role, str(grant.scope))
+            if key not in seen_grants:
+                seen_grants.add(key)
+                grants.append(grant)
+    return GroupResolution(sorted(roles), sorted(org_ids), grants)
 
 
 def _groups_for_local_account(request: Request, user_id: str) -> list[str]:
@@ -455,6 +420,33 @@ def require_local_account_enabled(request: Request, user_id: str) -> None:
     )
 
 
+def require_oidc_account_enabled(request: Request, oidc_subject: str) -> None:
+    """Reject an OIDC principal whose shadow account has been disabled.
+
+    Mirror of require_local_account_enabled for the OIDC-header path: an admin
+    disabling an external user via ``PUT /accounts/{key}`` (enabled=false) must
+    take effect for OIDC logins too, not just JWT ones. The shadow account is
+    keyed by JitProvisioner.account_key(subject) (NOT the raw subject), so we
+    resolve it by that key. A brand-new JIT account is created enabled, so first
+    login still passes; only an explicitly-disabled account is rejected.
+    """
+    from dfe_engine.auth.jit import JitProvisioner
+
+    account_store = getattr(request.app.state, "account_store", None)
+    if account_store is None:
+        return
+
+    account = account_store.get(JitProvisioner.account_key(oidc_subject))
+    if account is None or account.enabled:
+        return
+
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={"code": "unauthorized", "message": "Account disabled"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
 async def get_current_user(request: Request) -> AuthContext:
     """Authenticate the request via one of four paths (checked in order).
 
@@ -478,18 +470,42 @@ async def get_current_user(request: Request) -> AuthContext:
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
-        resolution = _resolve_group_grants(groups, group_store)
-        roles, org_ids = resolution.roles, resolution.org_ids
-        logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
-        audit_login_success(oidc_subject, "oidc", client_ip, roles)
+        # IdP-header groups are the live signal the IdP asserts for this login.
+        header_resolution = _resolve_group_grants(groups, group_store)
 
-        # JIT provisioning — create shadow account on first OIDC login
+        # JIT provisioning -- create/refresh the shadow account on OIDC login.
+        # First login also joins the account to its `org_<domain>` org group, so
+        # this must run BEFORE we resolve the account's store-side memberships.
         jit = getattr(request.app.state, "jit_provisioner", None)
         if jit:
             try:
                 jit.ensure_account(oidc_subject, groups, "oidc")
             except Exception:
                 logger.exception("JIT provisioning failed", user_id=oidc_subject)
+
+        # Consistency with the local/JWT paths: an external user's DFE-managed
+        # group memberships -- the JIT `org_<domain>` org group carrying the org's
+        # org_ids + role org_analyst, or any group an admin added the shadow
+        # account to -- live in the STORE, not the IdP header, so header groups
+        # alone never surface them and the user stays un-tenant-scoped despite the
+        # association. Resolve them via the SAME helper the JWT path uses, keyed by
+        # the shadow-account key (account_key(subject)) under which the account
+        # joins those groups, and UNION with the header grants so BOTH contribute
+        # (neither replaces the other).
+        from dfe_engine.auth.jit import JitProvisioner
+
+        store_resolution = resolve_live_grants_for_user(
+            request, JitProvisioner.account_key(oidc_subject), fallback_groups=groups
+        )
+        resolution = _merge_group_resolutions(header_resolution, store_resolution)
+        roles, org_ids = resolution.roles, resolution.org_ids
+        logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
+        audit_login_success(oidc_subject, "oidc", client_ip, roles)
+
+        # The account.enabled flag must gate OIDC principals too, not only JWT
+        # ones -- otherwise disabling an external user has no effect. Checked
+        # AFTER ensure_account so a freshly provisioned (enabled) account passes.
+        require_oidc_account_enabled(request, oidc_subject)
 
         return AuthContext(
             user_id=oidc_subject,
@@ -572,8 +588,13 @@ async def get_current_user(request: Request) -> AuthContext:
         require_local_account_enabled(request, jwt_user_id)
         live = resolve_live_grants_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
         live_groups = resolve_live_groups_for_user(request, jwt_user_id, fallback_groups=jwt_groups)
-        claim_org_ids = payload.get("org_ids", [])
-        org_ids = sorted(set(claim_org_ids) | set(live.org_ids)) if claim_org_ids else live.org_ids
+        # org_ids MUST come from LIVE membership only. The repository read-gate
+        # authorises org reads via `scope_id in user.org_ids`, and /auth/refresh
+        # copies org_ids back into the next token, so unioning the signed org_ids
+        # claim let a removed org member keep reading that org indefinitely - a
+        # self-perpetuating claim (F-REPO-ORGIDS). Mirror the roles path, which
+        # already ignores JWT authz claims.
+        org_ids = live.org_ids
         audit_login_success(jwt_user_id, "jwt", client_ip, live.roles)
         return AuthContext(
             org_id=payload.get("org_id", "default"),
@@ -601,6 +622,53 @@ async def get_current_user(request: Request) -> AuthContext:
 
 
 CurrentUser = Annotated[AuthContext, Depends(get_current_user)]
+
+
+# ── Tenant-scoped ClickHouse client (direct-read endpoints) ───
+
+
+def get_tenant_scoped_clickhouse_client(request: Request, user: CurrentUser) -> Any:
+    """FastAPI dependency: the privilege-appropriate CH client for THIS principal.
+
+    Resolves the acting user's fixed CH user via the ConnectionRegistry so a
+    DIRECT-CH read (sampler, discovery) runs under the right identity, correctly
+    scoped:
+
+      * org_analyst -> the row-filtered ``dfe_tenant_reader`` wrapped in a
+        TenantScopedClient injecting ``DFE_current_tenant_id`` = the caller's
+        org_ids (empty -> '' -> zero rows, fail closed);
+      * data_analyst_ro / data_viewer / infra_ro -> the read-only ``dfe_analyst_ro``
+        (drops readonly-incompatible per-query settings; no tenant setting);
+      * admin / infra / data_analyst -> their fixed user as-is (unrestricted).
+
+    This REPLACES ``ClickHouseManager.get_instance`` (the process-wide ADMIN
+    singleton) for the direct-CH-read endpoints, so an org-scoped principal can
+    never read another org's rows. The parameterized-VIEW execute path keeps its
+    OWN server-injected ``org_id`` view parameter and is deliberately unchanged.
+    Host/port come from settings (seeded into the registry at bootstrap). Tests
+    override this via ``app.dependency_overrides`` to inject a fake client.
+
+    Raises:
+        HTTPException: 503 when the registry is unconfigured or CH is unreachable.
+    """
+    registry = getattr(request.app.state, "connection_registry", None)
+    if registry is None:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "ClickHouse connection not configured"},
+        )
+    try:
+        return registry.read_client_for_user(user)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "connection_error", "message": f"Cannot connect to ClickHouse: {exc}"},
+        ) from exc
+
+
+TenantClient = Annotated[Any, Depends(get_tenant_scoped_clickhouse_client)]
 
 
 # ── Authorization ─────────────────────────────────────────────

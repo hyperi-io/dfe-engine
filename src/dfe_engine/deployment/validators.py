@@ -86,8 +86,14 @@ def _validate_autoscaling(config, errors: list[str], warnings: list[str]) -> Non
                 f"KEDA min_replicas ({config.keda.min_replicas}) > "
                 f"max_replicas ({config.keda.max_replicas})"
             )
-        if config.keda.kafka_trigger is None and config.keda.cpu_trigger is None:
-            errors.append("KEDA enabled but no triggers configured")
+        # No trigger check: the DOCUMENTED default is keda.enabled with NO
+        # explicit triggers, so the chart's own gated ScalingPressure trigger
+        # stands (see HelmValuesCompiler._compile_keda docstring +
+        # project_keda_scaling_signal). Every explicit trigger kind
+        # (kafka/cpu/prometheus/extra) is also valid, so there is no genuinely
+        # "no triggers configured" error case left -- the old check only ever
+        # produced false positives (it ignored prometheus_trigger/extra_triggers
+        # and rejected the standard default shape).
 
     if config.hpa.enabled:
         if config.hpa.min_replicas > config.hpa.max_replicas:

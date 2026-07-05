@@ -271,11 +271,11 @@ class TestAuthzResult:
 
 
 # ---------------------------------------------------------------------------
-# infra_admin role
+# infra role
 # ---------------------------------------------------------------------------
 
 
-class TestInfraAdminRole:
+class TestInfraRole:
     @pytest.mark.parametrize(
         "action",
         [
@@ -296,38 +296,45 @@ class TestInfraAdminRole:
             "service:receiver:metrics:read",
         ],
     )
-    def test_infra_admin_allowed_actions(self, action: str):
-        result = authorize(_auth(["infra_admin"]), action, enabled=True)
+    def test_infra_allowed_actions(self, action: str):
+        result = authorize(_auth(["infra"]), action, enabled=True)
         assert result.allowed
-        assert result.reason == "role:infra_admin"
+        assert result.reason == "role:infra"
 
     @pytest.mark.parametrize(
         "action",
         ["source:read", "source:write", "query:execute"],
     )
-    def test_infra_admin_denied_data_actions(self, action: str):
-        result = authorize(_auth(["infra_admin"]), action, enabled=True)
+    def test_infra_denied_data_actions(self, action: str):
+        result = authorize(_auth(["infra"]), action, enabled=True)
         assert not result.allowed
 
-    def test_infra_admin_has_argo_wildcard(self):
-        """infra_admin uses argo:* wildcard, not enumerated argo perms."""
+    @pytest.mark.parametrize("action", ["hunt:read", "hunt:write", "hunt:execute"])
+    def test_infra_owns_hunts(self, action: str):
+        """infra owns hunts: hunt:* was added to the infra role (2026-07 model)."""
+        result = authorize(_auth(["infra"]), action, enabled=True)
+        assert result.allowed
+        assert result.reason == "role:infra"
+
+    def test_infra_has_argo_wildcard(self):
+        """infra uses argo:* wildcard, not enumerated argo perms."""
         config = RoleConfig.load_builtin()
-        role = config.roles["infra_admin"]
+        role = config.roles["infra"]
         argo_patterns = [p for p in role.permissions if p.startswith("argo:")]
         # Single wildcard pattern, not 10+ enumerated actions
         assert argo_patterns == ["argo:*"]
 
-    def test_infra_admin_service_config_wildcard(self):
-        """infra_admin has service:*:config:* — matches any service config."""
+    def test_infra_service_config_wildcard(self):
+        """infra has service:*:config:* — matches any service config."""
         config = RoleConfig.load_builtin()
-        assert config.has_permission("infra_admin", "service:loader:config:write")
-        assert config.has_permission("infra_admin", "service:receiver:config:read")
+        assert config.has_permission("infra", "service:loader:config:write")
+        assert config.has_permission("infra", "service:receiver:config:read")
 
-    def test_infra_admin_service_metrics_read(self):
-        """infra_admin has service:*:metrics:read — read any service metrics."""
+    def test_infra_service_metrics_read(self):
+        """infra has service:*:metrics:read — read any service metrics."""
         config = RoleConfig.load_builtin()
-        assert config.has_permission("infra_admin", "service:loader:metrics:read")
-        assert not config.has_permission("infra_admin", "service:loader:metrics:write")
+        assert config.has_permission("infra", "service:loader:metrics:read")
+        assert not config.has_permission("infra", "service:loader:metrics:write")
 
 
 # ---------------------------------------------------------------------------
@@ -344,18 +351,18 @@ class TestArgoActions:
             assert not action.startswith("argo:")
 
     def test_argo_actions_are_open_ended(self):
-        """Any argo:*:* action is valid -- infra_admin gets argo:* wildcard."""
+        """Any argo:*:* action is valid -- infra gets argo:* wildcard."""
         result = authorize(
-            _auth(["infra_admin"]),
+            _auth(["infra"]),
             "argo:applications:action",
             enabled=True,
         )
         assert result.allowed
 
-    def test_infra_admin_allows_any_argo_action(self):
+    def test_infra_allows_any_argo_action(self):
         """argo:* wildcard means any argo: action is permitted."""
         result = authorize(
-            _auth(["infra_admin"]),
+            _auth(["infra"]),
             "argo:applications:sync",
             enabled=True,
         )
@@ -392,9 +399,9 @@ class TestDefaults:
             assert "write" not in perm
         assert not config.has_permission("data_viewer", "helm:compile")
 
-    def test_infra_admin_exists(self):
+    def test_infra_exists(self):
         config = RoleConfig.load_builtin()
-        assert "infra_admin" in config.roles
+        assert "infra" in config.roles
 
     def test_seven_built_in_roles(self):
         config = RoleConfig.load_builtin()
@@ -405,10 +412,10 @@ class TestDefaults:
         expected = {
             "admin",
             "data_analyst",
-            "data_analyst_viewer",
+            "data_analyst_ro",
             "data_viewer",
-            "infra_admin",
-            "infra_viewer",
-            "customer_viewer",
+            "infra",
+            "infra_ro",
+            "org_analyst",
         }
         assert set(config.roles.keys()) == expected

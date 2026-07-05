@@ -93,7 +93,10 @@ class TestValidateDeploymentConfig:
         assert result.valid is False
         assert any("min_replicas" in e for e in result.errors)
 
-    def test_keda_no_triggers(self):
+    def test_keda_enabled_no_explicit_triggers_is_valid(self):
+        """The documented default: keda.enabled with NO explicit triggers, so
+        the chart's built-in gated ScalingPressure trigger stands. This must NOT
+        be flagged as invalid."""
         from dfe_engine.deployment.models import ReceiverDeploymentConfig
 
         config = ReceiverDeploymentConfig()
@@ -102,8 +105,35 @@ class TestValidateDeploymentConfig:
         data["keda"]["kafka_trigger"] = None
         data["keda"]["cpu_trigger"] = None
         result = validate_deployment_config("receiver", data)
-        assert result.valid is False
-        assert any("no triggers" in e for e in result.errors)
+        assert result.valid is True, result.errors
+        assert not any("no triggers" in e for e in result.errors)
+
+    def test_keda_prometheus_trigger_only_is_valid(self):
+        from dfe_engine.deployment.models import ReceiverDeploymentConfig
+
+        config = ReceiverDeploymentConfig()
+        data = config.model_dump(mode="json")
+        data["keda"]["enabled"] = True
+        data["keda"]["kafka_trigger"] = None
+        data["keda"]["cpu_trigger"] = None
+        data["keda"]["prometheus_trigger"] = {
+            "query": "sum(rate(dfe_events_total[5m]))",
+            "threshold": 500,
+        }
+        result = validate_deployment_config("receiver", data)
+        assert result.valid is True, result.errors
+
+    def test_keda_extra_triggers_only_is_valid(self):
+        from dfe_engine.deployment.models import ReceiverDeploymentConfig
+
+        config = ReceiverDeploymentConfig()
+        data = config.model_dump(mode="json")
+        data["keda"]["enabled"] = True
+        data["keda"]["kafka_trigger"] = None
+        data["keda"]["cpu_trigger"] = None
+        data["keda"]["extra_triggers"] = [{"type": "cron", "metadata": {"desiredReplicas": "5"}}]
+        result = validate_deployment_config("receiver", data)
+        assert result.valid is True, result.errors
 
     def test_resource_requests_gt_limits_error(self):
         result = validate_deployment_config(

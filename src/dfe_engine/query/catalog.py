@@ -16,8 +16,12 @@ from scalo.logger import logger
 
 from dfe_engine.query.models import ViewDefinition, ViewParameter
 
-# Regex to extract {param:Type} patterns from CREATE VIEW SQL
-_PARAM_PATTERN = re.compile(r"\{(\w+):(\w+(?:\([^)]*\))?)\}")
+# Regex to extract {param:Type} patterns from CREATE VIEW SQL. The type may
+# contain nested parens (e.g. Array(Nullable(String)), Map(String, Array(...))).
+# CH types never contain braces, so consume any non-brace chars up to the
+# closing '}' -- the old \w+(\(...\))? pattern only allowed a single, flat paren
+# group and silently dropped nested-paren params.
+_PARAM_PATTERN = re.compile(r"\{(\w+):([^{}]+)\}")
 
 # View name prefix
 VIEW_PREFIX = "dfe_v_"

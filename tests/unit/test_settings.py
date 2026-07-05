@@ -5,7 +5,13 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from dfe_engine.settings import DFESettings, load_settings, reset_settings
+from dfe_engine.settings import (
+    APISettings,
+    AuthSettings,
+    DFESettings,
+    load_settings,
+    reset_settings,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -177,11 +183,6 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.secure is False
 
-    def test_clickhouse_connections_min(self, monkeypatch):
-        monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MIN", "5")
-        settings = load_settings()
-        assert settings.clickhouse.connections_min == 5
-
     def test_clickhouse_connections_max(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_CONNECTIONS_MAX", "20")
         settings = load_settings()
@@ -245,6 +246,48 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
         assert load_settings().auth.enabled is True
 
+    def test_auth_disabled_in_production_warns(self):
+        # F-AUTH-DEFAULT-OFF: a non-dev posture with auth OFF makes every request an
+        # anonymous admin. We cannot hard-fail the default combo (auth defaults off,
+        # env defaults production), so it must be surfaced LOUDLY instead.
+        from scalo.logger import logger
+
+        records: list[str] = []
+        sink_id = logger.add(records.append, level="WARNING")
+        try:
+            DFESettings(env="production")  # auth.enabled defaults False
+        finally:
+            logger.remove(sink_id)
+        assert any("anonymous admin" in str(r) for r in records)
+
+    def test_auth_disabled_in_dev_is_silent(self):
+        # A dev posture with auth off is the expected local-dev state: no warning.
+        from scalo.logger import logger
+
+        records: list[str] = []
+        sink_id = logger.add(records.append, level="WARNING")
+        try:
+            DFESettings(env="dev")
+        finally:
+            logger.remove(sink_id)
+        assert not any("anonymous admin" in str(r) for r in records)
+
+    def test_auth_enabled_in_production_no_auth_warning(self):
+        # Control: auth ON in production must NOT emit the anonymous-admin warning.
+        from scalo.logger import logger
+
+        records: list[str] = []
+        sink_id = logger.add(records.append, level="WARNING")
+        try:
+            DFESettings(
+                env="production",
+                auth=AuthSettings(enabled=True),
+                api=APISettings(jwt_secret="a-real-production-secret-over-32-bytes"),
+            )
+        finally:
+            logger.remove(sink_id)
+        assert not any("anonymous admin" in str(r) for r in records)
+
     def test_auth_dir_override(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DFE_AUTH_DIR", str(tmp_path / "auth"))
         settings = load_settings()
@@ -278,6 +321,24 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hyperdx.base_url == "http://hdx:8080"
 
+    def test_hyperdx_per_group_defaults_false_ga(self, monkeypatch):
+        """GA default: per_group is False and the shared team is 'dfe'."""
+        monkeypatch.delenv("DFE_HYPERDX_PER_GROUP", raising=False)
+        monkeypatch.delenv("DFE_GA_TEAM_NAME", raising=False)
+        settings = load_settings()
+        assert settings.hyperdx.per_group is False
+        assert settings.hyperdx.ga_team_name == "dfe"
+
+    def test_hyperdx_per_group_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_HYPERDX_PER_GROUP", "true")
+        settings = load_settings()
+        assert settings.hyperdx.per_group is True
+
+    def test_hyperdx_ga_team_name_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_GA_TEAM_NAME", "acme-shared")
+        settings = load_settings()
+        assert settings.hyperdx.ga_team_name == "acme-shared"
+
     def test_clickhouse_verify_true(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "1")
         settings = load_settings()
@@ -307,11 +368,6 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_QUERY_YAML_DIR", "/custom/queries")
         settings = load_settings()
         assert settings.query.yaml_dir == "/custom/queries"
-
-    def test_helm_output_dir_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HELM_OUTPUT_DIR", "/helm/out")
-        settings = load_settings()
-        assert settings.helm.output_dir == "/helm/out"
 
     def test_helm_environment_file_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HELM_ENVIRONMENT_FILE", "/env.yaml")
@@ -416,3 +472,55 @@ class TestIsDevPosture:
 
         for env in ("production", "prod", "staging", ""):
             assert is_dev_posture(env) is False
+
+
+class _CapLogger:
+    """Capture logger.warning calls; no-op the rest."""
+
+    def __init__(self):
+        self.warnings: list[tuple] = []
+
+    def warning(self, msg, **kw):
+        self.warnings.append((msg, kw))
+
+    def info(self, *a, **kw):
+        pass
+
+    def error(self, *a, **kw):
+        pass
+
+    def debug(self, *a, **kw):
+        pass
+
+
+class TestEnvOverridePrecedence:
+    """ENV > config file > defaults - a list-valued env override must REPLACE
+    the config-file list, not concatenate onto it (deep_merge appends lists)."""
+
+    def test_env_list_replaces_config_file_list(self, tmp_path, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("api:\n  cors_origins:\n    - https://from-file.example\n")
+        monkeypatch.setenv("DFE_API_CORS_ORIGINS", "https://from-env.example")
+
+        settings = load_settings(str(cfg))
+        assert settings.api.cors_origins == ["https://from-env.example"]
+
+    def test_config_file_list_replaces_defaults(self, tmp_path, monkeypatch):
+        _clear_registry_path_env(monkeypatch)
+        cfg = tmp_path / "cfg.yaml"
+        cfg.write_text("api:\n  cors_origins:\n    - https://only-file.example\n")
+
+        settings = load_settings(str(cfg))
+        assert settings.api.cors_origins == ["https://only-file.example"]
+
+
+class TestAlertDestinationsBadJson:
+    def test_bad_json_logs_warning_naming_var(self, monkeypatch):
+        cap = _CapLogger()
+        monkeypatch.setattr("scalo.logger.logger", cap, raising=False)
+        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS", "{not valid json")
+
+        load_settings()
+
+        assert any("ALERT_DESTINATIONS" in m for m, _ in cap.warnings)

@@ -456,3 +456,31 @@ class TestParseTableName:
     def test_transform_vector_parsing(self):
         result = ServiceConfigRegistry._parse_table_name("transform-vector-staging")
         assert result == ("transform-vector", "staging")
+
+
+# ---------------------------------------------------------------------------
+# YAML 1.1 / 1.2 write-read round trip (regression)
+# ---------------------------------------------------------------------------
+
+
+class TestYaml11RoundTrip:
+    """save_config writes with ruamel (YAML 1.2) but DirectoryConfigStore reads
+    back with PyYAML safe_load (YAML 1.1). Bare 'off'/'no'/'yes'/'on'/'null'
+    must survive as strings, not get coerced to bool/None on read."""
+
+    def test_ambiguous_string_scalars_survive_read(self, registry):
+        registry.save_config(
+            "unknownsvc",
+            {"mode": "off", "a": "no", "b": "yes", "c": "on", "n": "null", "plain": "hello"},
+            instance="default",
+        )
+        got = registry.get_config("unknownsvc", "default")
+        assert got["mode"] == "off"
+        assert got["a"] == "no"
+        assert got["b"] == "yes"
+        assert got["c"] == "on"
+        assert got["n"] == "null"
+        assert got["plain"] == "hello"
+        # And specifically NOT coerced to Python bool/None.
+        assert got["mode"] is not False
+        assert got["n"] is not None

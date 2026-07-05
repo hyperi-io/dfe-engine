@@ -16,6 +16,9 @@ GET /api/v1/gitops/log -> flat {entries, next_before} or, with ?group_by=,
 
 from __future__ import annotations
 
+import asyncio
+from dataclasses import asdict
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from scalo.logger import logger
@@ -58,12 +61,9 @@ def _state(request: Request, *, warn: bool = True) -> AutoMergeState:
 
 
 def _status(state: AutoMergeState) -> AutoMergeStatus:
-    return AutoMergeStatus(
-        stored=state.stored,
-        effective=state.effective,
-        allowed=state.allowed,
-        reason=state.reason,
-    )
+    # AutoMergeState is a dataclass with the same field set as AutoMergeStatus -
+    # splat it rather than copy field-by-field.
+    return AutoMergeStatus(**asdict(state))
 
 
 @router.get(
@@ -94,7 +94,9 @@ async def put_auto_merge(
         raise HTTPException(403, detail={"code": "auto_merge_forbidden", "message": state.reason})
     if body.enabled:
         logger.warning("AUTO-MERGE enabled via API", actor=user.user_id)
-    set_stored(gc, body.enabled, user.user_id)
+    # set_stored commits (+ pushes) to the deploy repo - offload the blocking
+    # dulwich/HTTPS work off the single event loop.
+    await asyncio.to_thread(set_stored, gc, body.enabled, user.user_id)
     audit_resource_change(
         user.user_id, "gitops", "auto-merge", "updated", {"enabled": body.enabled}
     )
@@ -133,21 +135,8 @@ class GroupedLogResponse(BaseModel):
 
 
 def _entry_model(e: LogEntry) -> LogEntryModel:
-    return LogEntryModel(
-        sha=e.sha,
-        timestamp=e.timestamp,
-        ctype=e.ctype,
-        scope=e.scope,
-        summary=e.summary,
-        actor=e.actor,
-        role=e.role,
-        action=e.action,
-        request_id=e.request_id,
-        files=e.files,
-        resources=e.resources,
-        conforming=e.conforming,
-        state=e.state,
-    )
+    # LogEntry is a dataclass whose field names/types match LogEntryModel 1:1.
+    return LogEntryModel(**asdict(e))
 
 
 @router.get(
@@ -171,8 +160,10 @@ async def get_log(
     """
     gc = _gitcrud(request)
     try:
-        entries, next_before = read_log(
-            gc, limit=limit, before=before, applied_revision=applied_revision
+        # read_log walks full git history via dulwich - offload the blocking
+        # walk off the event loop (single-worker uvicorn).
+        entries, next_before = await asyncio.to_thread(
+            read_log, gc, limit=limit, before=before, applied_revision=applied_revision
         )
     except UnknownCursorError as exc:
         raise HTTPException(400, detail={"code": "unknown_cursor", "message": str(exc)}) from exc

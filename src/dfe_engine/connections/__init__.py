@@ -11,9 +11,9 @@
 Provides connection resolution, tenant-scoped query execution, and
 ClickHouse user/policy reconciliation for DFE RBAC.
 
-The custom settings pattern uses a small number of static CH users
-(3-5 by privilege level) with row policies based on
-``getSetting('current_tenant_id')``.  dfe-engine injects the tenant
+The custom settings pattern uses a small fixed set of static CH users
+(by privilege level) with ONE row policy per ``_org_id`` table based on
+``getSetting('DFE_current_tenant_id')``.  dfe-engine injects the tenant
 ID per query based on the authenticated user's org_ids.
 
 Usage::

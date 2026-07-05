@@ -130,7 +130,7 @@ class TestOIDCAuthWithStaticFiles:
             groups_dir / "eng-analysts.yaml",
         )
         yaml_dump(
-            {"description": "Infra", "roles": ["infra_admin"], "members": []},
+            {"description": "Infra", "roles": ["infra"], "members": []},
             groups_dir / "eng-infra.yaml",
         )
 
@@ -140,7 +140,7 @@ class TestOIDCAuthWithStaticFiles:
         roles, org_ids = _resolve_roles_from_groups(["eng-analysts", "eng-infra"], store)
 
         assert "data_analyst" in roles
-        assert "infra_admin" in roles
+        assert "infra" in roles
         # Roles are sorted and deduplicated
         assert roles == sorted(set(roles))
 
@@ -321,7 +321,7 @@ class TestExistingRolesSurviveRestart:
         )
         # Write a custom group that should survive bootstrap
         yaml_dump(
-            {"description": "Custom ops team", "roles": ["infra_admin"], "members": []},
+            {"description": "Custom ops team", "roles": ["infra"], "members": []},
             groups_dir / "custom-ops.yaml",
         )
 
@@ -332,7 +332,7 @@ class TestExistingRolesSurviveRestart:
         store = GroupStore(groups_dir)
         group = store.get("custom-ops")
         assert group is not None
-        assert group.roles == ["infra_admin"]
+        assert group.roles == ["infra"]
         assert group.description == "Custom ops team"
 
     def test_bootstrap_does_not_remove_user_assigned_roles(self, tmp_path: Path) -> None:
@@ -350,7 +350,7 @@ class TestExistingRolesSurviveRestart:
         yaml_dump(
             {
                 "description": "Hunt, query, source CRUD — upgraded",
-                "roles": ["data_analyst", "infra_viewer"],
+                "roles": ["data_analyst", "infra_ro"],
                 "members": ["alice", "bob"],
             },
             groups_dir / "dfe-analysts.yaml",
@@ -365,7 +365,7 @@ class TestExistingRolesSurviveRestart:
         group = store.get("dfe-analysts")
         assert group is not None
         # The extra role added by admin must survive
-        assert "infra_viewer" in group.roles
+        assert "infra_ro" in group.roles
         assert "data_analyst" in group.roles
         # Members must survive
         assert "alice" in group.members
@@ -391,7 +391,7 @@ class TestSyncFailureDoesNotBreakAuth:
             groups_dir / "engineering.yaml",
         )
         yaml_dump(
-            {"description": "SRE team", "roles": ["infra_admin"], "members": []},
+            {"description": "SRE team", "roles": ["infra"], "members": []},
             groups_dir / "sre-team.yaml",
         )
 
@@ -404,7 +404,7 @@ class TestSyncFailureDoesNotBreakAuth:
         roles, _ = _resolve_roles_from_groups(["engineering", "sre-team"], store)
 
         assert "data_analyst" in roles
-        assert "infra_admin" in roles
+        assert "infra" in roles
 
     def test_sync_error_does_not_corrupt_existing_groups(self, tmp_path: Path) -> None:
         """A failed sync does not modify existing group files.

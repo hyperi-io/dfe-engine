@@ -305,7 +305,8 @@ class RuleCreationService:
         try:
             from ..clickhouse.clickhouse_manager import ClickHouseManager
 
-            ch = ClickHouseManager.get_instance()
+            # Bind the singleton to the service's config, not localhost defaults.
+            ch = ClickHouseManager.get_instance(self._ch_config)
             client = ch.get_clickhouse_client()
 
             # Build a minimal SELECT to estimate cost

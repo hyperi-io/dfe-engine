@@ -25,6 +25,11 @@ class Org(BaseModel):
         name: Primary identifier (filename stem).
         display_name: Human-readable label for UI display.
         org_ids: Tenant IDs used for ClickHouse row-level security filters.
+        domains: Email domains this org claims (e.g. ['acme.com']). SEPARATE from
+            org_ids - these are the login-email domains that map an external OIDC
+            user to this org (domain -> org_ids -> tenant scope), NOT tenant IDs.
+            An org may own several domains. Normalised to lowercase by OrgRegistry
+            on create/update.
         enabled: Whether this org is active.
         hyperdx_team_id: HyperDX team ID for this org's connection sync.
         hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
@@ -36,6 +41,7 @@ class Org(BaseModel):
     name: str
     display_name: str = ""
     org_ids: list[str] = Field(default_factory=list)
+    domains: list[str] = Field(default_factory=list)
     enabled: bool = True
     hyperdx_team_id: str = ""
     hyperdx_team_api_key_env: str = ""

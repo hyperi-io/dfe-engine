@@ -229,7 +229,7 @@ class TestSyncPreservesExistingRoles:
         provider_registry, group_store = registries
         provider_registry.create("test-sso", api_provider)
 
-        group_store.create(name="ops-example.com", roles=["infra_viewer"])
+        group_store.create(name="ops-example.com", roles=["infra_ro"])
 
         groups = [GroupInfo(id="new-id-456", name="ops", email="ops@example.com")]
         adapter = FakeAdapter(api_provider, groups)
@@ -240,7 +240,7 @@ class TestSyncPreservesExistingRoles:
         assert updated is not None
         assert updated.source_provider == "test-sso"
         assert updated.source_id == "new-id-456"
-        assert updated.roles == ["infra_viewer"]
+        assert updated.roles == ["infra_ro"]
 
 
 class TestSyncUpdatesProviderStatus:

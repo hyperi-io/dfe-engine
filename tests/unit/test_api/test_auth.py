@@ -189,7 +189,7 @@ class TestPermissions:
         resp = client.get("/api/v1/auth/permissions", headers=viewer_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert "infra_viewer" in data["roles"] or "data_analyst_viewer" in data["roles"]
+        assert "infra_ro" in data["roles"] or "data_analyst_ro" in data["roles"]
         assert "source:read" in data["permissions"]
         assert "config:write" not in data["permissions"]
 

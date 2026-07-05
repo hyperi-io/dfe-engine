@@ -54,6 +54,42 @@ def test_collect_without_ddl_omits_ddl_files() -> None:
     assert "values/receiver-prod-values.yaml" in arts
 
 
+def test_publish_merge_preserves_operator_helm_edit(tmp_path) -> None:
+    # FIX 7: a var set via the /helm path (helmvars resource 'receiver-prod-values'
+    # -> values/receiver-prod-values.yaml) must SURVIVE the next publish, which
+    # otherwise regenerates that file wholesale from the registry.
+    from dfe_engine.gitcrud import GitCrud, default_registry
+    from dfe_engine.gitops.repo import GitopsRepo
+
+    gc = GitCrud(GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry())
+    # simulate a prior publish landing the registry output, then an operator edit
+    gc.put(
+        "helmvars",
+        "receiver-prod-values",
+        {"replicaCount": 2, "image": {"repository": "ghcr.io/x/dfe-receiver", "tag": "2.2.0"}},
+        actor="ci",
+    )
+    gc.set_key("helmvars", "receiver-prod-values", "replicaCount", 99, actor="operator")
+    committed = (gc.repo_path / "values" / "receiver-prod-values.yaml").read_text()
+
+    arts = collect_deploy_artifacts(
+        _result(),  # registry base has replicaCount=2 for values/receiver-prod-values.yaml
+        existing={"values/receiver-prod-values.yaml": committed},
+    )
+    merged = yaml_load_string(arts["values/receiver-prod-values.yaml"])
+    assert merged["replicaCount"] == 99  # operator's edit WON, not reverted to 2
+    # registry-managed keys still present
+    assert merged["image"]["repository"] == "ghcr.io/x/dfe-receiver"
+    assert merged["deploy"] == {"service": "dfe-receiver", "instance": "prod"}
+
+
+def test_collect_without_existing_is_wholesale_regenerate() -> None:
+    # default (no existing) keeps the pure regenerate behaviour - no merge.
+    arts = collect_deploy_artifacts(_result())
+    values = yaml_load_string(arts["values/receiver-prod-values.yaml"])
+    assert values["replicaCount"] == 2
+
+
 def test_collect_ch_rbac_ddl_writes_one_survivability_file() -> None:
     arts = collect_deploy_artifacts(
         _result(),

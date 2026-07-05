@@ -22,7 +22,7 @@ Usage:
     from dfe_engine.auth.roles import RoleConfig
 
     config = RoleConfig.load_builtin()
-    if config.has_permission("infra_admin", "argo:applications:sync"):
+    if config.has_permission("infra", "argo:applications:sync"):
         ...
 """
 
@@ -37,6 +37,33 @@ from pydantic import BaseModel, ConfigDict
 from dfe_engine.yaml_utils import yaml_load, yaml_load_string
 
 RoleResourceType = Literal["core", "custom"]
+
+# HyperDX capability a role may declare in its ``hyperdx:`` block. Widest wins
+# in cumulative resolution (see _HYPERDX_ACCESS_RANK): full covers everything,
+# none is no access (the default when the block is absent).
+HyperdxAccessLevel = Literal["full", "otel", "org-scoped", "none"]
+
+# Lower rank = wider access. effective_hyperdx() picks the minimum rank across a
+# user's roles, so a single "full" role beats any number of narrower ones.
+_HYPERDX_ACCESS_RANK: dict[str, int] = {
+    "full": 0,
+    "otel": 1,
+    "org-scoped": 2,
+    "none": 3,
+}
+
+# One-release back-compat migration shim (old role name -> new). Group YAMLs,
+# JWTs and connection maps authored before the 2026-07 role rename may still
+# carry the OLD names; _lookup() falls back through this map so an old reference
+# still resolves the NEW role's grants. Literal names always win, so a config
+# that genuinely (re)defines a role under an old name is unaffected. Remove once
+# downstream group configs have been migrated to the new names.
+ROLE_ALIASES: dict[str, str] = {
+    "infra_admin": "infra",
+    "infra_viewer": "infra_ro",
+    "data_analyst_viewer": "data_analyst_ro",
+    "customer_viewer": "org_analyst",
+}
 
 _BUILTIN_CORE_ROLE_NAMES: frozenset[str] | None = None
 
@@ -54,9 +81,18 @@ def builtin_core_role_names() -> frozenset[str]:
 
 
 def _normalize_role_raw(raw: dict[str, Any]) -> dict[str, Any]:
+    """Accept the hyphenated key spelling as an alias for ``resource_type``.
+
+    The original guard read ``"resource_type" in data and "resource_type" not
+    in data`` - a contradiction that was always False, so the intended
+    normalisation never ran. RoleDefinition ignores unknown keys, so a role
+    authored with the natural hyphenated ``resource-type`` would silently lose
+    its declared type. Fold the hyphenated alias onto the canonical underscore
+    key (underscore wins if both are present).
+    """
     data = dict(raw)
-    if "resource_type" in data and "resource_type" not in data:
-        data["resource_type"] = data.pop("resource_type")
+    if "resource-type" in data and "resource_type" not in data:
+        data["resource_type"] = data.pop("resource-type")
     return data
 
 
@@ -107,6 +143,24 @@ def permission_matches(permission: str, action: str) -> bool:
         return True
 
 
+class HyperdxAccess(BaseModel):
+    """A role's declared HyperDX capability (config-driven, not code).
+
+    access:
+        full       - full HyperDX: all connections / dashboards
+        otel       - the OTel self-monitoring stream only (infra posture)
+        org-scoped - only the user's own org data
+        none       - no HyperDX access; the default when the block is absent
+    tenant_scoped:
+        True when the role's HyperDX view must be pinned to the user's org.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    access: HyperdxAccessLevel = "none"
+    tenant_scoped: bool = False
+
+
 class RoleDefinition(BaseModel):
     """Definition of a single role with permissions and scope flag."""
 
@@ -116,6 +170,9 @@ class RoleDefinition(BaseModel):
     permissions: list[str]
     scoped: bool = False
     resource_type: RoleResourceType = "custom"
+    # Optional config-driven HyperDX capability. Absent (None) == no access, so
+    # a pre-hyperdx role stays backward-compatible. See HyperdxAccess.
+    hyperdx: HyperdxAccess | None = None
 
 
 class RoleConfig:
@@ -127,6 +184,22 @@ class RoleConfig:
     def __init__(self, roles: dict[str, RoleDefinition]) -> None:
         self.roles = roles
 
+    def _lookup(self, role_name: str) -> RoleDefinition | None:
+        """Resolve a role name to its definition, honouring back-compat aliases.
+
+        Literal names win: a config that still defines a role under an old name
+        keeps working unchanged. Only when the literal name is absent do we fall
+        back through ROLE_ALIASES (old -> new), so a group or JWT that still
+        references a pre-rename name resolves the renamed role's grants.
+        """
+        role = self.roles.get(role_name)
+        if role is not None:
+            return role
+        aliased = ROLE_ALIASES.get(role_name)
+        if aliased is not None:
+            return self.roles.get(aliased)
+        return None
+
     def has_permission(self, role_name: str, action: str) -> bool:
         """Check whether a single role grants the given action.
 
@@ -137,7 +210,7 @@ class RoleConfig:
         Returns:
             True if the role exists and one of its permission patterns matches.
         """
-        role = self.roles.get(role_name)
+        role = self._lookup(role_name)
         if role is None:
             return False
         return any(permission_matches(perm, action) for perm in role.permissions)
@@ -168,10 +241,42 @@ class RoleConfig:
         """
         result: set[str] = set()
         for name in role_names:
-            role = self.roles.get(name)
+            role = self._lookup(name)
             if role is not None:
                 result.update(role.permissions)
         return result
+
+    def hyperdx_for(self, role_name: str) -> HyperdxAccess | None:
+        """Return a role's declared HyperDX capability, or None if undeclared.
+
+        Honours ROLE_ALIASES. A role that ships no ``hyperdx:`` block returns
+        None, which the cumulative resolver treats as access="none".
+        """
+        role = self._lookup(role_name)
+        if role is None:
+            return None
+        return role.hyperdx
+
+    def effective_hyperdx(self, role_names: list[str]) -> HyperdxAccess:
+        """Cumulative HyperDX capability across a set of roles.
+
+        Roles are cumulative, so the WIDEST access any role grants wins
+        (full > otel > org-scoped > none). The result is tenant_scoped only
+        when EVERY contributing role is org-scoped - a single non-org-scoped
+        HyperDX role lifts the org restriction. Roles with no ``hyperdx:`` block
+        (or access="none") contribute nothing; with no contributors the result
+        is access="none", tenant_scoped=False.
+        """
+        contributing = [
+            access
+            for name in role_names
+            if (access := self.hyperdx_for(name)) is not None and access.access != "none"
+        ]
+        if not contributing:
+            return HyperdxAccess(access="none", tenant_scoped=False)
+        widest = min(contributing, key=lambda h: _HYPERDX_ACCESS_RANK[h.access])
+        tenant_scoped = all(h.access == "org-scoped" for h in contributing)
+        return HyperdxAccess(access=widest.access, tenant_scoped=tenant_scoped)
 
     @classmethod
     def load(cls, path: Path) -> RoleConfig:

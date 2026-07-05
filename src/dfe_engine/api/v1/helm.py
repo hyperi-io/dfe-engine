@@ -19,6 +19,7 @@ protected vars). Optimistic concurrency via the If-Match header (commit SHA).
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
@@ -27,7 +28,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
-from dfe_engine.gitcrud import ConcurrencyConflictError, GitCrud
+from dfe_engine.gitcrud import ConcurrencyConflictError, GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
 from dfe_engine.gitcrud.commit_policy import (
     CommitContext,
@@ -68,6 +69,25 @@ def _policy(request: Request) -> PolicyStore | None:
 
 def _has_override(request: Request, user: Any) -> bool:
     return authorize(user, "helmvars:override", role_config=request.app.state.role_config).allowed
+
+
+def _enforce_protected(request: Request, name: str, path: str, user: Any) -> bool:
+    """Protected-var gate shared by set AND delete; returns the protected flag.
+
+    DELETE reverts a var to its chart default - that is still a WRITE to a
+    protected var, so it must clear the SAME policy.enforce bar as PUT. Without
+    this a helmvars:write holder could erase a locked override via DELETE without
+    the helmvars:override grant PUT requires. Raises 403 protected_var when locked
+    and no override is held.
+    """
+    policy = _policy(request)
+    protected = bool(policy and policy.is_protected(_CLASS, name, path))
+    if policy is not None:
+        try:
+            policy.enforce(_CLASS, name, path, override=_has_override(request, user))
+        except ProtectedVarError as exc:
+            raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+    return protected
 
 
 def _auto_merged(
@@ -111,8 +131,12 @@ async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict
     """Flattened dot-path vars for a resource, each marked protected or not."""
     gc = _gitcrud(request)
     policy = _policy(request)
+    try:
+        flat = gc.vars(_CLASS, name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
     out: list[dict[str, Any]] = []
-    for path, value in gc.vars(_CLASS, name).items():
+    for path, value in flat.items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
         out.append({"path": path, "value": value, "protected": protected})
     return out
@@ -133,33 +157,41 @@ async def set_var(
 ) -> WriteResult:
     """Set a helm var (-> gitops commit). 409 on stale If-Match; 403 if protected."""
     gc = _gitcrud(request)
-    policy = _policy(request)
 
     try:
         validate_change(path, body.value)
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 
-    protected = bool(policy and policy.is_protected(_CLASS, name, path))
-    if policy is not None:
-        try:
-            policy.enforce(_CLASS, name, path, override=_has_override(request, user))
-        except ProtectedVarError as exc:
-            raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+    protected = _enforce_protected(request, name, path, user)
 
-    msg = build_message(
-        CommitContext(
-            ctype="cfg",
-            scope=name,
-            summary=f"set {path.split('.')[-1]}"[:40],
-            actor=user.user_id,
-            role="helmvars:write",
-            base_revision=if_match or "",
-        )
-    )
+    # build_message budget-truncates an over-long subject; a residual violation
+    # (non-ASCII / bad type) is a client-fixable 422, never an unhandled 500.
     try:
-        res = gc.set_key(
-            _CLASS, name, path, body.value, user.user_id, message=msg, base_revision=if_match
+        msg = build_message(
+            CommitContext(
+                ctype="cfg",
+                scope=name,
+                summary=f"set {path.split('.')[-1]}",
+                actor=user.user_id,
+                role="helmvars:write",
+                base_revision=if_match or "",
+            )
+        )
+    except CommitPolicyError as exc:
+        raise HTTPException(
+            422, detail={"code": "invalid_commit_message", "message": str(exc)}
+        ) from exc
+    try:
+        res = await asyncio.to_thread(
+            gc.set_key,
+            _CLASS,
+            name,
+            path,
+            body.value,
+            user.user_id,
+            message=msg,
+            base_revision=if_match,
         )
     except ConcurrencyConflictError as exc:
         raise HTTPException(
@@ -172,6 +204,10 @@ async def set_var(
                 "head": exc.head,
             },
         ) from exc
+    except ValueError as exc:
+        # a bad list-path index (name[i] out of range / into a non-list) raises
+        # ValueError from the dot-path walker - a client path error, so 422.
+        raise HTTPException(422, detail={"code": "invalid_path", "message": str(exc)}) from exc
     audit_resource_change(
         user.user_id,
         "helmvars",
@@ -199,10 +235,37 @@ async def set_var(
     response_model=WriteResult,
     dependencies=[Depends(require_action("helmvars:write"))],
 )
-async def delete_var(name: str, path: str, user: CurrentUser, request: Request) -> WriteResult:
-    """Revert a helm var to its chart default (remove the override)."""
+async def delete_var(
+    name: str,
+    path: str,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> WriteResult:
+    """Revert a helm var to its chart default (remove the override).
+
+    Same guardrails as set_var: a protected var needs helmvars:override to revert,
+    the If-Match concurrency check applies, and the badge carries the real
+    protected flag (a revert is a write, not a free pass).
+    """
     gc = _gitcrud(request)
-    res = gc.delete_key(_CLASS, name, path, user.user_id)
+    protected = _enforce_protected(request, name, path, user)
+    try:
+        res = await asyncio.to_thread(
+            gc.delete_key, _CLASS, name, path, user.user_id, base_revision=if_match
+        )
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+    except ConcurrencyConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": str(exc),
+                "current": exc.current,
+                "head": exc.head,
+            },
+        ) from exc
     audit_resource_change(user.user_id, "helmvars", name, "updated", {"path": path, "revert": True})
     return WriteResult(
         changed=res.changed,
@@ -210,7 +273,7 @@ async def delete_var(name: str, path: str, user: CurrentUser, request: Request) 
         auto_merged=_auto_merged(
             request,
             gc,
-            protected=False,
+            protected=protected,
             actor=user.user_id,
             resource=f"{_CLASS}/{name}:{path}",
             changed=res.changed,

@@ -61,11 +61,11 @@ class TestBuiltinViews:
 
         applied = mgr.apply_all_builtin_views()
 
-        # Should find the 3 builtin .sql files
+        # Should find the builtin .sql files (system + overview views)
         assert len(applied) >= 3
         assert "dfe_v_system_health" in applied
         assert "dfe_v_system_table_sizes" in applied
-        assert "dfe_v_analytics_event_counts" in applied
+        assert "dfe_v_overview_alerts" in applied
 
     def test_diff_views(self):
         """Test diffing builtin vs live views."""
@@ -86,9 +86,9 @@ class TestBuiltinViews:
         # dfe_v_custom_extra is live but not in builtin files
         assert "dfe_v_custom_extra" in diff["extra"]
 
-        # dfe_v_system_table_sizes and dfe_v_analytics_event_counts are in files but not live
+        # dfe_v_system_table_sizes and the overview views are in files but not live
         assert "dfe_v_system_table_sizes" in diff["missing"]
-        assert "dfe_v_analytics_event_counts" in diff["missing"]
+        assert "dfe_v_overview_alerts" in diff["missing"]
 
 
 class TestBootstrap:

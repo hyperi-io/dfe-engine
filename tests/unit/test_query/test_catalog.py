@@ -151,6 +151,17 @@ class TestParseViewParameters:
         assert params[0].typescript_type == "string[]"
         assert params[0].input_type == "multiselect"
 
+    def test_nested_paren_array_parameter(self):
+        """Nested-paren CH types (Array(Nullable(String))) must not be dropped."""
+        sql = """
+        CREATE VIEW dfe_v_test AS
+        SELECT * FROM events WHERE id IN {ids:Array(Nullable(String))}
+        """
+        params = parse_view_parameters(sql)
+        assert len(params) == 1
+        assert params[0].name == "ids"
+        assert params[0].clickhouse_type == "Array(Nullable(String))"
+
     def test_deduplication(self):
         """Test that duplicate parameter names are deduplicated."""
         sql = """

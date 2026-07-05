@@ -2,10 +2,9 @@
 
 Merges deployment config + service config + source routing + KEDA wiring
 into complete values.yaml per service. Sits ON TOP of Argo CD — generates
-what Argo CD consumes, plus handles imperative operations Argo can't do.
+the overlay values dfe-infra's ApplicationSets consume.
 
-Compilation is **pure** (no side effects). Imperative operations (DDL, topics)
-are in ``operations.py``.
+Compilation is **pure** (no side effects).
 """
 
 from __future__ import annotations
@@ -15,7 +14,6 @@ from typing import Any
 
 from pydantic import SecretStr
 
-from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.deployment.registry import DeploymentConfigRegistry
 from dfe_engine.helm.environment import EnvironmentConfig, ExternalComponent
 from dfe_engine.helm.models import (
@@ -60,25 +58,14 @@ class HelmValuesCompiler:
         self._source = source_registry
         self._env = environment
 
-    def compile_all(
-        self,
-        group_role_mapping: dict[str, list[str]] | None = None,
-        role_config: RoleConfig | None = None,
-        argo_project: str = "dfe",
-    ) -> CompilationResult:
+    def compile_all(self) -> CompilationResult:
         """Compile Helm values for all services that have both deployment and service configs.
-
-        Args:
-            group_role_mapping: OIDC group → DFE role names (for Argo RBAC generation).
-            role_config: Role configuration (defaults to built-in roles.yaml).
-            argo_project: Argo CD project name for RBAC scoping.
 
         Returns:
             CompilationResult with helm_values, ddl_statements, kafka_topics,
-            argo_rbac_csv, argo_appproject_roles, warnings, and errors.
+            warnings, and errors.
         """
         result = CompilationResult()
-        compiled_services: list[tuple[str, str]] = []
 
         # Find all deployment configs
         for entry in self._deploy.list_configs():
@@ -89,61 +76,12 @@ class HelmValuesCompiler:
             try:
                 values = self.compile_service(service, instance)
                 result.helm_values[key] = values
-                compiled_services.append((service, instance))
             except Exception as e:
                 result.errors.append(f"{key}: {e}")
 
         # Compile DDL and Kafka topics from sources
         result.ddl_statements = self.compile_ddl()
         result.kafka_topics = self.compile_kafka_topics()
-
-        # Generate Argo CD RBAC policies
-        from dfe_engine.helm.argo_rbac import (
-            generate_appproject_roles,
-            generate_rbac_csv,
-        )
-
-        result.argo_rbac_csv = generate_rbac_csv(
-            group_role_mapping=group_role_mapping,
-            role_config=role_config,
-            project=argo_project,
-        )
-        result.argo_appproject_roles = generate_appproject_roles(
-            group_role_mapping=group_role_mapping,
-            role_config=role_config,
-            project=argo_project,
-        )
-
-        # Generate Argo CD Application + AppProject CRDs
-        if self._env.argo.enabled:
-            from dfe_engine.helm.argo_app import (
-                generate_applications,
-                generate_appproject,
-            )
-
-            argo = self._env.argo
-            result.argo_applications = generate_applications(
-                services=compiled_services,
-                environment_name=self._env.name,
-                namespace=self._env.namespace,
-                argo_project=argo.project,
-                chart_repo_url=argo.chart_repo_url,
-                chart_version=(argo.chart_version or self._env.image_tag_override or "latest"),
-                values_path_prefix=argo.values_path_prefix,
-                destination_server=argo.destination_server,
-                sync_policy=argo.sync_policy.to_argo_dict(),
-                chart_overrides=argo.chart_overrides or None,
-                extra_labels=argo.labels or None,
-                ignore_differences=argo.ignore_differences or None,
-            )
-            result.argo_appproject = generate_appproject(
-                project_name=argo.project,
-                environment_name=self._env.name,
-                namespace=self._env.namespace,
-                source_repos=argo.source_repos,
-                destination_server=argo.destination_server,
-                roles=result.argo_appproject_roles,
-            )
 
         # Compile external (Mode 2) components
         for component in self._env.components:
@@ -152,10 +90,6 @@ class HelmValuesCompiler:
             comp_values = self.compile_external_component(component)
             for inst_key, values_dict in comp_values.items():
                 result.helm_values[inst_key] = values_dict
-            # Generate Argo CD Application CRDs for external components
-            if self._env.argo.enabled:
-                comp_apps = self._compile_external_argo_apps(component)
-                result.argo_applications.extend(comp_apps)
 
         return result
 
@@ -208,11 +142,14 @@ class HelmValuesCompiler:
         if config_secret and config_secret.get("name"):
             secret_refs["config-secrets"] = config_secret["name"]
 
-        # 6. Node placement: map the deploy config's pod nodeSelector/tolerations
+        # 6. Node placement: map the deploy config's pod node_selector/tolerations
         # to the chart's nodeScheduling key (dfe-common.scheduling reads it).
+        # PodConfig.model_dump emits snake_case ('node_selector'), so the old
+        # camelCase 'nodeSelector' lookup here always missed -> the dial never
+        # reached the chart.
         node_scheduling: dict[str, Any] = {}
-        if pod.get("nodeSelector"):
-            node_scheduling["nodeSelector"] = pod["nodeSelector"]
+        if pod.get("node_selector"):
+            node_scheduling["nodeSelector"] = pod["node_selector"]
         if pod.get("tolerations"):
             node_scheduling["tolerations"] = pod["tolerations"]
 
@@ -223,7 +160,10 @@ class HelmValuesCompiler:
             image=HelmImage(
                 repository=image,
                 tag=image_tag,
-                pullPolicy=pod.get("imagePullPolicy", "IfNotPresent"),
+                # PodConfig.image_pull_policy (snake_case in model_dump) -> the
+                # chart's image.pullPolicy. Old code read a non-existent
+                # 'imagePullPolicy' key, so the dial was unreachable.
+                pullPolicy=pod.get("image_pull_policy", "IfNotPresent"),
             ),
             replicaCount=deploy.replicas,
             resources=resources,
@@ -267,32 +207,6 @@ class HelmValuesCompiler:
 
             results[key] = merged
         return results
-
-    def _compile_external_argo_apps(self, component: ExternalComponent) -> list[dict[str, Any]]:
-        """Generate Argo CD Application CRDs for an external component."""
-        from dfe_engine.helm.argo_app import generate_application
-
-        apps: list[dict[str, Any]] = []
-        argo = self._env.argo
-        for inst_name in component.instances:
-            app_name = f"{component.name}-{inst_name}"
-            values_path = f"{argo.values_path_prefix}/{app_name}-values.yaml"
-            app = generate_application(
-                service=component.name,
-                instance=inst_name,
-                environment_name=self._env.name,
-                namespace=component.namespace,
-                argo_project=argo.project,
-                chart_repo_url=component.chart.repo_url,
-                chart_name=component.chart.name,
-                chart_version=component.chart.version or "latest",
-                values_path=values_path,
-                destination_server=argo.destination_server,
-                sync_policy=argo.sync_policy.to_argo_dict(),
-                extra_labels=argo.labels or None,
-            )
-            apps.append(app)
-        return apps
 
     def compile_ddl(self) -> list[str]:
         """Compile CREATE TABLE DDL for all enabled sources.
@@ -369,7 +283,7 @@ class HelmValuesCompiler:
         return HelmServiceValues.model_validate(merged)
 
     def write_all(self, result: CompilationResult, output_dir: Path) -> list[Path]:
-        """Write compiled Helm values and RBAC policies to files.
+        """Write compiled Helm values to files.
 
         Args:
             result: CompilationResult from compile_all().
@@ -389,29 +303,6 @@ class HelmValuesCompiler:
             else:
                 data = values  # External component — already a dict
             yaml_dump(data, path)
-            written.append(path)
-
-        # Write Argo CD RBAC policy CSV
-        if result.argo_rbac_csv:
-            rbac_path = output_dir / "argocd-rbac-policy.csv"
-            rbac_path.write_text(result.argo_rbac_csv)
-            written.append(rbac_path)
-
-        # Write Argo CD Application CRDs
-        if result.argo_applications:
-            apps_dir = output_dir / "applications"
-            apps_dir.mkdir(parents=True, exist_ok=True)
-            for app in result.argo_applications:
-                app_name = app["metadata"]["name"]
-                path = apps_dir / f"{app_name}.yaml"
-                yaml_dump(app, path)
-                written.append(path)
-
-        # Write Argo CD AppProject CRD
-        if result.argo_appproject:
-            name = result.argo_appproject.get("metadata", {}).get("name", "dfe")
-            path = output_dir / f"appproject-{name}.yaml"
-            yaml_dump(result.argo_appproject, path)
             written.append(path)
 
         return written

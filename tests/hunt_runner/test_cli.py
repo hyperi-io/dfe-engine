@@ -36,6 +36,14 @@ def test_help_lists_both_commands():
     assert "materialise" in result.output
 
 
+def test_run_exposes_worker_id_option():
+    # every pod MUST be able to carry a distinct lease-owner id; the derived
+    # hostname-pid default covers the common case, the flag pins it explicitly
+    result = runner.invoke(cli.app, ["run", "--help"])
+    assert result.exit_code == 0
+    assert "--worker-id" in result.output
+
+
 def test_ch_params_maps_settings_fields():
     # A field rename (username -> user, secure typo, ...) must fail HERE, not
     # silently at connect time - so pin the exact settings -> get_client kwargs.

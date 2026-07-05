@@ -68,12 +68,96 @@ class TestReadLog:
         with pytest.raises(UnknownCursorError):
             read_log(crud, before="deadbeef" * 5)
 
+    def test_delete_commit_lists_files_from_old_path(self, crud):
+        # a delete commit has TreeChange.new=None - the walk must fall back to
+        # the old path instead of 500ing the whole log (live-reproduced)
+        crud.put("helmvars", "receiver-default", {"a": 1}, actor="derek")
+        crud.delete("helmvars", "receiver-default", actor="derek")
+        entries, _ = read_log(crud)
+        assert len(entries) == 2
+        delete_entry = entries[0]
+        assert delete_entry.files == ["values/receiver-default.yaml"]
+        assert delete_entry.resources == ["helmvars/receiver-default"]
+
     def test_applied_vs_pending(self, crud):
         first = _commit_var(crud, "receiver-default", "keda.maxReplicas", 1, "derek")
         _commit_var(crud, "receiver-default", "keda.maxReplicas", 2, "derek")
         entries, _ = read_log(crud, applied_revision=first.commit_sha)
         assert entries[0].state == "pending"  # newest, after the applied SHA
         assert entries[1].state == "applied"
+
+
+class TestDefaultMessageAttribution:
+    """Every mutation's DEFAULT (no explicit message) commit must be conforming
+    AND attributed to the actor - not mis-parsed + falling back to 'dfe-engine'.
+    """
+
+    def test_put_default_is_conforming_and_attributed(self, crud):
+        crud.put("helmvars", "receiver-default", {"a": 1}, actor="derek")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.ctype == "cfg"  # type_for_class(helmvars)
+        assert entry.actor == "derek"
+
+    def test_set_key_default_is_conforming_and_attributed(self, crud):
+        crud.set_key("helmvars", "receiver-default", "keda.maxReplicas", 5, actor="kaz")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.actor == "kaz"
+        assert entry.scope == "receiver-default"
+
+    def test_delete_key_default_is_conforming_and_attributed(self, crud):
+        crud.set_key("helmvars", "receiver-default", "keda.maxReplicas", 5, actor="kaz")
+        crud.delete_key("helmvars", "receiver-default", "keda.maxReplicas", actor="tanya")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.actor == "tanya"
+
+    def test_delete_default_is_conforming_and_attributed(self, crud):
+        crud.put("helmvars", "receiver-default", {"a": 1}, actor="derek")
+        crud.delete("helmvars", "receiver-default", actor="mallory")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.actor == "mallory"
+
+    def test_governance_put_maps_to_rbac_type(self, crud):
+        # a policy write (governance class) -> 'rbac' allowed type, attributed
+        crud.put("policies", "lock", {"name": "lock", "protected": []}, actor="admin")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.ctype == "rbac"
+        assert entry.actor == "admin"
+
+    def test_action_store_save_is_conforming_and_attributed(self, crud):
+        from dfe_engine.governance import ActionDef, ActionStore
+
+        action = ActionDef(
+            name="scale-x",
+            description="scale",
+            required_action="action:invoke:scale-x",
+            changes=[
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "keda.maxReplicas",
+                    "value": 9,
+                }
+            ],
+        )
+        ActionStore(crud).save(action, actor="kaz")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.ctype == "action"
+        assert entry.actor == "kaz"
+
+    def test_lifecycle_write_is_conforming_and_attributed(self, crud):
+        from dfe_engine.governance.lifecycle import LifecycleState, set_state
+
+        set_state(crud, "receiver", LifecycleState.STOPPED, actor="derek")
+        entry = read_log(crud)[0][0]
+        assert entry.conforming is True
+        assert entry.ctype == "lifecycle"
+        assert entry.actor == "derek"
 
 
 class TestGroupLog:

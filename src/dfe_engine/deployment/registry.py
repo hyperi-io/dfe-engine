@@ -2,7 +2,7 @@
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
-- DirectoryConfigStore from hyperi-pylib provides:
+- DirectoryConfigStore from scalo provides:
   - In-memory caching with background polling refresh
   - Thread-safe reads via RLock
   - Optional git-aware writes (auto-commit, branch management, push)
@@ -24,6 +24,11 @@ from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.services.plugins import deployment_classes, valid_services
+
+# Shared write-side quoting: yaml_dump (ruamel/1.2) writes, DirectoryConfigStore
+# (PyYAML/1.1) reads -- quote scalars the 1.1 reader would coerce. See the
+# services registry for the full WHY.
+from dfe_engine.services.registry import quote_ambiguous_scalars
 from dfe_engine.yaml_utils import yaml_dump
 
 
@@ -172,7 +177,7 @@ class DeploymentConfigRegistry:
 
         table = self._table_name(service, instance)
         yaml_path = self._config_directory / f"{table}.yaml"
-        yaml_dump(config_data, yaml_path)
+        yaml_dump(quote_ambiguous_scalars(config_data), yaml_path)
 
         if self._store.is_git:
             commit_msg = description or f"deploy: update {service}/{instance}"

@@ -6,7 +6,7 @@ claims by dfe-control-plane and passed into engine for Cedar evaluation.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -108,17 +108,6 @@ class AuthContext(BaseModel):
     request_id: str | None = None
     client_ip: str | None = None
     user_agent: str | None = None
-
-
-class AuthzRequest(BaseModel):
-    """A single authorization request for batch evaluation."""
-
-    principal: str = Field(..., description='Cedar principal (e.g. User::"alice")')
-    action: str = Field(..., description='Cedar action (e.g. Action::"config:read")')
-    resource: str = Field(
-        ..., description='Cedar resource (e.g. ServiceConfig::"receiver-production")'
-    )
-    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class AuthzResult(BaseModel):

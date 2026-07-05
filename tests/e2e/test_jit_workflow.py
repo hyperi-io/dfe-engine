@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.auth.jit import JitProvisioner
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -44,7 +45,7 @@ def jit_client(jit_settings):
     with TestClient(app, raise_server_exceptions=False) as client:
         # Create a group with org_ids for testing
         group_store = app.state.group_store
-        group_store.create("test-org-viewers", roles=["customer_viewer"])
+        group_store.create("test-org-viewers", roles=["org_analyst"])
         group_store.update("test-org-viewers", org_ids=["test-org"])
         yield client
     _registries.clear()
@@ -62,9 +63,9 @@ class TestJitWorkflow:
         assert resp.status_code == 200
         assert resp.json()["user_id"] == "newuser@corp.com"
 
-        # Verify shadow account was created
+        # Verify shadow account was created (keyed by account_key, not raw subject)
         account_store = jit_client.app.state.account_store
-        account = account_store.get("newuser-corp-com")
+        account = account_store.get(JitProvisioner.account_key("newuser@corp.com"))
         assert account is not None
         assert account.external is True
         assert account.last_login_at != ""
@@ -74,10 +75,12 @@ class TestJitWorkflow:
             "X-Oidc-Subject": "returning@corp.com",
             "X-Oidc-Groups": "test-org-viewers",
         }
+        key = JitProvisioner.account_key("returning@corp.com")
         jit_client.get("/api/v1/auth/me", headers=headers)
-        first = jit_client.app.state.account_store.get("returning-corp-com")
+        first = jit_client.app.state.account_store.get(key)
         jit_client.get("/api/v1/auth/me", headers=headers)
-        second = jit_client.app.state.account_store.get("returning-corp-com")
+        second = jit_client.app.state.account_store.get(key)
+        # Monotonic (may stay equal — FIX 7 skips the no-op write for a fresh login).
         assert second.last_login_at >= first.last_login_at
 
     def test_oidc_auth_still_works_without_jit(self, jit_client):
@@ -118,7 +121,9 @@ class TestJitWorkflow:
             },
         )
 
-        account = jit_client.app.state.account_store.get("groupchange-corp-com")
+        account = jit_client.app.state.account_store.get(
+            JitProvisioner.account_key("groupchange@corp.com")
+        )
         assert account is not None
         assert "extra-group" in account.groups
 
@@ -145,7 +150,7 @@ class TestJitWorkflow:
         resp = jit_client.get("/api/v1/auth/accounts", headers=admin_headers)
         assert resp.status_code == 200
         usernames = [a["username"] for a in resp.json()]
-        assert "visible-corp-com" in usernames
+        assert JitProvisioner.account_key("visible@corp.com") in usernames
 
     def test_external_flag_on_shadow_account(self, jit_client):
         """Shadow accounts have external=True."""
@@ -156,7 +161,9 @@ class TestJitWorkflow:
                 "X-Oidc-Groups": "test-org-viewers",
             },
         )
-        account = jit_client.app.state.account_store.get("extflag-corp-com")
+        account = jit_client.app.state.account_store.get(
+            JitProvisioner.account_key("extflag@corp.com")
+        )
         assert account is not None
         assert account.external is True
         assert account.source_provider == "oidc"
@@ -186,7 +193,9 @@ class TestJitWorkflow:
         assert resp.status_code == 200
 
         # Account is still provisioned
-        account = jit_client.app.state.account_store.get("nogroup-corp-com")
+        account = jit_client.app.state.account_store.get(
+            JitProvisioner.account_key("nogroup@corp.com")
+        )
         assert account is not None
         assert account.external is True
 
@@ -199,7 +208,9 @@ class TestJitWorkflow:
                 "X-Oidc-Groups": "test-org-viewers",
             },
         )
-        account = jit_client.app.state.account_store.get("logintime-corp-com")
+        account = jit_client.app.state.account_store.get(
+            JitProvisioner.account_key("logintime@corp.com")
+        )
         assert account is not None
         assert account.last_login_at != ""
         # Should be a parseable ISO timestamp

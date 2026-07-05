@@ -1,3 +1,9 @@
+# Fixed CH users by privilege (the custom-settings tenant model). Each role maps
+# to exactly one connection; the connection carries the CH user + a password_env.
+# The reconciler MINTS dfe_analyst / dfe_analyst_ro / dfe_tenant_reader (secrets
+# seam -> the *_PASSWORD env vars). The `default`/admin connection uses the
+# deployment's CH superuser (dfe_admin identity) - deliberately NOT minted, so the
+# admin connection + discovery authenticate even before the first reconcile.
 connections:
   default:
     host: localhost
@@ -5,6 +11,20 @@ connections:
     database: dfe
     user: default
     password_env: CH_DEFAULT_PASSWORD
+
+  analyst:
+    host: localhost
+    port: 8123
+    database: dfe
+    user: dfe_analyst
+    password_env: CH_ANALYST_PASSWORD
+
+  analyst_ro:
+    host: localhost
+    port: 8123
+    database: dfe
+    user: dfe_analyst_ro
+    password_env: CH_ANALYST_RO_PASSWORD
 
   tenant_reader:
     host: localhost
@@ -15,9 +35,9 @@ connections:
 
 role_connections:
   admin: default
-  data_analyst: default
-  data_analyst_viewer: default
-  data_viewer: default
-  infra_admin: default
-  infra_viewer: default
-  customer_viewer: tenant_reader
+  infra: default
+  data_analyst: analyst
+  data_analyst_ro: analyst_ro
+  data_viewer: analyst_ro
+  infra_ro: analyst_ro
+  org_analyst: tenant_reader

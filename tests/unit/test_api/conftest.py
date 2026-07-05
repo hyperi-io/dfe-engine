@@ -84,7 +84,7 @@ def client(app, api_settings: DFESettings) -> TestClient:
         # Reset admin password to test password
         account_store.reset_password("admin", "test-admin-pw")
 
-        # Create operator account (data_analyst + infra_admin)
+        # Create operator account (data_analyst + infra)
         if account_store.get("operator") is None:
             account_store.create(
                 "operator",
@@ -104,7 +104,7 @@ def client(app, api_settings: DFESettings) -> TestClient:
             group_store.add_member("dfe-viewers", "viewer")
         group_store.update(
             "dfe-viewers",
-            roles=["infra_viewer", "data_analyst_viewer", "data_viewer"],
+            roles=["infra_ro", "data_analyst_ro", "data_viewer"],
         )
 
         yield c

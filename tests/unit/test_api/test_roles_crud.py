@@ -141,7 +141,7 @@ class TestRolesCrud:
         assert resp.status_code == 409
 
     def test_delete_core_role_returns_409(self, client, admin_headers):
-        resp = client.delete("/api/v1/auth/roles/infra_viewer", headers=admin_headers)
+        resp = client.delete("/api/v1/auth/roles/infra_ro", headers=admin_headers)
         assert resp.status_code == 409
         data = resp.json()
         assert data["code"] == "conflict"

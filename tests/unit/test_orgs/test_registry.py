@@ -210,6 +210,112 @@ class TestUpdate:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# OrgRegistry domains (Task A)
+# ---------------------------------------------------------------------------
+
+
+class TestDomains:
+    def test_create_default_empty_domains(self, registry):
+        org = registry.create("acme")
+        assert org.domains == []
+
+    def test_create_normalises_domains_to_lowercase(self, registry):
+        org = registry.create("acme", domains=["a.com", "B.com"])
+        assert org.domains == ["a.com", "b.com"]
+
+    def test_create_domains_separate_from_org_ids(self, registry):
+        org = registry.create("acme", org_ids=["acme-tenant"], domains=["acme.com"])
+        assert org.org_ids == ["acme-tenant"]
+        assert org.domains == ["acme.com"]
+
+    def test_create_domains_strip_and_dedupe(self, registry):
+        org = registry.create("acme", domains=[" Acme.com ", "acme.com", ""])
+        assert org.domains == ["acme.com"]
+
+    def test_domains_persist_to_disk(self, registry):
+        registry.create("acme", domains=["Acme.com"])
+        org = registry.get("acme")
+        assert org.domains == ["acme.com"]
+
+    def test_update_adds_domains(self, registry):
+        registry.create("acme")
+        org = registry.update("acme", domains=["acme.com", "acme.io"])
+        assert org.domains == ["acme.com", "acme.io"]
+
+    def test_update_normalises_domains(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        org = registry.update("acme", domains=["ACME.com", "New.IO"])
+        assert org.domains == ["acme.com", "new.io"]
+
+    def test_update_removes_domains(self, registry):
+        registry.create("acme", domains=["acme.com", "acme.io"])
+        org = registry.update("acme", domains=["acme.com"])
+        assert org.domains == ["acme.com"]
+
+    def test_update_clear_domains(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        org = registry.update("acme", domains=[])
+        assert org.domains == []
+
+    def test_update_leaves_domains_untouched_when_not_supplied(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        org = registry.update("acme", display_name="Acme Corp")
+        assert org.domains == ["acme.com"]
+
+
+# ---------------------------------------------------------------------------
+# OrgRegistry.find_by_domain (Task B)
+# ---------------------------------------------------------------------------
+
+
+class TestFindByDomain:
+    def test_resolves_claiming_org(self, registry):
+        registry.create("acme", org_ids=["acme-tenant"], domains=["acme.com"])
+        org = registry.find_by_domain("acme.com")
+        assert org is not None
+        assert org.name == "acme"
+        assert org.org_ids == ["acme-tenant"]
+
+    def test_case_insensitive(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        org = registry.find_by_domain("ACME.com")
+        assert org is not None
+        assert org.name == "acme"
+
+    def test_resolves_across_multiple_domains_on_one_org(self, registry):
+        registry.create("acme", domains=["acme.com", "acme.io", "acme.co.uk"])
+        assert registry.find_by_domain("acme.io").name == "acme"
+        assert registry.find_by_domain("acme.co.uk").name == "acme"
+
+    def test_resolves_correct_org_among_many(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        registry.create("globex", domains=["globex.com", "globex.net"])
+        assert registry.find_by_domain("globex.net").name == "globex"
+        assert registry.find_by_domain("acme.com").name == "acme"
+
+    def test_unclaimed_domain_returns_none(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        assert registry.find_by_domain("nobody.com") is None
+
+    def test_empty_domain_returns_none(self, registry):
+        registry.create("acme", domains=["acme.com"])
+        assert registry.find_by_domain("") is None
+        assert registry.find_by_domain("   ") is None
+
+    def test_no_orgs_returns_none(self, registry):
+        assert registry.find_by_domain("acme.com") is None
+
+    def test_tie_break_is_deterministic_first_by_name(self, registry):
+        # Misconfiguration: two orgs claim the same domain. Resolution must be
+        # stable - the org whose name sorts first wins, regardless of insert order.
+        registry.create("zeta", domains=["shared.com"])
+        registry.create("alpha", domains=["shared.com"])
+        chosen = registry.find_by_domain("shared.com")
+        assert chosen is not None
+        assert chosen.name == "alpha"
+
+
 class TestDelete:
     def test_delete_removes_org(self, registry):
         registry.create("acme")

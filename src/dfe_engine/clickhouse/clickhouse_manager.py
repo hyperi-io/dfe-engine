@@ -178,6 +178,17 @@ class ClickHouseManager:
     def get_instance(cls, target_config_data: dict | None = None):
         if cls._instance is None:
             cls._instance = cls(target_config_data)
+        elif target_config_data and target_config_data != cls._instance.target_config_data:
+            # First-call-wins singleton: silently dropping a different config
+            # is the footgun that bound the process to localhost defaults.
+            logger.warning(
+                "ClickHouseManager.get_instance called with a config that differs "
+                "from the bound singleton; keeping the first-bound connection",
+                bound_host=cls._instance.target_config_data.get("ch_host"),
+                bound_port=cls._instance.target_config_data.get("ch_port"),
+                requested_host=target_config_data.get("ch_host"),
+                requested_port=target_config_data.get("ch_port"),
+            )
         return cls._instance
 
     @classmethod
@@ -210,6 +221,7 @@ class ClickHouseManager:
             port = self.target_config_data.get("ch_port", 8123)
             user = self.target_config_data.get("ch_username")
             password = self.target_config_data.get("ch_password")
+            database = self.target_config_data.get("ch_database")
             secure = self.target_config_data.get("ch_secure", True)
             verify = self.target_config_data.get("ch_verify", False)
 
@@ -245,6 +257,12 @@ class ClickHouseManager:
                 connect_params["username"] = user
             if password is not None:
                 connect_params["password"] = password
+            # Honour DFE_CLICKHOUSE_DATABASE for the admin client too (the
+            # restricted view client already passes database=); without this the
+            # exported ch_database was a no-op and the admin client bound to the
+            # driver default 'default'.
+            if database is not None:
+                connect_params["database"] = database
 
             # Configure HTTPS
             if secure:

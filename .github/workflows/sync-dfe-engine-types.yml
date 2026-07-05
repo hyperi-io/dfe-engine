@@ -19,7 +19,8 @@ on:
     branches: ["main", "master"]
     paths:
       - "openapi-spec/openapi.json"
-      - "src/dfe_engine/auth/rbac_scopes/scope_constants.py"
+      # scopes SSoT (scope_constants.py folded into this single scopes_dict)
+      - "src/dfe_engine/auth/rbac_scopes/__init__.py"
   workflow_dispatch:
 
 jobs:
