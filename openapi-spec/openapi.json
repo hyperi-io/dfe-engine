@@ -1987,7 +1987,7 @@
           "Sources"
         ],
         "summary": "Get Source Version",
-        "description": "Get one immutable source version snapshot by id.",
+        "description": "Get one immutable source version snapshot by id, with build/plan/deploy status.",
         "operationId": "get_source_version_api_v1_sources__name__versions_get",
         "parameters": [
           {
@@ -2018,7 +2018,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SourceVersionGetResponse"
+                  "$ref": "#/components/schemas/SourceVersionGetDetailResponse"
                 }
               }
             }
@@ -2389,7 +2389,7 @@
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name.",
+        "description": "Get a full source definition by name, including build/plan/deploy per version.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -2408,7 +2408,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Source"
+                  "$ref": "#/components/schemas/SourceDetailResponse"
                 }
               }
             }
@@ -12568,103 +12568,6 @@
         ],
         "title": "SizeResponse"
       },
-      "Source": {
-        "properties": {
-          "source": {
-            "type": "string",
-            "title": "Source",
-            "description": "The _source label \u2014 immutable identifier"
-          },
-          "display_name": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Display Name",
-            "description": "Human-readable display name"
-          },
-          "description": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Description",
-            "description": "Source description"
-          },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "description": "Whether the source is active",
-            "default": true
-          },
-          "deployed_version": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Deployed Version",
-            "description": "Version deployed to ClickHouse / runtime (null until first deploy)"
-          },
-          "current": {
-            "type": "string",
-            "title": "Current",
-            "description": "Working version (latest definition)",
-            "default": "1.0.0"
-          },
-          "versions": {
-            "additionalProperties": {
-              "$ref": "#/components/schemas/SourceVersion"
-            },
-            "type": "object",
-            "title": "Versions",
-            "description": "Version id \u2192 configuration snapshot"
-          },
-          "match": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceMatch"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Receiver match rule on the deployed version (serialized for API compat).",
-            "readOnly": true
-          },
-          "transform": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceTransform"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Transform config on the deployed version (serialized for API compat).",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "source",
-          "match",
-          "transform"
-        ],
-        "title": "Source",
-        "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
-      },
       "SourceDeployResponse": {
         "properties": {
           "source_name": {
@@ -12721,6 +12624,103 @@
         ],
         "title": "SourceDeployResponse",
         "description": "Result of deploying a source version to ClickHouse."
+      },
+      "SourceDetailResponse": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "The _source label \u2014 immutable identifier"
+          },
+          "display_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display Name",
+            "description": "Human-readable display name"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description",
+            "description": "Source description"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active",
+            "default": true
+          },
+          "deployed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Version",
+            "description": "Version deployed to ClickHouse / runtime (null until first deploy)"
+          },
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Working version (latest definition)",
+            "default": "1.0.0"
+          },
+          "versions": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/SourceVersionDetail"
+            },
+            "type": "object",
+            "title": "Versions",
+            "description": "Version id \u2192 configuration snapshot and pipeline artifacts"
+          },
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Receiver match rule on the deployed version (serialized for API compat).",
+            "readOnly": true
+          },
+          "transform": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceTransform"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Transform config on the deployed version (serialized for API compat).",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "match",
+          "transform"
+        ],
+        "title": "SourceDetailResponse",
+        "description": "Full source definition with per-version build/plan/deploy status."
       },
       "SourceFetcher": {
         "properties": {
@@ -13295,7 +13295,7 @@
         "title": "SourceTransform",
         "description": "Transform stage configuration (vector or wasm)."
       },
-      "SourceVersion": {
+      "SourceVersionDetail": {
         "properties": {
           "date_time": {
             "type": "string",
@@ -13383,6 +13383,39 @@
               }
             ],
             "description": "Transform stage (optional)"
+          },
+          "source_build": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SchemaBuildResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last schema build for this version (source-builds)"
+          },
+          "source_plan": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourcePlanResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last deploy plan for this version (source-plans)"
+          },
+          "source_deployment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceDeployResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last deploy run for this version (source-deploys)"
           }
         },
         "type": "object",
@@ -13390,10 +13423,10 @@
           "date_time",
           "match"
         ],
-        "title": "SourceVersion",
-        "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
+        "title": "SourceVersionDetail",
+        "description": "Source version snapshot plus persisted build/plan/deploy payloads."
       },
-      "SourceVersionGetResponse": {
+      "SourceVersionGetDetailResponse": {
         "properties": {
           "source": {
             "type": "string",
@@ -13461,8 +13494,8 @@
             "description": "All version ids defined on this source"
           },
           "version": {
-            "$ref": "#/components/schemas/SourceVersion",
-            "description": "Immutable configuration snapshot for ``selected``"
+            "$ref": "#/components/schemas/SourceVersionDetail",
+            "description": "Configuration snapshot for ``selected`` plus pipeline artifacts"
           }
         },
         "type": "object",
@@ -13473,8 +13506,8 @@
           "versions",
           "version"
         ],
-        "title": "SourceVersionGetResponse",
-        "description": "Source payload for a single requested version (mirrors ``MetaSchemaGetResponse``)."
+        "title": "SourceVersionGetDetailResponse",
+        "description": "Single-version GET with build/plan/deploy status on ``version``."
       },
       "SourceWriteRequest": {
         "properties": {
@@ -14909,6 +14942,30 @@
             },
             "type": "array",
             "title": "Validation Errors"
+          },
+          "built_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Built At",
+            "description": "When the build was persisted (source-builds); omitted on live-only builds"
+          },
+          "column_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Count",
+            "description": "Column count at build time when columns are not included in the payload"
           }
         },
         "type": "object",

@@ -30,6 +30,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.settings import get_settings
 from dfe_engine.source.deployment import (
+    SourceBuildArtifact,
     SourceDeployArtifact,
     SourceDeploymentStore,
     SourcePlanArtifact,
@@ -151,6 +152,14 @@ class SchemaBuildResult(BaseModel):
     columns: list[SchemaColumn]
     ddl: DDLResult | None = None
     validation_errors: list[str] = Field(default_factory=list)
+    built_at: str | None = Field(
+        default=None,
+        description="When the build was persisted (source-builds); omitted on live-only builds",
+    )
+    column_count: int | None = Field(
+        default=None,
+        description="Column count at build time when columns are not included in the payload",
+    )
 
 
 class SourcePlanResponse(BaseModel):
@@ -178,45 +187,18 @@ class SourceDeployResponse(BaseModel):
     ddl_failed: list[dict[str, str]] = Field(default_factory=list)
 
 
-class SourceBuildVersionSummary(BaseModel):
-    """Persisted build artifact summary for one source version."""
-
-    built_at: str
-    validation_errors: list[str] = Field(default_factory=list)
-    column_count: int = 0
-
-
-class SourcePlanVersionSummary(BaseModel):
-    """Persisted plan artifact summary for one source version."""
-
-    planned_at: str
-    table_exists: bool = False
-    validation_errors: list[str] = Field(default_factory=list)
-    ready: bool = False
-    statements_count: int = 0
-
-
-class SourceDeployVersionSummary(BaseModel):
-    """Persisted deploy artifact summary for one source version."""
-
-    deployed_at: str
-    success: bool
-    ddl_executed_count: int = 0
-    ddl_failed_count: int = 0
-
-
 class SourceVersionDetail(SourceVersion):
-    """Source version snapshot plus pipeline artifact status."""
+    """Source version snapshot plus persisted build/plan/deploy payloads."""
 
-    source_build: SourceBuildVersionSummary | None = Field(
+    source_build: SchemaBuildResult | None = Field(
         default=None,
         description="Last schema build for this version (source-builds)",
     )
-    source_plan: SourcePlanVersionSummary | None = Field(
+    source_plan: SourcePlanResponse | None = Field(
         default=None,
         description="Last deploy plan for this version (source-plans)",
     )
-    source_deployment: SourceDeployVersionSummary | None = Field(
+    source_deployment: SourceDeployResponse | None = Field(
         default=None,
         description="Last deploy run for this version (source-deploys)",
     )
@@ -959,36 +941,43 @@ def _version_detail_from_snapshot(
     deploy = store.load_deploy(source_name, version_id)
     return SourceVersionDetail(
         **snap.model_dump(mode="json"),
-        source_build=(
-            SourceBuildVersionSummary(
-                built_at=build.built_at,
-                validation_errors=list(build.validation_errors),
-                column_count=build.column_count,
-            )
-            if build
-            else None
-        ),
-        source_plan=(
-            SourcePlanVersionSummary(
-                planned_at=plan.planned_at,
-                table_exists=plan.table_exists,
-                validation_errors=list(plan.validation_errors),
-                ready=plan.ready,
-                statements_count=len(plan.statements),
-            )
-            if plan
-            else None
-        ),
-        source_deployment=(
-            SourceDeployVersionSummary(
-                deployed_at=deploy.deployed_at,
-                success=deploy.success,
-                ddl_executed_count=len(deploy.ddl_executed),
-                ddl_failed_count=len(deploy.ddl_failed),
-            )
-            if deploy
-            else None
-        ),
+        source_build=_build_to_response(build) if build else None,
+        source_plan=_plan_to_response(plan) if plan else None,
+        source_deployment=_deploy_to_response(deploy) if deploy else None,
+    )
+
+
+def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
+    views = dict(artifact.view_ddls)
+    if artifact.sigma_view_ddl:
+        views.setdefault("sigma", artifact.sigma_view_ddl)
+    ddl = None
+    if artifact.create_table_ddl:
+        ddl = DDLResult(
+            source_name=artifact.source_name,
+            create_table=artifact.create_table_ddl,
+            views=views,
+        )
+    return SchemaBuildResult(
+        source_name=artifact.source_name,
+        version=artifact.version,
+        columns=[],
+        ddl=ddl,
+        validation_errors=list(artifact.validation_errors),
+        built_at=artifact.built_at,
+        column_count=artifact.column_count,
+    )
+
+
+def _deploy_to_response(artifact: SourceDeployArtifact) -> SourceDeployResponse:
+    return SourceDeployResponse(
+        source_name=artifact.source_name,
+        version=artifact.version,
+        success=artifact.success,
+        deployed_version=artifact.deployed_version,
+        deployed_at=artifact.deployed_at,
+        ddl_executed=list(artifact.ddl_executed),
+        ddl_failed=list(artifact.ddl_failed),
     )
 
 
