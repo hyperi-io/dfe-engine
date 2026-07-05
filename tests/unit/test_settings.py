@@ -145,11 +145,17 @@ class TestEnvOverrides:
         assert settings.clickhouse.data_database == "dfe"
         assert settings.clickhouse.effective_data_database == "dfe"
 
-    def test_effective_data_database_falls_back_to_database(self, monkeypatch):
+    def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
         monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
         settings = load_settings()
-        assert settings.clickhouse.data_database == ""
+        assert settings.clickhouse.data_database == "dfe"
+        assert settings.clickhouse.effective_data_database == "dfe"
+
+    def test_effective_data_database_falls_back_when_emptied(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
+        settings = load_settings()
+        settings.clickhouse.data_database = ""
         assert settings.clickhouse.effective_data_database == "analytics"
 
     def test_clickhouse_secure_true(self, monkeypatch):
