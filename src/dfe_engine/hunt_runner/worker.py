@@ -17,7 +17,10 @@ ChCoordinator (survivable, independent of the engine).
 
 from __future__ import annotations
 
+import threading
 from typing import Any
+
+from scalo.logger import logger
 
 from .ch_coordinator import ChCoordinator
 from .checkpoint import predicate, window
@@ -62,8 +65,38 @@ class HuntWorker:
         if sql.strip():
             # INSERT INTO <target> SELECT ... WHERE {window}. log_comment attributes
             # the query in system.query_log; workload (if configured) puts it in a CH
-            # fair-share class.
-            self._ch.command(sql, settings=query_settings(spec.hunt_id, self._workload))
+            # fair-share class. Heartbeat the lease while the (possibly long) query
+            # runs so a run exceeding lease_seconds is NOT reclaimed mid-flight and
+            # double-run on another pod (P2.6).
+            self._run_with_heartbeat(spec.hunt_id, scheduled_start, sql)
         # Advance ONLY after the query committed (crash-safe resume).
         self._coord.set_watermark(spec.hunt_id, end)
         return end
+
+    def _run_with_heartbeat(self, hunt_id: str, fire: int, sql: str) -> None:
+        """Execute the windowed query while a background thread renews the lease.
+
+        The lease guarantees never-double-run only for runs shorter than
+        lease_seconds; a slower INSERT..SELECT would let the lease expire and a
+        second pod claim the SAME fire. A daemon timer renews at a third of the TTL
+        (so two renews fit before expiry) until the query returns. A failed renew
+        is logged, not fatal - the run continues and the standard overrun handling
+        catches a genuinely-lost lease.
+        """
+        interval = max(1.0, self._coord.lease_seconds / 3)
+        stop = threading.Event()
+
+        def _beat() -> None:
+            while not stop.wait(interval):
+                try:
+                    self._coord.renew(hunt_id, fire)
+                except Exception:
+                    logger.warning("lease renew failed for hunt {} fire {}", hunt_id, fire)
+
+        beat = threading.Thread(target=_beat, name=f"hunt-lease-{hunt_id}", daemon=True)
+        beat.start()
+        try:
+            self._ch.command(sql, settings=query_settings(hunt_id, self._workload))
+        finally:
+            stop.set()
+            beat.join(timeout=5)

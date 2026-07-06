@@ -28,7 +28,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 from sigma.collection import SigmaCollection
 
@@ -77,6 +77,19 @@ class ProviderConfig(BaseModel):
     )
     auth: ProviderAuth = Field(default_factory=ProviderAuth)
     options: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _reject_local_file_url(self) -> ProviderConfig:
+        """Refuse a ``file://`` git URL. It is never a legitimate remote and turns
+        provider registration into an arbitrary local-file read / SSRF primitive
+        (reachable now that sigma:write is a data_analyst grant, not admin-only).
+        NB host-allowlisting and confining a local_files ``directory`` under a
+        configured root remain an operator-policy decision, flagged separately.
+        """
+        url = str(self.options.get("url", "")).strip().lower()
+        if url.startswith("file:"):
+            raise ValueError("git provider 'url' must not be a file:// URL")
+        return self
 
 
 class SigmaRuleDoc(BaseModel):

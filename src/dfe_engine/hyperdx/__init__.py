@@ -8,6 +8,6 @@
 
 """HyperDX integration — team and connection management via internal API."""
 
-from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
+from dfe_engine.hyperdx.client import HyperDXClient
 
-__all__ = ["HyperDXClient", "SyncResult"]
+__all__ = ["HyperDXClient"]

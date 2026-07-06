@@ -153,6 +153,63 @@ def test_locally_edited_reimport_without_upstream_change_is_noop(crud):
     assert crud.head_revision() == head
 
 
+def _doc_with_lists(rule_id: str = _UUID_A, modified: str = "2023-05-01") -> SigmaRuleDoc:
+    d = _doc(rule_id=rule_id, modified=modified)
+    d.rule["tags"] = ["attack.t1059"]
+    d.rule["detection"] = {
+        "selection": {"Image|endswith": ["\\a.exe", "\\b.exe"]},
+        "condition": "selection",
+    }
+    return d
+
+
+def test_merge_with_shared_list_key_does_not_grow_and_resync_is_noop(crud):
+    # P1.3: a list shared between upstream and a local edit must NOT be duplicated
+    # by the local-edit merge, and a second identical re-sync must be a no-op commit.
+    store = SigmaCatalogStore(crud)
+    store.import_docs([_doc_with_lists(modified="2023-05-01")], actor="a", source="test")
+    # operator edits (level only) -> rule keeps its tags + detection lists
+    edited = store.get_rule(_UUID_A)["rule"]
+    edited["level"] = "informational"
+    store.edit_rule(_UUID_A, edited, actor="op")
+
+    # upstream re-sync carrying the SAME lists -> merge (local wins), no growth
+    store.import_docs([_doc_with_lists(modified="2024-01-01")], actor="a", source="test")
+    stored = store.get_rule(_UUID_A)["rule"]
+    assert stored["tags"] == ["attack.t1059"]  # not doubled
+    assert stored["detection"]["selection"]["Image|endswith"] == ["\\a.exe", "\\b.exe"]
+
+    # a second identical re-sync must skip - merged doc equals stored (no churn)
+    head = crud.head_revision()
+    report = store.import_docs([_doc_with_lists(modified="2024-01-01")], actor="a", source="test")
+    assert report.skipped == 1
+    assert report.merged == 0
+    assert crud.head_revision() == head
+
+
+def test_drift_is_sticky_until_operator_action(crud):
+    # P2.16: a recorded drift must survive an unchanged re-sync (visible until the
+    # operator reviews it), and be cleared only by an operator action (edit/adopt).
+    store = SigmaCatalogStore(crud)
+    store.import_docs([_doc(modified="2023-05-01")], actor="a", source="test")
+    rule = store.get_rule(_UUID_A)["rule"]
+    rule["level"] = "informational"
+    store.edit_rule(_UUID_A, rule, actor="op")
+    # upstream moves -> drift recorded
+    store.import_docs([_doc(modified="2024-01-01", level="critical")], actor="a", source="test")
+    assert store.get_rule(_UUID_A)["provenance"]["drift"] is True
+
+    # re-sync with UNCHANGED upstream -> drift must STAY True (was self-clearing before)
+    head = crud.head_revision()
+    store.import_docs([_doc(modified="2024-01-01", level="critical")], actor="a", source="test")
+    assert store.get_rule(_UUID_A)["provenance"]["drift"] is True
+    assert crud.head_revision() == head  # no churn commit
+
+    # operator adopts -> drift cleared
+    store.adopt_rule(_UUID_A, actor="op")
+    assert store.get_rule(_UUID_A)["provenance"]["drift"] is False
+
+
 # ── Edit / adopt / delete ───────────────────────────────────
 
 

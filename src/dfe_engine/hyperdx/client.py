@@ -27,7 +27,6 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass, field
 from typing import Any
 
 from scalo.logger import logger
@@ -35,7 +34,6 @@ from scalo.logger import logger
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
 from dfe_engine.governance.ch import TENANT_READER_USER, TENANT_SETTING
-from dfe_engine.orgs.models import Org
 
 # Deploy-repo path where the per-org DEFAULT_CONNECTIONS JSON lands. The HyperDX
 # fork chart consumes this file (raw JSON array) as its DEFAULT_CONNECTIONS env so
@@ -48,23 +46,6 @@ HYPERDX_CONNECTIONS_PATH = "hyperdx/connections.json"
 # moment its schema is deployed. Same consumption model as the connections file:
 # the fork chart wires it into the HyperDX app's DEFAULT_SOURCES env.
 HYPERDX_SOURCES_PATH = "hyperdx/sources.json"
-
-
-@dataclass
-class SyncResult:
-    """Result of a full HyperDX reconciliation pass.
-
-    Attributes:
-        teams_created: Names of teams that were created.
-        teams_failed: Names of teams that failed to create.
-        connections_created: Number of connections created.
-        connections_failed: Number of connections that failed.
-    """
-
-    teams_created: list[str] = field(default_factory=list)
-    teams_failed: list[str] = field(default_factory=list)
-    connections_created: int = 0
-    connections_failed: int = 0
 
 
 class HyperDXClient:
@@ -314,58 +295,6 @@ class HyperDXClient:
             return None
         data = response.json()
         return data.get("apiKey") or data.get("api_key") or None
-
-    async def sync_connections(
-        self,
-        orgs: list[Org],
-        conn_config: ConnectionConfig,
-    ) -> SyncResult:
-        """Full reconciliation: ensure HyperDX teams match the org registry.
-
-        Creates a team for each enabled org (prefixed with ``customer-``)
-        and ensures it has the tenant_reader connection from conn_config.
-
-        Args:
-            orgs: List of orgs from OrgRegistry.
-            conn_config: Connection configuration with connection definitions.
-
-        Returns:
-            SyncResult summarising what happened.
-        """
-        result = SyncResult()
-
-        tenant_conn = conn_config.connections.get("tenant_reader")
-        if tenant_conn is None:
-            logger.warning("No 'tenant_reader' connection in config, skipping sync")
-            return result
-
-        for org in orgs:
-            if not org.enabled:
-                continue
-
-            team_name = f"customer-{org.name}"
-            team_id = await self.create_team(team_name)
-            if team_id is None:
-                result.teams_failed.append(team_name)
-                continue
-            result.teams_created.append(team_name)
-
-            password = os.environ.get(tenant_conn.password_env, "")
-            conn_id = await self.create_connection(
-                team_id=team_id,
-                name=tenant_conn.name,
-                host=tenant_conn.host,
-                port=tenant_conn.port,
-                database=tenant_conn.database,
-                user=tenant_conn.user,
-                password=password,
-            )
-            if conn_id is None:
-                result.connections_failed += 1
-            else:
-                result.connections_created += 1
-
-        return result
 
     def generate_default_connections_json(
         self,

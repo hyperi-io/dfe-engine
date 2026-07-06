@@ -9,6 +9,7 @@ from dulwich import porcelain
 from dulwich.repo import Repo
 
 from dfe_engine.gitops.repo import (
+    ConcurrencyConflict,
     GitopsRepo,
     PathEscapesRepoError,
     PublishResult,
@@ -270,6 +271,66 @@ def test_push_rejection_fast_forwards_and_repushes(tmp_path: Path) -> None:
     assert (check / "other.yaml").read_text() == "o: 1\n"
     assert (check / "mine.yaml").read_text() == "m: 1\n"
     assert (work / "other.yaml").exists()
+
+
+def test_reconcile_refuses_same_file_remote_clobber(tmp_path: Path) -> None:
+    # P2.3: a concurrent REMOTE edit to a file this publish would rewrite must be
+    # refused (ConcurrencyConflict), not silently reverted by re-applying the
+    # stale full-file render on top of the fetched remote head.
+    remote, branch = _seeded_remote(tmp_path)
+    work = tmp_path / "work"
+    repo = GitopsRepo(local_path=str(work), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    assert repo.publish({"shared.yaml": "v: 1\n"}, message="first").pushed is True
+
+    # someone hand-edits the SAME file on the remote (our clone never fetches it)
+    other = tmp_path / "other"
+    porcelain.clone(remote, str(other))
+    (other / "shared.yaml").write_text("v: 99  # hand edit\n", encoding="utf-8")
+    porcelain.add(str(other), paths=[str(other / "shared.yaml")])
+    porcelain.commit(str(other), message=b"theirs", author=b"o <o@o>", committer=b"o <o@o>")
+    porcelain.push(str(other), remote, f"refs/heads/{branch}".encode())
+
+    # our stale publish rewrites the same file -> reconcile must refuse
+    with pytest.raises(ConcurrencyConflict) as excinfo:
+        repo.publish({"shared.yaml": "v: 2\n"}, message="mine")
+    assert "shared.yaml" in str(excinfo.value)
+
+    # the remote hand edit survives untouched (never reverted)
+    check = tmp_path / "check"
+    porcelain.clone(remote, str(check))
+    assert (check / "shared.yaml").read_text() == "v: 99  # hand edit\n"
+
+
+def test_stranded_commit_pushed_on_identical_retry(tmp_path: Path, monkeypatch) -> None:
+    # P2.4: a commit that landed locally but failed to push must be pushed by the
+    # next (content-identical) publish, not stranded behind a {changed:false}.
+    remote, branch = _seeded_remote(tmp_path)
+    work = tmp_path / "work"
+    repo = GitopsRepo(local_path=str(work), repo_url=remote, branch=branch, push=True)
+    repo.ensure()
+    repo.publish({"f.yaml": "v: 1\n"}, message="first")
+
+    real_push = repo._push_branch
+
+    def flaky_push() -> None:
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(repo, "_push_branch", flaky_push)
+    with pytest.raises(PushError):
+        repo.publish({"f.yaml": "v: 2\n"}, message="second")
+    stranded = repo.head_revision()
+
+    # push works again; an IDENTICAL retry stages nothing but must push the stranded commit
+    monkeypatch.setattr(repo, "_push_branch", real_push)
+    res = repo.publish({"f.yaml": "v: 2\n"}, message="second")
+    assert res.changed is False
+    assert res.pushed is True
+    assert res.commit_sha == stranded
+
+    check = tmp_path / "check"
+    porcelain.clone(remote, str(check))
+    assert (check / "f.yaml").read_text() == "v: 2\n"
 
 
 def test_push_rejection_beyond_fast_forward_raises(tmp_path: Path) -> None:

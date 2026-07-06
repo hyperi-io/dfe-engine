@@ -92,6 +92,28 @@ class GitRepoProvider(SigmaProvider):
         local.parent.mkdir(parents=True, exist_ok=True)
         logger.info("sigma git provider: cloning", provider=self.name, url=url, branch=branch)
         porcelain.clone(authed, str(local), branch=branch.encode())
+        # porcelain.clone persists the cloned URL (incl the username:token@ auth
+        # _authed_url embedded) into the cache clone's .git/config on disk under
+        # config_dir/.sigma-cache - readable by any co-located sidecar/volume
+        # snapshot. Scrub it back to the bare URL (fetch re-supplies auth each
+        # call), mirroring GitopsRepo._scrub_remote_credentials.
+        self._scrub_credentials(url)
+
+    def _scrub_credentials(self, bare_url: str) -> None:
+        """Rewrite remote.origin.url back to the credential-free URL after a clone."""
+        if not self._secret():
+            return
+        from dulwich.repo import Repo
+
+        try:
+            with Repo(str(self._clone_path)) as repo:
+                config = repo.get_config()
+                config.set((b"remote", b"origin"), b"url", bare_url.encode())
+                config.write_to_path()
+        except Exception:  # scrubbing is best-effort hardening, never fatal
+            logger.warning(
+                "sigma git provider: could not scrub clone credentials", provider=self.name
+            )
 
     def _scan(self, since: datetime | None) -> list[SigmaRuleDoc]:
         subdir = str(self.config.options.get("subdir", "")).strip().strip("/")

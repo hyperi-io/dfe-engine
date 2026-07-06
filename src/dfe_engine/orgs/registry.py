@@ -124,12 +124,21 @@ class OrgRegistry:
         a warning and pick DETERMINISTICALLY the org whose name sorts first
         (ascending), so resolution is stable across runs and independent of
         filesystem ordering.
+
+        A DISABLED org never claims a domain (parity with the HyperDX sync, which
+        already skips disabled orgs). Stored domains are re-normalised on compare,
+        not trusted to be lowercase, so a hand/gitops-written record (survivability
+        path, no create/update validator) still resolves.
         """
         target = domain.strip().lower()
         if not target:
             return None
         matches = sorted(
-            (o for o in self.list() if target in o.domains),
+            (
+                o
+                for o in self.list()
+                if o.enabled and target in {d.strip().lower() for d in o.domains}
+            ),
             key=lambda o: o.name,
         )
         if not matches:
@@ -147,7 +156,8 @@ class OrgRegistry:
         """Update mutable fields on an existing org.
 
         Permitted fields: ``display_name``, ``org_ids``, ``domains``, ``enabled``,
-        ``hyperdx_team_id``, ``hyperdx_team_api_key_env``, ``ch_password_env``.
+        ``hyperdx_team_id``, ``hyperdx_team_api_key_env``, ``hyperdx_connection_id``,
+        ``ch_password_env``.
 
         Args:
             name: Org to update.
@@ -181,6 +191,8 @@ class OrgRegistry:
             update_dict["hyperdx_team_id"] = fields["hyperdx_team_id"]
         if "hyperdx_team_api_key_env" in fields:
             update_dict["hyperdx_team_api_key_env"] = fields["hyperdx_team_api_key_env"]
+        if "hyperdx_connection_id" in fields:
+            update_dict["hyperdx_connection_id"] = fields["hyperdx_connection_id"]
         if "ch_password_env" in fields:
             update_dict["ch_password_env"] = fields["ch_password_env"]
 

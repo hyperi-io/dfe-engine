@@ -53,19 +53,14 @@ class S3Adapter(DatasourceAdapter):
             import boto3
             from botocore.config import Config
 
+            # The adapter config dict IS the contract. The old settings fallback read
+            # top-level settings.s3_* attributes that do not exist on DFESettings, so
+            # it ALWAYS yielded None/defaults - dropped rather than kept as a dead,
+            # misleading branch (P3.19).
             endpoint_url = self.config.get("endpoint_url")
             access_key = self.config.get("access_key_id")
             secret_key = self.config.get("secret_access_key")
             region = self.config.get("region", "us-east-1")
-
-            if not endpoint_url:
-                from dfe_engine.settings import get_settings
-
-                settings = get_settings()
-                endpoint_url = getattr(settings, "s3_endpoint_url", None)
-                access_key = access_key or getattr(settings, "s3_access_key_id", None)
-                secret_key = secret_key or getattr(settings, "s3_secret_access_key", None)
-                region = getattr(settings, "s3_region", region)
 
             client_config = Config(
                 retries={"max_attempts": 3, "mode": "adaptive"},
@@ -196,13 +191,10 @@ class FilesystemAdapter(DatasourceAdapter):
     @property
     def base_path(self) -> Path:
         if self._base_path is None:
+            # Adapter config is the contract; the old getattr(settings,
+            # "file_storage_base_path") read a top-level attr that does not exist on
+            # DFESettings (always None), so it is dropped (P3.19).
             path = self.config.get("base_path")
-            if not path:
-                from dfe_engine.settings import get_settings
-
-                settings = get_settings()
-                path = getattr(settings, "file_storage_base_path", None)
-
             if not path:
                 raise StorageListingError("No base_path configured for filesystem adapter")
 

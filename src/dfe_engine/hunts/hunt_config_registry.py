@@ -194,9 +194,17 @@ class HuntConfigRegistry:
                 cron_exprs = [cron]
             else:
                 cron_exprs = list(cron) if cron else []
-            rule_names = [
-                r.get("rule_name", "") for r in config.get("rules", []) if isinstance(r, dict)
-            ]
+            # Accept legacy STRING-form rule entries too, matching the API reader
+            # (_rules_from_stored). A dict-only filter here made list_hunts disagree
+            # with GET /hunts/{name}, so hunt_names_referencing_rule missed hunts
+            # with plain-string rules - letting DELETE /rules drop a still-in-use
+            # rule and sigma propagation skip the hunt (P3.9).
+            rule_names = []
+            for r in config.get("rules", []):
+                if isinstance(r, str) and r:
+                    rule_names.append(r)
+                elif isinstance(r, dict) and r.get("rule_name"):
+                    rule_names.append(r["rule_name"])
             results.append(
                 {
                     "name": name,

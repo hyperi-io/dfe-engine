@@ -54,12 +54,33 @@ class DDLManager:
             raise ValueError(f"View name must start with '{VIEW_PREFIX}': {name}")
 
         try:
-            self._client.command(sql)
+            self._client.command(self._prepare_sql(name, sql))
             self._grant_view(name)
             logger.info(f"Applied view: {self._database}.{name}")
         except Exception:
             logger.exception(f"Failed to apply view: {name}")
             raise
+
+    def _prepare_sql(self, name: str, sql: str) -> str:
+        """Render a builtin view's SQL against the target data database.
+
+        The .sql files keep an UNQUALIFIED ``CREATE OR REPLACE VIEW dfe_v_...``
+        head (the file is the SSoT / test contract) and use a ``{db}`` token for
+        any table the hunt-runner materialises in the data database
+        (hunt_schedule / hunt_state, whose db == effective_data_database, NOT the
+        fixed schemas databases like dfe / dfe_audit). We qualify + substitute at
+        APPLY time so:
+
+        - P2.11: the view is created IN ``self._database`` (data db), where the
+          catalog scans for it - an unqualified CREATE otherwise lands the view in
+          the admin connection's session db and the catalog never discovers it.
+        - P2.12: ``{db}.hunt_schedule`` resolves to the same db the runner writes,
+          instead of a hardcoded ``dfe`` that UNKNOWN_DATABASE/TABLE-fails whenever
+          effective_data_database differs.
+        """
+        rendered = sql.replace("{db}", self._database)
+        # Qualify the CREATE head once (first VIEW <name> occurrence).
+        return rendered.replace(f"VIEW {name}", f"VIEW {self._database}.{name}", 1)
 
     def _grant_view(self, name: str) -> None:
         """Grant SELECT on a view to the reconciled query_reader role."""

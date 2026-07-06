@@ -120,7 +120,7 @@ async def list_namespaces(
     executor: ViewExec,
 ) -> list[str]:
     """List available view namespaces."""
-    return executor._catalog.get_namespaces()
+    return executor.get_namespaces()
 
 
 @router.get(

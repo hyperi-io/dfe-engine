@@ -49,6 +49,10 @@ class Account(BaseModel):
     groups: list[str] = Field(default_factory=list)
     external: bool = False
     source_provider: str = ""
+    # The login email (external/OIDC accounts). The username is a SANITISED
+    # account_key (jane@corp.com -> jane-corp-com), so downstream systems keyed by
+    # email - HyperDX team membership revoke - need the real address stored here.
+    email: str = ""
     last_login_at: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -167,6 +171,8 @@ class AccountStore:
             account = account.model_copy(update={"external": fields["external"]})
         if "source_provider" in fields:
             account = account.model_copy(update={"source_provider": fields["source_provider"]})
+        if "email" in fields:
+            account = account.model_copy(update={"email": fields["email"]})
         if "last_login_at" in fields:
             account = account.model_copy(update={"last_login_at": fields["last_login_at"]})
 

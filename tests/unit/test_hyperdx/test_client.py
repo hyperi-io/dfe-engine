@@ -25,37 +25,9 @@ from dfe_engine.hyperdx.client import (
     HYPERDX_CONNECTIONS_PATH,
     HYPERDX_SOURCES_PATH,
     HyperDXClient,
-    SyncResult,
     build_hyperdx_connections_json,
     build_hyperdx_sources_json,
 )
-
-# ---------------------------------------------------------------------------
-# SyncResult
-# ---------------------------------------------------------------------------
-
-
-class TestSyncResult:
-    def test_default_sync_result(self):
-        result = SyncResult()
-        assert result.teams_created == []
-        assert result.teams_failed == []
-        assert result.connections_created == 0
-        assert result.connections_failed == 0
-
-    def test_sync_result_mutable(self):
-        result = SyncResult()
-        result.teams_created.append("team-1")
-        result.connections_created += 1
-        assert result.teams_created == ["team-1"]
-        assert result.connections_created == 1
-
-    def test_sync_result_instances_are_independent(self):
-        r1 = SyncResult()
-        r2 = SyncResult()
-        r1.teams_created.append("t1")
-        assert r2.teams_created == []
-
 
 # ---------------------------------------------------------------------------
 # HyperDXClient construction
@@ -204,20 +176,6 @@ class TestDisconnectedShortCircuit:
         )
         assert result is False
 
-    @pytest.mark.asyncio
-    async def test_sync_no_tenant_reader_returns_empty(self):
-        """sync_connections returns empty result if no tenant_reader connection."""
-        from dfe_engine.orgs.models import Org
-
-        client = HyperDXClient(base_url="http://x", api_key="k")
-        config = ConnectionConfig(connections={}, role_connections={})
-        result = await client.sync_connections(
-            orgs=[Org(name="acme", org_ids=["acme"])],
-            conn_config=config,
-        )
-        assert result.teams_created == []
-        assert result.connections_created == 0
-
 
 class TestInviteMember:
     @pytest.mark.asyncio
@@ -284,16 +242,6 @@ class TestUpdateConnection:
 
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_update_connection_failure_sets_disconnected(self):
-        pass
-
-
-class TestSyncConnections:
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_sync_creates_teams_for_enabled_orgs(self):
-        pass
-
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_sync_skips_disabled_orgs(self):
         pass
 
 

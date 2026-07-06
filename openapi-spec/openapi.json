@@ -12692,7 +12692,7 @@
           "running": {
             "type": "boolean",
             "title": "Running",
-            "description": "Whether the scheduler thread is alive"
+            "description": "Whether any runner currently holds an active hunt lease (a hunt is mid-run). False when all hunts are idle between fires - that is a HEALTHY idle runner, not a dead scheduler."
           },
           "hunt_count": {
             "type": "integer",
@@ -15165,6 +15165,15 @@
             "type": "array",
             "title": "Hunts Touched"
           },
+          "stale_bindings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Stale Bindings",
+            "description": "Bindings left behind by a deselect (still firing until deleted)"
+          },
           "warnings": {
             "items": {
               "type": "string"
@@ -17620,6 +17629,30 @@
             ],
             "title": "Taxonomy",
             "description": "Built-in mapping set (e.g. 'windows')"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Sigma logsource category this source serves (None = any)"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service",
+            "description": "Sigma logsource service this source serves (None = any)"
           },
           "custom_mappings": {
             "additionalProperties": {

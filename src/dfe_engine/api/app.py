@@ -114,6 +114,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         conn_config,
         ch_host=settings.clickhouse.host,
         ch_port=settings.clickhouse.port,
+        ch_secure=settings.clickhouse.secure,
+        ch_verify=settings.clickhouse.verify,
     )
 
     # Bootstrap org registry
@@ -158,15 +160,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
             from dfe_engine.governance.ch import reconcile_ch_rbac
             from dfe_engine.secrets import build_secrets
+            from dfe_engine.settings import get_clickhouse_config
 
-            ch_cfg = {
-                "ch_host": settings.clickhouse.host,
-                "ch_port": settings.clickhouse.port,
-                "ch_username": settings.clickhouse.username,
-                "ch_password": settings.clickhouse.password,
-                "ch_secure": settings.clickhouse.secure,
-                "ch_verify": settings.clickhouse.verify,
-            }
+            # Use get_clickhouse_config (7 keys incl ch_database), NOT a hand-built
+            # 6-key dict: this is the FIRST get_instance call in the lifespan, so a
+            # differing dict here would bind the first-call-wins singleton WITHOUT
+            # the configured database and make every later 7-key call warn (P2.7).
+            ch_cfg = get_clickhouse_config(settings)
             admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
             # The secrets store mints the service + fixed users; without it only
             # tiers, roles and the tenant row policies reconcile.

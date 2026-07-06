@@ -5,7 +5,7 @@ dfe-engine is the source of truth for the HTTP API contract and the RBAC scope c
 ## Goal
 
 - **API types**: Routes, request bodies, and responses defined in FastAPI/Pydantic become TypeScript types in dfe-ui.
-- **RBAC scopes**: Permission strings in `scope_constants.py` become a typed `scopes` object and `RbacScope` union in dfe-ui.
+- **RBAC scopes**: Permission strings in `rbac_scopes/__init__.py` become a typed `scopes` object and `RbacScope` union in dfe-ui.
 - **Automation**: Merges to `main`/`master` that touch the spec or scope catalog open a PR in dfe-ui; frontend code can rely on compile-time checks against the latest engine contract.
 
 ## Generators in this repo
@@ -31,7 +31,7 @@ See also [UI-API-GUIDE.md](./UI-API-GUIDE.md) for local mock/typegen workflows.
 
 | Item | Location |
 |------|----------|
-| Source of truth | `src/dfe_engine/auth/rbac_scopes/scope_constants.py` (`*_scopes` dict literals) |
+| Source of truth | `src/dfe_engine/auth/rbac_scopes/__init__.py` (`*_scopes` dict literals) |
 | Script | `rbac-scopes-spec/generate.py` |
 | Output | `rbac-scopes-spec/scopes/index.ts` (committed for review) |
 
@@ -43,7 +43,7 @@ python rbac-scopes-spec/generate.py
 uv run python rbac-scopes-spec/generate.py
 ```
 
-The generator parses `scope_constants.py` with the AST (no import side effects), merges all `*_scopes` dicts into `export const scopes`, and emits `export type RbacScope`.
+The generator parses `rbac_scopes/__init__.py` with the AST (no import side effects), reads the folded `scopes_dict` into `export const scopes`, and emits `export type RbacScope`.
 
 ## CI sync to dfe-ui
 
@@ -54,7 +54,7 @@ Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../.github/workflows/s
 
 - **Push** to `main` or `master` when either path changes:
   - `openapi-spec/openapi.json`
-  - `src/dfe_engine/auth/rbac_scopes/scope_constants.py`
+  - `src/dfe_engine/auth/rbac_scopes/__init__.py`
 - **Manual:** `workflow_dispatch`
 
 Note: Changing only Python API files without regenerating and committing `openapi.json` will not trigger the workflow. Regenerate the OpenAPI spec locally (or in CI elsewhere) and commit `openapi-spec/openapi.json` when the contract changes.
@@ -62,7 +62,7 @@ Note: Changing only Python API files without regenerating and committing `openap
 ### What the job does
 
 1. Checks out dfe-engine.
-2. Runs `python3 rbac-scopes-spec/generate.py` (fresh `scopes/index.ts` from current `scope_constants.py`).
+2. Runs `python3 rbac-scopes-spec/generate.py` (fresh `scopes/index.ts` from current `rbac_scopes/__init__.py`).
 3. Clones **dfe-ui** (repo from `DFE_UI_REPO`, default `hyperi-io/dfe-ui`) using `DFE_UI_TOKEN`.
 4. Copies into dfe-ui’s types package:
    - `openapi-spec/openapi.json` → `packages/dfe-engine-types/specs/openapi.json`

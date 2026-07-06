@@ -23,6 +23,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, OptionalAlertDestStore, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -80,7 +81,11 @@ router = APIRouter(prefix="/hunts", tags=["hunts"])
 class HuntEngineStatus(BaseModel):
     """Current state of the background hunt scheduler."""
 
-    running: bool = Field(description="Whether the scheduler thread is alive")
+    running: bool = Field(
+        description="Whether any runner currently holds an active hunt lease "
+        "(a hunt is mid-run). False when all hunts are idle between fires - that "
+        "is a HEALTHY idle runner, not a dead scheduler."
+    )
     hunt_count: int = Field(default=0, description="Number of loaded hunts across all schedulers")
     scheduling_mode: str = Field(default="", description="Scheduling mode (cron, adaptive)")
 
@@ -234,7 +239,11 @@ def _active_hunt_leases(request: Request) -> int:
             f"FROM `{db}`.hunt_lease GROUP BY hunt_id)"
         ).result_rows
         return int(rows[0][0]) if rows else 0
-    except Exception:
+    except Exception as exc:
+        # Fail-safe to 0 (a healthy-idle reading) so the status endpoint never
+        # 500s on a CH blip, but LOG it - a silent swallow hid real CH errors
+        # (unreachable, missing hunt_lease) behind a permanent running=false.
+        logger.warning("active-hunt-lease count query failed; reporting 0: {}", exc)
         return 0
 
 
@@ -386,6 +395,15 @@ async def update_hunt(
     # The request carries rule NAMES only - carry each kept rule's stored YAML
     # overrides across the rewrite instead of flattening to bare entries.
     config["rules"] = _merge_rule_overrides(existing.get("rules"), body.rules)
+    # Preserve any stored top-level block the write model does NOT own - notably
+    # the API-written alerts.destinations (POST /alerts/destinations). Rebuilding
+    # the YAML purely from the request model would silently drop it on every PUT,
+    # orphaning the destination and bypassing the shared-destination protection
+    # in delete_destinations_owned_by_hunt (P2.5).
+    model_keys = set(config.keys())
+    for key, value in existing.items():
+        if key not in model_keys:
+            config[key] = value
     registry.save(
         name,
         config,

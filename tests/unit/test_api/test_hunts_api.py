@@ -85,6 +85,26 @@ def test_put_preserves_per_rule_yaml_overrides(client, admin_headers, api_settin
     assert rules[0]["initial_checkpoint_lookback_minutes"] == 90
 
 
+def test_put_preserves_api_written_alerts_block(client, admin_headers, api_settings):
+    # P2.5: the alerts.destinations block (written by POST /alerts/destinations)
+    # is not part of HuntWriteRequest, so a PUT that rebuilds the YAML from the
+    # request model must preserve it rather than silently drop it.
+    stored = _stored_hunt()
+    stored["alerts"] = {"destinations": ["slack-alerts"]}
+    _registries["hunt_configs"].save("edge_auth3", stored)
+
+    resp = client.put(
+        "/api/v1/hunts/edge_auth3",
+        json=_put_body(log_buffer=90),
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+
+    on_disk = _hunt_yaml(api_settings, "edge_auth3")
+    assert on_disk["log_buffer"] == 90  # the requested change landed
+    assert on_disk["alerts"] == {"destinations": ["slack-alerts"]}  # block survived
+
+
 def test_put_drops_overrides_only_for_removed_rules(client, admin_headers, api_settings):
     _registries["hunt_configs"].save("edge_auth2", _stored_hunt())
 

@@ -82,24 +82,32 @@ def _fit_subject(ctype: str, scope: str, summary: str, limit: int = _SUBJECT_MAX
     return f"{ctype}({scope}): {summary}"
 
 
+def _oneline(value: object) -> str:
+    """Collapse any newline/CR to a space so a value cannot inject extra commit
+    lines. An unscreened newline in actor/summary/etc. would forge a trailer
+    (e.g. ``actor="x\\nDFE-Role: admin"``) and misattribute the audit log.
+    """
+    return " ".join(str(value).splitlines()).strip()
+
+
 def build_message(ctx: CommitContext) -> str:
     """Render the conforming commit message (subject + trailers + [skip ci])."""
-    subject = _fit_subject(ctx.ctype, ctx.scope, ctx.summary)
+    subject = _fit_subject(ctx.ctype, _oneline(ctx.scope), _oneline(ctx.summary))
     validate_subject(subject)
 
-    trailers: list[str] = [f"DFE-Actor: {ctx.actor}"]
+    trailers: list[str] = [f"DFE-Actor: {_oneline(ctx.actor)}"]
     if ctx.role:
-        trailers.append(f"DFE-Role: {ctx.role}")
+        trailers.append(f"DFE-Role: {_oneline(ctx.role)}")
     if ctx.action:
-        trailers.append(f"DFE-Action: {ctx.action}")
+        trailers.append(f"DFE-Action: {_oneline(ctx.action)}")
     if ctx.request_id:
-        trailers.append(f"DFE-Request-Id: {ctx.request_id}")
+        trailers.append(f"DFE-Request-Id: {_oneline(ctx.request_id)}")
     if ctx.base_revision:
-        trailers.append(f"DFE-Base-Revision: {ctx.base_revision}")
+        trailers.append(f"DFE-Base-Revision: {_oneline(ctx.base_revision)}")
     if ctx.audit_id:
-        trailers.append(f"DFE-Audit-Id: {ctx.audit_id}")
+        trailers.append(f"DFE-Audit-Id: {_oneline(ctx.audit_id)}")
     for k, v in ctx.trailers_extra.items():
-        trailers.append(f"{k}: {v}")
+        trailers.append(f"{_oneline(k)}: {_oneline(v)}")
 
     body = "\n".join(trailers)
     return f"{subject}\n\n{body}\n\n[skip ci]"

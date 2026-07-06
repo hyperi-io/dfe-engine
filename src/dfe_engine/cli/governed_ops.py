@@ -132,16 +132,12 @@ def reconcile_ch_rbac_cmd() -> None:
     from dfe_engine.governance.ch import reconcile_ch_rbac
     from dfe_engine.orgs.registry import OrgRegistry
     from dfe_engine.secrets import build_secrets
+    from dfe_engine.settings import get_clickhouse_config
 
     settings = load_settings()
-    ch_cfg = {
-        "ch_host": settings.clickhouse.host,
-        "ch_port": settings.clickhouse.port,
-        "ch_username": settings.clickhouse.username,
-        "ch_password": settings.clickhouse.password,
-        "ch_secure": settings.clickhouse.secure,
-        "ch_verify": settings.clickhouse.verify,
-    }
+    # get_clickhouse_config (7 keys incl ch_database), NOT a hand-built 6-key dict,
+    # so this construction site binds the identical singleton config (P2.7).
+    ch_cfg = get_clickhouse_config(settings)
     admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
     orgs_dir = Path(settings.config_dir or "config") / "orgs"
     orgs = OrgRegistry(orgs_dir).list() if orgs_dir.exists() else []

@@ -23,10 +23,11 @@ class TestViewManagement:
         sql = "CREATE OR REPLACE VIEW dfe_v_system_health AS SELECT 1"
         mgr.apply_view("dfe_v_system_health", sql)
 
-        # Should execute CREATE and GRANT
+        # Should execute CREATE and GRANT. The CREATE head is qualified with the
+        # target db at apply time (P2.11) so the view lands where the catalog scans.
         assert client.command.call_count == 2
         calls = [c.args[0] for c in client.command.call_args_list]
-        assert calls[0] == sql
+        assert calls[0] == "CREATE OR REPLACE VIEW testdb.dfe_v_system_health AS SELECT 1"
         assert "GRANT SELECT ON testdb.dfe_v_system_health TO dfe_query_reader_role" in calls[1]
 
     def test_apply_view_invalid_prefix(self):
@@ -65,7 +66,23 @@ class TestBuiltinViews:
         assert len(applied) >= 3
         assert "dfe_v_system_health" in applied
         assert "dfe_v_system_table_sizes" in applied
-        assert "dfe_v_overview_alerts" in applied
+        assert "dfe_v_overview_active_sources" in applied
+
+    def test_apply_view_qualifies_head_and_substitutes_db(self):
+        """P2.11 + P2.12: the CREATE head is qualified with the target data db (so
+        the catalog scanning that db discovers the view), and a {db} token in the
+        body resolves to the same db (so {db}.hunt_schedule matches where the
+        runner writes), instead of a hardcoded database."""
+        client = MagicMock()
+        mgr = DDLManager(client=client, database="dfe_data")
+        mgr.apply_view(
+            "dfe_v_test",
+            "CREATE OR REPLACE VIEW dfe_v_test AS SELECT * FROM {db}.hunt_state",
+        )
+        executed = client.command.call_args_list[0][0][0]
+        assert "CREATE OR REPLACE VIEW dfe_data.dfe_v_test AS" in executed
+        assert "FROM dfe_data.hunt_state" in executed
+        assert "{db}" not in executed
 
     def test_diff_views(self):
         """Test diffing builtin vs live views."""
@@ -88,7 +105,7 @@ class TestBuiltinViews:
 
         # dfe_v_system_table_sizes and the overview views are in files but not live
         assert "dfe_v_system_table_sizes" in diff["missing"]
-        assert "dfe_v_overview_alerts" in diff["missing"]
+        assert "dfe_v_overview_active_sources" in diff["missing"]
 
 
 class TestBootstrap:

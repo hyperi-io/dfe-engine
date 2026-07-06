@@ -143,9 +143,30 @@ def _safe_ident(name: str, *, what: str) -> str:
     return name
 
 
+def _parens_balanced(s: str) -> bool:
+    """True when parentheses are properly nested: the running open-count never
+    goes negative and ends at zero. This is what blocks a CAST breakout - a
+    premature ``)`` (e.g. ``String) OR (1=1``) closes the CAST early and injects
+    the trailer, yet has an equal ()-count, so a bare count check misses it."""
+    depth = 0
+    for ch in s:
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
 def _safe_type(ch_type: str) -> str:
-    """Validate an operator-declared ClickHouse type for a CAST (allow-list)."""
-    if not _CH_TYPE_RE.match(ch_type):
+    """Validate an operator-declared ClickHouse type for a CAST (allow-list).
+
+    The charset already blocks the obvious injectors (=, ;, backtick, ...); the
+    remaining break-out is an unbalanced/premature ``)`` that ends the CAST early,
+    so parentheses must be properly nested too.
+    """
+    if not _CH_TYPE_RE.match(ch_type) or not _parens_balanced(ch_type):
         raise SigmaViewError(f"illegal ClickHouse type: {ch_type!r}")
     return ch_type
 

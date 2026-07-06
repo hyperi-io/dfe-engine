@@ -11,6 +11,8 @@ from dfe_engine.helm.models import (
     CompilationResult,
     HelmDeployMeta,
     HelmImage,
+    HelmKeda,
+    HelmKedaTrigger,
     HelmServiceValues,
 )
 from dfe_engine.yaml_utils import yaml_load_string
@@ -88,6 +90,37 @@ def test_collect_without_existing_is_wholesale_regenerate() -> None:
     arts = collect_deploy_artifacts(_result())
     values = yaml_load_string(arts["values/receiver-prod-values.yaml"])
     assert values["replicaCount"] == 2
+
+
+def _result_with_list() -> CompilationResult:
+    # A values file carrying a NON-EMPTY list (keda.triggers) shared between the
+    # registry base and a re-published committed file - the P1 list-duplication case.
+    return CompilationResult(
+        helm_values={
+            "receiver-prod": HelmServiceValues(
+                deploy=HelmDeployMeta(service="dfe-receiver", instance="prod"),
+                image=HelmImage(repository="ghcr.io/x/dfe-receiver", tag="2.2.0"),
+                keda=HelmKeda(
+                    enabled=True,
+                    triggers=[HelmKedaTrigger(type="metrics-api", metadata={"k": "v"})],
+                ),
+            )
+        },
+    )
+
+
+def test_publish_over_own_output_is_idempotent_for_lists() -> None:
+    # P1.1: publish must be idempotent. Re-publishing an unchanged registry over
+    # its own committed output must be byte-identical - deep_merge's list-EXTEND
+    # otherwise duplicates every list (keda.triggers, kafka.brokers, ...) on every
+    # publish, growing unboundedly and never reaching 'repo already up to date'.
+    first = collect_deploy_artifacts(_result_with_list())
+    path = "values/receiver-prod-values.yaml"
+    # feed the first output back in as the committed file (steady-state re-publish)
+    second = collect_deploy_artifacts(_result_with_list(), existing={path: first[path]})
+    assert second[path] == first[path]  # byte-identical: no list growth
+    triggers = yaml_load_string(second[path])["keda"]["triggers"]
+    assert len(triggers) == 1  # not doubled
 
 
 def test_collect_ch_rbac_ddl_writes_one_survivability_file() -> None:

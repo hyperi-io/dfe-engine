@@ -386,20 +386,22 @@ holder can/cannot reach (wildcards expand via section 2.4).
 
 **data_analyst** - group `dfe-analysts`
 - Patterns: `hunt:*`, `query:*`, `source:*`, `sampler:read`, `fieldmap:*`,
-  `alert:*`, `rule:*`, `schema:read`, `schema:write`, `transform:*`, `org:read`;
-  hyperdx: `full`
+  `alert:*`, `rule:*`, `sigma:*`, `cel:check`, `schema:read`, `schema:write`,
+  `transform:*`, `org:read`; hyperdx: `full`
 - Can: full CRUD + execute on hunts/rules/queries (incl `query:raw` via
-  `query:*`)/sources/fieldmaps/alerts/transforms; build+read schemas; sample;
-  read org metadata; full HyperDX (gained in the rename).
+  `query:*`)/sources/fieldmaps/alerts/transforms; the full Sigma surface
+  (catalogue/providers/propagate/bindings/views) + CEL expression checks;
+  build+read schemas; sample; read org metadata; full HyperDX.
 - Cannot: config/deployment/helm/argo/infra; account/group admin; repository.
 
 **data_analyst_ro** - no default group
 - Patterns: `hunt:read`, `query:read`, `query:execute`, `source:read`,
-  `sampler:read`, `fieldmap:read`, `alert:read`, `rule:read`, `schema:read`,
-  `org:read`; hyperdx: `full`
-- Can: view every analyst surface, run existing queries/views, sample, full
-  HyperDX read. Served by the `dfe_analyst_ro` readonly CH user (no tenant filter).
-- Cannot: any write/author; `query:raw`.
+  `sampler:read`, `fieldmap:read`, `alert:read`, `rule:read`, `sigma:read`,
+  `schema:read`, `org:read`; hyperdx: `full`
+- Can: view every analyst surface (incl the Sigma catalogue), run existing
+  queries/views, sample, full HyperDX read. Served by the `dfe_analyst_ro`
+  readonly CH user (no tenant filter).
+- Cannot: any write/author; `query:raw`; Sigma write.
 
 **data_viewer** - group `dfe-viewers`
 - Patterns: `query:execute`, `source:read`, `sampler:read`, `dashboard:read`,
@@ -411,21 +413,21 @@ holder can/cannot reach (wildcards expand via section 2.4).
 
 **infra** - group `dfe-infra` (was `infra_admin`)
 - Patterns: `hunt:*`, `config:*`, `service:*:config:*`, `service:*:metrics:read`,
-  `helm:*`, `deployment:*`, `argo:*`, `org:*`, `group:*`, `repository:*`;
-  hyperdx: `otel`
-- Can: manage service configs/deployments/helm compile+DDL/Argo; full org+group+
-  repository admin; run hunts (GAINED in the rename); read service metrics; the
-  HyperDX OTel self-monitoring stream only.
+  `helm:*`, `deployment:*`, `argo:*`, `lifecycle:*`, `service:read`, `org:*`,
+  `group:*`, `repository:*`; hyperdx: `otel`
+- Can: manage service configs/deployments/helm compile+DDL/Argo; drive service
+  lifecycle (start/stop/scale via gitops); full org+group+repository admin; run
+  hunts; read service configs + metrics; the HyperDX OTel self-monitoring stream.
 - Cannot: analyst data authoring (query/source/rule/fieldmap/alert beyond hunts);
   the full HyperDX data surface.
 
 **infra_ro** - no default group (was `infra_viewer`)
 - Patterns: `config:read`, `service:*:config:read`, `service:*:metrics:read`,
   `helm:compile`, `deployment:read`, `argo:applications:get`,
-  `argo:projects:get`, `service-surface:read`, `service:read`, `org:read`;
-  hyperdx: `otel`
-- Can: read infra config/service/deployment/Argo state, dry-run helm compile,
-  OTel stream.
+  `argo:projects:get`, `lifecycle:read`, `service-surface:read`, `service:read`,
+  `org:read`; hyperdx: `otel`
+- Can: read infra config/service/deployment/Argo state + service lifecycle state,
+  dry-run helm compile, OTel stream.
 - Cannot: any infra write.
 
 **org_analyst** - scoped, no default group (was `customer_viewer`; auto-bound per org)
@@ -1092,19 +1094,16 @@ is already proven end to end against real ClickHouse.
 
 ---
 
-## 9. Argo CD RBAC Export
+## 9. Argo CD RBAC
 
-```mermaid
-flowchart LR
-    ROLES["roles.yaml<br/>argo:* permissions"] --> GEN["generate_rbac_csv()"]
-    GROUPS["GroupStore<br/>group→role mapping"] --> GEN
-    GEN --> CSV["argocd-rbac-cm<br/>policy.csv"]
-    GEN --> PROJ["AppProject<br/>.spec.roles"]
-```
+Roles still carry `argo:{resource}:{action}` grants (`infra` holds `argo:*`,
+`infra_ro` holds `argo:applications:get` / `argo:projects:get`), and the
+`ARGO_ACTION_PREFIX = "argo:"` namespace remains the SSoT for which Argo actions
+a role may perform.
 
-`helm/argo_rbac.py` maps DFE roles with `argo:{resource}:{action}`
-permissions to Argo CD Casbin policy lines. Handles wildcards and OIDC group
-bindings. Unknown argo actions logged as warnings (not errors).
+The engine no longer GENERATES the `argocd-rbac-cm` policy CSV / AppProject
+roles - the `helm/argo_rbac.py` exporter was removed. Argo CD RBAC is now
+dfe-infra's deployment concern; the engine's role model only declares the intent.
 
 ---
 
@@ -1219,10 +1218,6 @@ graph TD
         HDX["client.py<br/>HyperDXClient"]
     end
 
-    subgraph "helm/"
-        ARGO["argo_rbac.py<br/>RBAC CSV + AppProject"]
-    end
-
     DEPS --> ENGINE
     DEPS --> ACCOUNTS
     DEPS --> GROUPS
@@ -1238,8 +1233,6 @@ graph TD
     OIDC_SYNC --> GROUPS
     CONN_REG --> MODELS
     CONN_REG --> TENANT
-    ARGO --> ROLES_MOD
-    ARGO --> GROUPS
 ```
 
 ---

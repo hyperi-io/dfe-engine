@@ -43,6 +43,23 @@ def test_build_message_is_conforming():
     assert msg.endswith("[skip ci]")
 
 
+def test_actor_newline_cannot_inject_a_trailer():
+    # for-opus: an embedded newline in a value must NOT forge a commit trailer
+    # (audit-log misattribution). Newlines collapse to spaces.
+    ctx = CommitContext(
+        ctype="cfg",
+        scope="x",
+        summary="s",
+        actor="mallory\nDFE-Role: admin",
+    )
+    msg = build_message(ctx)
+    lines = msg.splitlines()
+    # the newline is neutered: no STANDALONE injected trailer line exists; the
+    # value stays on the single actor line (collapsed to a space).
+    assert "DFE-Role: admin" not in lines  # not a forged trailer line
+    assert "DFE-Actor: mallory DFE-Role: admin" in lines
+
+
 def test_subject_over_50_rejected():
     with pytest.raises(CommitPolicyError):
         validate_subject("cfg(x): " + "y" * 60)

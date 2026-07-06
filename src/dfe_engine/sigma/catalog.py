@@ -31,6 +31,7 @@ default_registry, whose class set is asserted elsewhere) over the SAME deploy re
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from dataclasses import dataclass
@@ -185,7 +186,14 @@ class SigmaCatalogStore:
         recorded when the upstream change signal moved.
         """
         existing_rule = existing.get("rule", {}) or {}
-        merged_rule = deep_merge(copy.deepcopy(doc.rule), copy.deepcopy(existing_rule))
+        # replace_lists: the operator's list (tags, references, detection value
+        # lists) wins WHOLESALE over upstream. Without it deep_merge APPENDS, so
+        # every re-sync duplicates shared list items (and reinstates ones the
+        # operator removed), the merged doc never equals the stored one, and every
+        # poll commits churn. See P1.3.
+        merged_rule = deep_merge(
+            copy.deepcopy(doc.rule), copy.deepcopy(existing_rule), replace_lists=True
+        )
         prev = existing.get("provenance", {}) or {}
         new_upstream = doc.change_key
         return {
@@ -197,7 +205,13 @@ class SigmaCatalogStore:
                 "origin": prev.get("origin", doc.origin),
                 "upstream_modified": new_upstream,
                 "local_edited": True,
-                "drift": bool(_as_text(new_upstream) != _as_text(prev.get("upstream_modified"))),
+                # STICKY drift (P2.16): once flagged, drift stays set until an
+                # operator action clears it (edit_rule / adopt_rule). Recomputing
+                # from scratch each sync would self-clear the flag on the very next
+                # poll (upstream unchanged -> False), erasing the review signal
+                # before an operator ever sees it.
+                "drift": bool(prev.get("drift", False))
+                or (_as_text(new_upstream) != _as_text(prev.get("upstream_modified"))),
                 "source_ref": prev.get("source_ref", doc.source_ref),
             },
         }
@@ -269,6 +283,9 @@ class SigmaCatalogStore:
             doc["title"] = title
         prov = doc.setdefault("provenance", {})
         prov["local_edited"] = True
+        # The operator has acted on the rule -> the catalogue-drift review signal is
+        # resolved (P2.16: sticky drift is cleared only by an operator action).
+        prov["drift"] = False
         self._crud.put(RULES_CLASS, rule_id, doc, actor, message=_msg(rule_id[:20], "edit", actor))
         return doc
 
@@ -280,8 +297,12 @@ class SigmaCatalogStore:
         """
         doc = self._crud.get(RULES_CLASS, rule_id)
         prov = doc.setdefault("provenance", {})
-        if not prov.get("local_edited", False):
+        # Adopting resolves any pending catalogue-drift review signal (P2.16). Clear
+        # drift even when already local_edited, so an explicit adopt acknowledges it.
+        drift_pending = bool(prov.get("drift", False))
+        if not prov.get("local_edited", False) or drift_pending:
             prov["local_edited"] = True
+            prov["drift"] = False
             self._crud.put(
                 RULES_CLASS, rule_id, doc, actor, message=_msg(rule_id[:20], "adopt", actor)
             )
@@ -427,7 +448,11 @@ async def sync_provider(
 ) -> SyncReport:
     """Fetch from one provider and upsert into the catalogue - the glue for a sync."""
     docs = await provider.fetch(since)
-    return catalog.import_docs(docs, actor, source=provider.name, warnings=provider.last_warnings)
+    # import_docs is a SYNC dulwich commit (put_many) - offload it so the sync task
+    # never blocks the event loop, matching the offloaded gitcrud API paths (P2.18).
+    return await asyncio.to_thread(
+        catalog.import_docs, docs, actor, source=provider.name, warnings=provider.last_warnings
+    )
 
 
 def _as_text(value: Any) -> str | None:

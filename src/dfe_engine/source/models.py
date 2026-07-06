@@ -230,6 +230,15 @@ class SourceSigma(BaseModel):
     """Sigma field mapping configuration for this source."""
 
     taxonomy: str | None = Field(default=None, description="Built-in mapping set (e.g. 'windows')")
+    # Optional logsource narrowing. When set, propagation only binds a rule to this
+    # source if the rule's category/service also match; None matches ANY (so a
+    # bare-taxonomy source keeps the product-only behaviour). See P2.17.
+    category: str | None = Field(
+        default=None, description="Sigma logsource category this source serves (None = any)"
+    )
+    service: str | None = Field(
+        default=None, description="Sigma logsource service this source serves (None = any)"
+    )
     custom_mappings: dict[str, str] = Field(
         default_factory=dict,
         description="Per-source field overrides (SigmaField: column_name)",

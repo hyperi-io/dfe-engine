@@ -366,19 +366,22 @@ def test_read_recent_returns_all_when_topic_small(monkeypatch):
     assert len(lines) == 7  # total < limit only because the topic genuinely has fewer
 
 
-def test_kafka_recent_truncated_false_when_window_filled(monkeypatch):
+def test_kafka_recent_truncated_true_when_window_filled(monkeypatch):
+    # P3.12: unified 'more available' meaning - a full window means older messages
+    # were left unread, so truncated is True (was inverted before).
     from dfe_engine.sampling import kafka_reader as kr
 
     monkeypatch.setattr(kr, "read_recent", lambda *a, **k: ["{}"] * 100)
     req = SampleRequest(backend=SampleBackend.KAFKA, mode=SampleMode.RECENT, topic="t")
     _lines, stats, _note = _sampler()._kafka_fast(req, "t", 100)
-    assert stats["truncated"] is False
+    assert stats["truncated"] is True
 
 
-def test_kafka_recent_truncated_true_when_short(monkeypatch):
+def test_kafka_recent_truncated_false_when_short(monkeypatch):
+    # A short read cut nothing - fewer messages available than asked -> not truncated.
     from dfe_engine.sampling import kafka_reader as kr
 
     monkeypatch.setattr(kr, "read_recent", lambda *a, **k: ["{}"] * 7)
     req = SampleRequest(backend=SampleBackend.KAFKA, mode=SampleMode.RECENT, topic="t")
     _lines, stats, _note = _sampler()._kafka_fast(req, "t", 100)
-    assert stats["truncated"] is True
+    assert stats["truncated"] is False

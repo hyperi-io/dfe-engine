@@ -64,6 +64,10 @@ class ConnectionRegistry:
             host/port come from settings, only the CH USER differs by privilege.
             ``None`` keeps each connection's configured host.
         ch_port: Override every connection's port the same way.
+        ch_secure: TLS on/off for every client (settings-derived). MUST be plumbed
+            or a TLS ClickHouse - notably ClickHouse Cloud, which is HTTPS-only -
+            gets a plaintext client and every fixed-user read fails (P2.8).
+        ch_verify: Certificate verification toggle (paired with ch_secure).
     """
 
     def __init__(
@@ -72,42 +76,56 @@ class ConnectionRegistry:
         *,
         ch_host: str | None = None,
         ch_port: int | None = None,
+        ch_secure: bool | None = None,
+        ch_verify: bool | None = None,
     ) -> None:
         self._config = config
         self._clients: dict[str, Any] = {}
         self._ch_host = ch_host
         self._ch_port = ch_port
+        self._ch_secure = ch_secure
+        self._ch_verify = ch_verify
 
     def get_connection_name(self, auth: AuthContext) -> str:
         """Resolve the best connection name for this user's roles.
 
         Alias-resolves every role (``ROLE_ALIASES``) first, then iterates roles in
         precedence order and returns the connection mapped to the highest-privilege
-        role the user holds. Falls back to ``"default"`` if no role mapping matches.
+        role the user holds.
 
-        Alias-awareness is load-bearing: a stale ``customer_viewer`` resolves to
-        ``org_analyst`` -> ``tenant_reader`` (row-filtered), NOT the admin
-        ``default`` fallback that an unresolved unknown role lands on.
+        Fail-CLOSED fallback: a principal with NO roles, or only unknown/unmapped
+        roles, must NOT land on the admin ``default`` connection (unrestricted,
+        every org). It resolves instead to the MOST-RESTRICTED mapped connection -
+        the lowest-privilege role in precedence (org_analyst -> ``tenant_reader``,
+        row-filtered, fail-closed to zero rows on empty org_ids). Raises when NO
+        connection is resolvable at all, rather than silently granting admin.
 
         Args:
             auth: Authenticated user context.
 
         Returns:
             Connection name string.
+
+        Raises:
+            KeyError: When no connection can be resolved for the principal.
         """
         canonical = {ROLE_ALIASES.get(role, role) for role in auth.roles}
         for role in _ROLE_PRECEDENCE:
             if role in canonical and role in self._config.role_connections:
                 return self._config.role_connections[role]
 
-        # Fallback: any non-precedence role with an explicit mapping (alias-resolved
-        # too), preserving the caller's role order for a deterministic pick.
+        # Any non-precedence role with an explicit mapping (alias-resolved too),
+        # preserving the caller's role order for a deterministic pick.
         for role in auth.roles:
             resolved = ROLE_ALIASES.get(role, role)
             if resolved in self._config.role_connections:
                 return self._config.role_connections[resolved]
 
-        return "default"
+        # No role matched: the LOWEST-privilege mapped connection, never admin.
+        for role in reversed(_ROLE_PRECEDENCE):
+            if role in self._config.role_connections:
+                return self._config.role_connections[role]
+        raise KeyError("no ClickHouse connection resolvable for the principal's roles")
 
     def get_client(self, connection_name: str) -> Any:
         """Get or create a clickhouse-connect client for the named connection.
@@ -142,13 +160,22 @@ class ConnectionRegistry:
         host = self._ch_host or conn.host
         port = self._ch_port or conn.port
 
-        client = clickhouse_connect.get_client(
-            host=host,
-            port=port,
-            database=conn.database,
-            username=conn.user,
-            password=password,
-        )
+        connect_params: dict[str, Any] = {
+            "host": host,
+            "port": port,
+            "database": conn.database,
+            "username": conn.user,
+            "password": password,
+        }
+        # Plumb TLS the same way ClickHouseAdapter.get_restricted_client does -
+        # a configured secure/verify must reach every fixed-user direct-read client
+        # or a TLS/Cloud ClickHouse connection fails (P2.8).
+        if self._ch_secure:
+            connect_params["secure"] = True
+            if self._ch_verify is not None:
+                connect_params["verify"] = self._ch_verify
+
+        client = clickhouse_connect.get_client(**connect_params)
 
         self._clients[connection_name] = client
         logger.info(

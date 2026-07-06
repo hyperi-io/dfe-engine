@@ -462,6 +462,29 @@ class TestLoadBuiltin:
         assert config.has_permission("infra", "service:dfe-loader:config:read") is True
         assert config.has_permission("infra", "service:dfe-loader:config:write") is True
 
+    def test_builtin_sigma_grants_reach_analyst_roles(self):
+        # P2: sigma was admin-only by accident - data_analyst authors sigma, ro reads.
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("data_analyst", "sigma:write") is True
+        assert config.has_permission("data_analyst", "sigma:read") is True
+        assert config.has_permission("data_analyst_ro", "sigma:read") is True
+        assert config.has_permission("data_analyst_ro", "sigma:write") is False
+
+    def test_builtin_infra_grants_lifecycle_and_bare_service_read(self):
+        # P2: lifecycle:* was operator-grantable per docs but held by no role;
+        # infra also lacked bare service:read (weaker infra_ro had it).
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("infra", "lifecycle:read") is True
+        assert config.has_permission("infra", "lifecycle:app:start") is True
+        assert config.has_permission("infra", "service:read") is True
+        assert config.has_permission("infra_ro", "lifecycle:read") is True
+        assert config.has_permission("infra_ro", "lifecycle:app:start") is False
+
+    def test_builtin_data_analyst_grants_cel_check(self):
+        # P3: cel:check was an admin-only accident; the analyst authors expressions.
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("data_analyst", "cel:check") is True
+
     def test_builtin_infra_ro_read_only_service(self):
         config = RoleConfig.load_builtin()
         assert config.has_permission("infra_ro", "service:dfe-loader:config:read") is True

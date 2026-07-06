@@ -77,8 +77,11 @@ def collect_deploy_artifacts(
             committed = yaml_load_string(prior) or {}
             if isinstance(committed, dict):
                 # deep_merge mutates + lets the override (committed operator edits)
-                # win over the registry base for any shared key.
-                content = deep_merge(dict(content), committed)
+                # win over the registry base for any shared key. replace_lists keeps
+                # publish idempotent: a committed list (keda.triggers, kafka.brokers)
+                # REPLACES the registry base rather than appending onto it, so
+                # re-publishing an unchanged registry is a byte-identical no-op.
+                content = deep_merge(dict(content), committed, replace_lists=True)
         artifacts[path] = yaml_dump_string(content)
 
     for name, sql in (ddl or {}).items():

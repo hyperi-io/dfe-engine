@@ -621,7 +621,10 @@ async def sync_provider_endpoint(
 async def get_sync(task_id: str, request: Request, user: CurrentUser) -> SyncResponse:
     """Poll a provider-sync task."""
     info = _task_manager(request).get(task_id)
-    if info is None or not info.kind.startswith("sigma:"):
+    # Match the EXACT kind (mirroring GET /sigma/propagations). A startswith
+    # 'sigma:' also let a 'sigma:propagate' task through, whose result dict then
+    # failed SyncReportModel validation -> 500 instead of the 404 contract (P3.23).
+    if info is None or info.kind != "sigma:sync":
         raise HTTPException(404, detail={"code": "not_found", "message": "sync task not found"})
     return _sync_response(info)
 
@@ -796,6 +799,10 @@ class PropagationReportModel(BaseModel):
     skipped_no_source: list[str] = Field(default_factory=list)
     failed: list[dict[str, Any]] = Field(default_factory=list)
     hunts_touched: list[str] = Field(default_factory=list)
+    stale_bindings: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Bindings left behind by a deselect (still firing until deleted)",
+    )
     warnings: list[str] = Field(default_factory=list)
 
 

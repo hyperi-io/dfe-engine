@@ -153,6 +153,10 @@ class ViewExecutor:
         """Get a specific view definition."""
         return self._catalog.get_view(label)
 
+    def get_namespaces(self) -> list[str]:
+        """List available view namespaces (public accessor over the catalog)."""
+        return self._catalog.get_namespaces()
+
     def _check_authorization(self, view_def: ViewDefinition, auth: AuthContext) -> None:
         from dfe_engine.auth import Scope, authorize
         from dfe_engine.settings import get_settings
@@ -217,8 +221,10 @@ class ViewExecutor:
                 # Offset pagination: the inner view limit must cover the whole
                 # requested window (offset + page size), or the outer
                 # LIMIT/OFFSET in _build_sql slices an already-truncated inner
-                # result and page 2+ comes back silently empty.
-                final["limit"] = offset + page_size
+                # result and page 2+ comes back silently empty. Capped at
+                # max_limit so a huge offset cannot bypass the documented cap and
+                # force the inner view to scan unboundedly (P3.13).
+                final["limit"] = min(offset + page_size, self._max_limit)
             else:
                 final["limit"] = page_size
         if "time_from" in param_names and options.time_from:
@@ -250,7 +256,14 @@ class ViewExecutor:
             param_parts.append(f"{p.name}={{{p.name}:{p.clickhouse_type}}}")
 
         param_str = ", ".join(param_parts)
-        view_call = f"{self._database}.{view_def.name}({param_str})"
+        # Zero-parameter views are plain CH views, not parameterised table
+        # functions: emitting 'db.view()' makes ClickHouse treat it as a table
+        # FUNCTION call and reject it (Code 46 UNKNOWN_FUNCTION). Only append the
+        # parens when there is at least one parameter to bind. (P1.2)
+        if param_parts:
+            view_call = f"{self._database}.{view_def.name}({param_str})"
+        else:
+            view_call = f"{self._database}.{view_def.name}"
 
         view_has_limit = any(p.name == "limit" for p in view_def.parameters)
 

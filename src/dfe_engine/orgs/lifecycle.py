@@ -127,11 +127,18 @@ class OrgLifecycleManager:
         return org
 
     async def delete_org(self, name: str, *, admin_id: str) -> None:
-        """Delete an org and its HyperDX team.
+        """Delete an org, its per-org HyperDX connection, and (only if it is the
+        last one on the team) the HyperDX team.
 
-        Deletes the HyperDX team (if any) before removing the org from the
-        registry. HyperDX failures are non-fatal. The CH RBAC reconciler drops
-        the org's role + row policies on its next run.
+        POSTURE-AWARE (P1.4/P1.5): under the GA posture every org shares ONE
+        HyperDX team, so an unconditional ``delete_team`` would destroy the team
+        (and connections + members) that all the REMAINING orgs still live on.
+        The team is deleted ONLY when no other org references the same
+        ``hyperdx_team_id`` - i.e. this is the last org on it (always true under
+        the per-group posture, where each org has its own team). The org's OWN
+        per-org connection is always dropped so the shared team is not left with a
+        dangling connection for a deleted tenant. HyperDX failures are non-fatal.
+        The CH RBAC reconciler drops the org's role + row policies on its next run.
 
         Args:
             name: Org to delete.
@@ -145,7 +152,17 @@ class OrgLifecycleManager:
             raise KeyError(name)
 
         if org.hyperdx_team_id and self._hdx is not None:
-            await self._hdx.delete_team(org.hyperdx_team_id)
+            others_on_team = any(
+                other.name != name and other.hyperdx_team_id == org.hyperdx_team_id
+                for other in self._registry.list()
+            )
+            # Always drop this org's own connection (harmless if it never had one).
+            if org.hyperdx_connection_id:
+                await self._hdx.delete_connection(org.hyperdx_team_id, org.hyperdx_connection_id)
+            # Delete the team ONLY when no other org still lives on it, so a shared
+            # (GA) team survives while any org references it.
+            if not others_on_team:
+                await self._hdx.delete_team(org.hyperdx_team_id)
 
         self._registry.delete(name)
         audit_org_change(admin_id=admin_id, org_name=name, change="deleted")
@@ -188,6 +205,23 @@ class OrgLifecycleManager:
             return False
         return await self._hdx.remove_member(team_api_key, email)
 
+    async def revoke_member_everywhere(self, email: str) -> int:
+        """Revoke a user's HyperDX membership across EVERY org.
+
+        The account-level counterpart to ``revoke_member``: an account being
+        disabled/deleted, or fully removed from its groups, loses access to all
+        orgs, so its HyperDX membership is revoked on each org's team. Non-fatal;
+        returns the number of revokes actually issued. A no-op (returns 0) when
+        HyperDX is not wired or the email is empty.
+        """
+        if self._hdx is None or not email:
+            return 0
+        issued = 0
+        for org in self._registry.list():
+            if await self.revoke_member(org.name, email):
+                issued += 1
+        return issued
+
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
@@ -221,7 +255,7 @@ class OrgLifecycleManager:
                 return existing.hyperdx_team_id, existing.hyperdx_team_api_key_env
         return None
 
-    async def _attach_tenant_connection(self, team_id: str, org: Org) -> None:
+    async def _attach_tenant_connection(self, team_id: str, org: Org) -> str:
         """Attach the org's ClickHouse connection to its HyperDX team (tenant-reader model).
 
         The connection authenticates as the SHARED ``dfe_tenant_reader`` (secret
@@ -231,14 +265,17 @@ class OrgLifecycleManager:
         orgs (empty setting -> 0 rows, fail closed). Network coordinates come from the
         ``default`` connection - every org hits the SAME ClickHouse as the SAME user,
         only the tenant setting differs. Non-fatal.
+
+        Returns the created connection id (empty string on any failure) so the
+        caller can persist it for a later posture-aware delete.
         """
         if self._conn_config is None:
-            return
+            return ""
         base = self._conn_config.connections.get("default")
         if base is None:
-            return
+            return ""
         try:
-            await self._hdx.create_connection(
+            conn_id = await self._hdx.create_connection(
                 team_id=team_id,
                 name=org.name,
                 host=base.host,
@@ -248,12 +285,14 @@ class OrgLifecycleManager:
                 password=self._fixed_reader_secret(),
                 settings={TENANT_SETTING: ",".join(org.org_ids or [])},
             )
+            return conn_id or ""
         except Exception as exc:
             logger.warning(
                 "HyperDX connection create failed",
                 org_name=org.name,
                 error=str(exc),
             )
+            return ""
 
     async def _provision_hyperdx(self, org: Org) -> Org:
         """Provision the org's HyperDX team + tenant connection, persist the team ID.
@@ -280,12 +319,13 @@ class OrgLifecycleManager:
             shared = self._existing_shared_team()
             if shared is not None:
                 team_id, api_key_env = shared
-                await self._attach_tenant_connection(team_id, org)
+                conn_id = await self._attach_tenant_connection(team_id, org)
                 audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
                 return self._registry.update(
                     org.name,
                     hyperdx_team_id=team_id,
                     hyperdx_team_api_key_env=api_key_env,
+                    hyperdx_connection_id=conn_id,
                 )
 
         team_name = f"customer-{org.name}" if self._per_group else self._ga_team_name
@@ -302,7 +342,9 @@ class OrgLifecycleManager:
         audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
         update_kwargs: dict[str, object] = {"hyperdx_team_id": team_id}
 
-        await self._attach_tenant_connection(team_id, org)
+        conn_id = await self._attach_tenant_connection(team_id, org)
+        if conn_id:
+            update_kwargs["hyperdx_connection_id"] = conn_id
 
         # Retrieve the team's own API key so we can invite members later. The env
         # var name derives from the team name (shared under GA, per-org otherwise).

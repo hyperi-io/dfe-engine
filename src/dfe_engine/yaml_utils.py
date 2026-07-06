@@ -20,6 +20,7 @@ Usage:
 """
 
 import os
+import re
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -38,6 +39,28 @@ _yaml_rt = YAML()
 _yaml_rt.default_flow_style = False
 _yaml_rt.preserve_quotes = True
 _yaml_rt.indent(mapping=2, sequence=4, offset=2)
+
+# YAML 1.1 coerces these bareword scalars to bool/null. We emit YAML 1.2 (they
+# stay strings for us), but downstream YAML-1.1 consumers - Helm/go-yaml and
+# scalo's DirectoryConfigStore (PyYAML safe_load) - would read an UNQUOTED
+# `mode: off` back as `mode: false`. Quote any string that matches so a
+# load-edit-dump round-trip preserves the operator's intended string (P2.9).
+_YAML11_AMBIGUOUS = re.compile(
+    r"^(?:y|Y|yes|Yes|YES|n|N|no|No|NO"
+    r"|true|True|TRUE|false|False|FALSE"
+    r"|on|On|ON|off|Off|OFF"
+    r"|null|Null|NULL|~)$"
+)
+
+
+def _represent_ambiguous_str(representer: Any, data: str) -> Any:
+    style = '"' if _YAML11_AMBIGUOUS.match(data) else None
+    return representer.represent_scalar("tag:yaml.org,2002:str", data, style=style)
+
+
+# Plain `str` values (the load-via-safe path yields plain str) flow through this
+# representer on dump; ruamel's own quoted-scalar types are unaffected.
+_yaml_rt.representer.add_representer(str, _represent_ambiguous_str)
 
 
 def yaml_load(source: str | Path) -> Any:
@@ -123,13 +146,19 @@ def yaml_dump_string(data: Any) -> str:
     return stream.getvalue()
 
 
-def deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> dict:
     """Recursively merge *override* into *base*, mutating *base* in-place.
 
     - dicts: merge recursively
-    - lists: append override items
+    - lists: append override items, OR replace wholesale when ``replace_lists``
     - sets:  union
     - type mismatch or non-container: override wins
+
+    ``replace_lists=True`` gives override-wins list semantics (matching Helm's own
+    list behaviour). Required by any caller that re-merges its OWN prior output --
+    e.g. the gitops publish merge and the sigma local-edit merge -- where the
+    default APPEND duplicates every shared list on every pass, growing unboundedly
+    and making the operation non-idempotent.
     """
     for key, nxt in override.items():
         if key not in base:
@@ -137,9 +166,12 @@ def deep_merge(base: dict, override: dict) -> dict:
             continue
         prev = base[key]
         if isinstance(prev, dict) and isinstance(nxt, dict):
-            deep_merge(prev, nxt)
+            deep_merge(prev, nxt, replace_lists=replace_lists)
         elif isinstance(prev, list) and isinstance(nxt, list):
-            prev.extend(nxt)
+            if replace_lists:
+                base[key] = nxt
+            else:
+                prev.extend(nxt)
         elif isinstance(prev, set) and isinstance(nxt, set):
             prev |= nxt
         else:

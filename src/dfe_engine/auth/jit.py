@@ -23,7 +23,7 @@ from dfe_engine.auth.audit import (
     audit_jit_hdx_invited,
     audit_jit_team_assigned,
 )
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import Group, GroupStore
 
 # Steady-state OIDC traffic calls ensure_account on EVERY request. last_login_at
 # is a coarse "recently active" marker (not an audit trail), so refresh it at
@@ -134,7 +134,11 @@ class JitProvisioner:
 
         existing = self._accounts.get(safe_name)
         if existing is not None:
-            # Subsequent login. Only rewrite the account YAML when something
+            # Subsequent login: propagate a later domain claim / org_ids change to
+            # the domain group even for a returning user (P2.20). Write-free unless
+            # the binding actually drifted.
+            self._refresh_domain_group(user_id)
+            # Only rewrite the account YAML when something
             # material changed - group membership, or last_login_at is stale
             # past the refresh window - so back-to-back requests for an
             # unchanged account do NOT each pay a read-modify-write (and
@@ -158,6 +162,10 @@ class JitProvisioner:
                 safe_name,
                 external=True,
                 source_provider=source_provider,
+                # Persist the login email (the raw subject when it is one) so a
+                # later HyperDX membership revoke - keyed by email, not the
+                # sanitised account_key - can resolve the address.
+                email=user_id if "@" in user_id else "",
                 last_login_at=now,
             )
         except ValueError:
@@ -171,11 +179,19 @@ class JitProvisioner:
         # early-return no-op path below is preserved). Different users on the same
         # domain each hit this on THEIR first login: the group is created once,
         # then each new account is added as a member.
-        self._ensure_domain_group(user_id, safe_name)
+        ensured_group = self._ensure_domain_group(user_id, safe_name)
+
+        # The effective group set includes the just-ensured org_<domain> group, so
+        # the domain group's org_ids AND its HyperDX-granting role contribute to
+        # first-login provisioning (P2.19) - the IdP header groups alone never carry
+        # the org binding that _ensure_domain_group just created.
+        effective_groups = list(oidc_groups)
+        if ensured_group and ensured_group not in effective_groups:
+            effective_groups.append(ensured_group)
 
         # Resolve org_ids from groups
         org_ids = []
-        for gname in oidc_groups:
+        for gname in effective_groups:
             group = self._groups.get(gname)
             if group and group.org_ids:
                 org_ids.extend(group.org_ids)
@@ -185,7 +201,7 @@ class JitProvisioner:
         # HyperDX team assignment. resolve_hyperdx_team returns "" for a principal
         # whose effective HyperDX access is `none` (Task C: no team, no invite, and
         # dfe-ui shows no link), so a falsy team here IS the scope gate.
-        team = self.resolve_hyperdx_team(oidc_groups)
+        team = self.resolve_hyperdx_team(effective_groups)
         if team:
             audit_jit_team_assigned(user_id, team, "hyperdx-access")
 
@@ -230,8 +246,12 @@ class JitProvisioner:
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _ensure_domain_group(self, user_id: str, member: str) -> None:
+    def _ensure_domain_group(self, user_id: str, member: str) -> str:
         """Ensure the shadow account's email-domain org group exists + is joined.
+
+        Returns the ensured ``org_<domain>`` group name (``""`` when the subject
+        has no email domain) so the caller can fold it into the group set used for
+        first-login HyperDX team resolution (P2.19).
 
         The org-association half of the external-OIDC -> org -> tenant-isolation
         chain (Task C). Given a subject that is an email:
@@ -251,27 +271,16 @@ class JitProvisioner:
         """
         domain = self._email_domain(user_id)
         if not domain:
-            return  # No email domain on the subject -> no org association.
+            return ""  # No email domain on the subject -> no org association.
 
         group_name = self._domain_group_name(domain)
-        if self._groups.get(group_name) is None:
-            org = self._orgs.find_by_domain(domain) if self._orgs is not None else None
-            if org is not None:
-                # Claimed domain: bind org_analyst at the OWNING ORG's scope, never
-                # system. org_analyst is org-restricted by design (its reads must
-                # not resolve system-wide) - a system-scoped grant would cover all
-                # scopes and over-grant. The org's org_ids drive the CH tenant
-                # setting so the member's reads are row-filtered to that org.
-                scope = f"org:{org.name}"
-                roles = [_ORG_DOMAIN_ROLE]
-                org_ids = list(org.org_ids)
-            else:
-                # Unclaimed domain: the account exists but gets NO grants until an
-                # org claims the domain (or an admin assigns a role). Assigning
-                # org_analyst here would grant its reads to an unscoped account.
-                scope = "system"
-                roles = []
-                org_ids = []
+        claimed = self._claimed_binding(domain)
+        # First-login create: a claimed domain seeds the org binding; an unclaimed
+        # one seeds an EMPTY group (no grants until an org claims it or an admin
+        # assigns a role).
+        scope, roles, org_ids = claimed if claimed is not None else ("system", [], [])
+        existing = self._groups.get(group_name)
+        if existing is None:
             try:
                 self._groups.create(
                     group_name,
@@ -281,12 +290,67 @@ class JitProvisioner:
                     org_ids=org_ids,
                     scope=scope,
                 )
-                return
+                return group_name
             except ValueError:
                 # Race: another login created it first - fall through to the
-                # idempotent add_member so this account still joins.
-                pass
+                # idempotent refresh + add_member so this account still joins.
+                existing = self._groups.get(group_name)
+
+        if existing is not None and claimed is not None:
+            self._apply_claimed_binding(group_name, existing, claimed)
         self._groups.add_member(group_name, member)
+        return group_name
+
+    def _apply_claimed_binding(
+        self, group_name: str, existing: Group, claimed: tuple[str, list[str], list[str]]
+    ) -> None:
+        """Propagate a CLAIMED domain's binding onto an existing group when it
+        drifted (P2.20). Only ever called with a real claim, so it never downgrades
+        an admin-configured or as-yet-unclaimed group to empty - the refresh must
+        not clobber manual grants. Writes nothing when already in sync.
+        """
+        scope, roles, org_ids = claimed
+        if (
+            existing.scope != scope
+            or sorted(existing.roles) != sorted(roles)
+            or list(existing.org_ids) != list(org_ids)
+        ):
+            self._groups.update(group_name, scope=scope, roles=roles, org_ids=org_ids)
+
+    def _refresh_domain_group(self, user_id: str) -> None:
+        """Subsequent-login refresh of an existing domain group's binding (P2.20).
+
+        Runs on returning-user logins (the first-login path uses
+        _ensure_domain_group) so a domain CLAIMED later (or an org whose org_ids
+        changed) propagates even when no new domain user logs in. Cheap: one group
+        read, and a write only when the domain is claimed AND the binding drifted -
+        an UNCLAIMED domain is left untouched (never wipes a manual/existing group).
+        """
+        domain = self._email_domain(user_id)
+        if not domain:
+            return
+        claimed = self._claimed_binding(domain)
+        if claimed is None:
+            return  # unclaimed -> nothing to propagate, leave the group as-is
+        group_name = self._domain_group_name(domain)
+        existing = self._groups.get(group_name)
+        if existing is None:
+            return  # no domain group yet (first-login path handles creation)
+        self._apply_claimed_binding(group_name, existing, claimed)
+
+    def _claimed_binding(self, domain: str) -> tuple[str, list[str], list[str]] | None:
+        """The (scope, roles, org_ids) binding for a domain CLAIMED by an org, or
+        None when no org claims it.
+
+        Claimed -> org_analyst at the OWNING ORG's scope (never system: org_analyst
+        is org-restricted by design; a system grant would over-grant), with the
+        org's org_ids driving the CH tenant setting. Returning None for an unclaimed
+        domain is what lets the refresh leave such groups untouched (P2.20).
+        """
+        org = self._orgs.find_by_domain(domain) if self._orgs is not None else None
+        if org is not None:
+            return f"org:{org.name}", [_ORG_DOMAIN_ROLE], list(org.org_ids)
+        return None
 
     def _roles_for_groups(self, oidc_groups: list[str]) -> set[str]:
         """Union of role names across the principal's known groups."""

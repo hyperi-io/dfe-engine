@@ -117,6 +117,12 @@ class ChCoordinator:
         """This worker's lease-owner id."""
         return self._worker_id
 
+    @property
+    def lease_seconds(self) -> int:
+        """Lease TTL. The worker heartbeats (renew) at a fraction of this so a
+        run longer than the TTL is not reclaimed mid-flight (never-double-run)."""
+        return self._lease_seconds
+
     def now(self) -> int:
         """Current epoch seconds (int) from the injected clock."""
         return int(self._clock())

@@ -256,6 +256,10 @@ async def delete_var(
         )
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+    except ValueError as exc:
+        # ValueError from the dot-path walker - a client path error, so 422 (parity
+        # with set_var/get_var; without this an invalid path 500s here). (P3.7)
+        raise HTTPException(422, detail={"code": "invalid_path", "message": str(exc)}) from exc
     except ConcurrencyConflictError as exc:
         raise HTTPException(
             status_code=409,

@@ -30,6 +30,20 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
 
+async def _revoke_hyperdx_membership_everywhere(request: Request, email: str) -> None:
+    """Revoke a user's HyperDX team membership across every org (non-fatal).
+
+    The account -> HyperDX propagation seam: an account being disabled/deleted or
+    fully removed from its groups must stop the org's HyperDX admitting them.
+    No-op when HyperDX/orgs are not wired (app.state.org_lifecycle absent) or the
+    account has no recorded email (local, non-OIDC accounts). Keyed by email
+    because HyperDX membership is by email, not the sanitised account username.
+    """
+    lifecycle = getattr(request.app.state, "org_lifecycle", None)
+    if lifecycle is not None and email:
+        await lifecycle.revoke_member_everywhere(email)
+
+
 # ── Request / Response models ────────────────────────────────
 
 
@@ -192,6 +206,10 @@ async def update_account(
         )
     else:
         account = store.update(username, **update_fields)
+    # Disabling an account revokes its HyperDX team membership on every org
+    # (non-fatal). Re-enabling does not re-invite here - login re-provisions.
+    if body.enabled is False:
+        await _revoke_hyperdx_membership_everywhere(request, account.email)
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
@@ -257,3 +275,6 @@ async def delete_account(
         username,
         removed=existing.groups,
     )
+    # A deleted account loses all access -> revoke its HyperDX team membership on
+    # every org (non-fatal, no-op when HyperDX unwired or no email on record).
+    await _revoke_hyperdx_membership_everywhere(request, existing.email)

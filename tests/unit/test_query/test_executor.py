@@ -272,6 +272,49 @@ class TestViewExecutorSQL:
         params_sent = call_kwargs.kwargs.get("parameters", call_kwargs[1].get("parameters", {}))
         assert params_sent["limit"] == 25
 
+    def test_zero_param_view_emits_no_parens(self):
+        """P1.2: a view with no parameters is a plain CH view, not a table
+        function - emit 'FROM db.view', never 'db.view()' (Code 46 otherwise)."""
+        view_def = _make_view_def(
+            name="dfe_v_overview_active_sources",
+            label="overview/active_sources",
+            params=[],
+            tenant_isolated=False,
+        )
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(restricted_client=client, catalog=catalog, database="testdb")
+        auth = _make_auth(roles=["admin"])
+        executor.execute("overview/active_sources", params={}, auth=auth)
+
+        sql = client.query.call_args[0][0]
+        assert "FROM testdb.dfe_v_overview_active_sources" in sql
+        assert "dfe_v_overview_active_sources(" not in sql  # no table-function parens
+
+    def test_offset_inner_limit_capped_at_max(self):
+        """P3.13: a huge offset must not bypass max_limit on the inner scan."""
+        view_def = _make_view_def()
+        catalog = MagicMock(spec=ViewCatalog)
+        catalog.get_view.return_value = view_def
+
+        client = MagicMock()
+        client.query.return_value = _make_query_result()
+
+        executor = ViewExecutor(
+            restricted_client=client, catalog=catalog, database="testdb", max_limit=100_000
+        )
+        auth = _make_auth(roles=["admin"])
+        options = QueryOptions(offset=10**9, limit=1000)
+        executor.execute("analytics/events", params={}, auth=auth, options=options)
+
+        call_kwargs = client.query.call_args
+        params_sent = call_kwargs.kwargs.get("parameters", call_kwargs[1].get("parameters", {}))
+        assert params_sent["limit"] == 100_000  # capped, not 10**9 + 1000
+
     def test_execution_error_wrapped(self):
         view_def = _make_view_def()
         catalog = MagicMock(spec=ViewCatalog)

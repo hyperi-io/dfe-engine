@@ -108,12 +108,20 @@ async def create_org(
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 
     lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
-    org = await lifecycle.create_org(
-        body.name,
-        org_ids=body.org_ids,
-        display_name=body.display_name,
-        admin_id=user.user_id,
-    )
+    try:
+        org = await lifecycle.create_org(
+            body.name,
+            org_ids=body.org_ids,
+            display_name=body.display_name,
+            admin_id=user.user_id,
+        )
+    except ValueError as exc:
+        # check-then-act race: a concurrent create landed the org between the
+        # get() above and here. registry.create raises ValueError -> 409, not 500.
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "conflict", "message": f"Org '{body.name}' already exists"},
+        ) from exc
     # Domains are not part of the lifecycle create signature (phase-3 owned), so
     # persist them via the registry once the org exists.
     if body.domains:

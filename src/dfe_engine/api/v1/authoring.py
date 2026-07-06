@@ -15,7 +15,7 @@ POST /authoring/ai/generate-vrl  -> AI VRL from samples (LogParser)
 POST /authoring/ai/suggest-schema-> AI meta-schema promotions (SchemaOptimiser)
 
 The AI endpoints submit to the AI module registry - stub modules by default; real
-models register under the same name (see dfe_engine.ai). RBAC: rules:read.
+models register under the same name (see dfe_engine.ai). RBAC: rule:read.
 """
 
 from __future__ import annotations
@@ -35,11 +35,15 @@ from dfe_engine.ai import (
     default_ai_registry,
 )
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.rule_authoring import build_query_scaffold, strip_hyperdx
 
 router = APIRouter(prefix="/authoring", tags=["Rules: Authoring"])
 
-_READ = Depends(require_action("rules:read"))
+# Singular 'rule:' namespace (matches rule:* / rule:read in roles.yaml). A plural
+# 'rules:read' matched NO role - permission_matches compares each colon segment
+# literally, so 'rule:*' never covered 'rules:read' and only admin could author.
+_READ = Depends(require_action(scopes_dict["rule_read"]))
 
 
 def _registry(request: Request):

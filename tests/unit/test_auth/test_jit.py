@@ -317,6 +317,43 @@ class TestDomainGroup:
         member = JitProvisioner.account_key("jane@acme.com")
         assert groups.get("org_acme_com").members.count(member) == 1
 
+    def test_domain_claimed_later_propagates_on_relogin(self, tmp_path):
+        # P2.20: a domain group created while unclaimed must pick up the org
+        # binding when the org claims the domain later - on the next login, even
+        # for a returning user.
+        accounts, groups, orgs = self._env(tmp_path, claim=False)
+        jit = self._jit(accounts, groups, orgs)
+        jit.ensure_account("jane@acme.com", [], "oidc")  # first login: unclaimed
+        grp = groups.get("org_acme_com")
+        assert grp.org_ids == []
+        assert grp.roles == []
+        assert grp.scope == "system"
+
+        # org now claims the domain
+        orgs.create("acme", org_ids=["acme-tenant"], domains=["acme.com"])
+
+        jit.ensure_account("jane@acme.com", [], "oidc")  # returning-user re-login
+        grp = groups.get("org_acme_com")
+        assert grp.org_ids == ["acme-tenant"]
+        assert grp.roles == ["org_analyst"]
+        assert grp.scope == "org:acme"
+
+    def test_relogin_does_not_clobber_unclaimed_domain_group(self, tmp_path):
+        # P2.20 must NOT downgrade an org_<domain> group to empty on re-login when
+        # no org claims the domain - an admin may have configured it by hand.
+        accounts, groups, orgs = self._env(tmp_path, claim=False)
+        # admin pre-configures the domain group with a role, though acme.com is unclaimed
+        groups.create("org_acme_com", roles=["org_analyst"], org_ids=["acme"], scope="org:acme")
+        accounts.create(JitProvisioner.account_key("jane@acme.com"), "", groups=[])
+
+        jit = self._jit(accounts, groups, orgs)
+        jit.ensure_account("jane@acme.com", [], "oidc")  # returning-user re-login
+
+        grp = groups.get("org_acme_com")
+        assert grp.roles == ["org_analyst"]  # untouched, not wiped
+        assert grp.org_ids == ["acme"]
+        assert grp.scope == "org:acme"
+
     def test_no_org_registry_creates_group_without_org_ids(self, tmp_path):
         accounts = AccountStore(tmp_path / "accounts")
         groups = GroupStore(tmp_path / "groups")

@@ -209,6 +209,9 @@ class PropagationReport:
     skipped_no_source: list[str] = field(default_factory=list)  # sigma ids, no source
     failed: list[dict[str, Any]] = field(default_factory=list)  # {sigma_rule_id, error}
     hunts_touched: list[str] = field(default_factory=list)
+    # Bindings whose sigma rule is no longer selected - a deselect left them behind
+    # and they keep firing until pruned (P3.24). Surfaced so the operator sees them.
+    stale_bindings: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
     def as_dict(self) -> dict[str, Any]:
@@ -220,6 +223,7 @@ class PropagationReport:
             "skipped_no_source": list(self.skipped_no_source),
             "failed": list(self.failed),
             "hunts_touched": list(self.hunts_touched),
+            "stale_bindings": list(self.stale_bindings),
             "warnings": list(self.warnings),
         }
 
@@ -407,6 +411,21 @@ class SigmaPropagator:
                 )
                 report.hunts_touched.append(hunt)
 
+        # Surface bindings left behind by a deselect: an existing sigma binding
+        # whose sigma id is not in the current selection keeps firing but is no
+        # longer wanted. Report it so the operator can DELETE it (P3.24).
+        selected_set = set(selected)
+        for row in self._rules.list_rules():
+            sigma_id = row.get("sigma_rule_id")
+            if sigma_id and sigma_id not in selected_set:
+                report.stale_bindings.append(
+                    {
+                        "rule_id": row["name"],
+                        "sigma_rule_id": sigma_id,
+                        "source": row.get("source", ""),
+                    }
+                )
+
         return report
 
     # -- binding queries (for the API list/get/delete) --
@@ -460,6 +479,10 @@ class SigmaPropagator:
             if live_upstream != prov.get("upstream_modified"):
                 catalogue_drift = True
 
+        # A binding whose sigma rule is no longer selected is STALE - a deselect
+        # left it behind and it keeps firing until pruned (P3.24).
+        stale = bool(sigma_id) and not self._selection.is_selected(sigma_id)
+
         return {
             "rule_id": rule_id,
             "sigma_rule_id": sigma_id,
@@ -470,7 +493,9 @@ class SigmaPropagator:
             "hunts": hunts,
             "hand_edited": hand_edited,
             "orphaned": orphaned,
-            "drift": bool(hand_edited or catalogue_drift or orphaned),
+            "selected": not stale,
+            "stale": stale,
+            "drift": bool(hand_edited or catalogue_drift or orphaned or stale),
         }
 
     def delete_binding(self, rule_id: str) -> bool:

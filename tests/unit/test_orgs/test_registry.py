@@ -306,6 +306,12 @@ class TestFindByDomain:
     def test_no_orgs_returns_none(self, registry):
         assert registry.find_by_domain("acme.com") is None
 
+    def test_disabled_org_does_not_claim_domain(self, registry):
+        # P3: a disabled org must not resolve a domain (parity with HyperDX sync).
+        registry.create("acme", domains=["acme.com"])
+        registry.update("acme", enabled=False)
+        assert registry.find_by_domain("acme.com") is None
+
     def test_tie_break_is_deterministic_first_by_name(self, registry):
         # Misconfiguration: two orgs claim the same domain. Resolution must be
         # stable - the org whose name sorts first wins, regardless of insert order.

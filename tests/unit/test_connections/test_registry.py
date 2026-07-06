@@ -89,11 +89,13 @@ class TestConnectionNameResolution:
         # data_analyst_ro has higher precedence than org_analyst.
         assert _name(["org_analyst", "data_analyst_ro"]) == "analyst_ro"
 
-    def test_no_roles_falls_back_to_default(self) -> None:
-        assert _name([]) == "default"
+    def test_no_roles_fails_closed_to_most_restricted(self) -> None:
+        # Fail-CLOSED: no roles must NOT land on the admin `default` connection -
+        # it resolves to the most-restricted (tenant_reader, row-filtered).
+        assert _name([]) == "tenant_reader"
 
-    def test_unknown_role_falls_back_to_default(self) -> None:
-        assert _name(["custom_role_xyz"]) == "default"
+    def test_unknown_role_fails_closed_to_most_restricted(self) -> None:
+        assert _name(["custom_role_xyz"]) == "tenant_reader"
 
     def test_non_precedence_role_with_mapping(self) -> None:
         """A role not in the precedence list but present in role_connections."""

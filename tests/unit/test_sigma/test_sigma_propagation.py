@@ -181,6 +181,26 @@ def test_propagate_binds_one_rule_to_every_matching_source(env):
     }
 
 
+def test_deselect_then_repropagate_reports_stale_binding(env):
+    # P3.24: deselecting a rule then re-propagating leaves its binding behind - the
+    # propagate report must SURFACE it as stale (and list_bindings flag it) so the
+    # operator knows to delete it, instead of it silently firing forever.
+    _add_windows_source(env)
+    _import_and_select(env, _rule_yaml(), _ID)
+    prop = _propagator(env)
+    prop.propagate()
+    rid = binding_rule_id(_ID, "windows_audit")
+
+    env.selection.deselect(_ID, actor="tester")
+    report = prop.propagate()
+
+    assert any(b["rule_id"] == rid for b in report.stale_bindings)
+    summary = prop.get_binding(rid)
+    assert summary["stale"] is True
+    assert summary["selected"] is False
+    assert summary["drift"] is True  # stale folds into drift for the review surface
+
+
 def test_propagate_skips_rule_with_no_matching_source(env):
     # source taxonomy 'linux' does not match the rule's product 'windows'
     env.sources.save_source(

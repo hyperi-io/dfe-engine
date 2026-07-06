@@ -275,6 +275,16 @@ async def remove_member(
         name,
         removed=[username],
     )
+    # Membership -> HyperDX propagation: if this removal leaves the account in NO
+    # groups it has lost all access, so revoke its HyperDX membership everywhere
+    # (non-fatal). The partial case - still in other groups but losing one org -
+    # is not handled here (needs per-org org_ids resolution); the account
+    # disable/delete path covers full-access loss. Keyed by the stored email.
+    account = account_store.get(username)
+    if account is not None and not account.groups:
+        lifecycle = getattr(request.app.state, "org_lifecycle", None)
+        if lifecycle is not None and account.email:
+            await lifecycle.revoke_member_everywhere(account.email)
     group = store.get(name)
     return _response(group if group is not None else existing)
 

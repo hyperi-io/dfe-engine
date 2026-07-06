@@ -84,16 +84,37 @@ def _render_ddl(topology: str = "single") -> dict[str, str]:
 
 
 def _read_committed_values(repo_path) -> dict[str, str]:
-    """Read the already-committed ``values/*.yaml`` from the local clone.
+    """Read the already-COMMITTED ``values/*.yaml`` from the local clone's HEAD.
 
     Passed to ``collect_deploy_artifacts(existing=...)`` so a publish MERGES the
     registry base under an operator's committed /helm var edits instead of
-    reverting them. Missing ``values/`` dir (first publish) -> empty map.
+    reverting them. Reads from the git HEAD tree, NOT the working tree, so a stray
+    uncommitted file (or one mid-write) can never be mistaken for a committed
+    operator edit (P3.8). Empty repo / no HEAD / no ``values/`` -> empty map (a
+    first publish).
     """
-    values_dir = repo_path / "values"
-    if not values_dir.is_dir():
+    from typing import cast
+
+    from dulwich.errors import NotGitRepository
+    from dulwich.objects import Blob, Commit, Tree
+    from dulwich.repo import Repo
+
+    try:
+        with Repo(str(repo_path)) as repo:
+            head_commit = cast("Commit", repo[repo.head()])
+            root = cast("Tree", repo[head_commit.tree])
+            if b"values" not in root:
+                return {}
+            _, values_sha = root[b"values"]
+            values_tree = cast("Tree", repo[values_sha])
+            out: dict[str, str] = {}
+            for entry in values_tree.items():
+                name = entry.path.decode()
+                if name.endswith(".yaml"):
+                    out[f"values/{name}"] = cast("Blob", repo[entry.sha]).data.decode()
+            return out
+    except (KeyError, FileNotFoundError, NotGitRepository):
         return {}
-    return {f"values/{f.name}": f.read_text() for f in sorted(values_dir.glob("*.yaml"))}
 
 
 def _render_ch_rbac_ddl() -> list[str]:

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from dulwich import porcelain
 from scalo.logger import logger
@@ -49,6 +50,14 @@ class PushError(RuntimeError):
     def __init__(self, message: str, committed_sha: str) -> None:
         super().__init__(message)
         self.committed_sha = committed_sha
+
+
+class ConcurrencyConflict(PushError):
+    """Raised when a concurrent REMOTE change touched a path this publish would
+    overwrite (a lost-update). A subclass of PushError so it carries the stranded
+    local sha and existing PushError handlers still surface it; callers that want
+    the retry semantics catch it specifically and re-read + re-render.
+    """
 
 
 class PathEscapesRepoError(ValueError):
@@ -180,6 +189,25 @@ class GitopsRepo:
         changed, sha_str, written = self._apply_and_commit(artifacts, deletions or [], message)
         if not changed or sha_str is None:
             logger.info("Gitops repo unchanged; skipping commit")
+            # A prior publish may have committed locally but failed to PUSH
+            # (PushError, e.g. a transient network fault), leaving the local branch
+            # AHEAD of the remote. An identical retry stages nothing, so without
+            # this the stranded commit would never reach the remote (and Argo) -
+            # the operator sees {changed:false} and believes it applied. When push
+            # is enabled and the local head is ahead of the remote, fast-forward
+            # push the stranded commit now (P2.4).
+            if self._push and self._repo_url and self._local_ahead_of_remote():
+                head = self.head_revision() or ""
+                try:
+                    self._push_branch()
+                except porcelain.DivergedBranches:
+                    return self._reconcile_and_repush(
+                        artifacts, deletions or [], message, head, written
+                    )
+                except Exception as exc:
+                    raise PushError(f"push of stranded commit {head} failed: {exc}", head) from exc
+                logger.info("Pushed stranded local commit", commit=head)
+                return PublishResult(changed=False, files=written, commit_sha=head, pushed=True)
             return PublishResult(changed=False, files=written)
 
         pushed = False
@@ -327,6 +355,33 @@ class GitopsRepo:
             f"refs/heads/{self._branch}".encode(),
         )
 
+    def _local_ahead_of_remote(self) -> bool:
+        """True when the local branch is a clean fast-forward AHEAD of the remote
+        (a stranded commit from a prior failed push). Best-effort: any lookup
+        failure returns False so a genuinely up-to-date or diverged repo is never
+        pushed spuriously from the no-op path."""
+        from dulwich.graph import can_fast_forward
+        from dulwich.repo import Repo
+
+        local = self.head_revision()
+        if local is None:
+            return False
+        try:
+            result = porcelain.ls_remote(self._authed_url())
+        except Exception:
+            return False
+        # ls_remote returns an LsRemoteResult (.refs); tolerate a plain dict too.
+        refs = getattr(result, "refs", result) or {}
+        remote_sha = refs.get(f"refs/heads/{self._branch}".encode())
+        if remote_sha is None or remote_sha == local.encode():
+            return False
+        try:
+            with Repo(str(self._path)) as repo:
+                # ahead == the remote head is an ancestor of our local head
+                return can_fast_forward(repo, remote_sha, local.encode())
+        except KeyError:
+            return False
+
     def _reconcile_and_repush(
         self,
         artifacts: dict[str, str],
@@ -390,8 +445,24 @@ class GitopsRepo:
                 local_sha,
             )
 
-        # remote moved on from our base: fast-forward the clone to the remote
-        # head and rebuild this publish's commit on top of it (never a force)
+        # remote moved on from our base: before rebuilding this publish on top of
+        # the remote head, REFUSE if the remote changed any path we are about to
+        # overwrite. Our `artifacts` are full-file renders built from the STALE
+        # pre-fetch read, so re-applying them would silently revert a concurrent
+        # remote-side edit (e.g. a supported hand commit) to the same file, with no
+        # 409 - the If-Match guard only saw the local head. Surface a conflict so
+        # the caller re-reads the fresh file and re-renders (P2.3).
+        conflicts = self._paths_changed_between(base, remote_sha, artifacts, deletions)
+        if conflicts:
+            raise ConcurrencyConflict(
+                "remote changed "
+                + ", ".join(sorted(conflicts))
+                + f" concurrently; local commit {local_sha} not pushed - re-read and retry",
+                local_sha,
+            )
+
+        # No overlapping remote change: fast-forward the clone to the remote head
+        # and rebuild this publish's commit on top of it (never a force).
         porcelain.reset(str(self._path), "hard", remote_sha)
         changed, sha_str, written = self._apply_and_commit(artifacts, deletions, message)
         if not changed or sha_str is None:
@@ -412,3 +483,41 @@ class GitopsRepo:
             pushed=True,
         )
         return PublishResult(changed=True, files=written, commit_sha=sha_str, pushed=True)
+
+    def _paths_changed_between(
+        self,
+        base_sha: bytes | None,
+        remote_sha: bytes,
+        artifacts: dict[str, str],
+        deletions: list[str],
+    ) -> set[str]:
+        """Paths this publish would touch whose content differs between our base
+        commit and the fetched remote head - i.e. remote-side concurrent edits we
+        would clobber if we re-applied the stale full-file renders (P2.3)."""
+        from dulwich.repo import Repo
+
+        touched = set(artifacts.keys()) | set(deletions)
+        changed: set[str] = set()
+        with Repo(str(self._path)) as repo:
+            for rel in touched:
+                if self._blob_at(repo, base_sha, rel) != self._blob_at(repo, remote_sha, rel):
+                    changed.add(rel)
+        return changed
+
+    @staticmethod
+    def _blob_at(repo: Any, commit_sha: bytes | None, rel: str) -> bytes | None:
+        """Bytes of ``rel`` at ``commit_sha`` (None if the commit is None or the
+        path does not exist at that commit)."""
+        if not commit_sha:
+            return None
+        from typing import cast
+
+        from dulwich.object_store import tree_lookup_path
+        from dulwich.objects import Blob, Commit
+
+        try:
+            commit = cast("Commit", repo[commit_sha])
+            _, blob_sha = tree_lookup_path(repo.get_object, commit.tree, rel.encode())
+            return cast("Blob", repo[blob_sha]).data
+        except KeyError:
+            return None

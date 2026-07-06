@@ -29,6 +29,14 @@ class TestDeepMerge:
         deep_merge(base, {"items": [3, 4]})
         assert base["items"] == [1, 2, 3, 4]
 
+    def test_list_replace_when_opted_in(self):
+        # replace_lists: override list wins wholesale (idempotent re-merge). Nested
+        # lists replace too; dicts still merge recursively.
+        base = {"items": [1, 2], "keda": {"triggers": [{"a": 1}]}}
+        deep_merge(base, {"items": [3, 4], "keda": {"triggers": [{"a": 1}]}}, replace_lists=True)
+        assert base["items"] == [3, 4]
+        assert base["keda"]["triggers"] == [{"a": 1}]  # not doubled
+
     def test_set_union(self):
         base = {"tags": {1, 2}}
         deep_merge(base, {"tags": {2, 3}})
@@ -58,6 +66,23 @@ class TestDeepMerge:
         base = {}
         deep_merge(base, {"a": 1})
         assert base == {"a": 1}
+
+
+class TestAmbiguousScalarQuoting:
+    def test_yaml11_ambiguous_strings_are_quoted_on_dump(self):
+        # P2.9: off/on/yes/no/true/false must round-trip as strings through a
+        # YAML-1.1 consumer (PyYAML safe_load), so they are quoted on dump.
+        import yaml as pyyaml
+
+        from dfe_engine.yaml_utils import yaml_dump_string
+
+        out = yaml_dump_string({"a": "off", "b": "yes", "c": "no", "d": "on", "e": "plain"})
+        back = pyyaml.safe_load(out)
+        assert back["a"] == "off"  # not coerced to False
+        assert back["b"] == "yes"
+        assert back["c"] == "no"
+        assert back["d"] == "on"
+        assert back["e"] == "plain"  # non-ambiguous scalar left unquoted
 
 
 class TestYamlDumpAtomic:

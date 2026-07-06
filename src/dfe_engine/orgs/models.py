@@ -33,6 +33,10 @@ class Org(BaseModel):
         enabled: Whether this org is active.
         hyperdx_team_id: HyperDX team ID for this org's connection sync.
         hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
+        hyperdx_connection_id: HyperDX ClickHouse-connection ID for this org's
+            per-org tenant connection. Under the GA posture every org shares ONE
+            team but has its OWN connection - this id lets delete_org drop just
+            that connection without touching the shared team.
         ch_password_env: Environment variable name holding the ClickHouse password.
         created_at: ISO 8601 timestamp of creation.
         updated_at: ISO 8601 timestamp of last update.
@@ -45,6 +49,7 @@ class Org(BaseModel):
     enabled: bool = True
     hyperdx_team_id: str = ""
     hyperdx_team_api_key_env: str = ""
+    hyperdx_connection_id: str = ""
     ch_password_env: str = ""
     created_at: str = ""
     updated_at: str = ""

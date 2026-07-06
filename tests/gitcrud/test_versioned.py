@@ -118,6 +118,25 @@ def test_versioned_doc_refuses_unversioned_class(tmp_path):
         vdoc.get_published("helmvars", "receiver")
 
 
+def test_versioned_governance_class_commits_as_rbac(tmp_path):
+    # P3.6: a versioned governance class (rbac_prefix='governance', no _CLASS_TYPE
+    # entry) must commit as the 'rbac' type - matching a plain put on the same
+    # class - not default to 'cfg', which would split its audit stream in two.
+    from dfe_engine.gitcrud.log import read_log
+
+    repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
+    reg = ResourceClassRegistry(
+        [ResourceClass("ch_tiers", "ch_tiers", rbac_prefix="governance", versioned=True)]
+    )
+    vdoc = VersionedDoc(GitCrud(repo, reg))
+    vdoc.save_draft("ch_tiers", "analyst", {"max_rows": 1}, actor="op")
+    vdoc.publish("ch_tiers", "analyst", actor="op")
+
+    entries, _ = read_log(vdoc._crud, limit=10)
+    assert entries, "expected commits in the log"
+    assert all(e.ctype == "rbac" for e in entries), [e.ctype for e in entries]
+
+
 def test_each_op_is_a_commit(vc):
     # head_revision() is git's own commit id (we only read it); each op advances it
     vc.save_draft("rules", "r", {"sql": "a"}, actor="x")

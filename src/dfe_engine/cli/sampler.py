@@ -49,7 +49,9 @@ def sample_get(
     source: str = typer.Argument(
         "", help="Registered source name (or use --table/--topic for ad-hoc)."
     ),
-    mode: SampleMode = typer.Option(SampleMode.SMART, help="recent|random|smart|anomaly."),
+    mode: SampleMode | None = typer.Option(
+        None, help="recent|random|smart|anomaly (default: sampler.default_mode)."
+    ),
     backend: SampleBackend = typer.Option(SampleBackend.CLICKHOUSE, help="clickhouse|kafka."),
     limit: int = typer.Option(0, "--limit", "-n", help="Rows to return (0 = config default)."),
     table: str = typer.Option("", help="Explicit ClickHouse table (ad-hoc)."),
@@ -63,7 +65,9 @@ def sample_get(
     """Pull a sample from SOURCE (or an explicit --table/--topic)."""
     settings = load_settings()
     req = SampleRequest(
-        mode=mode,
+        # Fall back to the documented operator default (sampler.default_mode) when
+        # --mode is not given, instead of a hardcoded SMART.
+        mode=mode or SampleMode(settings.sampler.default_mode),
         backend=backend,
         limit=limit or None,
         source=source or None,

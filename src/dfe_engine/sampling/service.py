@@ -233,12 +233,11 @@ class Sampler:
         suffix = uuid.uuid4().hex[:8]
         if req.mode == SampleMode.RECENT:
             lines = kr.read_recent(conf, topic, limit=limit, group_suffix=suffix)
-            # A bounded tail read returns the NEWEST `limit` messages. With the
-            # per-partition shortfall now redistributed, we fill the window
-            # whenever the topic holds at least `limit` messages -- that is a
-            # complete recent sample, so truncated is False. truncated=True only
-            # signals we fell short (the topic genuinely has fewer than asked).
-            return lines, {"read": len(lines), "truncated": len(lines) < limit}, None
+            # truncated follows the ONE documented meaning (SampleResult.truncated:
+            # "more rows were available than returned"), same as the CH + kafka
+            # random paths: a full window (>= limit) means older messages were left
+            # unread, so more is available; a short read cut nothing (P3.12).
+            return lines, {"read": len(lines), "truncated": len(lines) >= limit}, None
         # RANDOM over Kafka: read a bounded window from the earliest offset, then
         # sample it. There is no server-side random on a topic, so this is a fair
         # sample of the window, not of all history - say so.

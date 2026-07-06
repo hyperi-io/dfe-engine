@@ -17,22 +17,24 @@ from dfe_engine.query.catalog import parse_view_parameters, view_name_to_label
 from dfe_engine.query.ddl import BUILTIN_VIEWS_DIR, DDLManager
 
 _OVERVIEW = sorted(BUILTIN_VIEWS_DIR.glob("dfe_v_overview_*.sql"))
+# alerts + hunt_executions + hunt_cost_leaderboard are PARKED: their source tables
+# (dfe_audit.alert_state, dfe_audit.detection_checkpoint) have no writer on this
+# branch, and reading system.query_log instead is not ClickHouse-Cloud-portable
+# (node-local + needs a cross-tenant-leaky grant). They return once a tenant-owned
+# writer table lands. See FABLE-OUTBOX P2.1/P2.2/P2.10.
 _EXPECTED = {
     "overview/ingest_rows_bytes",
     "overview/ingest_by_source",
     "overview/pipeline_lag",
-    "overview/hunt_executions",
-    "overview/hunt_cost_leaderboard",
     "overview/detections",
-    "overview/alerts",
     "overview/storage_growth",
     "overview/active_sources",
     "overview/hunt_fleet_health",
 }
 
 
-def test_ten_overview_views_present():
-    assert len(_OVERVIEW) == 10
+def test_seven_overview_views_present():
+    assert len(_OVERVIEW) == 7
     labels = {view_name_to_label(f.stem) for f in _OVERVIEW}
     assert labels == _EXPECTED
 
@@ -56,7 +58,6 @@ def test_time_windowed_views_expose_bucket_and_range():
         "dfe_v_overview_ingest_rows_bytes",
         "dfe_v_overview_ingest_by_source",
         "dfe_v_overview_pipeline_lag",
-        "dfe_v_overview_hunt_executions",
         "dfe_v_overview_detections",
     }
     by_stem = {f.stem: f for f in _OVERVIEW}

@@ -39,17 +39,6 @@ _VERSIONS = "versions"
 _SPEC = "spec"
 
 
-def _versioned_message(cls: str, name: str, actor: str, summary: str) -> str:
-    """Conforming commit message for a versioned write (type mapped from cls).
-
-    Routes through build_message so the subject uses an ALLOWED type (not the raw
-    class name) and carries the DFE-Actor trailer - read_log then reads it as
-    conforming + attributed instead of falling back to 'dfe-engine'.
-    """
-    ctx = CommitContext(ctype=type_for_class(cls), scope=name, summary=summary, actor=actor)
-    return build_message(ctx)
-
-
 class VersionConflictError(Exception):
     """Raised on an attempt to overwrite an existing published version."""
 
@@ -59,6 +48,20 @@ class VersionedDoc:
 
     def __init__(self, crud: GitCrud) -> None:
         self._crud = crud
+
+    def _message(self, cls: str, name: str, actor: str, summary: str) -> str:
+        """Conforming commit message for a versioned write.
+
+        Resolves the commit TYPE from the class's ``rbac_prefix`` (mirroring
+        GitCrud._default_message), NOT the raw class name - otherwise a governance
+        class (ch_tiers, ch_service_roles) with no _CLASS_TYPE entry defaults to
+        'cfg' while a plain put on the same class commits as 'rbac', splitting one
+        activity stream across two log buckets and misclassifying the audit type
+        (P3.6). Routes through build_message for the DFE-Actor trailer + budget.
+        """
+        rc = self._crud.resource_class(cls)
+        ctype = type_for_class(rc.rbac_prefix or rc.name) if rc is not None else type_for_class(cls)
+        return build_message(CommitContext(ctype=ctype, scope=name, summary=summary, actor=actor))
 
     def _require_versioned(self, cls: str) -> None:
         """Enforce the opt-in: refuse a class that did not set ``versioned=True``.
@@ -164,7 +167,7 @@ class VersionedDoc:
         }
         env["draft"] = doc
         env["status"] = "draft"
-        return self._save(cls, name, env, actor, _versioned_message(cls, name, actor, "draft"))
+        return self._save(cls, name, env, actor, self._message(cls, name, actor, "draft"))
 
     def publish(self, cls: str, name: str, actor: str, message: str = "") -> int:
         """Freeze the draft as the next immutable version; return its number."""
@@ -180,9 +183,7 @@ class VersionedDoc:
         env["current"] = new_ver
         env["draft"] = None
         env["status"] = "published"
-        self._save(
-            cls, name, env, actor, _versioned_message(cls, name, actor, f"publish v{new_ver}")
-        )
+        self._save(cls, name, env, actor, self._message(cls, name, actor, f"publish v{new_ver}"))
         return new_ver
 
     def rollback(self, cls: str, name: str, version: int, actor: str) -> None:
@@ -195,7 +196,7 @@ class VersionedDoc:
         env["current"] = int(version)
         env["status"] = "published"
         self._save(
-            cls, name, env, actor, _versioned_message(cls, name, actor, f"rollback to v{version}")
+            cls, name, env, actor, self._message(cls, name, actor, f"rollback to v{version}")
         )
 
     def set_deployed(self, cls: str, name: str, version: int, actor: str) -> None:
@@ -205,5 +206,5 @@ class VersionedDoc:
             raise ResourceNotFoundError(f"{cls}/{name}")
         env["deployed"] = int(version)
         self._save(
-            cls, name, env, actor, _versioned_message(cls, name, actor, f"mark deployed v{version}")
+            cls, name, env, actor, self._message(cls, name, actor, f"mark deployed v{version}")
         )

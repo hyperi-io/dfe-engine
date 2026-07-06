@@ -237,8 +237,15 @@ class SigmaSourceMapper:
         """Find sources matching a Sigma logsource specification.
 
         Maps Sigma logsource fields to Source taxonomy:
-        - product → source.sigma.taxonomy
-        - category/service → matched by convention
+        - product  -> source.sigma.taxonomy
+        - category -> source.sigma.category (None on the source = matches any)
+        - service  -> source.sigma.service  (None on the source = matches any)
+
+        A source is bound only when the product matches AND every logsource facet
+        the source DECLARES also matches - so two same-product sources (e.g.
+        windows_audit vs windows_sysmon) no longer both receive a sysmon-only rule
+        (P2.17). A source with no declared category/service keeps product-only
+        behaviour.
 
         Args:
             product: Sigma product (e.g. 'windows', 'linux').
@@ -250,12 +257,16 @@ class SigmaSourceMapper:
         """
         matches: list[Source] = []
         for source in self._source_registry.get_all_sources(enabled_only=True):
-            if not source.sigma:
+            sig = source.sigma
+            if not sig or not (product and sig.taxonomy):
                 continue
-
-            # Match by taxonomy (product)
-            if product and source.sigma.taxonomy:
-                if source.sigma.taxonomy.lower() == product.lower():
-                    matches.append(source)
+            if sig.taxonomy.lower() != product.lower():
+                continue
+            # Narrow by any facet the source declares; a None facet matches any.
+            if category and sig.category and sig.category.lower() != category.lower():
+                continue
+            if service and sig.service and sig.service.lower() != service.lower():
+                continue
+            matches.append(source)
 
         return matches

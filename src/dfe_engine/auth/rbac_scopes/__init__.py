@@ -44,6 +44,18 @@ scopes_dict = {
     "cel_check": "cel:check",
     # dashboard - not used in API but required for UI & HyperDX
     "dashboard_read": "dashboard:read",
+    # governance (governed-ops: gitops auto-merge + Tier-2 actions/policies). Was
+    # enforced by the branch-new routers but absent from this catalogue, so a role
+    # editor could not offer the actions the API ships with (P2.13).
+    "governance_read": "governance:read",
+    "governance_write": "governance:write",
+    "governance_override": "governance:override",
+    # helm vars (helmvars CRUD via /helm/files, distinct from helm:compile/build)
+    "helmvars_read": "helmvars:read",
+    "helmvars_write": "helmvars:write",
+    "helmvars_override": "helmvars:override",
+    # lifecycle (service start/stop/scale via gitops)
+    "lifecycle_read": "lifecycle:read",
     # deployment
     "deployment_read": "deployment:read",
     "deployment_write": "deployment:write",
