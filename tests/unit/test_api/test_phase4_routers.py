@@ -384,10 +384,55 @@ class TestSchemasRouter:
 class TestSchemasMetaListRouter:
     """GET /api/v1/schemas — meta-schema registry listing."""
 
-    def test_list_meta_not_configured_returns_503(self, client, admin_headers):
+    def test_list_meta_empty_registry_returns_200(self, client, admin_headers):
         resp = client.get("/api/v1/schemas", headers=admin_headers)
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "not_configured"
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["total"] == 0
+        assert body["items"] == []
+
+    def test_list_meta_not_configured_returns_503(self, tmp_path):
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries, create_access_token
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+        )
+
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        services_dir = tmp_path / "services"
+        services_dir.mkdir()
+        auth_dir = tmp_path / "auth"
+        auth_dir.mkdir()
+
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=""),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(services_dir)),
+            auth=AuthSettings(enabled=True, auth_dir=str(auth_dir)),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-schemas"),
+        )
+        app = create_app(settings)
+
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                resp = tc.get("/api/v1/schemas", headers=headers)
+            assert resp.status_code == 503
+            assert resp.json()["code"] == "not_configured"
+        finally:
+            _registries.clear()
 
     def test_list_meta_requires_auth(self, client):
         resp = client.get("/api/v1/schemas")
@@ -687,13 +732,13 @@ class TestSchemasMetaListRouter:
         resp = client.get("/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1")
         assert resp.status_code == 401
 
-    def test_get_meta_not_configured_returns_503(self, client, admin_headers):
+    def test_get_meta_missing_schema_returns_404(self, client, admin_headers):
         resp = client.get(
             "/api/v1/schemas/definitions/aws/cloudtrail/versions/columns?version=1",
             headers=admin_headers,
         )
-        assert resp.status_code == 503
-        assert resp.json()["code"] == "not_configured"
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "not_found"
 
 
 class TestSchemasMetaWriteRouter:
