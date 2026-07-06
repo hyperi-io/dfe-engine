@@ -265,6 +265,7 @@ class TestGetSourceVersion:
         assert body["selected"] == "1.0.0"
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
+        assert body["previous_deployed_versions"] == []
         assert body["version"]["schema"]["engine"] == "MergeTree"
         assert body["version"]["source_build"] is None
         assert body["version"]["source_deployment"] is None

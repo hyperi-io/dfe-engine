@@ -6,12 +6,15 @@ from pathlib import Path
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.source.deployment import (
+    SourceDeployDocument,
     SourceDeploymentStore,
+    SourceDeployVersionRecord,
     SourcePlanArtifact,
     artifact_from_build,
     deploy_statements_for_build,
     plan_from_build,
     plan_ready_status,
+    previous_deployed_version_ids,
     qualify_ddl_statements,
 )
 from dfe_engine.source.models import SchemaColumn, Source
@@ -89,6 +92,36 @@ class TestSourceDeploymentStore:
         assert store.delete_build("syslog", "2.0.0", source=source) is True
         assert store.load_build("syslog", "2.0.0") is None
         assert not (tmp_path / "builds" / "syslog.yaml").is_file()
+
+    def test_previous_deployed_version_ids_excludes_live(self):
+        source = Source.model_validate(
+            {
+                "source": "x",
+                "match": {"field": "f", "value": "v"},
+                "deployed_version": "2.0.0",
+                "current": "3.0.0",
+                "versions": {
+                    "1.0.0": {"date_time": "2026-01-01"},
+                    "2.0.0": {"date_time": "2026-01-02"},
+                    "3.0.0": {"date_time": "2026-01-03"},
+                },
+            }
+        )
+        doc = SourceDeployDocument(
+            source="x",
+            deployed_version="2.0.0",
+            versions={
+                "1.0.0": SourceDeployVersionRecord(
+                    deployed_at="2026-01-01T00:00:00+00:00",
+                    success=True,
+                ),
+                "2.0.0": SourceDeployVersionRecord(
+                    deployed_at="2026-01-02T00:00:00+00:00",
+                    success=True,
+                ),
+            },
+        )
+        assert previous_deployed_version_ids(source, doc) == ["1.0.0"]
 
     def test_migrates_legacy_per_version_files(self, tmp_path: Path):
         store = SourceDeploymentStore(

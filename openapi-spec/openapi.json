@@ -13424,7 +13424,7 @@
           "selected": {
             "type": "string",
             "title": "Selected",
-            "description": "Version id requested via query parameter"
+            "description": "Version id requested in the URL path"
           },
           "versions": {
             "items": {
@@ -13433,6 +13433,14 @@
             "type": "array",
             "title": "Versions",
             "description": "All version ids defined on this source"
+          },
+          "previous_deployed_versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Previous Deployed Versions",
+            "description": "Version ids with a successful deploy in source-deploys history, excluding the live deployed_version"
           },
           "version": {
             "$ref": "#/components/schemas/SourceVersionDetail",

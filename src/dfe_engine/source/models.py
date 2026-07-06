@@ -736,8 +736,15 @@ class SourceVersionGetResponse(BaseModel):
         default=None,
         description="Version deployed to ClickHouse / runtime (null until first deploy)",
     )
-    selected: str = Field(..., description="Version id requested via query parameter")
+    selected: str = Field(..., description="Version id requested in the URL path")
     versions: list[str] = Field(..., description="All version ids defined on this source")
+    previous_deployed_versions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Version ids with a successful deploy in source-deploys history, "
+            "excluding the live deployed_version"
+        ),
+    )
     version: SourceVersion = Field(
         ..., description="Immutable configuration snapshot for ``selected``"
     )

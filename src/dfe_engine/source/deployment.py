@@ -83,6 +83,33 @@ class SourceDeployDocument(BaseModel):
     versions: dict[str, SourceDeployVersionRecord] = Field(default_factory=dict)
 
 
+def _semver_sort_key(version_id: str) -> tuple[int, int, int]:
+    parts = str(version_id).split(".")
+    if len(parts) != 3 or not all(p.isdigit() for p in parts):
+        return (0, 0, 0)
+    return (int(parts[0]), int(parts[1]), int(parts[2]))
+
+
+def previous_deployed_version_ids(
+    source: Source,
+    deploy_doc: SourceDeployDocument | None,
+) -> list[str]:
+    """Successful deploy history for this source, excluding the live ``deployed_version``."""
+    if deploy_doc is None:
+        return []
+    live = source.deployed_version
+    ids: list[str] = []
+    for version_id, record in deploy_doc.versions.items():
+        if not record.success:
+            continue
+        if live is not None and version_id == live:
+            continue
+        if version_id not in source.versions:
+            continue
+        ids.append(version_id)
+    return sorted(ids, key=_semver_sort_key)
+
+
 # Per-version views used by API helpers (flattened from documents).
 class SourceBuildArtifact(BaseModel):
     source_name: str
@@ -546,6 +573,14 @@ class SourceDeploymentStore:
         path = self._source_file(self.deploys_dir, source.source)
         yaml_dump(doc.model_dump(mode="json"), path)
         return path
+
+    def load_deploy_document(self, source_name: str) -> SourceDeployDocument | None:
+        return self._read_document(
+            self.deploys_dir,
+            source_name,
+            SourceDeployDocument,
+            track_deployed_version=True,
+        )
 
     def load_deploy(self, source_name: str, version: str) -> SourceDeployArtifact | None:
         doc = self._read_document(

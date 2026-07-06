@@ -38,6 +38,7 @@ from dfe_engine.source.deployment import (
     execute_ddl_statements,
     plan_from_build,
     plan_ready_status,
+    previous_deployed_version_ids,
 )
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
@@ -343,7 +344,9 @@ async def get_source_version(
         )
 
     store = SourceDeploymentStore.from_settings(get_settings())
+    deploy_doc = store.load_deploy_document(name)
     version_ids = sorted(source.versions.keys())
+    prev_deployed = previous_deployed_version_ids(source, deploy_doc)
     snap = source.versions[version]
     return SourceVersionGetDetailResponse(
         source=source.source,
@@ -354,6 +357,7 @@ async def get_source_version(
         deployed_version=source.deployed_version,
         selected=version,
         versions=version_ids,
+        previous_deployed_versions=prev_deployed,
         version=_version_detail_from_snapshot(source.source, version, snap, store),
     )
 
