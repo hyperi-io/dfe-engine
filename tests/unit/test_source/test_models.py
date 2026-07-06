@@ -719,6 +719,47 @@ class TestSourceWriteRequest:
         assert updated.versions["2.0.0"].schema_config.meta_schema == "meta/aws/guardduty"
         assert updated.deployed_version == "1.0.0"
 
+    def test_source_version_bump_required_transform(self):
+        base = {
+            "date_time": "2026-01-01",
+            "match": {"field": "f", "value": "v"},
+            "schema": {},
+            "transform": {"engine": "vector", "config_file": "/a.toml"},
+        }
+        prev = SourceVersion.model_validate(base)
+        updated = SourceVersion.model_validate(
+            {**base, "transform": {"engine": "vector", "config_file": "/b.toml"}}
+        )
+        assert source_version_bump_required(prev, updated) is True
+
+    def test_apply_write_update_bumps_transform_when_current_deployed(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {},
+                        "transform": {"engine": "vector", "config_file": "/a.toml"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "transform": {"engine": "vector", "config_file": "/b.toml"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert updated.versions["2.0.0"].transform is not None
+        assert updated.versions["2.0.0"].transform.config_file == "/b.toml"
+        assert updated.deployed_version == "1.0.0"
+
     def test_source_version_bump_required_sigma(self):
         base = {
             "date_time": "2026-01-01",

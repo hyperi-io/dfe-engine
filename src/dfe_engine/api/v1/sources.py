@@ -747,7 +747,7 @@ async def update_source(
     Before the first deploy, edits update the working version in place. After deploy, a new
     major version is created only when ``current`` equals ``deployed_version`` and schema pins
     (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
-    ``field_mappings``, or ``sigma`` change. Draft versions (``current`` not deployed) update
+    ``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update
     in place.
     """
     from dfe_engine.source.registry import SourceNotFoundError

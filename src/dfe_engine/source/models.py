@@ -460,7 +460,11 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
         return True
     prev_sigma = previous.sigma.model_dump(mode="json") if previous.sigma else None
     new_sigma = updated.sigma.model_dump(mode="json") if updated.sigma else None
-    return prev_sigma != new_sigma
+    if prev_sigma != new_sigma:
+        return True
+    prev_transform = previous.transform.model_dump(mode="json") if previous.transform else None
+    new_transform = updated.transform.model_dump(mode="json") if updated.transform else None
+    return prev_transform != new_transform
 
 
 def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
