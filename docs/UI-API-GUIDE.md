@@ -153,7 +153,7 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/sources` | List sources (paginated) |
 | POST | `/sources` | Create source |
 | GET | `/sources/{name}` | Get source details |
-| GET | `/sources/{name}/versions` | Get one version snapshot |
+| GET | `/sources/{name}/versions/{version}` | Get one version snapshot |
 | GET | `/sources/{name}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
 | POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 | POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`; not persisted) |

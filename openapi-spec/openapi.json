@@ -1981,14 +1981,14 @@
         ]
       }
     },
-    "/api/v1/sources/{name}/versions": {
+    "/api/v1/sources/{name}/versions/{version}": {
       "get": {
         "tags": [
           "Sources"
         ],
         "summary": "Get Source Version",
         "description": "Get one immutable source version snapshot by id, with build/deploy status.",
-        "operationId": "get_source_version_api_v1_sources__name__versions_get",
+        "operationId": "get_source_version_api_v1_sources__name__versions__version__get",
         "parameters": [
           {
             "name": "name",
@@ -2001,15 +2001,12 @@
           },
           {
             "name": "version",
-            "in": "query",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "description": "Source version id to return (required)",
               "title": "Version"
-            },
-            "description": "Source version id to return (required)"
+            }
           }
         ],
         "responses": {

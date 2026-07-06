@@ -3,7 +3,7 @@
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
 GET    /api/v1/sources/{name}           → Get source details
-GET    /api/v1/sources/{name}/versions  → Get one version snapshot
+GET    /api/v1/sources/{name}/versions/{version}  → Get one version snapshot
 GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
 POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (not persisted)
@@ -311,19 +311,15 @@ async def create_source(
 
 
 @router.get(
-    "/{name}/versions",
+    "/{name}/versions/{version}",
     response_model=SourceVersionGetDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source_version(
     name: str,
+    version: str,
     user: CurrentUser,
     registry: SourceReg,
-    version: str = Query(
-        ...,
-        min_length=1,
-        description="Source version id to return (required)",
-    ),
 ):
     """Get one immutable source version snapshot by id, with build/deploy status."""
     try:

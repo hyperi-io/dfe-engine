@@ -249,14 +249,14 @@ class TestGetSource:
 
 
 class TestGetSourceVersion:
-    """GET /api/v1/sources/{name}/versions?version="""
+    """GET /api/v1/sources/{name}/versions/{version}"""
 
     def test_get_version_after_create(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -279,7 +279,7 @@ class TestGetSourceVersion:
             headers=admin_headers,
         )
         v1 = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert v1.status_code == 200
@@ -306,7 +306,7 @@ class TestGetSourceVersion:
             headers=admin_headers,
         )
         v2 = client.get(
-            "/api/v1/sources/test_source/versions?version=2.0.0",
+            "/api/v1/sources/test_source/versions/2.0.0",
             headers=admin_headers,
         )
         assert v2.status_code == 200
@@ -318,24 +318,24 @@ class TestGetSourceVersion:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=9.9.9",
+            "/api/v1/sources/test_source/versions/9.9.9",
             headers=admin_headers,
         )
         assert resp.status_code == 404
 
     def test_get_version_source_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.get(
-            "/api/v1/sources/missing/versions?version=1.0.0",
+            "/api/v1/sources/missing/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 404
 
-    def test_get_version_query_required(
+    def test_get_version_path_requires_version_segment(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get("/api/v1/sources/test_source/versions", headers=admin_headers)
-        assert resp.status_code == 422
+        assert resp.status_code == 404
 
     def test_get_version_includes_top_level_metadata(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -347,7 +347,7 @@ class TestGetSourceVersion:
         }
         client.post("/api/v1/sources", json=body, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
