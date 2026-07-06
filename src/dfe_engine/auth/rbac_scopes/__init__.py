@@ -119,6 +119,10 @@ scopes_dict = {
     # sigma
     "sigma_read": "sigma:read",
     "sigma_write": "sigma:write",
+    # Registering/deleting a PROVIDER (git URL / local dir) is a higher-privilege,
+    # SSRF/path-reach-bearing action - admin-only, NOT the sigma:write a
+    # data_analyst holds for rule authoring (S1).
+    "sigma_admin": "sigma:admin",
     # source
     "source_read": "source:read",
     "source_write": "source:write",

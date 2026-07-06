@@ -285,74 +285,53 @@ class TestBuildHyperDXConnectionsJson:
 
         return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
 
-    def test_connection_uses_tenant_reader_and_org_tenant_setting(self, tmp_path):
+    def test_connection_uses_tenant_reader_and_org_tenant_setting(self):
         """Task A: an org connection authenticates as the SHARED dfe_tenant_reader and
         carries DFE_current_tenant_id = the org's comma-joined org_ids."""
         from types import SimpleNamespace
 
-        secrets = self._secrets(tmp_path)
-        secrets.put("ch/fixed/dfe_tenant_reader", "reader-pw")  # reconciler stores it here
-
         orgs = [SimpleNamespace(name="acme", org_ids=["acme", "globex"])]
-        result = json.loads(
-            build_hyperdx_connections_json(orgs, base=self._base(), secrets_store=secrets)
-        )
+        result = json.loads(build_hyperdx_connections_json(orgs, base=self._base()))
         assert len(result) == 1
         conn = result[0]
         assert conn["name"] == "acme"
         assert conn["user"] == "dfe_tenant_reader"  # shared fixed reader, NOT dfe_grp_*
-        assert conn["password"] == "reader-pw"  # sourced from ch/fixed/dfe_tenant_reader
+        # S3: the password is a PLACEHOLDER the deploy substitutes, never plaintext.
+        assert conn["password"] == "${DFE_TENANT_READER_PASSWORD}"
         assert conn["clickhouseSettings"] == {"DFE_current_tenant_id": "acme,globex"}
         assert conn["host"] == "ch"
         assert conn["port"] == 8123
         assert conn["database"] == "dfe"
 
-    def test_empty_org_ids_fails_closed_with_empty_setting(self, tmp_path):
+    def test_empty_org_ids_fails_closed_with_empty_setting(self):
         """An org with no org_ids -> empty tenant setting -> row policy yields 0 rows."""
         from types import SimpleNamespace
 
         orgs = [SimpleNamespace(name="acme", org_ids=[])]
-        result = json.loads(
-            build_hyperdx_connections_json(
-                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
-            )
-        )
+        result = json.loads(build_hyperdx_connections_json(orgs, base=self._base()))
         assert result[0]["clickhouseSettings"] == {"DFE_current_tenant_id": ""}
 
-    def test_disabled_org_skipped(self, tmp_path):
+    def test_disabled_org_skipped(self):
         from types import SimpleNamespace
 
         orgs = [
             SimpleNamespace(name="acme", org_ids=["acme"], enabled=True),
             SimpleNamespace(name="dormant", org_ids=["dormant"], enabled=False),
         ]
-        result = json.loads(
-            build_hyperdx_connections_json(
-                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
-            )
-        )
+        result = json.loads(build_hyperdx_connections_json(orgs, base=self._base()))
         assert [c["name"] for c in result] == ["acme"]
 
-    def test_missing_secret_yields_empty_password(self, tmp_path):
+    def test_password_is_never_plaintext_in_git(self):
+        """S3: no plaintext CH reader password is ever emitted - only the placeholder."""
         from types import SimpleNamespace
 
-        orgs = [SimpleNamespace(name="acme", org_ids=["acme"])]  # no secret seeded
-        result = json.loads(
-            build_hyperdx_connections_json(
-                orgs, base=self._base(), secrets_store=self._secrets(tmp_path)
-            )
-        )
-        assert len(result) == 1
-        assert result[0]["user"] == "dfe_tenant_reader"
-        assert result[0]["password"] == ""  # non-fatal: password lands next publish
+        orgs = [SimpleNamespace(name="acme", org_ids=["acme"])]
+        raw = build_hyperdx_connections_json(orgs, base=self._base())
+        assert "${DFE_TENANT_READER_PASSWORD}" in raw
+        assert json.loads(raw)[0]["password"] == "${DFE_TENANT_READER_PASSWORD}"
 
-    def test_no_orgs_yields_empty_array(self, tmp_path):
-        assert (
-            build_hyperdx_connections_json(
-                [], base=self._base(), secrets_store=self._secrets(tmp_path)
-            )
-            == "[]"
-        )
+    def test_no_orgs_yields_empty_array(self):
+        assert build_hyperdx_connections_json([], base=self._base()) == "[]"
 
 
 # ---------------------------------------------------------------------------

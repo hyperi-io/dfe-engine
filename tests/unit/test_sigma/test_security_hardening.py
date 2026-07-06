@@ -52,3 +52,62 @@ class TestProviderUrlHardening:
             options={"url": "https://github.com/SigmaHQ/sigma"},
         )
         assert cfg.options["url"].startswith("https://")
+
+
+class TestProviderReachConfinement:
+    """S1: register/update confine a provider's file/host reach."""
+
+    def _request(self, tmp_path):
+        from types import SimpleNamespace
+
+        return SimpleNamespace(
+            app=SimpleNamespace(
+                state=SimpleNamespace(settings=SimpleNamespace(config_dir=str(tmp_path)))
+            )
+        )
+
+    def test_local_files_dir_escape_rejected(self, tmp_path):
+        import pytest
+        from fastapi import HTTPException
+
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+
+        cfg = ProviderConfig(
+            name="evil", kind=ProviderKind.LOCAL_FILES, options={"directory": "../../etc"}
+        )
+        with pytest.raises(HTTPException) as exc:
+            _validate_provider_reach(self._request(tmp_path), cfg)
+        assert exc.value.status_code == 422
+
+    def test_local_files_dir_under_config_ok(self, tmp_path):
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+
+        cfg = ProviderConfig(
+            name="ok", kind=ProviderKind.LOCAL_FILES, options={"directory": "sigma/rules"}
+        )
+        _validate_provider_reach(self._request(tmp_path), cfg)  # no raise
+
+    def test_git_host_allowlist_rejects_off_list(self, tmp_path, monkeypatch):
+        import pytest
+        from fastapi import HTTPException
+
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+
+        monkeypatch.setenv("DFE_SIGMA_ALLOWED_HOSTS", "github.com,gitlab.com")
+        cfg = ProviderConfig(
+            name="evil", kind=ProviderKind.GIT_REPO, options={"url": "https://evil.example/x"}
+        )
+        with pytest.raises(HTTPException) as exc:
+            _validate_provider_reach(self._request(tmp_path), cfg)
+        assert exc.value.status_code == 422
+
+    def test_git_host_on_allowlist_ok(self, tmp_path, monkeypatch):
+        from dfe_engine.api.v1.sigma import _validate_provider_reach
+
+        monkeypatch.setenv("DFE_SIGMA_ALLOWED_HOSTS", "github.com")
+        cfg = ProviderConfig(
+            name="ok",
+            kind=ProviderKind.GIT_REPO,
+            options={"url": "https://github.com/SigmaHQ/sigma"},
+        )
+        _validate_provider_reach(self._request(tmp_path), cfg)  # no raise

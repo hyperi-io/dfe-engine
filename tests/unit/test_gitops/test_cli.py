@@ -54,17 +54,12 @@ def test_assemble_artifacts_includes_ch_rbac_ddl_and_hyperdx_connections(tmp_pat
     from dfe_engine.helm.models import CompilationResult
     from dfe_engine.hyperdx.client import HYPERDX_CONNECTIONS_PATH
     from dfe_engine.orgs.registry import OrgRegistry
-    from dfe_engine.secrets import build_secrets
     from dfe_engine.settings import AuthSettings, DFESettings, SecretsSettings
 
     config_dir = tmp_path / "config"
     OrgRegistry(config_dir / "orgs").create("acme", org_ids=["acme", "acme-sub"])
 
     secrets_dir = tmp_path / "secrets"
-    build_secrets(SecretsSettings(provider="file", path=str(secrets_dir))).put(
-        "ch/fixed/dfe_tenant_reader", "reader-pw"
-    )
-
     settings = DFESettings(
         config_dir=str(config_dir),
         secrets=SecretsSettings(provider="file", path=str(secrets_dir)),
@@ -85,5 +80,6 @@ def test_assemble_artifacts_includes_ch_rbac_ddl_and_hyperdx_connections(tmp_pat
     assert len(conns) == 1
     assert conns[0]["name"] == "acme"
     assert conns[0]["user"] == "dfe_tenant_reader"
-    assert conns[0]["password"] == "reader-pw"
+    # S3: the password is a placeholder the deploy substitutes, never plaintext-in-git.
+    assert conns[0]["password"] == "${DFE_TENANT_READER_PASSWORD}"
     assert conns[0]["clickhouseSettings"] == {"DFE_current_tenant_id": "acme,acme-sub"}

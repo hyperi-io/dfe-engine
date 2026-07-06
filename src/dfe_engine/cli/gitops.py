@@ -167,7 +167,6 @@ def _render_hyperdx_connections(settings: DFESettings) -> str | None:
         from dfe_engine.connections.config import ConnectionConfigLoader
         from dfe_engine.hyperdx.client import build_hyperdx_connections_json
         from dfe_engine.orgs.registry import OrgRegistry
-        from dfe_engine.secrets import build_secrets
 
         config_dir = settings.config_dir or os.environ.get("DFE_CONFIG_DIR", "")
         base_dir = Path(config_dir) if config_dir else Path("config")
@@ -183,8 +182,9 @@ def _render_hyperdx_connections(settings: DFESettings) -> str | None:
             return None
 
         orgs = OrgRegistry(base_dir / "orgs").list()
-        secrets_store = build_secrets(settings.secrets)
-        return build_hyperdx_connections_json(orgs, base=base, secrets_store=secrets_store)
+        # No secret read: the reader password is emitted as a placeholder the
+        # deploy substitutes, so plaintext never lands in git (S3).
+        return build_hyperdx_connections_json(orgs, base=base)
     except Exception as exc:  # HyperDX connections are optional in the artifact set
         print_warning(f"Skipping HyperDX connections render: {exc}")
         return None

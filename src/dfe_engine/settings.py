@@ -30,16 +30,9 @@ ClickHouse:
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 
 Hunts:
-- DFE_HUNT_LOG_PATH -> hunts.log_path
 - DFE_HUNTS_DIR -> hunts.hunt_dir
 - DFE_HUNTS_RULE_REPO_DIR -> hunts.rule_repo_dir
 - DFE_HUNTS_RULES_DIR -> hunts.rules_dir
-- DFE_HUNTS_NUM_THREADS -> hunts.num_threads
-- DFE_HUNTS_CHECKPOINT_DESTINATION -> hunts.checkpoint_destination
-- DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD -> hunts.checkpoint_timestamp_field
-- DFE_HUNTS_CHECKPOINT_PATH -> hunts.checkpoint_path
-- DFE_HUNTS_CRON_TASK_TIMEOUT -> hunts.cron_task_timeout
-- DFE_HUNTS_JITTER_SECONDS -> hunts.jitter_seconds
 
 Artifactory:
 - DFE_ARTIFACTORY_URL -> artifactory.url
@@ -138,86 +131,23 @@ class ClickHouseSettings(BaseModel):
 
 
 class HuntsSettings(BaseModel):
-    """Hunt scheduler settings."""
+    """Hunt directory settings.
 
-    log_path: str = Field(default="hunt_log_path")
-    checkpoint_path: str = Field(default="")
-    cron_task_timeout: int = Field(
-        default=300, description="Scheduler timeout in seconds (-1 = no timeout)"
-    )
+    Only the directory pointers are consumed (the hunt_runner reads hunt_dir; the
+    API registries read rules_dir + alert_destinations_dir). The former scheduler /
+    checkpoint / inline-alert fields were removed with the legacy hunt modules
+    (alert/alert_grouping/checkpoint/scheduler) - they had no reader (P3.16).
+    """
+
     hunt_dir: str = Field(default="", description="Directory containing hunt YAML configs")
     rule_repo_dir: str = Field(default="", description="Directory containing Jinja2 rule templates")
     rules_dir: str = Field(
         default="",
         description="YAML directory for API-managed detection rules (DirectoryConfigStore SSoT)",
     )
-    num_threads: int = Field(default=1, description="Number of concurrent hunt threads")
-    checkpoint_destination: str = Field(
-        default="clickhouse", description="Checkpoint storage: 'clickhouse' or 'file'"
-    )
-    checkpoint_timestamp_field: str = Field(
-        default="timestamp_load", description="Timestamp field for checkpointing"
-    )
-    jitter_seconds: int = Field(
-        default=15, description="Max random jitter in seconds for sub-minute stagger"
-    )
-    scheduling_mode: str = Field(
-        default="adaptive",
-        description="'adaptive' (REFRESH AFTER backpressure) or 'cron' (rigid, deprecated)",
-    )
-    min_interval_seconds: int = Field(
-        default=0,
-        description=(
-            "Min seconds between completion and next start"
-            " (adaptive mode). 0 = derive from cron frequency"
-        ),
-    )
-    explain_queries: bool = Field(
-        default=False,
-        description="Run EXPLAIN PLAN before each hunt query and log the plan",
-    )
-    max_concurrent_queries: int = Field(
-        default=0,
-        description="Max concurrent hunt queries across all schedulers (0 = unlimited)",
-    )
-    resource_limit_read_rows: int = Field(
-        default=0, description="Warn when a hunt reads more than this many rows (0 = no limit)"
-    )
-    resource_limit_read_bytes: int = Field(
-        default=0, description="Warn when a hunt reads more bytes than this (0 = no limit)"
-    )
-    resource_limit_memory_bytes: int = Field(
-        default=0, description="Warn when a hunt uses more memory than this (0 = no limit)"
-    )
-    resource_limit_execution_ms: int = Field(
-        default=0, description="Warn when a hunt takes longer than this in ms (0 = no limit)"
-    )
-    alert_channels: list[str] = Field(
-        default_factory=list,
-        description="Global Apprise notification URLs applied to all hunts (e.g. slack://token/#channel)",
-    )
-    alert_destinations: dict[str, str] = Field(
-        default_factory=dict,
-        description=(
-            "Named alert destinations: {name: apprise_url}."
-            " Inline bootstrap; prefer alert_destinations_dir."
-        ),
-    )
     alert_destinations_dir: str = Field(
         default="",
         description="YAML directory for alert destination definitions (DirectoryConfigStore SSoT)",
-    )
-    default_alert_cooldown: str = Field(
-        default="1h",
-        description="Default alert cooldown window for grouped alerts",
-    )
-    default_max_alerts_per_run: int = Field(
-        default=0,
-        description="Default max alerts per execution (0 = unlimited)",
-    )
-    default_max_sample_events: int = Field(
-        default=10,
-        description="Default max _json samples in grouped alert body",
     )
 
 
@@ -456,28 +386,18 @@ class FieldMapSettings(BaseModel):
 class ServicesSettings(BaseModel):
     """Endpoints for managed DFE services.
 
-    Used by ServiceStateClient to query health and metrics from running services.
+    Only the transform-WASM endpoints + the config replica dir are consumed. The
+    per-service *_url health/metrics endpoints were removed with ServiceStateClient
+    (services/state.py, deleted) - they had no reader (P3.17).
 
     Environment variables:
-    - DFE_SERVICES_RECEIVER_URL -> services.receiver_url
-    - DFE_SERVICES_RECEIVER_METRICS_URL -> services.receiver_metrics_url
-    - DFE_SERVICES_LOADER_URL -> services.loader_url
-    - DFE_SERVICES_ARCHIVER_METRICS_URL -> services.archiver_metrics_url
-    - DFE_SERVICES_TRANSFORM_VECTOR_URL -> services.transform_vector_url
     - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
-    - DFE_SERVICES_FETCHER_URL -> services.fetcher_url
-    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     - DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
+    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     """
 
-    receiver_url: str = Field(default="http://localhost:8080")
-    receiver_metrics_url: str = Field(default="http://localhost:9090")
-    loader_url: str = Field(default="http://localhost:9090")
-    archiver_metrics_url: str = Field(default="http://localhost:9090")
-    transform_vector_url: str = Field(default="http://localhost:8080")
     transform_wasm_url: str = Field(default="http://localhost:8080")
     transform_wasm_compiler_url: str = Field(default="http://localhost:8090")
-    fetcher_url: str = Field(default="http://localhost:8080")
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
     )
@@ -844,66 +764,14 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
         overrides["clickhouse"]["topology"] = val
 
-    # Hunts settings
-    if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
-        overrides["hunts"]["log_path"] = val
+    # Hunts settings (only the directory pointers remain; the scheduler/checkpoint/
+    # inline-alert settings were removed with the legacy hunt modules - P3.16).
     if val := _get_env("DFE_HUNTS_DIR"):
         overrides["hunts"]["hunt_dir"] = val
     if val := _get_env("DFE_HUNTS_RULE_REPO_DIR"):
         overrides["hunts"]["rule_repo_dir"] = val
     if val := _get_env("DFE_HUNTS_RULES_DIR"):
         overrides["hunts"]["rules_dir"] = val
-    if val := _get_env("DFE_HUNTS_NUM_THREADS"):
-        overrides["hunts"]["num_threads"] = int(val)
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_DESTINATION"):
-        overrides["hunts"]["checkpoint_destination"] = val
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_TIMESTAMP_FIELD"):
-        overrides["hunts"]["checkpoint_timestamp_field"] = val
-    if val := _get_env("DFE_HUNTS_CHECKPOINT_PATH"):
-        overrides["hunts"]["checkpoint_path"] = val
-    if val := _get_env("DFE_HUNTS_CRON_TASK_TIMEOUT"):
-        overrides["hunts"]["cron_task_timeout"] = int(val)
-    if val := _get_env("DFE_HUNTS_JITTER_SECONDS"):
-        overrides["hunts"]["jitter_seconds"] = int(val)
-    if val := _get_env("DFE_HUNTS_SCHEDULING_MODE"):
-        overrides["hunts"]["scheduling_mode"] = val
-    if val := _get_env("DFE_HUNTS_MIN_INTERVAL_SECONDS"):
-        overrides["hunts"]["min_interval_seconds"] = int(val)
-    if val := _get_env("DFE_HUNTS_EXPLAIN_QUERIES"):
-        overrides["hunts"]["explain_queries"] = val.lower() in ("true", "1", "yes")
-    if val := _get_env("DFE_HUNTS_MAX_CONCURRENT_QUERIES"):
-        overrides["hunts"]["max_concurrent_queries"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_ROWS"):
-        overrides["hunts"]["resource_limit_read_rows"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_READ_BYTES"):
-        overrides["hunts"]["resource_limit_read_bytes"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_MEMORY_BYTES"):
-        overrides["hunts"]["resource_limit_memory_bytes"] = int(val)
-    if val := _get_env("DFE_HUNTS_RESOURCE_LIMIT_EXECUTION_MS"):
-        overrides["hunts"]["resource_limit_execution_ms"] = int(val)
-    if val := _get_env("DFE_HUNTS_ALERT_CHANNELS"):
-        overrides["hunts"]["alert_channels"] = [u.strip() for u in val.split(",") if u.strip()]
-    if val := _get_env("DFE_HUNTS_ALERT_DESTINATIONS"):
-        # JSON format: {"slack-dfe-alerts": "slack://T.../B.../x.../"}
-        import json
-
-        try:
-            overrides["hunts"]["alert_destinations"] = json.loads(val)
-        except json.JSONDecodeError as exc:
-            # Do not swallow silently: a typo'd destinations var otherwise
-            # disappears with no alert routing and no clue why. Name the var.
-            from scalo.logger import logger
-
-            logger.warning(
-                "DFE_HUNTS_ALERT_DESTINATIONS is not valid JSON; ignoring it",
-                error=str(exc),
-            )
-    if val := _get_env("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN"):
-        overrides["hunts"]["default_alert_cooldown"] = val
-    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN"):
-        overrides["hunts"]["default_max_alerts_per_run"] = int(val)
-    if val := _get_env("DFE_HUNTS_DEFAULT_MAX_SAMPLE_EVENTS"):
-        overrides["hunts"]["default_max_sample_events"] = int(val)
 
     # Artifactory settings
     if val := _get_env("DFE_ARTIFACTORY_URL", "ARTIFACTORY_VECTOR_TEMPLATES"):
@@ -989,23 +857,12 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_FIELDMAPS_DIR"):
         overrides["fieldmap"]["fieldmaps_dir"] = val
 
-    # Services settings
-    if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
-        overrides["services"]["receiver_url"] = val
-    if val := _get_env("DFE_SERVICES_RECEIVER_METRICS_URL"):
-        overrides["services"]["receiver_metrics_url"] = val
-    if val := _get_env("DFE_SERVICES_LOADER_URL"):
-        overrides["services"]["loader_url"] = val
-    if val := _get_env("DFE_SERVICES_ARCHIVER_METRICS_URL"):
-        overrides["services"]["archiver_metrics_url"] = val
-    if val := _get_env("DFE_SERVICES_TRANSFORM_VECTOR_URL"):
-        overrides["services"]["transform_vector_url"] = val
+    # Services settings (the per-service health/metrics *_url vars were removed
+    # with ServiceStateClient - P3.17; only the transform-WASM + config dir remain).
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
         overrides["services"]["transform_wasm_url"] = val
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
         overrides["services"]["transform_wasm_compiler_url"] = val
-    if val := _get_env("DFE_SERVICES_FETCHER_URL"):
-        overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
 

@@ -293,11 +293,6 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.auth.auth_dir == str(tmp_path / "auth")
 
-    def test_hunt_log_path_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNT_LOG_PATH", "/var/log/hunts")
-        settings = load_settings()
-        assert settings.hunts.log_path == "/var/log/hunts"
-
     def test_legacy_clickhouse_host_fallback(self, monkeypatch):
         """Legacy env var (no DFE_ prefix) should also work."""
         monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
@@ -379,11 +374,6 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.fieldmap.fieldmaps_dir == "/custom/fieldmaps"
 
-    def test_alert_channels_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_ALERT_CHANNELS", "email,slack")
-        settings = load_settings()
-        assert "email" in settings.hunts.alert_channels
-
     def test_deployment_config_dir_override(self, monkeypatch):
         monkeypatch.setenv("DFE_DEPLOYMENT_CONFIG_DIR", "/custom/deploy")
         settings = load_settings()
@@ -399,25 +389,10 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.source.sources_dir == "/custom/sources"
 
-    def test_hunt_default_cooldown_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DEFAULT_ALERT_COOLDOWN", "600")
-        settings = load_settings()
-        assert settings.hunts.default_alert_cooldown == "600"
-
-    def test_hunt_max_alerts_per_run_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_DEFAULT_MAX_ALERTS_PER_RUN", "50")
-        settings = load_settings()
-        assert settings.hunts.default_max_alerts_per_run == 50
-
     def test_hyperdx_api_key_env_override(self, monkeypatch):
         monkeypatch.setenv("DFE_HYPERDX_API_KEY_ENV", "MY_KEY_VAR")
         settings = load_settings()
         assert settings.hyperdx.api_key_env == "MY_KEY_VAR"
-
-    def test_hunt_alert_destinations_json_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS", '{"email": "alert@test.com"}')
-        settings = load_settings()
-        assert settings.hunts.alert_destinations == {"email": "alert@test.com"}
 
     def test_multiple_overrides_at_once(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_HOST", "ch1.example.com")
@@ -513,14 +488,3 @@ class TestEnvOverridePrecedence:
 
         settings = load_settings(str(cfg))
         assert settings.api.cors_origins == ["https://only-file.example"]
-
-
-class TestAlertDestinationsBadJson:
-    def test_bad_json_logs_warning_naming_var(self, monkeypatch):
-        cap = _CapLogger()
-        monkeypatch.setattr("scalo.logger.logger", cap, raising=False)
-        monkeypatch.setenv("DFE_HUNTS_ALERT_DESTINATIONS", "{not valid json")
-
-        load_settings()
-
-        assert any("ALERT_DESTINATIONS" in m for m, _ in cap.warnings)

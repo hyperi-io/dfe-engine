@@ -388,11 +388,16 @@ class HyperDXClient:
         }
 
 
+# The reader password is NEVER written into the deploy repo. We emit this
+# placeholder token and the HyperDX chart / deploy substitutes it from a k8s
+# Secret / env at render time, so plaintext creds never land in git (S3).
+TENANT_READER_PASSWORD_PLACEHOLDER = "${DFE_TENANT_READER_PASSWORD}"
+
+
 def build_hyperdx_connections_json(
     orgs: list[Any],
     *,
     base: ClickHouseConnection,
-    secrets_store: Any,
 ) -> str:
     """Build the HyperDX per-ORG DEFAULT_CONNECTIONS JSON under the tenant-reader model.
 
@@ -409,10 +414,9 @@ def build_hyperdx_connections_json(
 
     ``base`` supplies the shared network coordinates (host/port/database) - every
     org connects to the SAME ClickHouse as the SAME user; only the tenant setting
-    differs. Pure apart from the single secrets read for the shared reader password;
-    no HTTP. A missing reader secret yields an empty password (non-fatal) so the map
-    stays structurally complete and the password lands on the next publish once the
-    reconciler has minted it.
+    differs. Pure, no HTTP, no secret read: the reader password is emitted as the
+    ``${DFE_TENANT_READER_PASSWORD}`` placeholder (the deploy substitutes it from a
+    Secret) so PLAINTEXT CREDS NEVER LAND IN GIT (S3).
 
     FORK DEPENDENCY: the HyperDX fork Connection schema carries no generic per-query
     settings map today - only ``hyperdxSettingPrefix``, which builds ``<prefix>_user``
@@ -423,7 +427,6 @@ def build_hyperdx_connections_json(
     are stripped by the fork's zod/Mongoose parse today, so emitting it now is
     forward-safe (inert until the fork wires it).
     """
-    password = _read_fixed_reader_secret(secrets_store)
     connections = [
         {
             "name": org.name,
@@ -431,7 +434,8 @@ def build_hyperdx_connections_json(
             "port": base.port,
             "database": base.database,
             "user": TENANT_READER_USER,
-            "password": password,
+            # Placeholder, NOT the plaintext - the deploy substitutes it (S3).
+            "password": TENANT_READER_PASSWORD_PLACEHOLDER,
             "clickhouseSettings": {TENANT_SETTING: _tenant_value(org)},
         }
         for org in orgs
@@ -443,20 +447,6 @@ def build_hyperdx_connections_json(
 def _tenant_value(org: Any) -> str:
     """Comma-joined org_ids for the org's DFE_current_tenant_id setting ('' -> 0 rows)."""
     return ",".join(getattr(org, "org_ids", None) or [])
-
-
-def _read_fixed_reader_secret(secrets_store: Any) -> str:
-    """Read the shared dfe_tenant_reader plaintext from the seam; '' if absent (non-fatal).
-
-    Path ``ch/fixed/dfe_tenant_reader`` mirrors where ``ChRbacReconciler`` stores the
-    minted fixed-user plaintext (``ch/fixed/<name>``).
-    """
-    if secrets_store is None:
-        return ""
-    try:
-        return secrets_store.get(f"ch/fixed/{TENANT_READER_USER}")
-    except Exception:
-        return ""
 
 
 def build_hyperdx_sources_json(

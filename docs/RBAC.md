@@ -386,13 +386,15 @@ holder can/cannot reach (wildcards expand via section 2.4).
 
 **data_analyst** - group `dfe-analysts`
 - Patterns: `hunt:*`, `query:*`, `source:*`, `sampler:read`, `fieldmap:*`,
-  `alert:*`, `rule:*`, `sigma:*`, `cel:check`, `schema:read`, `schema:write`,
-  `transform:*`, `org:read`; hyperdx: `full`
+  `alert:*`, `rule:*`, `sigma:read`, `sigma:write`, `cel:check`, `schema:read`,
+  `schema:write`, `transform:*`, `org:read`; hyperdx: `full`
 - Can: full CRUD + execute on hunts/rules/queries (incl `query:raw` via
-  `query:*`)/sources/fieldmaps/alerts/transforms; the full Sigma surface
-  (catalogue/providers/propagate/bindings/views) + CEL expression checks;
-  build+read schemas; sample; read org metadata; full HyperDX.
-- Cannot: config/deployment/helm/argo/infra; account/group admin; repository.
+  `query:*`)/sources/fieldmaps/alerts/transforms; author Sigma rules + browse the
+  catalogue, propagate, manage bindings/views + CEL checks; build+read schemas;
+  sample; read org metadata; full HyperDX.
+- Cannot: `sigma:admin` (registering/deleting a provider - a git-URL/local-dir,
+  SSRF/path-reach action is admin-only); config/deployment/helm/argo/infra;
+  account/group admin; repository.
 
 **data_analyst_ro** - no default group
 - Patterns: `hunt:read`, `query:read`, `query:execute`, `source:read`,

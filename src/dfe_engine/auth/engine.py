@@ -51,6 +51,7 @@ API_ENFORCED_ACTIONS: frozenset[str] = frozenset(
         "helmvars:write",
         "helmvars:override",
         "lifecycle:read",
+        "sigma:admin",
         "hunt:execute",
         "hunt:read",
         "hunt:write",

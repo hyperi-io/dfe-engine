@@ -35,7 +35,7 @@ from dfe_engine.sigma.catalog import (
     sync_provider,
 )
 from dfe_engine.sigma.propagation import SigmaPropagator
-from dfe_engine.sigma.providers import ProviderConfig, build_provider
+from dfe_engine.sigma.providers import ProviderConfig, ProviderKind, build_provider
 from dfe_engine.sigma.views import (
     SigmaViewColumn,
     SigmaViewDefinition,
@@ -48,6 +48,9 @@ router = APIRouter(prefix="/sigma", tags=["sigma"])
 
 _READ = Depends(require_action(scopes_dict["sigma_read"]))
 _WRITE = Depends(require_action(scopes_dict["sigma_write"]))
+# Provider register/update/delete accept a git URL / local directory (SSRF +
+# path-reach) - admin-only, above the sigma:write a data_analyst holds (S1).
+_ADMIN = Depends(require_action(scopes_dict["sigma_admin"]))
 
 
 # ── Response models ─────────────────────────────────────────
@@ -444,6 +447,50 @@ def _make_provider(request: Request, config: ProviderConfig):
     return build_provider(config, secrets=secrets, work_dir=_sigma_work_dir(request))
 
 
+def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
+    """Confine a provider's reach at register/update time (S1, defence in depth on
+    top of the sigma:admin gate + the ProviderConfig file:// reject).
+
+    - local_files ``directory`` MUST resolve UNDER the engine config dir, so a
+      provider cannot read arbitrary server files.
+    - a git_repo ``url`` host must be on ``DFE_SIGMA_ALLOWED_HOSTS`` when that
+      allowlist is set (comma-list; empty = any host).
+    """
+    import os
+    from urllib.parse import urlparse
+
+    if config.kind == ProviderKind.LOCAL_FILES:
+        directory = str(config.options.get("directory", "")).strip()
+        if directory:
+            base = Path(getattr(request.app.state.settings, "config_dir", "") or "config").resolve()
+            raw = Path(directory)
+            target = raw.resolve() if raw.is_absolute() else (base / raw).resolve()
+            if not target.is_relative_to(base):
+                raise HTTPException(
+                    422,
+                    detail={
+                        "code": "path_escape",
+                        "message": f"local_files directory must resolve under {base}",
+                    },
+                )
+    elif config.kind == ProviderKind.GIT_REPO:
+        allowed = [
+            h.strip().lower()
+            for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
+            if h.strip()
+        ]
+        if allowed:
+            host = (urlparse(str(config.options.get("url", "")).strip()).hostname or "").lower()
+            if host not in allowed:
+                raise HTTPException(
+                    422,
+                    detail={
+                        "code": "host_not_allowed",
+                        "message": f"git url host {host!r} not in DFE_SIGMA_ALLOWED_HOSTS",
+                    },
+                )
+
+
 def _parse_since(value: str | None) -> datetime | None:
     if not value:
         return None
@@ -504,11 +551,12 @@ async def list_providers(request: Request, user: CurrentUser) -> list[ProviderCo
     return _provider_store(request).list_configs()
 
 
-@router.post("/providers", response_model=ProviderConfig, status_code=201, dependencies=[_WRITE])
+@router.post("/providers", response_model=ProviderConfig, status_code=201, dependencies=[_ADMIN])
 async def register_provider(
     body: ProviderConfig, request: Request, user: CurrentUser
 ) -> ProviderConfig:
     """Register (or overwrite) a provider config."""
+    _validate_provider_reach(request, body)
     saved = await asyncio.to_thread(_provider_store(request).save_config, body, user.user_id)
     audit_resource_change(user.user_id, "sigma_provider", body.name, "registered")
     return saved
@@ -525,12 +573,13 @@ async def get_provider(name: str, request: Request, user: CurrentUser) -> Provid
         ) from exc
 
 
-@router.put("/providers/{name}", response_model=ProviderConfig, dependencies=[_WRITE])
+@router.put("/providers/{name}", response_model=ProviderConfig, dependencies=[_ADMIN])
 async def update_provider(
     name: str, body: ProviderConfig, request: Request, user: CurrentUser
 ) -> ProviderConfig:
     """Update a provider config. The path name wins over the body name."""
     config = body.model_copy(update={"name": name})
+    _validate_provider_reach(request, config)
     saved = await asyncio.to_thread(_provider_store(request).save_config, config, user.user_id)
     audit_resource_change(user.user_id, "sigma_provider", name, "updated")
     return saved
@@ -566,7 +615,7 @@ async def disable_provider(name: str, request: Request, user: CurrentUser) -> Pr
     return saved
 
 
-@router.delete("/providers/{name}", status_code=204, dependencies=[_WRITE])
+@router.delete("/providers/{name}", status_code=204, dependencies=[_ADMIN])
 async def delete_provider(name: str, request: Request, user: CurrentUser) -> None:
     """Delete a stored provider config (a built-in default reverts to its default)."""
     try:

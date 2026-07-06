@@ -69,6 +69,7 @@ export const scopes = {
   service_validate: "service:validate",
   sigma_read: "sigma:read",
   sigma_write: "sigma:write",
+  sigma_admin: "sigma:admin",
   source_read: "source:read",
   source_write: "source:write",
   source_delete: "source:delete",

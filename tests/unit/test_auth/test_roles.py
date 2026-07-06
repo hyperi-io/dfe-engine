@@ -470,6 +470,13 @@ class TestLoadBuiltin:
         assert config.has_permission("data_analyst_ro", "sigma:read") is True
         assert config.has_permission("data_analyst_ro", "sigma:write") is False
 
+    def test_sigma_admin_is_admin_only(self):
+        # S1: registering a provider (SSRF/path-reach) is sigma:admin - data_analyst
+        # holds sigma:read+write (NOT the sigma:* wildcard), so it cannot register.
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("data_analyst", "sigma:admin") is False
+        assert config.has_permission("admin", "sigma:admin") is True
+
     def test_builtin_infra_grants_lifecycle_and_bare_service_read(self):
         # P2: lifecycle:* was operator-grantable per docs but held by no role;
         # infra also lacked bare service:read (weaker infra_ro had it).
