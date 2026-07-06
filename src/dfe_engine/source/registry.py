@@ -422,7 +422,16 @@ class SourceRegistry:
         return sources
 
     def source_exists(self, source_name: str) -> bool:
-        """Check if a source exists in the registry."""
+        """Check if a source exists in the registry.
+
+        Validates the name shape so a traversal name from the bulk-action body
+        cannot be used as a lookup key at all (defence in depth - the mutating
+        get/save/delete already containment-check; F-SOURCES-TRAVERSAL).
+
+        Raises:
+            SourceValidationError: Name is not a bare filename stem (traversal).
+        """
+        self._validate_source_name(source_name)
         return self._store.get(source_name) is not None
 
     # -----------------------------------------------------------------

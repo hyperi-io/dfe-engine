@@ -441,6 +441,7 @@ class AuthSettings(BaseModel):
     Environment variables:
     - DFE_AUTH_ENABLED -> auth.enabled
     - DFE_AUTH_DIR -> auth.auth_dir
+    - DFE_AUTH_GATEWAY_HEADER_SECRET -> auth.gateway_header_secret
     """
 
     enabled: bool = Field(
@@ -450,6 +451,15 @@ class AuthSettings(BaseModel):
     auth_dir: str = Field(
         default="",
         description="Auth config directory (accounts, groups, api-keys)",
+    )
+    gateway_header_secret: str = Field(
+        default="",
+        description=(
+            "Shared secret the gateway injects in X-DFE-Gateway-Auth to prove a "
+            "request transited it. When set, X-Oidc-* headers are trusted ONLY on "
+            "a constant-time match (blocks direct header forgery by a pod-network "
+            "peer). Empty = trust headers on network topology alone (warned)."
+        ),
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
@@ -887,6 +897,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_DIR"):
         overrides["auth"]["auth_dir"] = val
+    if val := _get_env("DFE_AUTH_GATEWAY_HEADER_SECRET"):
+        overrides["auth"]["gateway_header_secret"] = val
 
     # Local auth settings (nested under auth.local)
     if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):

@@ -91,6 +91,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     oidc_dir.mkdir(parents=True, exist_ok=True)
     app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
 
+    # Warn when the OIDC header-trust boundary rests on network topology alone: with
+    # auth on but no gateway secret set, a pod-network peer could forge X-Oidc-*
+    # headers and self-authenticate. Set DFE_AUTH_GATEWAY_HEADER_SECRET (matched by
+    # the gateway's injected X-DFE-Gateway-Auth) to enforce gateway transit in-code.
+    if settings.auth.enabled and not settings.auth.gateway_header_secret:
+        logger.warning(
+            "OIDC header-trust is UNGUARDED: X-Oidc-* headers are trusted on network "
+            "topology alone. Set DFE_AUTH_GATEWAY_HEADER_SECRET so only requests that "
+            "transit the gateway (bearing X-DFE-Gateway-Auth) are trusted."
+        )
+
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader
     from dfe_engine.connections.registry import ConnectionRegistry

@@ -11,6 +11,7 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 
 from __future__ import annotations
 
+import hmac
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, NamedTuple
 
@@ -420,6 +421,33 @@ def require_local_account_enabled(request: Request, user_id: str) -> None:
     )
 
 
+# Header a gateway sets to prove it (not a pod-network peer) originated the
+# request; paired with auth.gateway_header_secret.
+_GATEWAY_AUTH_HEADER = "X-DFE-Gateway-Auth"
+
+
+def _gateway_headers_trusted(request: Request, settings: DFESettings) -> bool:
+    """Whether this request's ``X-Oidc-*`` headers may be trusted.
+
+    The gateway (Envoy / oauth2-proxy) authenticates the user and injects the
+    ``X-Oidc-*`` headers. A peer that can reach the pod DIRECTLY (a compromised
+    sidecar, another cluster workload, an SSRF pivot) could forge those headers
+    and self-authenticate as any subject/group - the engine otherwise has no proof
+    the request transited the gateway.
+
+    When ``auth.gateway_header_secret`` is set, the request MUST present it in
+    ``X-DFE-Gateway-Auth`` (constant-time compared) for the OIDC header path to be
+    taken; a missing/wrong secret makes the ``X-Oidc-*`` headers untrusted and the
+    request falls through to the API-key / JWT paths. When no secret is configured
+    the headers are trusted on network topology alone (legacy; app startup warns).
+    Defence in depth on top of the deployment's NetworkPolicy + gateway strip.
+    """
+    secret = settings.auth.gateway_header_secret
+    if not secret:
+        return True
+    return hmac.compare_digest(request.headers.get(_GATEWAY_AUTH_HEADER, ""), secret)
+
+
 def require_oidc_account_enabled(request: Request, oidc_subject: str) -> None:
     """Reject an OIDC principal whose shadow account has been disabled.
 
@@ -464,14 +492,26 @@ async def get_current_user(request: Request) -> AuthContext:
     user_agent = request.headers.get("User-Agent")
 
     # ── Path 1: OIDC headers (Envoy Gateway) ────────────────────
+    # The X-Oidc-* headers are trusted ONLY when the request proves it transited
+    # the gateway (see _gateway_headers_trusted). Without that proof a pod-network
+    # peer could forge X-Oidc-Subject + X-Oidc-Groups and self-authenticate as any
+    # subject/group. When no gateway secret is configured the headers are trusted
+    # on network topology alone (legacy behaviour, warned at startup).
     oidc_subject = request.headers.get("X-Oidc-Subject")
-    if oidc_subject:
+    if oidc_subject and _gateway_headers_trusted(request, settings):
         group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
         groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
         # IdP-header groups are the live signal the IdP asserts for this login.
         header_resolution = _resolve_group_grants(groups, group_store)
+
+        # Reject a pre-existing DISABLED account FIRST - before any JIT writes or
+        # the success audit. A first-login account does not exist yet, so this
+        # passes and ensure_account creates it enabled; only an admin-disabled
+        # account is rejected, and it is rejected without churning store state
+        # (JIT group writes) or logging a false success (MED-1 + MED-2).
+        require_oidc_account_enabled(request, oidc_subject)
 
         # JIT provisioning -- create/refresh the shadow account on OIDC login.
         # First login also joins the account to its `org_<domain>` org group, so
@@ -500,13 +540,8 @@ async def get_current_user(request: Request) -> AuthContext:
         resolution = _merge_group_resolutions(header_resolution, store_resolution)
         roles, org_ids = resolution.roles, resolution.org_ids
         logger.debug("OIDC auth", user_id=oidc_subject, groups=groups, roles=roles)
+
         audit_login_success(oidc_subject, "oidc", client_ip, roles)
-
-        # The account.enabled flag must gate OIDC principals too, not only JWT
-        # ones -- otherwise disabling an external user has no effect. Checked
-        # AFTER ensure_account so a freshly provisioned (enabled) account passes.
-        require_oidc_account_enabled(request, oidc_subject)
-
         return AuthContext(
             user_id=oidc_subject,
             email=oidc_email,

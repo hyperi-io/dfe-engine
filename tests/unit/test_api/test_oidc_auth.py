@@ -178,6 +178,70 @@ def _oidc_request(app, subject: str, groups: str | None = None):
     return Request(scope)
 
 
+def _request_with_headers(app, headers: dict[str, str]):
+    from starlette.requests import Request
+
+    raw = [(k.lower().encode(), v.encode()) for k, v in headers.items()]
+    return Request(
+        {
+            "type": "http",
+            "http_version": "1.1",
+            "method": "GET",
+            "path": "/api/v1/auth/me",
+            "raw_path": b"/api/v1/auth/me",
+            "query_string": b"",
+            "headers": raw,
+            "client": ("127.0.0.1", 5555),
+            "server": ("testserver", 80),
+            "scheme": "http",
+            "app": app,
+        }
+    )
+
+
+class TestGatewayHeaderTrust:
+    """HIGH-1: when a gateway secret is set, X-Oidc-* is trusted ONLY on a matching
+    X-DFE-Gateway-Auth header - a pod-network peer cannot forge headers."""
+
+    async def test_forged_oidc_headers_without_secret_are_not_trusted(self, client, app):
+        import pytest
+        from fastapi import HTTPException
+
+        from dfe_engine.api.deps import get_current_user
+
+        app.state.settings.auth.gateway_header_secret = "s3cr3t-gw"
+        # Attacker sets X-Oidc-* directly, no valid gateway secret header.
+        req = _request_with_headers(app, {"X-Oidc-Subject": "attacker@evil.example"})
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user(req)
+        assert exc.value.status_code == 401  # OIDC path skipped -> unauthenticated
+
+    async def test_oidc_headers_with_matching_secret_are_trusted(self, client, app):
+        from dfe_engine.api.deps import get_current_user
+
+        app.state.settings.auth.gateway_header_secret = "s3cr3t-gw"
+        req = _request_with_headers(
+            app,
+            {"X-Oidc-Subject": "alice@example.com", "X-DFE-Gateway-Auth": "s3cr3t-gw"},
+        )
+        ctx = await get_current_user(req)
+        assert ctx.user_id == "alice@example.com"
+
+    async def test_wrong_secret_is_rejected(self, client, app):
+        import pytest
+        from fastapi import HTTPException
+
+        from dfe_engine.api.deps import get_current_user
+
+        app.state.settings.auth.gateway_header_secret = "s3cr3t-gw"
+        req = _request_with_headers(
+            app, {"X-Oidc-Subject": "alice@example.com", "X-DFE-Gateway-Auth": "wrong"}
+        )
+        with pytest.raises(HTTPException) as exc:
+            await get_current_user(req)
+        assert exc.value.status_code == 401
+
+
 class TestOidcStoreSideGroups:
     """The OIDC path resolves the shadow account's STORE-side group memberships
     (the JIT ``org_<domain>`` org group, or any admin-assigned group) and unions
