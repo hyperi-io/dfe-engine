@@ -19,6 +19,7 @@ from dfe_engine.source.models import (
     apply_source_write_update,
     next_major_source_version,
     source_from_write,
+    source_version_bump_required,
 )
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -533,7 +534,13 @@ class TestSourceWriteRequest:
             }
         )
         write = SourceWriteRequest.model_validate(
-            {"match": {"field": "f", "value": "v"}, "schema": {"engine": "MergeTree"}}
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {
+                    "engine": "MergeTree",
+                    "meta_schema_version": "2.0.0",
+                },
+            }
         )
         monkeypatch.setattr(
             "dfe_engine.source.models.next_major_source_version",
@@ -542,7 +549,7 @@ class TestSourceWriteRequest:
         with pytest.raises(ValueError, match="Refusing to overwrite"):
             apply_source_write_update(existing, write)
 
-    def test_apply_write_update_appends_without_overwriting(self):
+    def test_apply_write_update_appends_on_bump_worthy_change_after_deploy(self):
         existing = Source.model_validate(
             {
                 "source": "src_a",
@@ -553,7 +560,7 @@ class TestSourceWriteRequest:
                         "date_time": "2026-01-01",
                         "header": {"type": "time_series", "version": "1.0.0"},
                         "match": {"field": "f", "value": "v"},
-                        "schema": {"ttl_days": 90},
+                        "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
                     }
                 },
             }
@@ -563,7 +570,11 @@ class TestSourceWriteRequest:
                 "enabled": True,
                 "description": "rev 2",
                 "match": {"field": "f", "value": "v"},
-                "schema": {"ttl_days": 30, "engine": "MergeTree"},
+                "schema": {
+                    "ttl_days": 30,
+                    "engine": "MergeTree",
+                    "meta_schema_version": "2.0.0",
+                },
             }
         )
         updated = apply_source_write_update(existing, write)
@@ -571,9 +582,152 @@ class TestSourceWriteRequest:
         assert updated.versions["1.0.0"].schema_config.ttl_days == 90
         assert "2.0.0" in updated.versions
         assert updated.versions["2.0.0"].schema_config.ttl_days == 30
+        assert updated.versions["2.0.0"].schema_config.meta_schema_version == "2.0.0"
         assert updated.current == "2.0.0"
         assert updated.deployed_version == "1.0.0"
         assert updated.description == "rev 2"
+
+    def test_apply_write_update_in_place_before_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema_version": "1.0.0"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"meta_schema_version": "2.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.versions.keys() == {"1.0.0"}
+        assert updated.current == "1.0.0"
+        assert updated.versions["1.0.0"].schema_config.meta_schema_version == "2.0.0"
+
+    def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"ttl_days": 90, "meta_schema_version": "1.0.0"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "g", "value": "w"},
+                "schema": {"ttl_days": 30, "meta_schema_version": "1.0.0"},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.versions.keys() == {"1.0.0"}
+        assert updated.versions["1.0.0"].schema_config.ttl_days == 30
+        assert updated.versions["1.0.0"].match.field == "g"
+
+    def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "2.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {
+                    "meta_schema": "meta/aws/guardduty",
+                    "meta_schema_version": "1.0.0",
+                },
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "3.0.0"
+        assert updated.versions["2.0.0"].schema_config.meta_schema == "meta/aws/cloudwatch"
+        assert updated.versions["3.0.0"].schema_config.meta_schema == "meta/aws/guardduty"
+        assert updated.deployed_version == "2.0.0"
+
+    def test_apply_write_update_draft_current_no_bump_after_deploy(self):
+        """Bump-worthy edits on a non-deployed ``current`` stay in place."""
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {
+                            "meta_schema": "meta/aws/cloudwatch",
+                            "meta_schema_version": "1.0.0",
+                        },
+                    },
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {
+                    "meta_schema": "meta/aws/guardduty",
+                    "meta_schema_version": "1.0.0",
+                },
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.current == "2.0.0"
+        assert "3.0.0" not in updated.versions
+        assert updated.versions["2.0.0"].schema_config.meta_schema == "meta/aws/guardduty"
+        assert updated.deployed_version == "1.0.0"
+
+    def test_source_version_bump_required_sigma(self):
+        base = {
+            "date_time": "2026-01-01",
+            "match": {"field": "f", "value": "v"},
+            "schema": {},
+        }
+        prev = SourceVersion.model_validate(base)
+        updated = SourceVersion.model_validate({**base, "sigma": {"taxonomy": "windows"}})
+        assert source_version_bump_required(prev, updated) is True
 
 
 class TestSourceVersionGetResponse:

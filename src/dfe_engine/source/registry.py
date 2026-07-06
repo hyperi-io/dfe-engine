@@ -248,7 +248,7 @@ class SourceRegistry:
         created_by: str | None = None,
         description: str | None = None,
     ) -> Source:
-        """Update a source by appending a new major version (never overwrites history)."""
+        """Update a source; version bump only when the deployed version is edited."""
         if isinstance(write, dict):
             try:
                 write = SourceWriteRequest.model_validate(write)

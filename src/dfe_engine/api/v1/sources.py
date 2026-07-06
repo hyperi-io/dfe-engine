@@ -742,7 +742,14 @@ async def update_source(
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Update a source from a flat revision body (appends next major version)."""
+    """Update a source from a flat revision body.
+
+    Before the first deploy, edits update the working version in place. After deploy, a new
+    major version is created only when ``current`` equals ``deployed_version`` and schema pins
+    (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
+    ``field_mappings``, or ``sigma`` change. Draft versions (``current`` not deployed) update
+    in place.
+    """
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):

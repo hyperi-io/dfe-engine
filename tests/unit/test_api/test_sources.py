@@ -284,14 +284,34 @@ class TestGetSourceVersion:
         )
         assert v1.status_code == 200
         assert v1.json()["selected"] == "1.0.0"
-        assert v1.json()["current"] == "2.0.0"
+        assert v1.json()["current"] == "1.0.0"
+        assert v1.json()["description"] == "v2"
 
+    def test_get_version_after_bump_worthy_update_appends_version(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        registry = _registries["source"]
+        registry.set_deployed_version("test_source", "1.0.0")
+
+        client.put(
+            "/api/v1/sources/test_source",
+            json={
+                **sample_source,
+                "schema": {
+                    **sample_source["schema_config"],
+                    "meta_schema_version": "2.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
         v2 = client.get(
             "/api/v1/sources/test_source/versions?version=2.0.0",
             headers=admin_headers,
         )
         assert v2.status_code == 200
-        assert v2.json()["version"]["schema"]["engine"] == "MergeTree"
+        assert v2.json()["current"] == "2.0.0"
+        assert v2.json()["version"]["schema"]["meta_schema_version"] == "2.0.0"
 
     def test_get_version_not_found(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -351,17 +371,17 @@ class TestUpdateSource:
         assert resp.status_code == 200
         updated = resp.json()
         assert updated["message"] == "updated"
-        assert updated["current"] == "2.0.0"
+        assert updated["current"] == "1.0.0"
         assert updated["deployed_version"] is None
-        assert updated["versions"] == ["1.0.0", "2.0.0"]
+        assert updated["versions"] == ["1.0.0"]
 
         # Verify the update persisted
         get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
         assert get_resp.json()["description"] == "Updated description"
         body = get_resp.json()
         assert "1.0.0" in body["versions"]
-        assert "2.0.0" in body["versions"]
-        assert body["current"] == "2.0.0"
+        assert "2.0.0" not in body["versions"]
+        assert body["current"] == "1.0.0"
         assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
 
     def test_update_rejects_versions_payload(
