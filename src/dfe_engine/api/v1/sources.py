@@ -3,11 +3,10 @@
 GET    /api/v1/sources                  → Paginated source list
 POST   /api/v1/sources                  → Create source
 GET    /api/v1/sources/{name}           → Get source details
-GET    /api/v1/sources/{name}/versions  → Get one version snapshot
+GET    /api/v1/sources/{name}/versions/{version}  → Get one version snapshot
 GET    /api/v1/sources/{name}/columns   → Composed schema columns for a version
 POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
-GET    /api/v1/sources/{name}/plan      → Get saved deploy plan for a version
-POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (saves to source-plans)
+POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (not persisted)
 POST   /api/v1/sources/{name}/deploy    → Deploy version to ClickHouse
 PUT    /api/v1/sources/{name}           → Update source
 DELETE /api/v1/sources/{name}           → Delete source
@@ -38,6 +37,8 @@ from dfe_engine.source.deployment import (
     ensure_build_artifact,
     execute_ddl_statements,
     plan_from_build,
+    plan_ready_status,
+    previous_deployed_version_ids,
 )
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
@@ -173,6 +174,10 @@ class SourcePlanResponse(BaseModel):
     statements: list[str] = Field(default_factory=list)
     ddl: DDLResult | None = None
     ready: bool = False
+    ready_reason: str | None = Field(
+        default=None,
+        description="Why the plan is or is not ready to deploy",
+    )
 
 
 class SourceDeployResponse(BaseModel):
@@ -188,15 +193,11 @@ class SourceDeployResponse(BaseModel):
 
 
 class SourceVersionDetail(SourceVersion):
-    """Source version snapshot plus persisted build/plan/deploy payloads."""
+    """Source version snapshot plus persisted build/deploy payloads."""
 
     source_build: SchemaBuildResult | None = Field(
         default=None,
         description="Last schema build for this version (source-builds)",
-    )
-    source_plan: SourcePlanResponse | None = Field(
-        default=None,
-        description="Last deploy plan for this version (source-plans)",
     )
     source_deployment: SourceDeployResponse | None = Field(
         default=None,
@@ -311,21 +312,17 @@ async def create_source(
 
 
 @router.get(
-    "/{name}/versions",
+    "/{name}/versions/{version}",
     response_model=SourceVersionGetDetailResponse,
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source_version(
     name: str,
+    version: str,
     user: CurrentUser,
     registry: SourceReg,
-    version: str = Query(
-        ...,
-        min_length=1,
-        description="Source version id to return (required)",
-    ),
 ):
-    """Get one immutable source version snapshot by id, with build/plan/deploy status."""
+    """Get one immutable source version snapshot by id, with build/deploy status."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -347,7 +344,9 @@ async def get_source_version(
         )
 
     store = SourceDeploymentStore.from_settings(get_settings())
+    deploy_doc = store.load_deploy_document(name)
     version_ids = sorted(source.versions.keys())
+    prev_deployed = previous_deployed_version_ids(source, deploy_doc)
     snap = source.versions[version]
     return SourceVersionGetDetailResponse(
         source=source.source,
@@ -358,6 +357,7 @@ async def get_source_version(
         deployed_version=source.deployed_version,
         selected=version,
         versions=version_ids,
+        previous_deployed_versions=prev_deployed,
         version=_version_detail_from_snapshot(source.source, version, snap, store),
     )
 
@@ -518,39 +518,6 @@ async def build_source_schema(
     )
 
 
-@router.get(
-    "/{name}/plan",
-    response_model=SourcePlanResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_read"]))],
-)
-async def get_source_plan(
-    name: str,
-    user: CurrentUser,
-    registry: SourceReg,
-    version: str = Query(..., description="Source version id to retrieve the plan for"),
-) -> SourcePlanResponse:
-    """Return a saved deploy plan for a source version (from source-plans)."""
-    try:
-        registry.get_source(name)
-    except SourceNotFoundError:
-        raise HTTPException(
-            status_code=404,
-            detail={"code": "not_found", "message": f"Source '{name}' not found"},
-        ) from None
-
-    store = SourceDeploymentStore.from_settings(get_settings())
-    plan = store.load_plan(name, version)
-    if plan is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "not_found",
-                "message": f"No plan for source '{name}' version '{version}'",
-            },
-        )
-    return _plan_to_response(plan)
-
-
 @router.post(
     "/{name}/plan",
     response_model=SourcePlanResponse,
@@ -566,7 +533,7 @@ async def plan_source_deploy(
         description="Source version id (defaults to current working version)",
     ),
 ) -> SourcePlanResponse:
-    """Dry-run ClickHouse deploy: DDL statements, validation errors, persisted plan."""
+    """Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted)."""
     from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
     from dfe_engine.source.type_registry import TypeRegistry
 
@@ -616,7 +583,6 @@ async def plan_source_deploy(
         statements=statements,
         table_exists=table_exists,
     )
-    store.save_plan(plan, source)
     audit_resource_change(user.user_id, "source", name, "planned")
     return _plan_to_response(plan)
 
@@ -653,55 +619,44 @@ async def deploy_source(
 
     settings = get_settings()
     store = SourceDeploymentStore.from_settings(settings)
-    plan = store.load_plan(name, version_id)
-    statements: list[str]
-    if plan is not None:
-        if not plan.ready:
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "plan_not_ready",
-                    "message": (
-                        f"Plan for source '{name}' version '{version_id}' is not ready to deploy"
-                    ),
-                    "validation_errors": plan.validation_errors,
-                },
-            )
-    if plan is not None and plan.statements:
-        statements = list(plan.statements)
-    else:
-        try:
-            result, _artifact = ensure_build_artifact(
-                store,
-                source,
-                version_id=version_id,
-                schemas_base_dir=settings.schemas.schemas_dir or None,
-                refresh=True,
-            )
-        except SchemaBuildError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "build_error", "message": str(exc)},
-            ) from exc
-        builder = SchemaBuilderV2(
-            TypeRegistry.default(),
-            schemas_base_dir=settings.schemas.schemas_dir or None,
-        )
-        statements, _table_exists = deploy_statements_for_build(
-            builder,
+    try:
+        result, _artifact = ensure_build_artifact(
+            store,
             source,
-            version_id,
-            result,
-            db=settings.clickhouse.effective_data_database,
-            ch_client=ch_client,
+            version_id=version_id,
+            schemas_base_dir=settings.schemas.schemas_dir or None,
+            refresh=True,
         )
-
-    if not statements:
+    except SchemaBuildError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "build_error", "message": str(exc)},
+        ) from exc
+    builder = SchemaBuilderV2(
+        TypeRegistry.default(),
+        schemas_base_dir=settings.schemas.schemas_dir or None,
+    )
+    statements, table_exists = deploy_statements_for_build(
+        builder,
+        source,
+        version_id,
+        result,
+        db=settings.clickhouse.effective_data_database,
+        ch_client=ch_client,
+    )
+    ready, ready_reason = plan_ready_status(
+        validation_errors=list(result.validation_errors),
+        statements=statements,
+        table_exists=table_exists,
+    )
+    if not ready:
+        code = "plan_not_ready" if result.validation_errors else "nothing_to_deploy"
         raise HTTPException(
             status_code=400,
             detail={
-                "code": "nothing_to_deploy",
-                "message": f"No DDL statements to deploy for source '{name}' version '{version_id}'",
+                "code": code,
+                "message": ready_reason,
+                "validation_errors": list(result.validation_errors),
             },
         )
 
@@ -755,7 +710,7 @@ async def deploy_source(
     dependencies=[Depends(require_action(scopes_dict["source_read"]))],
 )
 async def get_source(name: str, user: CurrentUser, registry: SourceReg):
-    """Get a full source definition by name, including build/plan/deploy per version."""
+    """Get a full source definition by name, including build/deploy per version."""
     try:
         source = registry.get_source(name)
     except SourceNotFoundError:
@@ -787,7 +742,14 @@ async def update_source(
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Update a source from a flat revision body (appends next major version)."""
+    """Update a source from a flat revision body.
+
+    Before the first deploy, edits update the working version in place. After deploy, a new
+    major version is created only when ``current`` equals ``deployed_version`` and schema pins
+    (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
+    ``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update
+    in place.
+    """
     from dfe_engine.source.registry import SourceNotFoundError
 
     if not registry.source_exists(name):
@@ -937,12 +899,10 @@ def _version_detail_from_snapshot(
     store: SourceDeploymentStore,
 ) -> SourceVersionDetail:
     build = store.load_build(source_name, version_id)
-    plan = store.load_plan(source_name, version_id)
     deploy = store.load_deploy(source_name, version_id)
     return SourceVersionDetail(
         **snap.model_dump(mode="json"),
         source_build=_build_to_response(build) if build else None,
-        source_plan=_plan_to_response(plan) if plan else None,
         source_deployment=_deploy_to_response(deploy) if deploy else None,
     )
 
@@ -1011,6 +971,7 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
         statements=list(plan.statements),
         ddl=ddl,
         ready=plan.ready,
+        ready_reason=plan.ready_reason,
     )
 
 

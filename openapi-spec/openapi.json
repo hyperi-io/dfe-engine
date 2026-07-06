@@ -1981,14 +1981,14 @@
         ]
       }
     },
-    "/api/v1/sources/{name}/versions": {
+    "/api/v1/sources/{name}/versions/{version}": {
       "get": {
         "tags": [
           "Sources"
         ],
         "summary": "Get Source Version",
-        "description": "Get one immutable source version snapshot by id, with build/plan/deploy status.",
-        "operationId": "get_source_version_api_v1_sources__name__versions_get",
+        "description": "Get one immutable source version snapshot by id, with build/deploy status.",
+        "operationId": "get_source_version_api_v1_sources__name__versions__version__get",
         "parameters": [
           {
             "name": "name",
@@ -2001,15 +2001,12 @@
           },
           {
             "name": "version",
-            "in": "query",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "description": "Source version id to return (required)",
               "title": "Version"
-            },
-            "description": "Source version id to return (required)"
+            }
           }
         ],
         "responses": {
@@ -2195,69 +2192,12 @@
       }
     },
     "/api/v1/sources/{name}/plan": {
-      "get": {
-        "tags": [
-          "Sources"
-        ],
-        "summary": "Get Source Plan",
-        "description": "Return a saved deploy plan for a source version (from source-plans).",
-        "operationId": "get_source_plan_api_v1_sources__name__plan_get",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Source version id to retrieve the plan for",
-              "title": "Version"
-            },
-            "description": "Source version id to retrieve the plan for"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SourcePlanResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      },
       "post": {
         "tags": [
           "Sources"
         ],
         "summary": "Plan Source Deploy",
-        "description": "Dry-run ClickHouse deploy: DDL statements, validation errors, persisted plan.",
+        "description": "Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted).",
         "operationId": "plan_source_deploy_api_v1_sources__name__plan_post",
         "parameters": [
           {
@@ -2389,7 +2329,7 @@
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name, including build/plan/deploy per version.",
+        "description": "Get a full source definition by name, including build/deploy per version.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -2435,7 +2375,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body (appends next major version).",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
@@ -12908,6 +12848,18 @@
             "type": "boolean",
             "title": "Ready",
             "default": false
+          },
+          "ready_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready Reason",
+            "description": "Why the plan is or is not ready to deploy"
           }
         },
         "type": "object",
@@ -13395,17 +13347,6 @@
             ],
             "description": "Last schema build for this version (source-builds)"
           },
-          "source_plan": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourcePlanResponse"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Last deploy plan for this version (source-plans)"
-          },
           "source_deployment": {
             "anyOf": [
               {
@@ -13424,7 +13365,7 @@
           "match"
         ],
         "title": "SourceVersionDetail",
-        "description": "Source version snapshot plus persisted build/plan/deploy payloads."
+        "description": "Source version snapshot plus persisted build/deploy payloads."
       },
       "SourceVersionGetDetailResponse": {
         "properties": {
@@ -13483,7 +13424,7 @@
           "selected": {
             "type": "string",
             "title": "Selected",
-            "description": "Version id requested via query parameter"
+            "description": "Version id requested in the URL path"
           },
           "versions": {
             "items": {
@@ -13492,6 +13433,14 @@
             "type": "array",
             "title": "Versions",
             "description": "All version ids defined on this source"
+          },
+          "previous_deployed_versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Previous Deployed Versions",
+            "description": "Version ids with a successful deploy in source-deploys history, excluding the live deployed_version"
           },
           "version": {
             "$ref": "#/components/schemas/SourceVersionDetail",

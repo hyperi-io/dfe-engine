@@ -2,7 +2,9 @@
 
 import pytest
 
-from dfe_engine.source.models import Source
+from dfe_engine.schema.schema_builder_v2 import SchemaBuildResult
+from dfe_engine.source.deployment import SourceDeploymentStore, artifact_from_build
+from dfe_engine.source.models import Source, SourceWriteRequest
 from dfe_engine.source.registry import (
     SourceMatchConflictError,
     SourceNotFoundError,
@@ -289,6 +291,60 @@ class TestRoundTrip:
         assert loaded.fetcher.auth.type == source.fetcher.auth.type
         assert loaded.sigma.taxonomy == source.sigma.taxonomy
         assert loaded.sigma.custom_mappings == source.sigma.custom_mappings
+
+    def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        registry.save_source(
+            {
+                "source": "draft_src",
+                "match": {"field": "f", "value": "v"},
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
+                    },
+                },
+            }
+        )
+        source = registry.get_source("draft_src")
+        store.save_build(
+            artifact_from_build(
+                SchemaBuildResult(
+                    source_name="draft_src",
+                    columns=[],
+                    create_table_ddl="CREATE TABLE t",
+                ),
+                version="2.0.0",
+            ),
+            source,
+        )
+        registry.update_source_from_write(
+            "draft_src",
+            SourceWriteRequest.model_validate(
+                {
+                    "match": {"field": "f", "value": "v"},
+                    "schema": {
+                        "meta_schema": "meta/b",
+                        "meta_schema_version": "1.0.0",
+                    },
+                }
+            ),
+            deployment_store=store,
+        )
+        assert store.load_build("draft_src", "2.0.0") is None
+        assert store.load_build("draft_src", "1.0.0") is None
 
 
 # ---------------------------------------------------------------------------

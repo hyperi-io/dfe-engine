@@ -430,20 +430,80 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
     return Source.model_validate(payload)
 
 
-def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
-    """Append a new major version; never overwrite published version entries."""
-    new_version_id = next_major_source_version(existing.versions)
-    if new_version_id in existing.versions:
-        raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
-
+def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) -> SourceVersion:
+    """Build the version snapshot for a write, inheriting unset optional fields."""
     snapshot = write.to_version_snapshot()
     if write.transform is None and existing.transform is not None:
         snapshot = snapshot.model_copy(update={"transform": existing.transform})
     if write.header is None:
         snapshot = snapshot.model_copy(update={"header": existing.version(existing.current).header})
+    return snapshot
+
+
+def _schema_pin_for_bump(schema: SourceSchema) -> tuple[Any, ...]:
+    """Schema references that change composed columns / deploy DDL."""
+    return (
+        schema.meta_schema,
+        schema.meta_schema_version,
+        schema.derived_schema,
+        schema.additional_fields,
+    )
+
+
+def source_version_bump_required(previous: SourceVersion, updated: SourceVersion) -> bool:
+    """True when a deployed source needs a new major version id for this snapshot change."""
+    prev_schema = previous.effective_schema()
+    new_schema = updated.effective_schema()
+    if _schema_pin_for_bump(prev_schema) != _schema_pin_for_bump(new_schema):
+        return True
+    if (previous.field_mappings or []) != (updated.field_mappings or []):
+        return True
+    prev_sigma = previous.sigma.model_dump(mode="json") if previous.sigma else None
+    new_sigma = updated.sigma.model_dump(mode="json") if updated.sigma else None
+    if prev_sigma != new_sigma:
+        return True
+    prev_transform = previous.transform.model_dump(mode="json") if previous.transform else None
+    new_transform = updated.transform.model_dump(mode="json") if updated.transform else None
+    return prev_transform != new_transform
+
+
+def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str | None:
+    """Return a draft ``current`` version id whose persisted build should be dropped after edit."""
+    deployed = updated.deployed_version
+    current = updated.current
+    if deployed is None or deployed == current:
+        return None
+    if existing.current != current:
+        return None
+    previous = existing.versions[current]
+    new_snap = updated.versions[current]
+    if not source_version_bump_required(previous, new_snap):
+        return None
+    return current
+
+
+def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
+    """Persist a write: bump major version only when ``current`` is deployed and pins/mappings change."""
+    snapshot = _build_merged_version_snapshot(existing, write)
+    current_id = existing.current
+    previous = existing.versions[current_id]
+
+    append_version = (
+        existing.deployed_version is not None
+        and existing.deployed_version == current_id
+        and source_version_bump_required(previous, snapshot)
+    )
 
     merged_versions = dict(existing.versions)
-    merged_versions[new_version_id] = snapshot
+    if append_version:
+        new_version_id = next_major_source_version(existing.versions)
+        if new_version_id in existing.versions:
+            raise ValueError(f"Refusing to overwrite existing version {new_version_id!r}")
+        merged_versions[new_version_id] = snapshot
+        target_current = new_version_id
+    else:
+        merged_versions[current_id] = snapshot
+        target_current = current_id
 
     payload: dict[str, Any] = {
         "source": existing.source,
@@ -453,7 +513,7 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         "description": write.description if write.description is not None else existing.description,
         "enabled": write.enabled,
         "deployed_version": existing.deployed_version,
-        "current": new_version_id,
+        "current": target_current,
         "versions": {
             vid: ver.model_dump(mode="json", by_alias=True) for vid, ver in merged_versions.items()
         },
@@ -676,8 +736,15 @@ class SourceVersionGetResponse(BaseModel):
         default=None,
         description="Version deployed to ClickHouse / runtime (null until first deploy)",
     )
-    selected: str = Field(..., description="Version id requested via query parameter")
+    selected: str = Field(..., description="Version id requested in the URL path")
     versions: list[str] = Field(..., description="All version ids defined on this source")
+    previous_deployed_versions: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Version ids with a successful deploy in source-deploys history, "
+            "excluding the live deployed_version"
+        ),
+    )
     version: SourceVersion = Field(
         ..., description="Immutable configuration snapshot for ``selected``"
     )
