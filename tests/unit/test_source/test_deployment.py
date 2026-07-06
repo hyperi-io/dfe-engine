@@ -6,11 +6,15 @@ from pathlib import Path
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.source.deployment import (
+    SourceDeployDocument,
     SourceDeploymentStore,
+    SourceDeployVersionRecord,
     SourcePlanArtifact,
     artifact_from_build,
     deploy_statements_for_build,
     plan_from_build,
+    plan_ready_status,
+    previous_deployed_version_ids,
     qualify_ddl_statements,
 )
 from dfe_engine.source.models import SchemaColumn, Source
@@ -56,6 +60,68 @@ class TestSourceDeploymentStore:
         doc = yaml_load(tmp_path / "plans" / "syslog.yaml")
         assert doc["source"] == "syslog"
         assert "1.0.0" in doc["versions"]
+
+    def test_delete_build_removes_version(self, tmp_path: Path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "match": {"field": "f", "value": "v"},
+                "current": "2.0.0",
+                "deployed_version": "1.0.0",
+                "versions": {
+                    "1.0.0": {"date_time": "2026-01-01"},
+                    "2.0.0": {"date_time": "2026-01-02"},
+                },
+            }
+        )
+        art = artifact_from_build(
+            SchemaBuildResult(
+                source_name="syslog",
+                columns=[],
+                create_table_ddl="CREATE TABLE t",
+            ),
+            version="2.0.0",
+        )
+        store.save_build(art, source)
+        assert store.load_build("syslog", "2.0.0") is not None
+        assert store.delete_build("syslog", "2.0.0", source=source) is True
+        assert store.load_build("syslog", "2.0.0") is None
+        assert not (tmp_path / "builds" / "syslog.yaml").is_file()
+
+    def test_previous_deployed_version_ids_excludes_live(self):
+        source = Source.model_validate(
+            {
+                "source": "x",
+                "match": {"field": "f", "value": "v"},
+                "deployed_version": "2.0.0",
+                "current": "3.0.0",
+                "versions": {
+                    "1.0.0": {"date_time": "2026-01-01"},
+                    "2.0.0": {"date_time": "2026-01-02"},
+                    "3.0.0": {"date_time": "2026-01-03"},
+                },
+            }
+        )
+        doc = SourceDeployDocument(
+            source="x",
+            deployed_version="2.0.0",
+            versions={
+                "1.0.0": SourceDeployVersionRecord(
+                    deployed_at="2026-01-01T00:00:00+00:00",
+                    success=True,
+                ),
+                "2.0.0": SourceDeployVersionRecord(
+                    deployed_at="2026-01-02T00:00:00+00:00",
+                    success=True,
+                ),
+            },
+        )
+        assert previous_deployed_version_ids(source, doc) == ["1.0.0"]
 
     def test_migrates_legacy_per_version_files(self, tmp_path: Path):
         store = SourceDeploymentStore(
@@ -126,6 +192,27 @@ class TestDeployStatements:
         plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=False)
         assert plan.ready is False
         assert plan.validation_errors == ["bad column"]
+        assert "validation failed" in (plan.ready_reason or "").lower()
+
+    def test_plan_ready_false_when_table_in_sync(self):
+        result = SchemaBuildResult(
+            source_name="x",
+            columns=[],
+            create_table_ddl="CREATE TABLE {db}.x (`a` String)",
+        )
+        plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=True)
+        assert plan.ready is False
+        assert plan.ready_reason is not None
+        assert "already exists" in plan.ready_reason
+
+    def test_plan_ready_status_helper(self):
+        ready, reason = plan_ready_status(
+            validation_errors=[],
+            statements=["ALTER TABLE t ADD COLUMN x UInt8"],
+            table_exists=True,
+        )
+        assert ready is True
+        assert "1 DDL" in reason
 
     def test_artifact_from_build(self):
         result = SchemaBuildResult(

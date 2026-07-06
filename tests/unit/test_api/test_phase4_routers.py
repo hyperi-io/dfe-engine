@@ -250,15 +250,7 @@ class TestSchemasRouter:
             _registries.clear()
             reset_settings()
 
-    def test_plan_not_found(self, client, admin_headers, sample_source):
-        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
-        resp = client.get(
-            "/api/v1/sources/test_source/plan?version=1.0.0",
-            headers=admin_headers,
-        )
-        assert resp.status_code == 404
-
-    def test_source_plan_persisted(self, tmp_path, monkeypatch):
+    def test_source_plan_dry_run(self, tmp_path, monkeypatch):
         import shutil
 
         from dfe_engine.api.app import create_app
@@ -273,7 +265,7 @@ class TestSchemasRouter:
             SourceSettings,
             reset_settings,
         )
-        from dfe_engine.yaml_utils import yaml_dump, yaml_load
+        from dfe_engine.yaml_utils import yaml_dump
 
         reset_settings()
 
@@ -360,17 +352,8 @@ class TestSchemasRouter:
                 assert body["ready"] is True
                 assert body["statements"]
 
-                get_plan = tc.get(
-                    "/api/v1/sources/plan_src/plan?version=1.0.0",
-                    headers=headers,
-                )
-                assert get_plan.status_code == 200
-                assert get_plan.json()["planned_at"] == body["planned_at"]
-
-                assert (tmp_path / "source-plans" / "plan_src.yaml").is_file()
                 assert (tmp_path / "source-builds" / "plan_src.yaml").is_file()
-                plan_doc = yaml_load(tmp_path / "source-plans" / "plan_src.yaml")
-                assert plan_doc["versions"]["1.0.0"]
+                assert not (tmp_path / "source-plans" / "plan_src.yaml").exists()
         finally:
             app.dependency_overrides.clear()
             _registries.clear()

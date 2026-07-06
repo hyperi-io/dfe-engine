@@ -241,7 +241,6 @@ class TestGetSource:
         assert data["display_name"] == "Test Source"
         ver = data["versions"]["1.0.0"]
         assert ver["source_build"] is None
-        assert ver["source_plan"] is None
         assert ver["source_deployment"] is None
 
     def test_get_not_found(self, client: TestClient, admin_headers: dict):
@@ -250,14 +249,14 @@ class TestGetSource:
 
 
 class TestGetSourceVersion:
-    """GET /api/v1/sources/{name}/versions?version="""
+    """GET /api/v1/sources/{name}/versions/{version}"""
 
     def test_get_version_after_create(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -266,9 +265,9 @@ class TestGetSourceVersion:
         assert body["selected"] == "1.0.0"
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
+        assert body["previous_deployed_versions"] == []
         assert body["version"]["schema"]["engine"] == "MergeTree"
         assert body["version"]["source_build"] is None
-        assert body["version"]["source_plan"] is None
         assert body["version"]["source_deployment"] is None
 
     def test_get_version_after_update_preserves_history(
@@ -281,43 +280,63 @@ class TestGetSourceVersion:
             headers=admin_headers,
         )
         v1 = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert v1.status_code == 200
         assert v1.json()["selected"] == "1.0.0"
-        assert v1.json()["current"] == "2.0.0"
+        assert v1.json()["current"] == "1.0.0"
+        assert v1.json()["description"] == "v2"
 
+    def test_get_version_after_bump_worthy_update_appends_version(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        registry = _registries["source"]
+        registry.set_deployed_version("test_source", "1.0.0")
+
+        client.put(
+            "/api/v1/sources/test_source",
+            json={
+                **sample_source,
+                "schema": {
+                    **sample_source["schema_config"],
+                    "meta_schema_version": "2.0.0",
+                },
+            },
+            headers=admin_headers,
+        )
         v2 = client.get(
-            "/api/v1/sources/test_source/versions?version=2.0.0",
+            "/api/v1/sources/test_source/versions/2.0.0",
             headers=admin_headers,
         )
         assert v2.status_code == 200
-        assert v2.json()["version"]["schema"]["engine"] == "MergeTree"
+        assert v2.json()["current"] == "2.0.0"
+        assert v2.json()["version"]["schema"]["meta_schema_version"] == "2.0.0"
 
     def test_get_version_not_found(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=9.9.9",
+            "/api/v1/sources/test_source/versions/9.9.9",
             headers=admin_headers,
         )
         assert resp.status_code == 404
 
     def test_get_version_source_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.get(
-            "/api/v1/sources/missing/versions?version=1.0.0",
+            "/api/v1/sources/missing/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 404
 
-    def test_get_version_query_required(
+    def test_get_version_path_requires_version_segment(
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get("/api/v1/sources/test_source/versions", headers=admin_headers)
-        assert resp.status_code == 422
+        assert resp.status_code == 404
 
     def test_get_version_includes_top_level_metadata(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -329,7 +348,7 @@ class TestGetSourceVersion:
         }
         client.post("/api/v1/sources", json=body, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions?version=1.0.0",
+            "/api/v1/sources/test_source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -353,17 +372,17 @@ class TestUpdateSource:
         assert resp.status_code == 200
         updated = resp.json()
         assert updated["message"] == "updated"
-        assert updated["current"] == "2.0.0"
+        assert updated["current"] == "1.0.0"
         assert updated["deployed_version"] is None
-        assert updated["versions"] == ["1.0.0", "2.0.0"]
+        assert updated["versions"] == ["1.0.0"]
 
         # Verify the update persisted
         get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
         assert get_resp.json()["description"] == "Updated description"
         body = get_resp.json()
         assert "1.0.0" in body["versions"]
-        assert "2.0.0" in body["versions"]
-        assert body["current"] == "2.0.0"
+        assert "2.0.0" not in body["versions"]
+        assert body["current"] == "1.0.0"
         assert body["versions"]["1.0.0"]["schema"]["engine"] == "MergeTree"
 
     def test_update_rejects_versions_payload(
