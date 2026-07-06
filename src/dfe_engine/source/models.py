@@ -467,6 +467,21 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     return prev_transform != new_transform
 
 
+def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str | None:
+    """Return a draft ``current`` version id whose persisted build should be dropped after edit."""
+    deployed = updated.deployed_version
+    current = updated.current
+    if deployed is None or deployed == current:
+        return None
+    if existing.current != current:
+        return None
+    previous = existing.versions[current]
+    new_snap = updated.versions[current]
+    if not source_version_bump_required(previous, new_snap):
+        return None
+    return current
+
+
 def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:
     """Persist a write: bump major version only when ``current`` is deployed and pins/mappings change."""
     snapshot = _build_merged_version_snapshot(existing, write)

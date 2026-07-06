@@ -58,6 +58,38 @@ class TestSourceDeploymentStore:
         assert doc["source"] == "syslog"
         assert "1.0.0" in doc["versions"]
 
+    def test_delete_build_removes_version(self, tmp_path: Path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "match": {"field": "f", "value": "v"},
+                "current": "2.0.0",
+                "deployed_version": "1.0.0",
+                "versions": {
+                    "1.0.0": {"date_time": "2026-01-01"},
+                    "2.0.0": {"date_time": "2026-01-02"},
+                },
+            }
+        )
+        art = artifact_from_build(
+            SchemaBuildResult(
+                source_name="syslog",
+                columns=[],
+                create_table_ddl="CREATE TABLE t",
+            ),
+            version="2.0.0",
+        )
+        store.save_build(art, source)
+        assert store.load_build("syslog", "2.0.0") is not None
+        assert store.delete_build("syslog", "2.0.0", source=source) is True
+        assert store.load_build("syslog", "2.0.0") is None
+        assert not (tmp_path / "builds" / "syslog.yaml").is_file()
+
     def test_migrates_legacy_per_version_files(self, tmp_path: Path):
         store = SourceDeploymentStore(
             builds_dir=tmp_path / "builds",

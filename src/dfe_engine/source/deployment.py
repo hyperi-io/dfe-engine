@@ -481,6 +481,24 @@ class SourceDeploymentStore:
         yaml_dump(doc.model_dump(mode="json"), path)
         return path
 
+    def delete_build(self, source_name: str, version: str, *, source: Source | None = None) -> bool:
+        """Remove one version entry from source-builds (or delete the file if empty)."""
+        path = self._source_file(self.builds_dir, source_name)
+        doc = self._read_document(self.builds_dir, source_name, SourceBuildDocument)
+        if doc is None or version not in doc.versions:
+            return False
+        del doc.versions[version]
+        if source is not None:
+            doc.versions = _prune_versions_to_source(doc.versions, source)
+        if not doc.versions:
+            if path.is_file():
+                path.unlink()
+            return True
+        if doc.current not in doc.versions:
+            doc.current = sorted(doc.versions.keys())[-1]
+        yaml_dump(doc.model_dump(mode="json"), path)
+        return True
+
     def load_build(self, source_name: str, version: str) -> SourceBuildArtifact | None:
         doc = self._read_document(self.builds_dir, source_name, SourceBuildDocument)
         if doc is None or version not in doc.versions:

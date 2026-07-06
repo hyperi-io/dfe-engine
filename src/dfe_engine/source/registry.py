@@ -36,6 +36,7 @@ from dfe_engine.source.models import (
     Source,
     SourceWriteRequest,
     apply_source_write_update,
+    draft_build_version_to_invalidate,
     source_from_write,
 )
 from dfe_engine.yaml_utils import yaml_dump
@@ -247,6 +248,7 @@ class SourceRegistry:
         *,
         created_by: str | None = None,
         description: str | None = None,
+        deployment_store: Any | None = None,
     ) -> Source:
         """Update a source; version bump only when the deployed version is edited."""
         if isinstance(write, dict):
@@ -260,6 +262,20 @@ class SourceRegistry:
             updated = apply_source_write_update(existing, write)
         except ValueError as e:
             raise SourceValidationError(str(e)) from e
+
+        invalidate_version = draft_build_version_to_invalidate(existing, updated)
+        if invalidate_version is not None:
+            store = deployment_store
+            if store is None:
+                try:
+                    from dfe_engine.settings import get_settings
+                    from dfe_engine.source.deployment import SourceDeploymentStore
+
+                    store = SourceDeploymentStore.from_settings(get_settings())
+                except Exception:
+                    store = None
+            if store is not None and store.load_build(source_name, invalidate_version) is not None:
+                store.delete_build(source_name, invalidate_version, source=updated)
 
         return self.save_source(updated, created_by=created_by, description=description)
 

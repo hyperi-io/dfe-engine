@@ -17,6 +17,7 @@ from dfe_engine.source.models import (
     SourceVersionGetResponse,
     SourceWriteRequest,
     apply_source_write_update,
+    draft_build_version_to_invalidate,
     next_major_source_version,
     source_from_write,
     source_version_bump_required,
@@ -759,6 +760,38 @@ class TestSourceWriteRequest:
         assert updated.versions["2.0.0"].transform is not None
         assert updated.versions["2.0.0"].transform.config_file == "/b.toml"
         assert updated.deployed_version == "1.0.0"
+
+    def test_draft_build_version_to_invalidate(self):
+        existing = Source.model_validate(
+            {
+                "source": "x",
+                "deployed_version": "1.0.0",
+                "current": "2.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {},
+                    },
+                    "2.0.0": {
+                        "date_time": "2026-01-02",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a"},
+                    },
+                },
+            }
+        )
+        updated = existing.model_copy(deep=True)
+        updated.versions["2.0.0"] = updated.versions["2.0.0"].model_copy(
+            update={
+                "schema_config": SourceSchema(meta_schema="meta/b"),
+            }
+        )
+        assert draft_build_version_to_invalidate(existing, updated) == "2.0.0"
+        updated.versions["2.0.0"] = existing.versions["2.0.0"].model_copy(
+            update={"match": SourceMatch(field="g", value="v")}
+        )
+        assert draft_build_version_to_invalidate(existing, updated) is None
 
     def test_source_version_bump_required_sigma(self):
         base = {
