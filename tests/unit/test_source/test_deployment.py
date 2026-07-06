@@ -11,6 +11,7 @@ from dfe_engine.source.deployment import (
     artifact_from_build,
     deploy_statements_for_build,
     plan_from_build,
+    plan_ready_status,
     qualify_ddl_statements,
 )
 from dfe_engine.source.models import SchemaColumn, Source
@@ -126,6 +127,27 @@ class TestDeployStatements:
         plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=False)
         assert plan.ready is False
         assert plan.validation_errors == ["bad column"]
+        assert "validation failed" in (plan.ready_reason or "").lower()
+
+    def test_plan_ready_false_when_table_in_sync(self):
+        result = SchemaBuildResult(
+            source_name="x",
+            columns=[],
+            create_table_ddl="CREATE TABLE {db}.x (`a` String)",
+        )
+        plan = plan_from_build(result, version="1.0.0", statements=[], table_exists=True)
+        assert plan.ready is False
+        assert plan.ready_reason is not None
+        assert "already exists" in plan.ready_reason
+
+    def test_plan_ready_status_helper(self):
+        ready, reason = plan_ready_status(
+            validation_errors=[],
+            statements=["ALTER TABLE t ADD COLUMN x UInt8"],
+            table_exists=True,
+        )
+        assert ready is True
+        assert "1 DDL" in reason
 
     def test_artifact_from_build(self):
         result = SchemaBuildResult(

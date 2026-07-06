@@ -37,6 +37,7 @@ from dfe_engine.source.deployment import (
     ensure_build_artifact,
     execute_ddl_statements,
     plan_from_build,
+    plan_ready_status,
 )
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
@@ -172,6 +173,10 @@ class SourcePlanResponse(BaseModel):
     statements: list[str] = Field(default_factory=list)
     ddl: DDLResult | None = None
     ready: bool = False
+    ready_reason: str | None = Field(
+        default=None,
+        description="Why the plan is or is not ready to deploy",
+    )
 
 
 class SourceDeployResponse(BaseModel):
@@ -631,7 +636,7 @@ async def deploy_source(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
     )
-    statements, _table_exists = deploy_statements_for_build(
+    statements, table_exists = deploy_statements_for_build(
         builder,
         source,
         version_id,
@@ -639,22 +644,19 @@ async def deploy_source(
         db=settings.clickhouse.effective_data_database,
         ch_client=ch_client,
     )
-    if result.validation_errors:
+    ready, ready_reason = plan_ready_status(
+        validation_errors=list(result.validation_errors),
+        statements=statements,
+        table_exists=table_exists,
+    )
+    if not ready:
+        code = "plan_not_ready" if result.validation_errors else "nothing_to_deploy"
         raise HTTPException(
             status_code=400,
             detail={
-                "code": "plan_not_ready",
-                "message": (f"Source '{name}' version '{version_id}' has schema validation errors"),
-                "validation_errors": result.validation_errors,
-            },
-        )
-
-    if not statements:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "nothing_to_deploy",
-                "message": f"No DDL statements to deploy for source '{name}' version '{version_id}'",
+                "code": code,
+                "message": ready_reason,
+                "validation_errors": list(result.validation_errors),
             },
         )
 
@@ -962,6 +964,7 @@ def _plan_to_response(plan: SourcePlanArtifact) -> SourcePlanResponse:
         statements=list(plan.statements),
         ddl=ddl,
         ready=plan.ready,
+        ready_reason=plan.ready_reason,
     )
 
 

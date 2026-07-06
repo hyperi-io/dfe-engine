@@ -41,6 +41,10 @@ class SourcePlanVersionRecord(BaseModel):
     ready: bool = Field(
         description="True when there are no validation errors and deploy statements are present"
     )
+    ready_reason: str | None = Field(
+        default=None,
+        description="Why the plan is or is not ready to deploy",
+    )
 
 
 class SourceDeployVersionRecord(BaseModel):
@@ -101,6 +105,7 @@ class SourcePlanArtifact(BaseModel):
     create_table_ddl: str = ""
     view_ddls: dict[str, str] = Field(default_factory=dict)
     ready: bool = False
+    ready_reason: str | None = None
 
 
 class SourceDeployArtifact(BaseModel):
@@ -208,6 +213,30 @@ def deploy_statements_for_build(
     return qualify_ddl_statements(statements, db), table_exists
 
 
+def plan_ready_status(
+    *,
+    validation_errors: list[str],
+    statements: list[str],
+    table_exists: bool,
+) -> tuple[bool, str]:
+    """Return whether a plan can deploy and a human-readable explanation."""
+    if validation_errors:
+        head = validation_errors[0]
+        suffix = f" (+{len(validation_errors) - 1} more)" if len(validation_errors) > 1 else ""
+        return False, f"Schema validation failed: {head}{suffix}"
+    if not statements:
+        if table_exists:
+            return (
+                False,
+                "ClickHouse table already exists and all planned columns are present "
+                "(no DDL to apply)",
+            )
+        return False, "No deploy DDL was generated for this version"
+    count = len(statements)
+    noun = "statement" if count == 1 else "statements"
+    return True, f"{count} DDL {noun} ready to apply"
+
+
 def plan_from_build(
     result: SchemaBuildResult,
     *,
@@ -216,7 +245,11 @@ def plan_from_build(
     table_exists: bool,
 ) -> SourcePlanArtifact:
     errors = list(result.validation_errors)
-    ready = not errors and bool(statements)
+    ready, ready_reason = plan_ready_status(
+        validation_errors=errors,
+        statements=statements,
+        table_exists=table_exists,
+    )
     return SourcePlanArtifact(
         source_name=result.source_name,
         version=version,
@@ -227,6 +260,7 @@ def plan_from_build(
         create_table_ddl=result.create_table_ddl or "",
         view_ddls=dict(result.view_ddls or {}),
         ready=ready,
+        ready_reason=ready_reason,
     )
 
 
@@ -285,6 +319,7 @@ def _plan_record_from_artifact(artifact: SourcePlanArtifact) -> SourcePlanVersio
         create_table_ddl=artifact.create_table_ddl,
         view_ddls=dict(artifact.view_ddls),
         ready=artifact.ready,
+        ready_reason=artifact.ready_reason,
     )
 
 
@@ -303,6 +338,7 @@ def _plan_artifact_from_record(
         create_table_ddl=record.create_table_ddl,
         view_ddls=dict(record.view_ddls),
         ready=record.ready,
+        ready_reason=record.ready_reason,
     )
 
 

@@ -1987,7 +1987,7 @@
           "Sources"
         ],
         "summary": "Get Source Version",
-        "description": "Get one immutable source version snapshot by id, with build/plan/deploy status.",
+        "description": "Get one immutable source version snapshot by id, with build/deploy status.",
         "operationId": "get_source_version_api_v1_sources__name__versions_get",
         "parameters": [
           {
@@ -2195,69 +2195,12 @@
       }
     },
     "/api/v1/sources/{name}/plan": {
-      "get": {
-        "tags": [
-          "Sources"
-        ],
-        "summary": "Get Source Plan",
-        "description": "Return a saved deploy plan for a source version (from source-plans).",
-        "operationId": "get_source_plan_api_v1_sources__name__plan_get",
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          },
-          {
-            "name": "version",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "description": "Source version id to retrieve the plan for",
-              "title": "Version"
-            },
-            "description": "Source version id to retrieve the plan for"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SourcePlanResponse"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      },
       "post": {
         "tags": [
           "Sources"
         ],
         "summary": "Plan Source Deploy",
-        "description": "Dry-run ClickHouse deploy: DDL statements, validation errors, persisted plan.",
+        "description": "Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted).",
         "operationId": "plan_source_deploy_api_v1_sources__name__plan_post",
         "parameters": [
           {
@@ -2389,7 +2332,7 @@
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name, including build/plan/deploy per version.",
+        "description": "Get a full source definition by name, including build/deploy per version.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -12908,6 +12851,18 @@
             "type": "boolean",
             "title": "Ready",
             "default": false
+          },
+          "ready_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready Reason",
+            "description": "Why the plan is or is not ready to deploy"
           }
         },
         "type": "object",
@@ -13395,17 +13350,6 @@
             ],
             "description": "Last schema build for this version (source-builds)"
           },
-          "source_plan": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourcePlanResponse"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Last deploy plan for this version (source-plans)"
-          },
           "source_deployment": {
             "anyOf": [
               {
@@ -13424,7 +13368,7 @@
           "match"
         ],
         "title": "SourceVersionDetail",
-        "description": "Source version snapshot plus persisted build/plan/deploy payloads."
+        "description": "Source version snapshot plus persisted build/deploy payloads."
       },
       "SourceVersionGetDetailResponse": {
         "properties": {
