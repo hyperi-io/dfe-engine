@@ -292,20 +292,20 @@ deploy repo. It writes config and DDL - NOT Argo Applications.
   Client secrets are NOT written here - ESO materialises those from Vault.
 - CLI: `dfe-api gitops publish/render` (`cli/gitops.py`).
 
-**Important:** the Helm compiler still GENERATES `argo_applications` /
-`argo_appproject` / `argo_rbac_csv` objects, but they are NOT published to the
-deploy repo - they are legacy by-products. The ApplicationSets in dfe-infra own
-Argo App authorship. This is the boundary in code form.
+**Important:** the Helm compiler emits ONLY the overlay values (+ DDL) written to
+the deploy repo. It no longer authors any Argo objects - the `argo_applications` /
+`argo_appproject` / `argo_rbac` generators were removed. The ApplicationSets in
+dfe-infra own Argo App authorship. This is the boundary in code form.
 
 ### Provisioners (opt-in)
 
 Guarded by `DFE_ORG_PROVISIONING_ENABLED`, non-fatal on error:
 
-- `orgs/ch_provisioner.py` - per-org ClickHouse user + database for tenants with
-  `dedicated_database=True`.
 - `governance/ch/reconciler.py` - ensures the fixed CH users by privilege + ONE
   row policy per `_org_id` table (tenant isolation via the `DFE_current_tenant_id`
-  custom setting; needs `custom_settings_prefixes=DFE_` on the CH server).
+  custom setting; needs `custom_settings_prefixes=DFE_` on the CH server - NB this
+  does NOT enforce on ClickHouse Cloud, which rejects the custom setting; see
+  [BACKING-SERVICES.md](BACKING-SERVICES.md)).
 - `hyperdx/` - HyperDX tenant connection provisioning.
 
 ---

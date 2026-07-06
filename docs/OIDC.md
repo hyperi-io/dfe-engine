@@ -45,9 +45,15 @@ field, avoids DirectoryConfigStore YAML 1.1 boolean coercion).
 
 **Location:** `{auth_dir}/oidc-providers/{name}.yaml`, default
 `config/auth/oidc-providers/{name}.yaml`. `auth_dir` = `DFE_AUTH_DIR`, else
-`{DFE_CONFIG_DIR}/auth`. (Note: `DFE_AUTH_OIDC_PROVIDERS_DIR` exists as a setting
-but is NOT read by the loader - the path above is fixed. Do not rely on it to
-relocate providers.)
+`{DFE_CONFIG_DIR}/auth`.
+
+DRIFT (known gap): the two loaders disagree. The API runtime registry
+([api/app.py](../src/dfe_engine/api/app.py)) is HARDCODED to
+`{auth_dir}/oidc-providers/`, but the gitops-publish CLI
+([cli/gitops.py](../src/dfe_engine/cli/gitops.py)) reads
+`settings.auth.oidc.providers_dir` (`DFE_AUTH_OIDC_PROVIDERS_DIR`). Setting that
+var relocates providers for the PUBLISH path only, not the runtime API - so keep
+providers at the default path until the two are reconciled.
 
 ### 2.1 Schema
 
@@ -61,7 +67,9 @@ client_id_env: ""        # ENV VAR NAME holding the client ID (never the value)
 groups:
   mode: manual           # manual | token_claim | api
   claim_name: groups     # token_claim: the JWT claim carrying group IDs/names
-  sync_interval: 3600    # api: seconds between syncs (0 = manual trigger only)
+  sync_interval: 3600    # api: interval config for a periodic loop that is NOT
+                         # yet wired - sync is MANUAL-trigger only today (POST
+                         # /oidc/providers/{name}/sync); the field is forward config
   # --- google (type=google, mode=api) ---
   service_account_json_env: ""   # env var NAME for the SA JSON
   admin_email: ""                # domain-wide delegation subject

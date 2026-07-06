@@ -236,16 +236,20 @@ live `drift` summary (hand-edited OR catalogue-drift OR orphaned).
 ## 6. API surface
 
 Router prefix `/sigma`. RBAC: reads need `sigma:read`, writes need `sigma:write`
-(+ every write audits). `/sigma/*` returns **503 not_configured** when gitops is
-off. Long jobs (sync, propagate) use a submit->poll envelope (`task_id` + status +
-optional report), blocking up to a `wait` budget.
+(+ every write audits). REGISTERING a provider (register/update/delete - it takes
+a git URL / local dir, an SSRF + path-reach action) needs the admin-only
+`sigma:admin`, NOT `sigma:write`. `/sigma/*` returns **503 not_configured** when
+gitops is off. Long jobs (sync, propagate) use a submit->poll envelope (`task_id`
++ status + optional report), blocking up to a `wait` budget.
 
 | Method | Path | RBAC |
 |--------|------|------|
 | GET | `/sigma/mappings/{source}` , `/sigma/logsource` | read |
 | GET/PUT/DELETE | `/sigma/views` , `/sigma/views/{source}` | read / write |
 | POST | `/sigma/views/{source}` , `/sigma/views` | write (generate/preview DDL) |
-| GET/POST | `/sigma/providers` , `/sigma/providers/{name}` (+ `/enable` `/disable`) | read / write |
+| GET | `/sigma/providers` , `/sigma/providers/{name}` | read |
+| POST/PUT/DELETE | `/sigma/providers` , `/sigma/providers/{name}` | admin (`sigma:admin`) |
+| POST | `/sigma/providers/{name}/enable` `/disable` | write |
 | POST | `/sigma/providers/{name}/sync` (query `since`, `wait`) | write |
 | GET | `/sigma/syncs/{task_id}` | read |
 | GET | `/sigma/catalogue` (paginated; `q`, `selected`) , `/sigma/catalogue/{id}` | read |
@@ -296,6 +300,9 @@ hunt-runner concern to confirm against the runner, not the engine.
   hunts, and the full API surface are BUILT.
 - No new runtime dependency: pySigma + dulwich were already DFE deps; valhallaAPI
   was deliberately not adopted.
-- OpenAPI spec regen is a follow-on (the sigma routes post-date the last regen).
+- Propagation reports `stale_bindings` (a binding whose sigma rule was deselected
+  keeps firing until deleted), and source binding narrows on the rule's
+  category/service, not just product (`SourceSigma.category` / `.service`; a source
+  declaring neither matches any).
 - Commit-diff incremental fetch (vs full-scan + client-side `since`) is a noted
   future optimisation, not a correctness gap.

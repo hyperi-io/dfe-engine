@@ -72,6 +72,7 @@ full Sigma pipeline).
 
 | Doc | Status | What |
 |-----|--------|------|
+| [ANTI-PATTERNS.md](ANTI-PATTERNS.md) | Reference | Reviewed anti-pattern audit (keep/change verdicts + blocking-I/O work items). |
 | [GITOPS-COMMIT-STANDARD.md](GITOPS-COMMIT-STANDARD.md) | Standard | Gitops commit format for governed writes. |
 | [GOVERNED-OPS-DESIGN.md](GOVERNED-OPS-DESIGN.md) | Design | Generic YAML-in-git CRUD engine. |
 | [OBSERVABILITY-STANDARD.md](OBSERVABILITY-STANDARD.md) | Standard | Whole-stack logs/metrics/traces to one OTel destination. |
