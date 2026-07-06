@@ -233,9 +233,12 @@ class TestColumnTypes:
         assert "TYPE bloom_filter GRANULARITY 4" in ddl
 
     def test_json_type(self, gen: DDLGenerator):
+        # JSON must be emitted BARE, never Nullable(JSON) - ClickHouse rejects
+        # Nullable() around JSON (code 43 on CH 24.8).
         cols = [_col(name="data", type="json")]
         ddl = gen.generate_create_table("t", cols)
-        assert "Nullable(JSON)" in ddl
+        assert "Nullable(JSON)" not in ddl
+        assert "JSON" in ddl
 
 
 # ── DEFAULT / MATERIALIZED / ALIAS ──────────────────────────────────

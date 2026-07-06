@@ -87,6 +87,128 @@ def _get_env(primary: str, *fallbacks: str) -> str | None:
     return None
 
 
+class ChResilienceSettings(BaseModel):
+    """CH connection-resilience knobs (Phase 0) - config-cascade, NEVER hardcoded.
+
+    The engine retries a CONNECTION outage with reconnecting exponential back-off
+    up to a GENEROUS budget, recovering automatically when CH returns (a network
+    blip, a CH restart, or a CH Cloud idle warm-up). Sized from the dependency's
+    real behaviour, not a guessed timer; the budget is the backstop, not a race.
+    """
+
+    enabled: bool = Field(default=True, description="Retry+reconnect on CH connection outages.")
+    wait_initial_seconds: float = Field(default=0.5, description="Back-off before the first retry.")
+    wait_max_seconds: float = Field(
+        default=10.0, description="Back-off cap per attempt (the poll cadence once ramped)."
+    )
+    wait_multiplier: float = Field(default=2.0, description="Exponential back-off factor.")
+    budget_seconds: float = Field(
+        default=60.0,
+        description="GENEROUS backstop for a transient outage before giving up (503).",
+    )
+    waking_budget_seconds: float = Field(
+        default=300.0,
+        description="Extended budget once a CH Cloud auto-wake is in flight (cold start).",
+    )
+
+
+class ChQueryCaps(BaseModel):
+    """Per-query resource ceilings the kill switch clamps to (None = leave unset).
+
+    Each maps to the ClickHouse server setting of the same name. The clamp is
+    ``min(caller, cap)`` so a cap only ever TIGHTENS a query, never loosens it.
+    """
+
+    max_execution_time: int | None = Field(default=None, description="Seconds; wall-clock cap.")
+    max_memory_usage: int | None = Field(default=None, description="Bytes; per-query RAM cap.")
+    max_threads: int | None = Field(default=None, description="Thread fan-out cap.")
+    max_bytes_to_read: int | None = Field(default=None, description="Bytes scanned cap.")
+
+    def as_dict(self) -> dict[str, int]:
+        """The SET caps only (drops None), ready to clamp a settings dict with."""
+        return {k: v for k, v in self.model_dump().items() if v is not None}
+
+
+class ChKillSwitchSettings(BaseModel):
+    """Incident brake: a gitops severity dial that clamps user-query ceilings.
+
+    Flip ``severity`` (off -> light -> full) in gitops to shed ClickHouse load
+    during an incident WITHOUT a redeploy: every user-facing query (the QUERY /
+    TRACING profiles) has its resource ceilings clamped to ``min(caller, cap)``.
+    Ops paths (INTERNAL admin/topology, MIGRATE DDL, INSERT/DELETE/OPTIMIZE) are
+    EXEMPT, so incident recovery and migrations keep running. Pattern adapted from
+    PostHog (MIT) - see THIRD-PARTY-NOTICES.
+
+    ``light`` trims the worst offenders (long / wide reads); ``full`` is the hard
+    clamp for a real incident. Memory / bytes caps default unset (cluster-specific -
+    an operator sizes them); the time / threads caps are safe universal trims.
+    Takes effect on the next settings reload (the gitops dial is read live per call).
+    """
+
+    severity: str = Field(default="off", description="Incident brake level: off | light | full.")
+    light: ChQueryCaps = Field(
+        default_factory=lambda: ChQueryCaps(max_execution_time=15, max_threads=8)
+    )
+    full: ChQueryCaps = Field(
+        default_factory=lambda: ChQueryCaps(max_execution_time=5, max_threads=2)
+    )
+
+    def active_caps(self) -> dict[str, int]:
+        """The caps for the current ``severity`` ({} when off / unknown)."""
+        sev = self.severity.strip().lower()
+        if sev == "full":
+            return self.full.as_dict()
+        if sev == "light":
+            return self.light.as_dict()
+        return {}
+
+    @property
+    def active(self) -> bool:
+        """True when the brake is engaged (severity is light or full)."""
+        return self.severity.strip().lower() in ("light", "full")
+
+
+class ClickHouseCloudSettings(BaseModel):
+    """ClickHouse Cloud service-lifecycle config (CONTROL PLANE; opt-in).
+
+    Separate from the SQL connection (the regular ``clickhouse.*`` block pointed
+    at a ``*.clickhouse.cloud`` host). This block is the CONTROL-PLANE management
+    API (``api.clickhouse.cloud``) used to see / start / stop the service - a
+    BILLABLE lever, off by default. The api key needs only service read +
+    state-management (a SERVICE-SCOPED key, NOT an org-admin key); see
+    docs/CLICKHOUSE-CLOUD.md.
+    """
+
+    api_key_id: str = Field(default="", description="CH Cloud mgmt API key id (control plane).")
+    api_key_secret: str = Field(
+        default="", description="CH Cloud mgmt API key secret (control plane)."
+    )
+    api_base: str = Field(
+        default="https://api.clickhouse.cloud/v1", description="CH Cloud management API base URL."
+    )
+    organization_id: str = Field(
+        default="", description="CH Cloud org id (empty = auto-discover the first org for the key)."
+    )
+    service_id: str = Field(
+        default="", description="CH Cloud service UUID (takes precedence over service_name)."
+    )
+    service_name: str = Field(
+        default="dfe", description="CH Cloud service name to select when service_id is empty."
+    )
+    autowake: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: on a CH connect failure, if the Cloud service is stopped/idle, START it "
+            "(billable). OFF by default; requires the api key + a non-prod posture."
+        ),
+    )
+
+    @property
+    def configured(self) -> bool:
+        """True when the control-plane creds are present (lifecycle usable)."""
+        return bool(self.api_key_id and self.api_key_secret)
+
+
 class ClickHouseSettings(BaseModel):
     """ClickHouse connection settings."""
 
@@ -117,6 +239,26 @@ class ClickHouseSettings(BaseModel):
     # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
     # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
     topology: str = Field(default="single")
+    resilience: ChResilienceSettings = Field(default_factory=ChResilienceSettings)
+    cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
+    kill_switch: ChKillSwitchSettings = Field(default_factory=ChKillSwitchSettings)
+    metrics_enabled: bool = Field(
+        default=False,
+        description=(
+            "Opt-in per-query CH metrics (scalo.metrics counter + duration histogram). "
+            "Off by default: the structured per-query log always emits; the metric "
+            "backend + a /metrics scrape endpoint are an infra seam not wired yet."
+        ),
+    )
+    migrate_on_startup: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: apply pending CH migrations at engine startup (the "
+            "bootstrap-apply-that-senses runner - resolves the engine per topology). "
+            "Idempotent + non-fatal; off by default so startup is unaffected where "
+            "Argo owns the DDL."
+        ),
+    )
 
     @property
     def effective_data_database(self) -> str:
@@ -487,7 +629,7 @@ class HyperDXSettings(BaseModel):
         description=(
             "Team model posture. False (GA default) = ONE shared HyperDX team "
             "(ga_team_name) that every provisioned user joins; tenant isolation is "
-            "the per-connection DFE_current_tenant_id setting, not the team. True "
+            "the per-connection SQL_current_tenant_id setting, not the team. True "
             "(post-GA) = the richer per-org team (customer-<org>) per org."
         ),
     )
@@ -774,6 +916,52 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
         overrides["clickhouse"]["topology"] = val
 
+    # ClickHouse Cloud lifecycle (control-plane mgmt API; opt-in, billable).
+    ch_cloud: dict = {}
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_ID"):
+        ch_cloud["api_key_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET"):
+        ch_cloud["api_key_secret"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_BASE"):
+        ch_cloud["api_base"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_ORGANIZATION_ID"):
+        ch_cloud["organization_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE_ID"):
+        ch_cloud["service_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE", "DFE_CLICKHOUSE_CLOUD_SERVICE_NAME"):
+        ch_cloud["service_name"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_AUTOWAKE"):
+        ch_cloud["autowake"] = val.lower() in ("true", "1", "yes")
+    if ch_cloud:
+        overrides["clickhouse"]["cloud"] = ch_cloud
+
+    # CH connection resilience (config-cascade back-off; never hardcoded). The
+    # generous wake budget also accepts the DFE_CLICKHOUSE_CLOUD_WAKE_TIMEOUT alias.
+    ch_resil: dict = {}
+    if val := _get_env("DFE_CLICKHOUSE_RESILIENCE_ENABLED"):
+        ch_resil["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env(
+        "DFE_CLICKHOUSE_RESILIENCE_BUDGET_SECONDS", "DFE_CLICKHOUSE_CLOUD_WAKE_TIMEOUT"
+    ):
+        ch_resil["budget_seconds"] = float(val)
+    if val := _get_env("DFE_CLICKHOUSE_RESILIENCE_WAKING_BUDGET_SECONDS"):
+        ch_resil["waking_budget_seconds"] = float(val)
+    if val := _get_env("DFE_CLICKHOUSE_RESILIENCE_WAIT_INITIAL_SECONDS"):
+        ch_resil["wait_initial_seconds"] = float(val)
+    if val := _get_env("DFE_CLICKHOUSE_RESILIENCE_WAIT_MAX_SECONDS"):
+        ch_resil["wait_max_seconds"] = float(val)
+    if ch_resil:
+        overrides["clickhouse"]["resilience"] = ch_resil
+
+    # CH kill switch - the gitops incident brake (off | light | full). Only the
+    # severity dial is env-flippable; the per-level caps are config (gitops YAML).
+    if val := _get_env("DFE_CLICKHOUSE_KILL_SWITCH_SEVERITY", "DFE_CLICKHOUSE_KILL_SWITCH"):
+        overrides["clickhouse"]["kill_switch"] = {"severity": val.strip().lower()}
+    if val := _get_env("DFE_CLICKHOUSE_METRICS_ENABLED"):
+        overrides["clickhouse"]["metrics_enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_CLICKHOUSE_MIGRATE_ON_STARTUP"):
+        overrides["clickhouse"]["migrate_on_startup"] = val.lower() in ("true", "1", "yes")
+
     # Hunts settings (only the directory pointers remain; the scheduler/checkpoint/
     # inline-alert settings were removed with the legacy hunt modules - P3.16).
     if val := _get_env("DFE_HUNTS_DIR"):
@@ -993,8 +1181,12 @@ def _get_env_overrides() -> dict:
             ("query", "yaml_dir"): "queries",
         }
         for (section, key), subdir in _config_dir_subdirs.items():
-            if key not in overrides.get(section, {}):
-                overrides.setdefault(section, {})[key] = str(Path(config_dir) / subdir)
+            section_overrides = overrides.setdefault(section, {})
+            # ``overrides`` also holds the scalar ``config_dir`` value, so the
+            # section slot is typed str|dict; every key here targets a real dict
+            # section (never ``config_dir``), narrow so the assignment is sound.
+            if isinstance(section_overrides, dict) and key not in section_overrides:
+                section_overrides[key] = str(Path(config_dir) / subdir)
 
     # Remove empty sections
     return {k: v for k, v in overrides.items() if v}

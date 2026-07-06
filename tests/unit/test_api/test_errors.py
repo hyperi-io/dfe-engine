@@ -46,6 +46,9 @@ class TestExceptionHandlers:
         data = resp.json()
         assert data["code"] == "unauthorized"
         assert "message" in data
+        # WWW-Authenticate must survive the shared HTTPException handler -
+        # dropping it (JSONResponse built without headers=) is a live bug.
+        assert resp.headers["www-authenticate"] == "Bearer"
 
     def test_401_bad_token(self, client: TestClient):
         resp = client.get(

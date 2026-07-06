@@ -46,11 +46,13 @@ class _DfeApiApp:
 
             def register_commands(self, app) -> None:
                 from dfe_engine.cli import register_auth_commands
+                from dfe_engine.cli.ch_cloud import register_ch_cloud_commands
                 from dfe_engine.cli.gitops import register_gitops_commands
                 from dfe_engine.cli.governed_ops import register_governed_ops_commands
                 from dfe_engine.cli.sampler import register_sampler_commands
 
                 register_auth_commands(app)
+                register_ch_cloud_commands(app)
                 register_gitops_commands(app)
                 register_governed_ops_commands(app)
                 register_sampler_commands(app)

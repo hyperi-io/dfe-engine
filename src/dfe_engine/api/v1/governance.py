@@ -244,7 +244,7 @@ async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
 )
 async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
     """Reconcile CH quota tiers + service roles + fixed users + the per-table
-    DFE_current_tenant_id row policies into ClickHouse, minting the service + fixed
+    SQL_current_tenant_id row policies into ClickHouse, minting the service + fixed
     user secrets via the secrets seam. Idempotent. governance:write.
     """
     from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager

@@ -156,8 +156,7 @@ class OrgRegistry:
         """Update mutable fields on an existing org.
 
         Permitted fields: ``display_name``, ``org_ids``, ``domains``, ``enabled``,
-        ``hyperdx_team_id``, ``hyperdx_team_api_key_env``, ``hyperdx_connection_id``,
-        ``ch_password_env``.
+        ``hyperdx_team_id``, ``hyperdx_team_api_key_path``, ``hyperdx_connection_id``.
 
         Args:
             name: Org to update.
@@ -189,12 +188,10 @@ class OrgRegistry:
             update_dict["enabled"] = fields["enabled"]
         if "hyperdx_team_id" in fields:
             update_dict["hyperdx_team_id"] = fields["hyperdx_team_id"]
-        if "hyperdx_team_api_key_env" in fields:
-            update_dict["hyperdx_team_api_key_env"] = fields["hyperdx_team_api_key_env"]
+        if "hyperdx_team_api_key_path" in fields:
+            update_dict["hyperdx_team_api_key_path"] = fields["hyperdx_team_api_key_path"]
         if "hyperdx_connection_id" in fields:
             update_dict["hyperdx_connection_id"] = fields["hyperdx_connection_id"]
-        if "ch_password_env" in fields:
-            update_dict["ch_password_env"] = fields["ch_password_env"]
 
         update_dict["updated_at"] = _now()
         org = org.model_copy(update=update_dict)

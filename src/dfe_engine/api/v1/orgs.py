@@ -29,6 +29,7 @@ from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
 from dfe_engine.auth import Scope
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 if TYPE_CHECKING:
@@ -217,6 +218,7 @@ async def update_org(
 
     if update_fields:
         org = registry.update(name, **update_fields)
+        audit_resource_change(user.user_id, "org", name, "updated")
     else:
         org = registry.get(name)
         if org is None:

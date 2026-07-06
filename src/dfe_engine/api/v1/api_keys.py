@@ -23,6 +23,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/api-keys", tags=["API Keys"])
@@ -78,6 +79,9 @@ async def create_api_key(
             detail={"code": "conflict", "message": f"API key '{body.name}' already exists"},
         )
     key_meta, full_key = store.create(body.name, groups=body.groups, description=body.description)
+    audit_resource_change(
+        user.user_id, "api_key", key_meta.name, "created", {"short_token": key_meta.short_token}
+    )
     return APIKeyCreatedResponse(
         name=key_meta.name,
         short_token=key_meta.short_token,
@@ -139,3 +143,4 @@ async def revoke_api_key(
                 "message": f"No API key with short_token '{short_token}'",
             },
         )
+    audit_resource_change(user.user_id, "api_key", short_token, "revoked")

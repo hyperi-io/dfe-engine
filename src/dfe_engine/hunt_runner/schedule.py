@@ -45,11 +45,16 @@ def ensure_schedule_schema(ch: Any, database: str) -> None:
     ``enabled`` as a soft tombstone so a removed hunt stops waking KEDA without a
     delete. ``updated`` is the replacing version (latest write wins per hunt_id).
     """
+    from ..clickhouse.engines import EngineResolver, EngineSpec
+
+    resolved = EngineResolver(client=ch).resolve(
+        EngineSpec("ReplacingMergeTree", "updated"), database
+    )
     ch.command(
-        f"CREATE TABLE IF NOT EXISTS `{database}`.hunt_schedule ("
+        f"CREATE TABLE IF NOT EXISTS `{database}`.hunt_schedule{resolved.on_cluster} ("
         "hunt_id String, interval_seconds Int64, phase_offset Int64, "
         "enabled UInt8 DEFAULT 1, updated DateTime64(3) DEFAULT now64(3)) "
-        "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
+        f"ENGINE = {resolved.clause} ORDER BY hunt_id"
     )
 
 

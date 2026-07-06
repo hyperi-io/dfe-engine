@@ -165,48 +165,86 @@ class TestEnsureAccountHdxInvite:
         assert account is not None
 
 
+def _file_secrets(tmp_path):
+    """Real file-backed DfeSecrets (no mocks - same pattern as test_lifecycle.py)."""
+    from dfe_engine.secrets import build_secrets
+    from dfe_engine.settings import SecretsSettings
+
+    return build_secrets(SecretsSettings(provider="file", path=str(tmp_path / "secrets")))
+
+
 class TestResolveTeamApiKey:
     def test_returns_empty_without_org_registry(self, stores):
         _, groups = stores
         jit = JitProvisioner(account_store=None, group_store=groups, org_registry=None)
         assert jit._resolve_team_api_key("customer-acme") == ""
 
-    def test_ga_shared_team_resolves_via_any_org_env(self, stores, tmp_path, monkeypatch):
-        """GA team name (not customer-*) resolves its key via any org's stored env."""
+    def test_returns_empty_without_secrets_store(self, stores, tmp_path):
+        """A recorded path with NO secrets store wired must fail soft, not raise."""
         accounts, groups = stores
         from dfe_engine.orgs.registry import OrgRegistry
 
-        monkeypatch.setenv("HYPERDX_TEAM_API_KEY_DFE", "shared-key")
         org_registry = OrgRegistry(tmp_path / "orgs")
         org_registry.create("acme", org_ids=["acme"])
-        org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_DFE")
+        org_registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
 
         jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)
+        assert jit._resolve_team_api_key("customer-acme") == ""
+
+    def test_ga_shared_team_resolves_via_any_org_secret(self, stores, tmp_path):
+        """GA team name (not customer-*) resolves its key via any org's stored path."""
+        accounts, groups = stores
+        from dfe_engine.orgs.registry import OrgRegistry
+
+        secrets = _file_secrets(tmp_path)
+        secrets.put("hyperdx/team-api-key/dfe", "shared-key")
+        org_registry = OrgRegistry(tmp_path / "orgs")
+        org_registry.create("acme", org_ids=["acme"])
+        org_registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/dfe")
+
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            org_registry=org_registry,
+            secrets_store=secrets,
+        )
         assert jit._resolve_team_api_key("dfe") == "shared-key"
 
-    def test_returns_empty_when_env_var_unset(self, stores, tmp_path):
+    def test_returns_empty_when_secret_missing(self, stores, tmp_path):
         accounts, groups = stores
         from dfe_engine.orgs.registry import OrgRegistry
 
+        secrets = _file_secrets(tmp_path)
         org_registry = OrgRegistry(tmp_path / "orgs")
         org_registry.create("acme", org_ids=["acme"])
-        org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_ACME")
+        org_registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
 
-        jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)
-        # Env var not set → empty string
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            org_registry=org_registry,
+            secrets_store=secrets,
+        )
+        # Secret never put -> empty string
         result = jit._resolve_team_api_key("customer-acme")
         assert result == ""
 
-    def test_returns_key_when_env_var_set(self, stores, tmp_path, monkeypatch):
+    def test_returns_key_when_secret_present(self, stores, tmp_path):
         accounts, groups = stores
         from dfe_engine.orgs.registry import OrgRegistry
 
-        monkeypatch.setenv("HYPERDX_TEAM_API_KEY_ACME", "team-secret-key")
+        secrets = _file_secrets(tmp_path)
+        secrets.put("hyperdx/team-api-key/acme", "team-secret-key")
         org_registry = OrgRegistry(tmp_path / "orgs")
         org_registry.create("acme", org_ids=["acme"])
-        org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_ACME")
+        org_registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
 
-        jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)
+        jit = JitProvisioner(
+            account_store=accounts,
+            group_store=groups,
+            org_registry=org_registry,
+            secrets_store=secrets,
+        )
         result = jit._resolve_team_api_key("customer-acme")
         assert result == "team-secret-key"
 

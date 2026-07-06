@@ -128,7 +128,7 @@ def _render_ch_rbac_ddl() -> list[str]:
     and the fixed/service USER secrets need the secrets seam, so both are
     intentionally skipped (empty ``org_tables`` + empty hashes) - the live
     reconciler fills them in. NB the generated SQL also assumes the CH server has
-    ``<custom_settings_prefixes>DFE_</custom_settings_prefixes>`` (deploy config,
+    ``<custom_settings_prefixes>SQL_</custom_settings_prefixes>`` (deploy config,
     see .env.example). Non-fatal: a render failure warns and drops the DDL.
     """
     try:
@@ -158,7 +158,7 @@ def _render_hyperdx_connections(settings: DFESettings) -> str | None:
     coordinates), and the scalo.secrets seam - mirroring app.py's bootstrap wiring -
     then emits one connection per org via ``build_hyperdx_connections_json``: all
     share the fixed ``dfe_tenant_reader`` user, each row-scoped by its baked-in
-    ``DFE_current_tenant_id`` setting. Returns None (skip the artifact) when the base
+    ``SQL_current_tenant_id`` setting. Returns None (skip the artifact) when the base
     ``default`` connection is unavailable. Non-fatal: a failure warns + skips.
     """
     try:
@@ -266,7 +266,7 @@ def _assemble_artifacts(
         artifacts[ENVOY_OIDC_VALUES_PATH] = render_envoy_oidc_values(providers)
 
     # HyperDX consumes one ClickHouse connection per ORG (all share the fixed
-    # dfe_tenant_reader user, each row-scoped by its baked-in DFE_current_tenant_id
+    # dfe_tenant_reader user, each row-scoped by its baked-in SQL_current_tenant_id
     # setting); render the per-org DEFAULT_CONNECTIONS JSON into the deploy repo.
     connections = _render_hyperdx_connections(settings)
     if connections is not None:

@@ -13,7 +13,7 @@ axis is the PRODUCTION-STANDARD custom-settings model (docs/RBAC.md section 5):
 
 - a SMALL FIXED set of CH users by PRIVILEGE (``FIXED_USERS`` + ``dfe_admin``),
   and
-- ONE ``DFE_current_tenant_id``-driven RESTRICTIVE row policy per ``_org_id``
+- ONE ``SQL_current_tenant_id``-driven RESTRICTIVE row policy per ``_org_id``
   table (``render_tenant_policies``), targeting only ``dfe_tenant_reader``.
 
 Adding an org is zero DDL; the engine injects the org id into the per-query
@@ -34,12 +34,10 @@ from .models import (
     ChFixedUser,
     ChServiceRole,
     ChTier,
-    GroupChBinding,
 )
 from .reconciler import (
     ChRbacReconciler,
     ReconcileResult,
-    bindings_from_groups,
     compute_drops,
     load_catalogue_from_gitcrud,
     reconcile_ch_rbac,
@@ -67,9 +65,7 @@ __all__ = [
     "ChRbacReconciler",
     "ChServiceRole",
     "ChTier",
-    "GroupChBinding",
     "ReconcileResult",
-    "bindings_from_groups",
     "compute_drops",
     "load_catalogue_from_gitcrud",
     "reconcile_ch_rbac",

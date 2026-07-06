@@ -25,6 +25,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -103,6 +104,7 @@ async def create_account(
         body.username,
         added=body.groups,
     )
+    audit_resource_change(user.user_id, "account", account.username, "created")
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
@@ -206,6 +208,7 @@ async def update_account(
         )
     else:
         account = store.update(username, **update_fields)
+    audit_resource_change(user.user_id, "account", account.username, "updated")
     # Disabling an account revokes its HyperDX team membership on every org
     # (non-fatal). Re-enabling does not re-invite here - login re-provisions.
     if body.enabled is False:
@@ -242,6 +245,7 @@ async def reset_password(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.reset_password(username, body.new_password)
+    audit_resource_change(user.user_id, "account", username, "password_reset")
     return {"message": "password reset"}
 
 
@@ -268,6 +272,7 @@ async def delete_account(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.delete(username)
+    audit_resource_change(user.user_id, "account", username, "deleted")
     # Create/update sync membership both ways; delete must too, or the username
     # is left dangling in every Group.members list it belonged to.
     sync_group_members_for_account_groups_change(

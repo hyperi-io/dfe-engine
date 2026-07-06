@@ -167,8 +167,16 @@ class TypeRegistry:
 
         ch_type = base_type
 
-        # Nullable wraps inner (ClickHouse: LowCardinality(Nullable(T)))
-        if nullable:
+        # Nullable wraps inner (ClickHouse: LowCardinality(Nullable(T))). But
+        # ClickHouse REJECTS Nullable() around composite / self-nullable types
+        # (JSON, Array, Map, Tuple, Nested) - e.g. Nullable(JSON) is a hard error
+        # (code 43 on CH 24.8). A nullable JSON/composite is emitted bare.
+        stripped = ch_type.strip()
+        if (
+            nullable
+            and stripped != "JSON"
+            and not stripped.startswith(("Array(", "Map(", "Tuple(", "Nested("))
+        ):
             ch_type = f"Nullable({ch_type})"
 
         # LowCardinality wraps outer

@@ -101,8 +101,10 @@ class TestResolveNormal:
         assert r == ResolvedType(ch_type="Nullable(UUID)", codec=None)
 
     def test_json_default(self, registry: TypeRegistry):
+        # JSON is emitted BARE, never Nullable(JSON) - ClickHouse rejects Nullable()
+        # around JSON (code 43 on CH 24.8).
         r = registry.resolve("json")
-        assert r == ResolvedType(ch_type="Nullable(JSON)", codec="ZSTD(3)")
+        assert r == ResolvedType(ch_type="JSON", codec="ZSTD(3)")
 
     def test_geo_point_default(self, registry: TypeRegistry):
         r = registry.resolve("geo_point")

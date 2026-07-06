@@ -130,24 +130,39 @@ class ChCoordinator:
     # ---- schema -------------------------------------------------------
 
     def ensure_schema(self) -> None:
-        """Create the three coordination tables if absent (idempotent)."""
-        self._ch.command(f"CREATE DATABASE IF NOT EXISTS `{self._db}`")
+        """Create the three coordination tables if absent (idempotent).
+
+        Engines resolve through the topology-sensing resolver, so the tables get the
+        right form on single (ReplacingMergeTree) / on-prem cluster
+        (ReplicatedReplacingMergeTree ON CLUSTER) / Cloud (SharedReplacingMergeTree)
+        - never a hardcoded literal. The database is created ON CLUSTER too where the
+        topology needs it, else the ON CLUSTER table creates fail on the other
+        replicas (the single -> cluster trap).
+        """
+        from ..clickhouse.engines import EngineResolver, EngineSpec
+
+        resolver = EngineResolver(client=self._ch)
+        lease = resolver.resolve(EngineSpec("ReplacingMergeTree", "claimed"), self._db)
+        wmark = resolver.resolve(EngineSpec("ReplacingMergeTree", "updated"), self._db)
+        state = resolver.resolve(EngineSpec("ReplacingMergeTree", "updated"), self._db)
+
+        self._ch.command(f"CREATE DATABASE IF NOT EXISTS `{self._db}`{lease.on_cluster}")
         self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_lease ("
+            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_lease{lease.on_cluster} ("
             "hunt_id String, owner String, fire Int64, lease_until Int64, "
             "claimed DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(claimed) ORDER BY hunt_id"
+            f"ENGINE = {lease.clause} ORDER BY hunt_id"
         )
         self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_watermark ("
+            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_watermark{wmark.on_cluster} ("
             "hunt_id String, watermark Int64, updated DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
+            f"ENGINE = {wmark.clause} ORDER BY hunt_id"
         )
         self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_state ("
+            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_state{state.on_cluster} ("
             "hunt_id String, overrun_count Int64, too_aggressive UInt8, "
             "updated DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
+            f"ENGINE = {state.clause} ORDER BY hunt_id"
         )
 
     # ---- lease (claim) ------------------------------------------------

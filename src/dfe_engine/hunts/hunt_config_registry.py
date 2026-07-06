@@ -73,6 +73,24 @@ class HuntConfigNotFoundError(HuntConfigRegistryError):
     """Hunt config not found in the registry."""
 
 
+def _git_author(actor: str | None) -> str | None:
+    """Format an actor id into a dulwich-valid ``Name <email>`` identity.
+
+    dulwich raises ``InvalidUserIdentity`` on a BARE username, so the raw actor
+    the API passes (``user.user_id``) must be wrapped with a synthetic address, or
+    the commit fails - and the store's ``_git_commit`` swallows that failure, so a
+    save/delete would silently NOT commit (the YAML lands uncommitted: an
+    attribution AND gitops-survivability hole). An already-formatted
+    ``Name <email>`` value passes through; ``None`` stays ``None`` (dulwich then
+    uses the repo's configured identity).
+    """
+    if not actor:
+        return None
+    if "<" in actor and ">" in actor:
+        return actor
+    return f"{actor} <{actor}@dfe-engine>"
+
+
 class HuntConfigRegistry:
     """YAML-backed store for hunt scheduler configuration documents."""
 
@@ -136,7 +154,7 @@ class HuntConfigRegistry:
             commit_msg = description or f"hunt: update {name}"
             if created_by:
                 commit_msg = f"{commit_msg} (by {created_by})"
-            self._store._git_commit(yaml_path, commit_msg, author=created_by)
+            self._store._git_commit(yaml_path, commit_msg, author=_git_author(created_by))
             if self._store._git_push:
                 self._store._git_push_remote()
 
@@ -144,7 +162,7 @@ class HuntConfigRegistry:
         logger.info(f"Saved hunt config '{name}' → {yaml_path}")
         return payload
 
-    def delete(self, name: str) -> None:
+    def delete(self, name: str, *, deleted_by: str | None = None) -> None:
         yaml_path = self._hunts_directory / f"{name}.yaml"
 
         if not yaml_path.exists():
@@ -159,9 +177,18 @@ class HuntConfigRegistry:
                 rel_path = str(yaml_abs.relative_to(repo_root))
                 yaml_abs.unlink(missing_ok=True)
                 git.rm(self._store._repo, paths=[rel_path])
+                # Credit the actor like save() does - a delete is an auditable
+                # mutation, so its commit must carry the author, not land anonymous.
+                commit_msg = f"hunt: delete {name}"
+                if deleted_by:
+                    commit_msg = f"{commit_msg} (by {deleted_by})"
+                author_ident = _git_author(deleted_by)
+                author_bytes = author_ident.encode("utf-8") if author_ident else None
                 git.commit(
                     self._store._repo,
-                    message=f"hunt: delete {name}".encode(),
+                    message=commit_msg.encode(),
+                    author=author_bytes,
+                    committer=author_bytes,
                 )
                 if self._store._git_push:
                     self._store._git_push_remote()

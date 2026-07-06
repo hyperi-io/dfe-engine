@@ -32,12 +32,15 @@ class Org(BaseModel):
             on create/update.
         enabled: Whether this org is active.
         hyperdx_team_id: HyperDX team ID for this org's connection sync.
-        hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.
+        hyperdx_team_api_key_path: scalo.secrets (DfeSecrets) path holding the org's
+            HyperDX team API key. Written by OrgLifecycleManager at team creation and
+            read back by OrgLifecycleManager.revoke_member / JitProvisioner - the
+            secrets seam is durable and shared, unlike a process-env var (lost on
+            restart, invisible to sibling pods in a multi-replica k8s deploy).
         hyperdx_connection_id: HyperDX ClickHouse-connection ID for this org's
             per-org tenant connection. Under the GA posture every org shares ONE
             team but has its OWN connection - this id lets delete_org drop just
             that connection without touching the shared team.
-        ch_password_env: Environment variable name holding the ClickHouse password.
         created_at: ISO 8601 timestamp of creation.
         updated_at: ISO 8601 timestamp of last update.
     """
@@ -48,8 +51,7 @@ class Org(BaseModel):
     domains: list[str] = Field(default_factory=list)
     enabled: bool = True
     hyperdx_team_id: str = ""
-    hyperdx_team_api_key_env: str = ""
+    hyperdx_team_api_key_path: str = ""
     hyperdx_connection_id: str = ""
-    ch_password_env: str = ""
     created_at: str = ""
     updated_at: str = ""

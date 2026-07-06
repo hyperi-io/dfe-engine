@@ -302,10 +302,11 @@ dfe-infra own Argo App authorship. This is the boundary in code form.
 Guarded by `DFE_ORG_PROVISIONING_ENABLED`, non-fatal on error:
 
 - `governance/ch/reconciler.py` - ensures the fixed CH users by privilege + ONE
-  row policy per `_org_id` table (tenant isolation via the `DFE_current_tenant_id`
-  custom setting; needs `custom_settings_prefixes=DFE_` on the CH server - NB this
-  does NOT enforce on ClickHouse Cloud, which rejects the custom setting; see
-  [BACKING-SERVICES.md](BACKING-SERVICES.md)).
+  row policy per `_org_id` table (tenant isolation via the `SQL_current_tenant_id`
+  custom setting). The `SQL_` prefix is portable (live-proven): on ClickHouse
+  Cloud it is the built-in custom-setting prefix so it enforces with no config; on
+  self-hosted CH set `custom_settings_prefixes=SQL_` on the server. See
+  [BACKING-SERVICES.md](BACKING-SERVICES.md).
 - `hyperdx/` - HyperDX tenant connection provisioning.
 
 ---

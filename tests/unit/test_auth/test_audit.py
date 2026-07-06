@@ -18,9 +18,6 @@ from unittest.mock import patch
 import pytest
 
 from dfe_engine.auth.audit import (
-    audit_account_change,
-    audit_api_key_change,
-    audit_group_change,
     audit_jit_account_created,
     audit_jit_failed,
     audit_jit_groups_updated,
@@ -183,115 +180,6 @@ class TestAuditPermissionDenied:
         assert kwargs["action"] == "admin:write"
         assert kwargs["roles"] == ["data_analyst"]
         assert "admin:write" in kwargs["reason"]
-
-
-class TestAuditAccountChange:
-    @pytest.mark.parametrize("change", ["created", "updated", "deleted"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_info_event(self, mock_logger, change):
-        audit_account_change(
-            admin_id="admin",
-            target_user="newuser",
-            change=change,
-        )
-        mock_logger.info.assert_called_once()
-
-    @pytest.mark.parametrize("change", ["created", "updated", "deleted"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name_includes_change(self, mock_logger, change):
-        audit_account_change(
-            admin_id="admin",
-            target_user="newuser",
-            change=change,
-        )
-        args, _ = mock_logger.info.call_args
-        assert args[0] == f"auth.account.{change}"
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_account_change(
-            admin_id="superadmin",
-            target_user="alice",
-            change="created",
-        )
-        _, kwargs = mock_logger.info.call_args
-        assert kwargs["admin_id"] == "superadmin"
-        assert kwargs["target_user"] == "alice"
-        assert kwargs["change"] == "created"
-
-
-class TestAuditGroupChange:
-    @pytest.mark.parametrize("change", ["created", "updated", "deleted"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_info_event(self, mock_logger, change):
-        audit_group_change(
-            admin_id="admin",
-            group_name="soc-analysts",
-            change=change,
-        )
-        mock_logger.info.assert_called_once()
-
-    @pytest.mark.parametrize("change", ["created", "updated", "deleted"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name_includes_change(self, mock_logger, change):
-        audit_group_change(
-            admin_id="admin",
-            group_name="soc-analysts",
-            change=change,
-        )
-        args, _ = mock_logger.info.call_args
-        assert args[0] == f"auth.group.{change}"
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_group_change(
-            admin_id="superadmin",
-            group_name="threat-hunters",
-            change="updated",
-        )
-        _, kwargs = mock_logger.info.call_args
-        assert kwargs["admin_id"] == "superadmin"
-        assert kwargs["group_name"] == "threat-hunters"
-        assert kwargs["change"] == "updated"
-
-
-class TestAuditApiKeyChange:
-    @pytest.mark.parametrize("change", ["created", "revoked"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_emits_info_event(self, mock_logger, change):
-        audit_api_key_change(
-            admin_id="admin",
-            key_name="ci-pipeline",
-            short_token="ABCDEF1234567890",
-            change=change,
-        )
-        mock_logger.info.assert_called_once()
-
-    @pytest.mark.parametrize("change", ["created", "revoked"])
-    @patch("dfe_engine.auth.audit.logger")
-    def test_event_name_includes_change(self, mock_logger, change):
-        audit_api_key_change(
-            admin_id="admin",
-            key_name="ci-pipeline",
-            short_token="ABCDEF1234567890",
-            change=change,
-        )
-        args, _ = mock_logger.info.call_args
-        assert args[0] == f"auth.api_key.{change}"
-
-    @patch("dfe_engine.auth.audit.logger")
-    def test_structured_fields(self, mock_logger):
-        audit_api_key_change(
-            admin_id="superadmin",
-            key_name="deploy-bot",
-            short_token="DEADBEEF12345678",
-            change="revoked",
-        )
-        _, kwargs = mock_logger.info.call_args
-        assert kwargs["admin_id"] == "superadmin"
-        assert kwargs["key_name"] == "deploy-bot"
-        assert kwargs["short_token"] == "DEADBEEF12345678"
-        assert kwargs["change"] == "revoked"
 
 
 class TestAuditOrgChange:

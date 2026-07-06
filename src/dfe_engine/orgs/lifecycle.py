@@ -15,7 +15,7 @@ operation proceeds.
 ClickHouse isolation is NO LONGER a per-org database (the retired 2.1 model) nor a
 per-org role/per-group user (the retired interim model); under the shared-table +
 ``_org_id`` model it is ONE fixed row-filtered reader (``dfe_tenant_reader``) scoped
-per query by the ``DFE_current_tenant_id`` custom setting, reconciled by
+per query by the ``SQL_current_tenant_id`` custom setting, reconciled by
 ``governance.ch.ChRbacReconciler`` - not here. This manager only bakes each org's
 tenant setting into that org's HyperDX connection.
 
@@ -32,7 +32,6 @@ Usage::
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING, Any
 
 from scalo.logger import logger
@@ -51,9 +50,9 @@ if TYPE_CHECKING:
     from dfe_engine.hyperdx.client import HyperDXClient
 
 
-def _team_api_key_env(team_name: str) -> str:
-    """Env var name that holds a HyperDX team's API key (derived from the team name)."""
-    return f"HYPERDX_TEAM_API_KEY_{team_name.upper().replace('-', '_')}"
+def _team_api_key_secret_path(team_name: str) -> str:
+    """scalo.secrets path that holds a HyperDX team's API key (derived from the team name)."""
+    return f"hyperdx/team-api-key/{team_name}"
 
 
 class OrgLifecycleManager:
@@ -61,7 +60,7 @@ class OrgLifecycleManager:
 
     HyperDX operations are non-fatal: failures are logged and do not prevent the
     org operation from completing. ClickHouse isolation (the ONE ``_org_id`` row
-    policy driven by ``DFE_current_tenant_id``) is applied by
+    policy driven by ``SQL_current_tenant_id``) is applied by
     ``governance.ch.ChRbacReconciler`` from the registry, not here - orgs share
     tables and the shared ``dfe_tenant_reader`` user.
     """
@@ -80,13 +79,16 @@ class OrgLifecycleManager:
         self._hdx = hyperdx_client
         self._conn_config = connection_config
         # scalo.secrets seam (DfeSecrets): source of the shared dfe_tenant_reader
-        # plaintext the HyperDX connection authenticates with. None -> no password
-        # sourced (connection minted with an empty one, non-fatal).
+        # plaintext the HyperDX connection authenticates with, AND the durable store
+        # for each HyperDX team's minted API key (never the process environment -
+        # that is lost on restart and invisible to sibling pods in a multi-replica
+        # deploy). None -> no password sourced / no team key persisted; both
+        # non-fatal.
         self._secrets = secrets_store
         # DFE_HYPERDX_PER_GROUP posture (Task B). False (GA default) = ONE shared
         # HyperDX team (`ga_team_name`) for every org; True (post-GA) = the richer
         # per-org team `customer-<org>`. Either way there is ONE connection per org
-        # carrying its DFE_current_tenant_id setting, so tenant isolation is the
+        # carrying its SQL_current_tenant_id setting, so tenant isolation is the
         # per-connection setting, never the team boundary.
         self._per_group = per_group
         self._ga_team_name = ga_team_name
@@ -175,9 +177,9 @@ class OrgLifecycleManager:
         org's group (or the group's org access changing). When a user loses
         access to *org_name*, remove them from that org's HyperDX team
         (``customer-<org>``) so the org's HyperDX stops admitting them. Resolves
-        the org's stored team API key (the ``hyperdx_team_api_key_env`` env var
-        ``_provision_hyperdx`` writes) and issues the revoke. Non-fatal; returns
-        True only when the revoke was issued.
+        the org's stored team API key (the scalo.secrets path ``_provision_hyperdx``
+        writes to ``hyperdx_team_api_key_path``) and issues the revoke. Non-fatal;
+        returns True only when the revoke was issued.
 
         The account/group STORES + their routers live outside this module, so the
         one-line hook the sibling/handback must add (per affected org) is::
@@ -198,9 +200,9 @@ class OrgLifecycleManager:
         if self._hdx is None:
             return False
         org = self._registry.get(org_name)
-        if org is None or not org.hyperdx_team_api_key_env:
+        if org is None or not org.hyperdx_team_api_key_path:
             return False
-        team_api_key = os.environ.get(org.hyperdx_team_api_key_env, "")
+        team_api_key = self._get_team_api_key(org.hyperdx_team_api_key_path)
         if not team_api_key:
             return False
         return await self._hdx.remove_member(team_api_key, email)
@@ -242,24 +244,39 @@ class OrgLifecycleManager:
         except Exception:
             return ""
 
+    def _get_team_api_key(self, path: str) -> str:
+        """Read a HyperDX team API key back from the scalo.secrets seam.
+
+        Mirrors ``_fixed_reader_secret``'s fail-soft shape: no store, no path, or a
+        missing/errored secret -> empty string, so a revoke/invite silently no-ops
+        instead of raising (HyperDX operations are non-fatal throughout this
+        module).
+        """
+        if self._secrets is None or not path:
+            return ""
+        try:
+            return self._secrets.get(path)
+        except Exception:
+            return ""
+
     def _existing_shared_team(self) -> tuple[str, str] | None:
-        """The GA shared team (team_id, api_key_env) if a prior org already made it.
+        """The GA shared team (team_id, api_key_path) if a prior org already made it.
 
         GA posture (per_group False) puts every org on ONE HyperDX team, so the
         second org onwards must REUSE the first org's team rather than mint a
-        duplicate ``dfe`` team. Returns the first stored (team_id, api_key_env) pair
+        duplicate ``dfe`` team. Returns the first stored (team_id, api_key_path) pair
         found in the registry, or None when no org has provisioned a team yet.
         """
         for existing in self._registry.list():
             if existing.hyperdx_team_id:
-                return existing.hyperdx_team_id, existing.hyperdx_team_api_key_env
+                return existing.hyperdx_team_id, existing.hyperdx_team_api_key_path
         return None
 
     async def _attach_tenant_connection(self, team_id: str, org: Org) -> str:
         """Attach the org's ClickHouse connection to its HyperDX team (tenant-reader model).
 
         The connection authenticates as the SHARED ``dfe_tenant_reader`` (secret
-        ``ch/fixed/dfe_tenant_reader``) and carries the org's ``DFE_current_tenant_id``
+        ``ch/fixed/dfe_tenant_reader``) and carries the org's ``SQL_current_tenant_id``
         = comma-joined ``org_ids`` as a per-connection ClickHouse setting; the ONE
         restrictive row policy on each ``_org_id`` table scopes that reader to those
         orgs (empty setting -> 0 rows, fail closed). Network coordinates come from the
@@ -318,13 +335,13 @@ class OrgLifecycleManager:
         if not self._per_group:
             shared = self._existing_shared_team()
             if shared is not None:
-                team_id, api_key_env = shared
+                team_id, api_key_path = shared
                 conn_id = await self._attach_tenant_connection(team_id, org)
                 audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
                 return self._registry.update(
                     org.name,
                     hyperdx_team_id=team_id,
-                    hyperdx_team_api_key_env=api_key_env,
+                    hyperdx_team_api_key_path=api_key_path,
                     hyperdx_connection_id=conn_id,
                 )
 
@@ -346,17 +363,35 @@ class OrgLifecycleManager:
         if conn_id:
             update_kwargs["hyperdx_connection_id"] = conn_id
 
-        # Retrieve the team's own API key so we can invite members later. The env
-        # var name derives from the team name (shared under GA, per-org otherwise).
+        # Retrieve the team's own API key so we can invite members later. Minted
+        # through the scalo.secrets seam (DfeSecrets), NOT the process environment:
+        # os.environ is per-process (lost on restart) and per-pod (invisible to
+        # sibling replicas in a multi-replica k8s deploy), whereas the secrets seam
+        # is durable and shared. The path derives from the team name (shared under
+        # GA, per-org otherwise). No secrets store configured -> non-fatal, matching
+        # every other secrets-seam read/write in this module: the key is simply not
+        # persisted (an invite attempt this run resolves no key and no-ops).
         team_api_key = await self._hdx.get_team_api_key(team_id)
-        if team_api_key:
-            env_var = _team_api_key_env(team_name)
-            os.environ[env_var] = team_api_key
-            update_kwargs["hyperdx_team_api_key_env"] = env_var
-            logger.info(
-                "HyperDX team API key stored",
+        if team_api_key and self._secrets is not None:
+            path = _team_api_key_secret_path(team_name)
+            try:
+                self._secrets.put(path, team_api_key)
+                update_kwargs["hyperdx_team_api_key_path"] = path
+                logger.info(
+                    "HyperDX team API key stored",
+                    org_name=org.name,
+                    secret_path=path,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "HyperDX team API key store failed",
+                    org_name=org.name,
+                    error=str(exc),
+                )
+        elif team_api_key:
+            logger.warning(
+                "HyperDX team API key minted but no secrets store configured; not persisted",
                 org_name=org.name,
-                env_var=env_var,
             )
 
         return self._registry.update(org.name, **update_kwargs)

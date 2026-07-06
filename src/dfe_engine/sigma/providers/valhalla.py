@@ -51,6 +51,21 @@ _DEFAULT_BASE = "https://valhalla.nextron-systems.com"
 _GETSIGMA_PATH = "/api/v1/getsigma"
 
 
+def _retry_after_seconds(response: Any) -> float | None:
+    """Seconds to wait from a 429's ``Retry-After`` header, or None to fall back.
+
+    Handles the delta-seconds form (the common API case). The HTTP-date form is
+    rarer and left to the caller's linear backoff (returns None).
+    """
+    raw = response.headers.get("Retry-After")
+    if not raw:
+        return None
+    try:
+        return max(0.0, float(raw))
+    except ValueError:
+        return None
+
+
 class ValhallaProvider(SigmaProvider):
     """Fetch sigma rules from the Valhalla JSON feed over HTTP.
 
@@ -96,34 +111,40 @@ class ValhallaProvider(SigmaProvider):
         return []
 
     async def _fetch_raw(self) -> list[dict[str, Any]]:
-        """POST getsigma with backoff on 429; return the raw rule dicts. Network seam."""
+        """POST getsigma; return the raw rule dicts. Network seam.
+
+        ``scalo.http`` already retries transport + 5xx errors (stamina) and raises
+        for status, so the ONLY thing left to add here is the 429/Retry-After
+        handler valhalla's aggressive rate limiting needs - scalo never retries a
+        4xx. A non-429 4xx (e.g. a bad apikey -> 401) surfaces immediately; any
+        other error propagates un-retried (scalo already spent its budget - no
+        double retry).
+        """
+        import httpx
         from scalo.http import AsyncHttpClient
 
         apikey = self._api_key()
         payload = {"apikey": apikey, "format": "json"}
-        last_exc: Exception | None = None
         async with AsyncHttpClient(base_url=self._base) as client:
             for attempt in range(1, self._max_retries + 1):
                 try:
                     resp = await client.post(_GETSIGMA_PATH, data=payload)
-                except Exception as exc:  # transient transport error - retry with backoff
-                    last_exc = exc
-                    await asyncio.sleep(self._backoff_seconds * attempt)
-                    continue
-                if resp.status_code == 429:
-                    # Respect the aggressive rate limiting: linear backoff, then retry.
+                except httpx.HTTPStatusError as exc:
+                    if exc.response.status_code != 429 or attempt >= self._max_retries:
+                        raise  # non-429 4xx (real error) or out of 429 retries
+                    delay = _retry_after_seconds(exc.response) or self._backoff_seconds * attempt
                     logger.warning(
                         "valhalla rate-limited (429); backing off",
                         provider=self.name,
                         attempt=attempt,
+                        delay_seconds=delay,
                     )
-                    await asyncio.sleep(self._backoff_seconds * attempt)
+                    await asyncio.sleep(delay)
                     continue
-                resp.raise_for_status()
                 return self._extract_rules(resp.json())
         raise RuntimeError(
-            f"valhalla provider {self.name!r}: exhausted {self._max_retries} retries"
-        ) from last_exc
+            f"valhalla provider {self.name!r}: exhausted {self._max_retries} retries on 429"
+        )
 
     async def fetch(self, since: datetime | None = None) -> list[SigmaRuleDoc]:
         raw = await self._fetch_raw()

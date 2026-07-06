@@ -13,7 +13,7 @@ ClickHouse user/policy reconciliation for DFE RBAC.
 
 The custom settings pattern uses a small fixed set of static CH users
 (by privilege level) with ONE row policy per ``_org_id`` table based on
-``getSetting('DFE_current_tenant_id')``.  dfe-engine injects the tenant
+``getSetting('SQL_current_tenant_id')``.  dfe-engine injects the tenant
 ID per query based on the authenticated user's org_ids.
 
 Usage::

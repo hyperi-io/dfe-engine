@@ -129,6 +129,9 @@ scopes_dict = {
     "source_delete": "source:delete",
     # system
     "system_read": "system:read",
+    # ClickHouse Cloud service lifecycle (control plane; a BILLABLE start/stop) -
+    # admin-only, separate from system:read so it can be granted narrowly.
+    "clickhouse_cloud_manage": "clickhouse_cloud:manage",
     # tasks
     "task_read": "task:read",
     "task_write": "task:write",

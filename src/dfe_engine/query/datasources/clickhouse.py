@@ -40,29 +40,31 @@ class ClickHouseAdapter(DatasourceAdapter):
         return self._manager
 
     def get_restricted_client(self) -> Any:
-        """Get a restricted clickhouse-connect client for parameterized view execution."""
-        if self._restricted_client is None:
-            import clickhouse_connect
+        """Get a restricted, pooled client for parameterised view execution.
 
+        Routes through the shared pool (the ConnectionCache keys on the restricted
+        creds, so it gets its own pooled client) rather than a direct
+        clickhouse_connect bypass.
+        """
+        if self._restricted_client is None:
+            from dfe_engine.clickhouse.clickhouse_manager import get_pooled_client
+            from dfe_engine.clickhouse.profiles import Profile
             from dfe_engine.settings import get_settings
 
             settings = get_settings()
             ch = settings.clickhouse
             qv = settings.query_views
 
-            connect_params: dict[str, Any] = {
-                "host": ch.host,
-                "port": ch.port,
-                "username": qv.restricted_user,
-                "password": qv.restricted_password,
-                "database": ch.database,
+            config: dict[str, Any] = {
+                "ch_host": ch.host,
+                "ch_port": ch.port,
+                "ch_username": qv.restricted_user,
+                "ch_password": qv.restricted_password,
+                "ch_database": ch.database,
+                "ch_secure": ch.secure,
+                "ch_verify": ch.verify,
             }
-
-            if ch.secure:
-                connect_params["secure"] = True
-                connect_params["verify"] = ch.verify
-
-            self._restricted_client = clickhouse_connect.get_client(**connect_params)
+            self._restricted_client = get_pooled_client(config, Profile.QUERY)
 
         return self._restricted_client
 

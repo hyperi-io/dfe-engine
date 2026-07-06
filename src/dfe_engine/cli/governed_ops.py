@@ -123,7 +123,7 @@ def action_invoke(
 @governed_app.command("reconcile-ch-rbac")
 def reconcile_ch_rbac_cmd() -> None:
     """Reconcile CH quota tiers + service roles + fixed users + the per-table
-    DFE_current_tenant_id row policies into ClickHouse (mints the service + fixed
+    SQL_current_tenant_id row policies into ClickHouse (mints the service + fixed
     user secrets via the secrets seam). Idempotent.
     """
     from pathlib import Path

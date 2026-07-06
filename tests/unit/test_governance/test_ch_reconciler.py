@@ -19,7 +19,6 @@ from types import SimpleNamespace
 from dfe_engine.governance.ch.models import FIXED_USERS, ChServiceRole, ChTier
 from dfe_engine.governance.ch.reconciler import (
     ChRbacReconciler,
-    bindings_from_groups,
     compute_drops,
     load_catalogue_from_gitcrud,
     reconcile_ch_rbac,
@@ -131,7 +130,7 @@ class TestRenderAll:
         assert (
             "CREATE ROW POLICY OR REPLACE `dfe_tenant_filter` ON `dfe`.`events` "
             "AS RESTRICTIVE FOR SELECT USING "
-            "has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id) "
+            "has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id) "
             "TO `dfe_tenant_reader`" in s
         )
         # NO retired per-org / per-group objects survive the model change
@@ -267,44 +266,6 @@ class TestReconcile:
         assert "DROP ROLE IF EXISTS `dfe_org_gone_role`" in applied
         assert "DROP ROW POLICY IF EXISTS `dfe_rowpol_gone_dfe_events`" in applied
         assert any("dfe_org_gone_role" in d for d in result.dropped)
-
-
-class TestBindingsFromGroups:
-    """The group->org resolver still used by HyperDX + org lifecycle."""
-
-    def _grp(self, name: str, org_ids: list[str]) -> SimpleNamespace:
-        return SimpleNamespace(name=name, org_ids=org_ids)
-
-    def test_group_with_org_id_binds_to_org_name(self):
-        orgs = [_org("acme", ["acme"]), _org("globex", ["gx-1", "gx-2"])]
-        groups = [self._grp("soc", ["acme"]), self._grp("ir", ["gx-2"])]
-        bindings = bindings_from_groups(groups, orgs)
-        by_group = {b.group: b for b in bindings}
-        assert by_group["soc"].org == "acme"
-        assert by_group["soc"].user() == "dfe_grp_soc"
-        assert by_group["ir"].org == "globex"  # resolved via a tenant org_id, not the name
-        assert by_group["ir"].tier == ""  # no tier axis on a group -> default at render
-
-    def test_group_without_org_ids_yields_no_binding(self):
-        # No org-scoped access -> no CH data user (never an implicit unrestricted one).
-        assert bindings_from_groups([self._grp("admins", [])], [_org("acme", ["acme"])]) == []
-
-    def test_ambiguous_multi_org_group_is_skipped(self):
-        # Two distinct orgs on one group can't be one CH user (double org grant fails
-        # closed), so the derivation refuses it rather than mislabel it.
-        orgs = [_org("acme", ["acme"]), _org("globex", ["globex"])]
-        groups = [self._grp("both", ["acme", "globex"])]
-        assert bindings_from_groups(groups, orgs) == []
-
-    def test_unknown_org_ref_yields_no_binding(self):
-        assert bindings_from_groups([self._grp("x", ["nope"])], [_org("acme", ["acme"])]) == []
-
-    def test_multi_tenant_single_org_binds_once(self):
-        # A group referencing several org_ids that all belong to ONE org -> one binding.
-        orgs = [_org("globex", ["gx-1", "gx-2"])]
-        bindings = bindings_from_groups([self._grp("ops", ["gx-1", "gx-2"])], orgs)
-        assert len(bindings) == 1
-        assert bindings[0].org == "globex"
 
 
 class TestCatalogueFromGitcrud:

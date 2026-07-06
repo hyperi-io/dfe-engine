@@ -24,6 +24,7 @@ from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
     QueryOptions,
@@ -250,6 +251,13 @@ async def execute_raw_query(
 
     duration_ms = int((time.perf_counter() - start) * 1000)
 
+    audit_resource_change(
+        user.user_id,
+        "query",
+        request.datasource,
+        "executed",
+        {"query": request.query[:200]},
+    )
     return QueryResponse(
         rows=rows,
         columns=columns,

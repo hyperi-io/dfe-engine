@@ -189,3 +189,45 @@ def test_raw_query_binds_manager_to_settings_config(app, api_settings, admin_hea
             assert captured["username"] == "svc"
         finally:
             ClickHouseManager.reset_instance()
+
+
+def test_raw_query_emits_audit(app, api_settings, admin_headers, monkeypatch):
+    """POST /queries/raw audits the datasource + a truncated copy of the SQL run.
+
+    This is the admin arbitrary-SQL path (query:raw) - the highest-sensitivity
+    query surface, so it must leave a SOC2 audit trail distinct from the
+    org-scoped parameterized-view execute path.
+    """
+    import clickhouse_connect
+
+    import dfe_engine.api.v1.queries as queries_mod
+
+    class _FakeConnectClient:
+        def query(self, sql, parameters=None, settings=None, **_kw):
+            return _FakeResult(["n"], [(1,)])
+
+        def command(self, sql, *_a, **_kw):
+            return None
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(clickhouse_connect, "get_client", lambda **kwargs: _FakeConnectClient())
+
+    calls = []
+    monkeypatch.setattr(queries_mod, "audit_resource_change", lambda *a: calls.append(a))
+
+    with TestClient(app, raise_server_exceptions=False) as client:
+        ClickHouseManager.reset_instance()
+        try:
+            r = client.post(
+                "/api/v1/queries/raw",
+                json={"datasource": "clickhouse:default", "query": "SELECT 1"},
+                headers=admin_headers,
+            )
+            assert r.status_code == 200, r.text
+            assert calls == [
+                ("admin", "query", "clickhouse:default", "executed", {"query": "SELECT 1"})
+            ]
+        finally:
+            ClickHouseManager.reset_instance()

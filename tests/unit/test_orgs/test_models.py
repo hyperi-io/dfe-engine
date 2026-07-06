@@ -66,20 +66,16 @@ class TestOrgModel:
         org = Org(name="test")
         assert org.enabled is True
         assert org.hyperdx_team_id == ""
-        assert org.ch_password_env == ""
 
     def test_org_internal_metadata_roundtrip(self):
         org = Org(
             name="acme",
             hyperdx_team_id="team-abc",
-            ch_password_env="DFE_ACME_CH_PASSWORD",
         )
         data = org.model_dump()
         assert data["hyperdx_team_id"] == "team-abc"
-        assert data["ch_password_env"] == "DFE_ACME_CH_PASSWORD"
         restored = Org.model_validate(data)
         assert restored.hyperdx_team_id == "team-abc"
-        assert restored.ch_password_env == "DFE_ACME_CH_PASSWORD"
 
     def test_domains_default_empty_and_independent(self):
         org1 = Org(name="one")

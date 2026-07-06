@@ -19,6 +19,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier as _bq
+from dfe_engine.clickhouse.quoting import quote_literal as _sq
+
 from .models import (
     FIXED_USERS,
     TENANT_POLICY_NAME,
@@ -28,24 +31,6 @@ from .models import (
     ChServiceRole,
     ChTier,
 )
-
-
-def _bq(identifier: str) -> str:
-    """Backtick-quote a CH identifier (escaping embedded backticks)."""
-    return "`" + identifier.replace("`", "``") + "`"
-
-
-def _sq(value: str) -> str:
-    """Single-quote a CH string literal (escape backslashes THEN single quotes).
-
-    ClickHouse honours C-style backslash escapes inside string literals, so the
-    backslash MUST be doubled before the quote is doubled - otherwise a crafted
-    value like ``\\' OR 1=1`` breaks out of a RESTRICTIVE row-policy predicate and
-    tenant isolation fails open (F-ROWPOLICY-BACKSLASH, proven live on CH 25.8).
-    Order is load-bearing: escape ``\\`` first so the ``''`` we emit for a quote is
-    not itself re-escaped. Matches clickhouse-connect's escape_str.
-    """
-    return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
 
 
 def _settings_kv(settings: dict[str, int]) -> str:
@@ -139,7 +124,7 @@ def _fixed_user_settings(fu: ChFixedUser) -> list[str]:
     """The ``SETTINGS`` bits for a fixed user (readonly + the tenant setting).
 
     Ordered/stable: ``readonly = 1`` then, for the row-filtered reader,
-    ``DFE_current_tenant_id = '' CHANGEABLE_IN_READONLY``. The reader is readonly
+    ``SQL_current_tenant_id = '' CHANGEABLE_IN_READONLY``. The reader is readonly
     but MUST set the ONE tenant setting per query, so that single setting is
     changeable-in-readonly; its default is empty, which fails CLOSED (0 rows) until
     a real tenant id is injected. The setting name is escaped-safe (identifier, no
@@ -187,14 +172,14 @@ def render_fixed_users(hashes: dict[str, str]) -> list[str]:
 
 def render_tenant_policies(tables: list[tuple[str, str]]) -> list[str]:
     """ONE RESTRICTIVE row policy per ``_org_id``-bearing table - the whole tenant
-    axis, driven by the per-query ``DFE_current_tenant_id`` custom setting.
+    axis, driven by the per-query ``SQL_current_tenant_id`` custom setting.
 
     ``tables`` is the ``(db, table)`` list the reconciler discovers from
     ``system.columns``. Every policy shares the short-name ``dfe_tenant_filter``
     (a CH row-policy name is per-table, so this is one filter definition applied
     everywhere) and targets ONLY ``dfe_tenant_reader``::
 
-        USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)
+        USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)
 
     - a comma-joined tenant list ``'acme,globex'`` scopes the reader to those orgs
       (multi-org users), and
@@ -222,30 +207,44 @@ def render_tenant_policies(tables: list[tuple[str, str]]) -> list[str]:
     return stmts
 
 
-def render_materialise(orgs: list[Any], tiers: list[Any]) -> list[str]:
+def render_materialise(orgs: list[Any], tiers: list[Any], resolver: Any = None) -> list[str]:
     """DDL+DML projecting the gitops SoT into read-only CH meta tables (spec 9).
 
     ``dfe_meta.orgs`` + ``dfe_meta.ch_tiers`` are ReplacingMergeTree projections;
     gitops stays the source of truth. Each reconcile TRUNCATEs + re-INSERTs so the
     projection exactly reflects current config (drops of removed orgs/tiers
     included) - idempotent and always current.
+
+    ``resolver`` (an EngineResolver bound to the admin client, passed by the
+    reconciler) senses the topology so the meta tables + database get the right
+    engine + ON CLUSTER form on single / on-prem cluster / Cloud. Without it the
+    single-node plain form is used (the resolver's own terminal default). The DB +
+    TRUNCATEs carry the same ON CLUSTER clause so they land on every replica.
     """
+    from dfe_engine.clickhouse.engines import EngineSpec
+
+    if resolver is not None:
+        eng = resolver.resolve(EngineSpec("ReplacingMergeTree", "updated_at"), "dfe_meta")
+        on_cluster, clause = eng.on_cluster, eng.clause
+    else:
+        on_cluster, clause = "", "ReplacingMergeTree(updated_at)"
+
     stmts: list[str] = [
-        "CREATE DATABASE IF NOT EXISTS dfe_meta",
+        f"CREATE DATABASE IF NOT EXISTS dfe_meta{on_cluster}",
         (
-            "CREATE TABLE IF NOT EXISTS dfe_meta.orgs "
+            f"CREATE TABLE IF NOT EXISTS dfe_meta.orgs{on_cluster} "
             "(name String, org_ids Array(String), display_name String, "
             "enabled UInt8, updated_at DateTime DEFAULT now()) "
-            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
+            f"ENGINE = {clause} ORDER BY name"
         ),
         (
-            "CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers "
+            f"CREATE TABLE IF NOT EXISTS dfe_meta.ch_tiers{on_cluster} "
             "(name String, kind String, is_default UInt8, "
             "updated_at DateTime DEFAULT now()) "
-            "ENGINE = ReplacingMergeTree(updated_at) ORDER BY name"
+            f"ENGINE = {clause} ORDER BY name"
         ),
-        "TRUNCATE TABLE dfe_meta.orgs",
-        "TRUNCATE TABLE dfe_meta.ch_tiers",
+        f"TRUNCATE TABLE dfe_meta.orgs{on_cluster}",
+        f"TRUNCATE TABLE dfe_meta.ch_tiers{on_cluster}",
     ]
     for o in orgs:
         ids = ", ".join(_sq(i) for i in (o.org_ids or []))

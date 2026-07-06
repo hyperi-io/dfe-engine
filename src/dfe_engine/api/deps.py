@@ -670,7 +670,7 @@ def get_tenant_scoped_clickhouse_client(request: Request, user: CurrentUser) -> 
     scoped:
 
       * org_analyst -> the row-filtered ``dfe_tenant_reader`` wrapped in a
-        TenantScopedClient injecting ``DFE_current_tenant_id`` = the caller's
+        TenantScopedClient injecting ``SQL_current_tenant_id`` = the caller's
         org_ids (empty -> '' -> zero rows, fail closed);
       * data_analyst_ro / data_viewer / infra_ro -> the read-only ``dfe_analyst_ro``
         (drops readonly-incompatible per-query settings; no tenant setting);

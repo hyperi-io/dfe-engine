@@ -38,7 +38,6 @@ import signal
 import time
 from typing import Any
 
-import clickhouse_connect
 import typer
 
 from dfe_engine.settings import DFESettings, load_settings
@@ -53,35 +52,19 @@ from .worker import HuntWorker
 app = typer.Typer(help="dfe-hunt-runner: CH-coordinated pull-based hunt execution.")
 
 
-def _ch_params(settings: DFESettings) -> dict[str, Any]:
-    """The clickhouse-connect kwargs for the raw client, derived from settings.
-
-    Pure (opens no connection) so the settings -> params mapping is unit-testable
-    without a live ClickHouse - the same host/port/username/password/secure/verify
-    the integration ``ch_client`` fixture builds a client from.
-    """
-    ch = settings.clickhouse
-    return {
-        "host": ch.host,
-        "port": ch.port,
-        "username": ch.username,
-        "password": ch.password,
-        "secure": ch.secure,
-        "verify": ch.verify,
-    }
-
-
 def _build_ch(settings: DFESettings) -> tuple[Any, str]:
-    """Build a RAW clickhouse-connect client + resolve the data database name.
+    """Build a ClickHouse client wrapper + resolve the data database name.
 
-    Returns ``(client, database)``. The coordinator calls ``.insert()`` (which the
-    ClickHouseClientWrapper does not expose), so this hands back the raw
-    clickhouse-connect client, built from _ch_params (the SAME fields the integration
-    ``ch_client`` fixture uses). The database is ``effective_data_database`` - NEVER a
-    hardcoded 'dfe'; the coordination + schedule tables live in whatever data database
-    the connection resolves to.
+    Returns ``(client, database)``. Routes through the ClickHouseManager (shared
+    pool + resilience); the wrapper now exposes ``.insert()`` so the coordinator no
+    longer needs a raw bypass client. The database is ``effective_data_database`` -
+    NEVER a hardcoded 'dfe'; the coordination + schedule tables live in whatever data
+    database the connection resolves to.
     """
-    client = clickhouse_connect.get_client(**_ch_params(settings))
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_clickhouse_config
+
+    client = ClickHouseManager.get_instance(get_clickhouse_config(settings)).get_clickhouse_client()
     return client, settings.clickhouse.effective_data_database
 
 

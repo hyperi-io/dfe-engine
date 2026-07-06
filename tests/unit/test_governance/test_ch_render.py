@@ -19,7 +19,6 @@ from dfe_engine.governance.ch.models import (
     TENANT_SETTING,
     ChServiceRole,
     ChTier,
-    GroupChBinding,
 )
 from dfe_engine.governance.ch.render import (
     _sq,
@@ -41,12 +40,6 @@ class TestNaming:
         assert t.role() == "dfe_analyst_tier_2_role"
         assert t.profile() == "dfe_analyst_tier_2_profile"
         assert t.quota_name() == "dfe_analyst_tier_2_quota"
-
-    def test_group_binding_user_default_and_override(self):
-        # GroupChBinding survives only as the HyperDX group->org resolver; user()
-        # is still deterministic + backtick-safe.
-        assert GroupChBinding(group="soc-ro").user() == "dfe_grp_soc-ro"
-        assert GroupChBinding(group="x", ch_user="custom").user() == "custom"
 
 
 class TestRenderTier:
@@ -173,7 +166,7 @@ class TestRenderTenantPolicies:
 
     def test_predicate_uses_has_splitbychar_getsetting(self):
         s = _joined(render_tenant_policies([("dfe", "events")]))
-        assert "USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)" in s
+        assert "USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)" in s
         # the setting name is the SSoT constant
         assert TENANT_SETTING in s
 
@@ -215,7 +208,7 @@ class TestSqEscaping:
         # getSetting takes the setting NAME as a single-quoted string literal,
         # emitted through _sq so the predicate stays one bounded expression.
         s = _joined(render_tenant_policies([("dfe", "events")]))
-        assert "getSetting('DFE_current_tenant_id')" in s
+        assert "getSetting('SQL_current_tenant_id')" in s
 
 
 class TestRenderFixedUsers:
@@ -246,12 +239,12 @@ class TestRenderFixedUsers:
         assert (
             "CREATE USER IF NOT EXISTS `dfe_tenant_reader` "
             "IDENTIFIED WITH sha256_hash BY 'h_dfe_tenant_reader' "
-            "SETTINGS readonly = 1, DFE_current_tenant_id = '' CHANGEABLE_IN_READONLY" in s
+            "SETTINGS readonly = 1, SQL_current_tenant_id = '' CHANGEABLE_IN_READONLY" in s
         )
         # re-applied via ALTER USER so an existing user still gets the setting.
         assert (
             "ALTER USER `dfe_tenant_reader` SETTINGS readonly = 1, "
-            "DFE_current_tenant_id = '' CHANGEABLE_IN_READONLY" in s
+            "SQL_current_tenant_id = '' CHANGEABLE_IN_READONLY" in s
         )
 
     def test_read_write_analyst_has_no_readonly_or_tenant_setting(self):

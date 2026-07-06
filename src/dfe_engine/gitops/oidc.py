@@ -17,9 +17,9 @@ into the deploy repo. The client secret itself is materialised by ESO from Vault
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
+from dfe_engine.env_refs import resolve_env_ref
 from dfe_engine.yaml_utils import yaml_dump_string
 
 ENVOY_OIDC_VALUES_PATH = "envoy/oidc-values.yaml"
@@ -78,7 +78,7 @@ def build_oidc_providers(registry: Any) -> list[dict[str, str]]:
             {
                 "name": name,
                 "issuer": getattr(prov, "issuer", ""),
-                "client_id": os.environ.get(getattr(prov, "client_id_env", ""), ""),
+                "client_id": resolve_env_ref(getattr(prov, "client_id_env", "")),
             }
         )
     return providers

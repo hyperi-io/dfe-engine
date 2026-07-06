@@ -89,7 +89,9 @@ async def compile_transform(
     """
     compiler_url = settings.services.transform_wasm_compiler_url
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    from scalo.http import AsyncHttpClient
+
+    async with AsyncHttpClient(timeout=300.0) as client:
         try:
             resp = await client.post(
                 f"{compiler_url}/compile",
@@ -99,27 +101,29 @@ async def compile_transform(
             raise HTTPException(
                 status_code=503,
                 detail={
-                    "code": "COMPILER_UNAVAILABLE",
+                    "code": "compiler_unavailable",
                     "message": "Compilation service is unavailable",
                 },
             ) from exc
-
-    if resp.status_code == 422:
-        body = resp.json()
-        raise HTTPException(status_code=422, detail=body.get("error", body))
-
-    if not resp.is_success:
-        body = (
-            resp.json()
-            if resp.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=body.get(
-                "error", {"code": "COMPILATION_FAILED", "message": "Compilation failed"}
-            ),
-        )
+        except httpx.HTTPStatusError as exc:
+            # AsyncHttpClient.post() already ran raise_for_status() (and retried
+            # 5xx/transport errors via stamina before giving up) - recover the
+            # response from the exception to keep the same body/status passthrough.
+            resp = exc.response
+            if resp.status_code == 422:
+                body = resp.json()
+                raise HTTPException(status_code=422, detail=body.get("error", body)) from exc
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
+            raise HTTPException(
+                status_code=resp.status_code,
+                detail=body.get(
+                    "error", {"code": "compilation_failed", "message": "Compilation failed"}
+                ),
+            ) from exc
 
     data = resp.json()
     audit_resource_change(user.user_id, "transform", request.language, "compiled")
@@ -146,7 +150,9 @@ async def test_transform(
     """
     wasm_url = settings.services.transform_wasm_url
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    from scalo.http import AsyncHttpClient
+
+    async with AsyncHttpClient(timeout=60.0) as client:
         try:
             resp = await client.post(
                 f"{wasm_url}/test",
@@ -161,21 +167,26 @@ async def test_transform(
             raise HTTPException(
                 status_code=503,
                 detail={
-                    "code": "TRANSFORM_HOST_UNAVAILABLE",
+                    "code": "transform_host_unavailable",
                     "message": "Transform host is unavailable",
                 },
             ) from exc
-
-    if not resp.is_success:
-        body = (
-            resp.json()
-            if resp.headers.get("content-type", "").startswith("application/json")
-            else {}
-        )
-        raise HTTPException(
-            status_code=resp.status_code,
-            detail=body.get("error", {"code": "TEST_FAILED", "message": "Transform test failed"}),
-        )
+        except httpx.HTTPStatusError as exc:
+            # See compile_transform: AsyncHttpClient already raise_for_status()'d
+            # (and retried 5xx/transport errors via stamina) - recover the
+            # response from the exception for the same body/status passthrough.
+            resp = exc.response
+            body = (
+                resp.json()
+                if resp.headers.get("content-type", "").startswith("application/json")
+                else {}
+            )
+            raise HTTPException(
+                status_code=resp.status_code,
+                detail=body.get(
+                    "error", {"code": "test_failed", "message": "Transform test failed"}
+                ),
+            ) from exc
 
     data = resp.json()
     audit_resource_change(user.user_id, "transform", "wasm", "tested")

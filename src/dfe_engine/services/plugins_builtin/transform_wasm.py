@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.models.common import production_sasl_scram
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
@@ -72,41 +73,11 @@ _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "kafka": {
             "consumer": {
-                "sasl": {
-                    "enabled": True,
-                    "mechanism": "scram_sha_512",
-                    "username": "",
-                    "password": "",
-                    "oauth_token_endpoint": None,
-                    "oauth_client_id": None,
-                    "oauth_client_secret": None,
-                    "oauth_scope": None,
-                    "oauth_extensions": None,
-                    "aws_region": None,
-                    "aws_access_key_id": None,
-                    "aws_secret_access_key": None,
-                    "aws_session_token": None,
-                    "aws_profile": None,
-                },
+                "sasl": production_sasl_scram(),
                 "tls": {"enabled": True},
             },
             "producer": {
-                "sasl": {
-                    "enabled": True,
-                    "mechanism": "scram_sha_512",
-                    "username": "",
-                    "password": "",
-                    "oauth_token_endpoint": None,
-                    "oauth_client_id": None,
-                    "oauth_client_secret": None,
-                    "oauth_scope": None,
-                    "oauth_extensions": None,
-                    "aws_region": None,
-                    "aws_access_key_id": None,
-                    "aws_secret_access_key": None,
-                    "aws_session_token": None,
-                    "aws_profile": None,
-                },
+                "sasl": production_sasl_scram(),
                 "tls": {"enabled": True},
             },
         },

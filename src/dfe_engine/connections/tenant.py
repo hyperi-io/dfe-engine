@@ -10,9 +10,9 @@
 
 The custom-settings tenant model: a tenant-scoped principal (the ``org_analyst``
 role, resolved to the fixed ``dfe_tenant_reader`` CH user by the ConnectionRegistry)
-runs every query with the ``DFE_current_tenant_id`` custom setting, which the ONE
+runs every query with the ``SQL_current_tenant_id`` custom setting, which the ONE
 per-table RESTRICTIVE row policy reads via
-``has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)``. The
+``has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)``. The
 tenant-filtered variant of this wrapper is used for that principal; admin /
 analyst (read-write) principals run as their own fixed user WITHOUT any wrapper
 (targeted by no policy, so they see all rows).
@@ -28,7 +28,7 @@ leak another tenant's rows.
 Two orthogonal knobs let the ONE wrapper also serve the read-only ``dfe_analyst_ro``
 fixed user (data_analyst_ro / data_viewer / infra_ro):
 
-  * ``tenant_filtered`` (default True) - inject ``DFE_current_tenant_id``. Set
+  * ``tenant_filtered`` (default True) - inject ``SQL_current_tenant_id``. Set
     False for ``dfe_analyst_ro``, which is NOT a row-policy target and whose
     profile does NOT make the setting CHANGEABLE_IN_READONLY (so injecting it
     would be rejected).
@@ -58,7 +58,7 @@ class TenantScopedClient:
             (``AuthContext.org_ids``). Empty -> the tenant setting is injected as
             '' (fail closed: zero rows), never omitted. Ignored when
             ``tenant_filtered`` is False.
-        tenant_filtered: Inject ``DFE_current_tenant_id`` (the row-policy target,
+        tenant_filtered: Inject ``SQL_current_tenant_id`` (the row-policy target,
             ``dfe_tenant_reader``). False for ``dfe_analyst_ro`` (no policy, no
             changeable tenant setting).
         readonly: The wrapped fixed user runs CH ``readonly=1``; drop
@@ -97,7 +97,7 @@ class TenantScopedClient:
 
     @property
     def tenant_setting_value(self) -> str:
-        """The exact ``DFE_current_tenant_id`` value injected per query.
+        """The exact ``SQL_current_tenant_id`` value injected per query.
 
         Comma-joined org_ids (multi-org scoping), or '' when the principal has no
         orgs (fail closed). This is the string the row policy's ``splitByChar``
@@ -114,7 +114,7 @@ class TenantScopedClient:
         ``max_execution_time``) are DROPPED - the fixed user's profile already
         bounds the query.
 
-        Tenant next: when ``tenant_filtered`` the ``DFE_current_tenant_id`` setting
+        Tenant next: when ``tenant_filtered`` the ``SQL_current_tenant_id`` setting
         is injected unconditionally (fail closed - comma-joined org_ids, or '' when
         empty, never skipped) and is authoritative, overwriting any client-supplied
         value so a query can never widen its own tenant scope. It is the sole
@@ -136,7 +136,7 @@ class TenantScopedClient:
             sql: SQL query string.
             *args: Positional arguments forwarded to the underlying client.
             **kwargs: Keyword arguments forwarded to the underlying client. The
-                ``settings`` kwarg is augmented with ``DFE_current_tenant_id``.
+                ``settings`` kwarg is augmented with ``SQL_current_tenant_id``.
 
         Returns:
             Query result from the underlying clickhouse-connect client.

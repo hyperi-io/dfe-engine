@@ -21,6 +21,8 @@ from typing import Any
 from dulwich import porcelain
 from scalo.logger import logger
 
+from .dulwich_auth import authed_https_url, scrub_remote_credentials
+
 
 @dataclass
 class PublishResult:
@@ -121,37 +123,24 @@ class GitopsRepo:
     def _authed_url(self) -> str:
         """Embed HTTPS credentials in the remote URL for a single git operation.
 
-        dulwich.porcelain clone/push take no username/password kwargs; HTTPS auth
-        is carried in the URL. SSH URLs auth via the agent/keys (no creds here).
-        This value is passed EXPLICITLY to clone/push/fetch on each call and is
-        never persisted: clone would otherwise write it into the local
-        ``.git/config`` (remote.origin.url), so ensure() scrubs the stored remote
-        back to the bare URL (F-GITOPS-TOKEN).
+        Passed EXPLICITLY to clone/push/fetch each call and never persisted (clone
+        would otherwise write it into ``.git/config``, so ensure() scrubs it back).
+        See :func:`~dfe_engine.gitops.dulwich_auth.authed_https_url` - shared with
+        the sigma git-repo provider so the URL escaping lives in one place.
         """
-        url = self._repo_url
-        if self._username and url.startswith(("http://", "https://")):
-            scheme, rest = url.split("://", 1)
-            return f"{scheme}://{self._username}:{self._token}@{rest}"
-        return url
+        return authed_https_url(self._repo_url, self._username, self._token)
 
     def _scrub_remote_credentials(self) -> None:
         """Rewrite remote.origin.url back to the bare, credential-free repo URL.
 
-        porcelain.clone persists whatever URL it cloned from into the clone's
-        ``.git/config``; for HTTPS token auth that _authed_url() carries
-        ``username:token@`` in plaintext on the shared/in-cluster volume, readable
-        by any co-located sidecar, exec shell or volume snapshot (F-GITOPS-TOKEN).
-        Scrub it: push()/fetch() re-supply _authed_url() explicitly every call, so
-        the stored remote never needs the credential. No-op when no token is held.
+        porcelain.clone persists the credentialed clone URL into ``.git/config``;
+        scrub the ``username:token@`` back out so it never sits in plaintext on the
+        shared/in-cluster volume (F-GITOPS-TOKEN). push()/fetch() re-supply
+        _authed_url() every call. No-op when no token is held.
         """
         if not (self._username and self._token):
             return
-        from dulwich.repo import Repo
-
-        with Repo(str(self._path)) as repo:
-            config = repo.get_config()
-            config.set((b"remote", b"origin"), b"url", self._repo_url.encode())
-            config.write_to_path()
+        scrub_remote_credentials(self._path, self._repo_url)
 
     def ensure(self) -> Path:
         """Make the working tree present: clone, reuse, or init."""

@@ -31,6 +31,7 @@ from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed
 from dfe_engine.auth import Scope
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.groups import Group, GroupStore, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -161,6 +162,7 @@ async def create_group(
         group.name,
         added=group.members,
     )
+    audit_resource_change(user.user_id, "group", group.name, "created")
     return _response(group)
 
 
@@ -226,6 +228,7 @@ async def update_group(
         )
     else:
         group = store.update(name, **update_fields)
+    audit_resource_change(user.user_id, "group", group.name, "updated")
     return _response(group)
 
 
@@ -250,6 +253,7 @@ async def add_member(
         name,
         added=[body.username],
     )
+    audit_resource_change(user.user_id, "group_member", f"{name}/{body.username}", "added")
     group = store.get(name)
     return _response(group if group is not None else existing)
 
@@ -275,6 +279,7 @@ async def remove_member(
         name,
         removed=[username],
     )
+    audit_resource_change(user.user_id, "group_member", f"{name}/{username}", "removed")
     # Membership -> HyperDX propagation: if this removal leaves the account in NO
     # groups it has lost all access, so revoke its HyperDX membership everywhere
     # (non-fatal). The partial case - still in other groups but losing one org -
@@ -306,3 +311,4 @@ async def delete_group(
             status_code=409,
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
+    audit_resource_change(user.user_id, "group", name, "deleted")

@@ -149,7 +149,7 @@ Authoritative reference: [RBAC.md](RBAC.md) section 5. Summary:
 ```mermaid
 graph LR
     Reader["dfe_tenant_reader - shared, readonly"]
-    Setting["per-query DFE_current_tenant_id - which org(s)"]
+    Setting["per-query SQL_current_tenant_id - which org(s)"]
     Policy["ONE row policy per _org_id table - getSetting filter"]
     Profile["Settings profile - per-query limits"]
     Quota["Quota - rate and volume"]
@@ -164,12 +164,12 @@ The reconciler (`governance/ch/reconciler.py`) mints the fixed users (`dfe_analy
 `dfe_analyst_ro`, `dfe_tenant_reader`; `dfe_admin` is the deployment superuser, not
 minted) via `render_fixed_users`, plus quota tiers, service roles, and
 `render_tenant_policies` -- ONE `RESTRICTIVE` row policy per `_org_id` table
-`USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)`. These
+`USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)`. These
 emit as a gitops DDL artifact applied by the same migration runner as the schema
 DDL (core tiers from dfe-schemas). Tenant isolation is then a per-query
-`DFE_current_tenant_id` setting injected by `TenantScopedClient`, NOT a user per
+`SQL_current_tenant_id` setting injected by `TenantScopedClient`, NOT a user per
 org -- so it scales to thousands of orgs with no per-tenant DDL. Requires the CH
-server `custom_settings_prefixes=DFE_` (a deploy prerequisite).
+server `custom_settings_prefixes=SQL_` (a deploy prerequisite).
 
 This applies to **hunts too**. A hunt worker does not connect to ClickHouse as an
 unbounded account -- it runs as a fixed CH user carrying a quota and a settings

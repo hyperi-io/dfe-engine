@@ -27,6 +27,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search
+from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import casbin_scope_catalog, scopes_dict
 from dfe_engine.auth.role_store import Role, RoleStore
 
@@ -182,6 +183,7 @@ async def create_role(
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
     _refresh_role_config(request)
+    audit_resource_change(user.user_id, "role", role.name, "created")
     return _role_response(role)
 
 
@@ -262,6 +264,7 @@ async def update_role(
             detail={"code": "not_found", "message": f"Role '{name}' not found"},
         ) from None
     _refresh_role_config(request)
+    audit_resource_change(user.user_id, "role", role.name, "updated")
     return _role_response(role)
 
 
@@ -298,3 +301,4 @@ async def delete_role(
             detail={"code": "not_found", "message": f"Role '{name}' not found"},
         ) from None
     _refresh_role_config(request)
+    audit_resource_change(user.user_id, "role", name, "deleted")

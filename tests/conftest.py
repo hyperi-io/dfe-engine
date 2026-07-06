@@ -35,14 +35,19 @@ from pathlib import Path
 import pytest
 from scalo.logger import logger
 
-# Load .env file if present (before any other imports that might use settings)
+# Load .env (before any import that reads settings). Search this dir and its
+# parents so a git WORKTREE without its own .env falls back to the main checkout's
+# (that is where the gitignored .env lives). First found wins.
 try:
     from dotenv import load_dotenv
 
-    env_path = Path(__file__).parent.parent / ".env"
-    if env_path.exists():
-        load_dotenv(env_path, override=True)
-        logger.info(f"Loaded environment from {env_path}")
+    _tests_root = Path(__file__).parent.parent
+    for _base in (_tests_root, *_tests_root.parents):
+        env_path = _base / ".env"
+        if env_path.exists():
+            load_dotenv(env_path, override=True)
+            logger.info(f"Loaded environment from {env_path}")
+            break
 except ImportError:
     pass  # python-dotenv not installed, rely on shell-exported vars
 

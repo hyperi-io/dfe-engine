@@ -236,6 +236,42 @@ class TestUpdateOrg:
         )
         assert resp.status_code == 403
 
+    def test_update_org_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.orgs as orgs_mod
+
+        calls = []
+        monkeypatch.setattr(orgs_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.put(
+            "/api/v1/orgs/acme",
+            json={"display_name": "Acme Updated"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "org", "acme", "updated")]
+
+    def test_update_org_no_fields_does_not_emit_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.orgs as orgs_mod
+
+        calls = []
+        monkeypatch.setattr(orgs_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.put(
+            "/api/v1/orgs/acme",
+            json={},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == []
+
 
 # ---------------------------------------------------------------------------
 # DELETE /api/v1/orgs/{name}

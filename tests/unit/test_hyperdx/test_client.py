@@ -28,6 +28,7 @@ from dfe_engine.hyperdx.client import (
     build_hyperdx_connections_json,
     build_hyperdx_sources_json,
 )
+from dfe_engine.resilience import CircuitBreaker, CircuitBreakerConfig, CircuitState
 
 # ---------------------------------------------------------------------------
 # HyperDXClient construction
@@ -39,9 +40,10 @@ class TestClientConstruction:
         client = HyperDXClient(base_url="http://example.com/", api_key="key")
         assert client._base_url == "http://example.com"
 
-    def test_client_defaults_connected(self):
+    def test_client_defaults_circuit_closed(self):
         client = HyperDXClient(base_url="http://example.com", api_key="key")
-        assert client._connected is True
+        assert client._breaker.state == CircuitState.CLOSED
+        assert client._breaker.is_call_permitted() is True
 
     def test_headers_include_bearer(self):
         client = HyperDXClient(base_url="http://example.com", api_key="my-key")
@@ -126,19 +128,19 @@ class TestGenerateDefaultConnectionsJson:
 
 
 class TestDisconnectedShortCircuit:
-    """When _connected=False, all async methods return immediately."""
+    """When the circuit is OPEN, all async methods return immediately."""
 
     @pytest.mark.asyncio
     async def test_create_team_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.create_team("team-1")
         assert result is None
 
     @pytest.mark.asyncio
     async def test_create_connection_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.create_connection(
             team_id="t1",
             name="conn",
@@ -153,21 +155,21 @@ class TestDisconnectedShortCircuit:
     @pytest.mark.asyncio
     async def test_delete_connection_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.delete_connection(team_id="t1", conn_id="c1")
         assert result is False
 
     @pytest.mark.asyncio
     async def test_delete_team_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.delete_team(team_id="t1")
         assert result is False
 
     @pytest.mark.asyncio
     async def test_update_connection_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.update_connection(
             team_id="t1",
             connection_id="c1",
@@ -181,7 +183,7 @@ class TestInviteMember:
     @pytest.mark.asyncio
     async def test_invite_member_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.invite_member(team_api_key="team-key", email="user@corp.com")
         assert result is False
 
@@ -194,7 +196,7 @@ class TestGetTeamApiKey:
     @pytest.mark.asyncio
     async def test_get_team_api_key_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.get_team_api_key(team_id="t1")
         assert result is None
 
@@ -251,19 +253,47 @@ class TestRemoveMember:
     @pytest.mark.asyncio
     async def test_remove_member_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
+        client._breaker.record_failure()  # threshold=1 -> circuit OPEN
         result = await client.remove_member(team_api_key="team-key", email="user@corp.com")
         assert result is False
 
     @pytest.mark.asyncio
     async def test_remove_member_does_not_latch_client_disconnected(self):
-        # Team-scoped like invite_member: a per-team API-key failure must NOT mark
-        # the whole client unreachable (mark_disconnected=False). base_url is
-        # unroutable so the request fails, but _connected stays True.
+        # Team-scoped like invite_member: a per-team API-key failure must NOT trip
+        # the whole client's circuit (mark_disconnected=False). base_url is
+        # unroutable so the request fails, but the circuit stays CLOSED.
         client = HyperDXClient(base_url="http://127.0.0.1:1", api_key="k")
         result = await client.remove_member(team_api_key="team-key", email="user@corp.com")
         assert result is False
-        assert client._connected is True
+        assert client._breaker.state == CircuitState.CLOSED
+
+
+class TestCircuitBreaker:
+    """The circuit replaces the old one-way _connected latch: it OPENs on an
+    admin-path outage AND recovers (the latch never did)."""
+
+    @pytest.mark.asyncio
+    async def test_admin_failure_opens_circuit(self):
+        # An unroutable base_url makes the admin call fail -> the circuit OPENs so
+        # the rest of the provisioning sequence fast-skips.
+        client = HyperDXClient(base_url="http://127.0.0.1:1", api_key="k")
+        assert client._breaker.state == CircuitState.CLOSED
+        result = await client.create_team("team-1")
+        assert result is None
+        assert client._breaker.state == CircuitState.OPEN
+
+    @pytest.mark.asyncio
+    async def test_circuit_recovers_after_reset_timeout(self):
+        # THE FIX: with reset_timeout elapsed the circuit HALF_OPENs and permits a
+        # probe again - the old _connected=False latch stayed disconnected forever.
+        breaker = CircuitBreaker(
+            "hyperdx-test", CircuitBreakerConfig(failure_threshold=1, reset_timeout=0.0)
+        )
+        client = HyperDXClient(base_url="http://127.0.0.1:1", api_key="k", breaker=breaker)
+        await client.create_team("team-1")  # trips it
+        # reset_timeout=0 -> the next evaluation transitions OPEN -> HALF_OPEN.
+        assert client._breaker.is_call_permitted() is True
+        assert client._breaker.state == CircuitState.HALF_OPEN
 
 
 # ---------------------------------------------------------------------------
@@ -287,7 +317,7 @@ class TestBuildHyperDXConnectionsJson:
 
     def test_connection_uses_tenant_reader_and_org_tenant_setting(self):
         """Task A: an org connection authenticates as the SHARED dfe_tenant_reader and
-        carries DFE_current_tenant_id = the org's comma-joined org_ids."""
+        carries SQL_current_tenant_id = the org's comma-joined org_ids."""
         from types import SimpleNamespace
 
         orgs = [SimpleNamespace(name="acme", org_ids=["acme", "globex"])]
@@ -298,7 +328,7 @@ class TestBuildHyperDXConnectionsJson:
         assert conn["user"] == "dfe_tenant_reader"  # shared fixed reader, NOT dfe_grp_*
         # S3: the password is a PLACEHOLDER the deploy substitutes, never plaintext.
         assert conn["password"] == "${DFE_TENANT_READER_PASSWORD}"
-        assert conn["clickhouseSettings"] == {"DFE_current_tenant_id": "acme,globex"}
+        assert conn["clickhouseSettings"] == {"SQL_current_tenant_id": "acme,globex"}
         assert conn["host"] == "ch"
         assert conn["port"] == 8123
         assert conn["database"] == "dfe"
@@ -309,7 +339,7 @@ class TestBuildHyperDXConnectionsJson:
 
         orgs = [SimpleNamespace(name="acme", org_ids=[])]
         result = json.loads(build_hyperdx_connections_json(orgs, base=self._base()))
-        assert result[0]["clickhouseSettings"] == {"DFE_current_tenant_id": ""}
+        assert result[0]["clickhouseSettings"] == {"SQL_current_tenant_id": ""}
 
     def test_disabled_org_skipped(self):
         from types import SimpleNamespace

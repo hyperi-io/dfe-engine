@@ -70,6 +70,19 @@ class TestCreateGroup:
         )
         assert resp.status_code == 422
 
+    def test_create_group_emits_audit(self, client, admin_headers, monkeypatch):
+        import dfe_engine.api.v1.account_groups as groups_mod
+
+        calls = []
+        monkeypatch.setattr(groups_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "audit-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert calls == [("admin", "group", "audit-group", "created")]
+
 
 class TestListGroups:
     """GET /api/v1/auth/groups"""
@@ -220,6 +233,24 @@ class TestUpdateGroup:
         )
         assert resp.status_code == 403
 
+    def test_update_group_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "audit-upd-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.account_groups as groups_mod
+
+        calls = []
+        monkeypatch.setattr(groups_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.put(
+            "/api/v1/auth/groups/audit-upd-group",
+            json={"description": "updated"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "group", "audit-upd-group", "updated")]
+
 
 class TestAddMember:
     """POST /api/v1/auth/groups/{name}/members"""
@@ -274,6 +305,24 @@ class TestAddMember:
         )
         assert resp.status_code == 403
 
+    def test_add_member_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "audit-add-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.account_groups as groups_mod
+
+        calls = []
+        monkeypatch.setattr(groups_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.post(
+            "/api/v1/auth/groups/audit-add-group/members",
+            json={"username": "admin"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "group_member", "audit-add-group/admin", "added")]
+
 
 class TestRemoveMember:
     """DELETE /api/v1/auth/groups/{name}/members/{username}"""
@@ -310,6 +359,28 @@ class TestRemoveMember:
         )
         assert resp.status_code == 403
 
+    def test_remove_member_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "audit-rm-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/auth/groups/audit-rm-group/members",
+            json={"username": "admin"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.account_groups as groups_mod
+
+        calls = []
+        monkeypatch.setattr(groups_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.delete(
+            "/api/v1/auth/groups/audit-rm-group/members/admin",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "group_member", "audit-rm-group/admin", "removed")]
+
 
 class TestDeleteGroup:
     """DELETE /api/v1/auth/groups/{name}"""
@@ -344,3 +415,17 @@ class TestDeleteGroup:
     def test_delete_requires_admin(self, client, viewer_headers):
         resp = client.delete("/api/v1/auth/groups/dfe-admins", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_delete_group_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "audit-del-group", "roles": ["data_viewer"]},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.account_groups as groups_mod
+
+        calls = []
+        monkeypatch.setattr(groups_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.delete("/api/v1/auth/groups/audit-del-group", headers=admin_headers)
+        assert resp.status_code == 204
+        assert calls == [("admin", "group", "audit-del-group", "deleted")]

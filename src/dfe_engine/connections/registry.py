@@ -28,7 +28,6 @@ of the registry.
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 from scalo.logger import logger
@@ -38,6 +37,7 @@ from dfe_engine.auth.roles import ROLE_ALIASES
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
 from dfe_engine.connections.tenant import TenantScopedClient
+from dfe_engine.env_refs import resolve_env_ref
 from dfe_engine.governance.ch.models import ANALYST_RO_USER, TENANT_READER_USER
 
 # Privilege ordering: highest privilege first.  When a user holds
@@ -149,33 +149,30 @@ class ConnectionRegistry:
         if conn is None:
             raise KeyError(f"Connection '{connection_name}' not defined in config")
 
-        password = ""
-        if conn.password_env:
-            password = os.environ.get(conn.password_env, "")
-
-        import clickhouse_connect
+        password = resolve_env_ref(conn.password_env)
 
         # Host/port come from settings (seeded at bootstrap) when provided - all
         # fixed users share ONE CH cluster; only the CH USER differs by privilege.
         host = self._ch_host or conn.host
         port = self._ch_port or conn.port
 
-        connect_params: dict[str, Any] = {
-            "host": host,
-            "port": port,
-            "database": conn.database,
-            "username": conn.user,
-            "password": password,
-        }
-        # Plumb TLS the same way ClickHouseAdapter.get_restricted_client does -
-        # a configured secure/verify must reach every fixed-user direct-read client
-        # or a TLS/Cloud ClickHouse connection fails (P2.8).
-        if self._ch_secure:
-            connect_params["secure"] = True
-            if self._ch_verify is not None:
-                connect_params["verify"] = self._ch_verify
+        # Route through the shared pool (no direct clickhouse_connect bypass): the
+        # ConnectionCache keys on the resolved (host, user, creds, ...) so each fixed
+        # user gets its own pooled client to the one cluster. TLS is plumbed the same
+        # way ClickHouseAdapter.get_restricted_client does (P2.8).
+        from dfe_engine.clickhouse.clickhouse_manager import get_pooled_client
+        from dfe_engine.clickhouse.profiles import Profile
 
-        client = clickhouse_connect.get_client(**connect_params)
+        config: dict[str, Any] = {
+            "ch_host": host,
+            "ch_port": port,
+            "ch_database": conn.database,
+            "ch_username": conn.user,
+            "ch_password": password,
+            "ch_secure": bool(self._ch_secure),
+            "ch_verify": self._ch_verify if self._ch_verify is not None else False,
+        }
+        client = get_pooled_client(config, Profile.QUERY)
 
         self._clients[connection_name] = client
         logger.info(
@@ -214,7 +211,7 @@ class ConnectionRegistry:
         connection still scopes right:
 
           * ``dfe_tenant_reader`` (org_analyst) -> a TenantScopedClient injecting
-            ``DFE_current_tenant_id`` = the caller's org_ids (empty -> '' -> zero
+            ``SQL_current_tenant_id`` = the caller's org_ids (empty -> '' -> zero
             rows, fail closed); readonly so the sampler's per-query settings are
             dropped.
           * ``dfe_analyst_ro`` (data_analyst_ro / data_viewer / infra_ro) -> a

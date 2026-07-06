@@ -9,7 +9,7 @@
 
 Formalises .tmp/fable-review/ch-proof/proof.py against a REAL ClickHouse: apply
 the ACTUAL rendered DDL from ``governance.ch.render`` (the fixed ``dfe_tenant_reader``
-with readonly + ``DFE_current_tenant_id`` CHANGEABLE_IN_READONLY, plus the ONE
+with readonly + ``SQL_current_tenant_id`` CHANGEABLE_IN_READONLY, plus the ONE
 ``has(splitByChar(...))`` row policy), then prove per-tenant isolation both via the
 driver ``settings=`` param (the TenantScopedClient injection path) AND via the real
 TenantScopedClient wrapper:
@@ -20,7 +20,7 @@ TenantScopedClient wrapper:
     unknown     -> 0
 
 Connects to the LOCAL dev CH daemon (localhost:18123, default/proofadmin) which
-has ``<custom_settings_prefixes>DFE_</custom_settings_prefixes>`` configured. Skips
+has ``<custom_settings_prefixes>SQL_</custom_settings_prefixes>`` configured. Skips
 gracefully if that daemon is unreachable. No mocks: real CH, real user, real policy.
 
 Deliberately ONE test function: the model's user (``dfe_tenant_reader``) and table
@@ -105,7 +105,7 @@ def _count_via_settings(setting: str | None) -> int:
     """count() as dfe_tenant_reader with the driver settings= param (or unset)."""
     r = _client("dfe_tenant_reader", _READER_PW)
     try:
-        kwargs = {} if setting is None else {"settings": {"DFE_current_tenant_id": setting}}
+        kwargs = {} if setting is None else {"settings": {"SQL_current_tenant_id": setting}}
         return int(r.query("SELECT count() FROM dfe.events", **kwargs).result_rows[0][0])
     finally:
         r.close()

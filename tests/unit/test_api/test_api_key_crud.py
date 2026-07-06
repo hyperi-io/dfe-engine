@@ -63,6 +63,20 @@ class TestCreateAPIKey:
         )
         assert resp.status_code == 422
 
+    def test_create_api_key_emits_audit(self, client, admin_headers, monkeypatch):
+        import dfe_engine.api.v1.api_keys as api_keys_mod
+
+        calls = []
+        monkeypatch.setattr(api_keys_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "audit-key"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        short_token = resp.json()["short_token"]
+        assert calls == [("admin", "api_key", "audit-key", "created", {"short_token": short_token})]
+
 
 class TestListAPIKeys:
     """GET /api/v1/auth/api-keys"""
@@ -117,3 +131,19 @@ class TestRevokeAPIKey:
     def test_revoke_requires_admin(self, client, viewer_headers):
         resp = client.delete("/api/v1/auth/api-keys/deadbeef", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_revoke_api_key_emits_audit(self, client, admin_headers, monkeypatch):
+        create_resp = client.post(
+            "/api/v1/auth/api-keys",
+            json={"name": "audit-revoke-key"},
+            headers=admin_headers,
+        )
+        short_token = create_resp.json()["short_token"]
+
+        import dfe_engine.api.v1.api_keys as api_keys_mod
+
+        calls = []
+        monkeypatch.setattr(api_keys_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.delete(f"/api/v1/auth/api-keys/{short_token}", headers=admin_headers)
+        assert resp.status_code == 204
+        assert calls == [("admin", "api_key", short_token, "revoked")]

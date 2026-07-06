@@ -60,6 +60,19 @@ class TestCreateAccount:
         )
         assert resp.status_code == 422
 
+    def test_create_account_emits_audit(self, client, admin_headers, monkeypatch):
+        import dfe_engine.api.v1.accounts as accounts_mod
+
+        calls = []
+        monkeypatch.setattr(accounts_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "audituser", "password": "pw"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert calls == [("admin", "account", "audituser", "created")]
+
 
 class TestListAccounts:
     """GET /api/v1/auth/accounts"""
@@ -171,6 +184,24 @@ class TestUpdateAccount:
         )
         assert resp.status_code == 403
 
+    def test_update_account_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "audit-upd", "password": "pw"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.accounts as accounts_mod
+
+        calls = []
+        monkeypatch.setattr(accounts_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.put(
+            "/api/v1/auth/accounts/audit-upd",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "account", "audit-upd", "updated")]
+
 
 class TestResetPassword:
     """POST /api/v1/auth/accounts/{username}/reset-password"""
@@ -204,6 +235,24 @@ class TestResetPassword:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+    def test_reset_password_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "audit-pw", "password": "oldpw"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.accounts as accounts_mod
+
+        calls = []
+        monkeypatch.setattr(accounts_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.post(
+            "/api/v1/auth/accounts/audit-pw/reset-password",
+            json={"new_password": "newpw"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert calls == [("admin", "account", "audit-pw", "password_reset")]
 
 
 class TestDeleteAccount:
@@ -255,3 +304,17 @@ class TestDeleteAccount:
                 "members"
             ]
             assert "multigroup" not in members
+
+    def test_delete_account_emits_audit(self, client, admin_headers, monkeypatch):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "audit-del", "password": "pw"},
+            headers=admin_headers,
+        )
+        import dfe_engine.api.v1.accounts as accounts_mod
+
+        calls = []
+        monkeypatch.setattr(accounts_mod, "audit_resource_change", lambda *a: calls.append(a))
+        resp = client.delete("/api/v1/auth/accounts/audit-del", headers=admin_headers)
+        assert resp.status_code == 204
+        assert calls == [("admin", "account", "audit-del", "deleted")]

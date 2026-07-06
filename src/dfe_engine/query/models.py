@@ -193,30 +193,6 @@ class ExplainPlan(BaseModel):
 from dfe_engine.auth.models import AuthContext as AuthContext
 
 # =============================================================================
-# Audit Models
-# =============================================================================
-
-
-class QueryAuditLog(BaseModel):
-    """Audit log entry for query execution."""
-
-    timestamp: str
-    request_id: str
-    query_label: str
-    org_id: str
-    user_id: str
-    datasource: str
-    store: str | None
-    params: dict[str, Any] | None = None  # Only if audit_level=full
-    duration_ms: int
-    row_count: int
-    cached: bool
-    client_ip: str | None
-    user_agent: str | None
-    error: str | None = None
-
-
-# =============================================================================
 # Parameterized View Models
 # =============================================================================
 

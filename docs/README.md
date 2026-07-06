@@ -28,6 +28,7 @@ full Sigma pipeline).
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current | System architecture, module map, data flow. |
 | [dfe-infra.md](dfe-infra.md) | Reference | The engine <-> infra boundary + deployment contract. |
 | [BACKING-SERVICES.md](BACKING-SERVICES.md) | Current | Backing-service swap matrix (CH / Kafka / secrets / storage). |
+| [CLICKHOUSE-CLOUD.md](CLICKHOUSE-CLOUD.md) | Current | CH connection resilience + ClickHouse Cloud service lifecycle (status/start/stop, opt-in auto-wake). |
 | [SUPPLY-CHAIN-PINNING.md](SUPPLY-CHAIN-PINNING.md) | Standard | SHA-pin + cooldown + LTS dependency policy. |
 | [HELM-COMPILER-RESEARCH.md](HELM-COMPILER-RESEARCH.md) | Research | Helm values compiler background. |
 | [MONOREPO-MIGRATION.md](MONOREPO-MIGRATION.md) | Research | Monorepo question / migration notes. |

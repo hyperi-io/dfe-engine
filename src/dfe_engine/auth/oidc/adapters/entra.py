@@ -29,7 +29,6 @@ Usage::
 
 from __future__ import annotations
 
-import os
 from typing import TYPE_CHECKING
 
 import msal
@@ -37,6 +36,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo
+from dfe_engine.env_refs import resolve_env_ref
 
 if TYPE_CHECKING:
     from dfe_engine.auth.oidc.models import OIDCProvider
@@ -219,10 +219,10 @@ class EntraAdapter(OIDCGroupAdapter):
         client_secret_env = self._provider.groups.client_secret_env
         client_id_env = self._provider.client_id_env
 
-        # Resolve actual values from environment
-        tenant_id = os.environ.get(tenant_id_env) if tenant_id_env else None
-        client_id = os.environ.get(client_id_env) if client_id_env else None
-        client_secret = os.environ.get(client_secret_env) if client_secret_env else None
+        # Resolve actual values from environment (None when unconfigured or unset)
+        tenant_id = resolve_env_ref(tenant_id_env, default=None)
+        client_id = resolve_env_ref(client_id_env, default=None)
+        client_secret = resolve_env_ref(client_secret_env, default=None)
 
         if not tenant_id or not client_id or not client_secret:
             return None

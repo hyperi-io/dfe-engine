@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Any
 
 from dfe_engine.services.descriptor import KafkaRole, ServiceDescriptor
+from dfe_engine.services.models.common import production_sasl_scram
 from dfe_engine.services.plugin import ServicePlugin
 
 descriptor = ServiceDescriptor(
@@ -74,21 +75,11 @@ _keda_defaults: dict[str, Any] = {
 _template_overrides: dict[str, dict[str, Any]] = {
     "production": {
         "source": {
-            "sasl": {
-                "enabled": True,
-                "mechanism": "scram_sha_512",
-                "username": "",
-                "password": "",
-            },
+            "sasl": production_sasl_scram(),
             "tls": {"enabled": True},
         },
         "sink": {
-            "sasl": {
-                "enabled": True,
-                "mechanism": "scram_sha_512",
-                "username": "",
-                "password": "",
-            },
+            "sasl": production_sasl_scram(),
             "tls": {"enabled": True},
         },
     },

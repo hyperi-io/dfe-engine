@@ -46,7 +46,7 @@ class TestDiscoveryRouter:
         """Discovery acquires the acting user's fixed CH client via the dependency.
 
         Overriding it with the tenant reader wrapper an org_analyst resolves to
-        proves the metadata read runs row-scoped (DFE_current_tenant_id injected),
+        proves the metadata read runs row-scoped (SQL_current_tenant_id injected),
         not on a hardcoded admin ``default`` connection.
         """
         from dfe_engine.api.deps import get_tenant_scoped_clickhouse_client
@@ -71,7 +71,7 @@ class TestDiscoveryRouter:
             resp = client.get("/api/v1/discovery/databases", headers=admin_headers)
             assert resp.status_code == 200, resp.text
             assert resp.json() == [{"name": "dfe", "engine": "Atomic"}]
-            assert rec.last_settings == {"DFE_current_tenant_id": "acme"}
+            assert rec.last_settings == {"SQL_current_tenant_id": "acme"}
         finally:
             app.dependency_overrides.pop(get_tenant_scoped_clickhouse_client, None)
 

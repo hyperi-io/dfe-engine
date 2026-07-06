@@ -46,7 +46,7 @@ def test_render_ch_rbac_ddl_has_tier_and_service_role_ddl() -> None:
 def test_assemble_artifacts_includes_ch_rbac_ddl_and_hyperdx_connections(tmp_path) -> None:
     """A publish's artifact set carries ddl/ch-rbac.sql AND the per-ORG HyperDX
     DEFAULT_CONNECTIONS JSON: every org connection uses the shared dfe_tenant_reader
-    (secret ch/fixed/dfe_tenant_reader) and carries its DFE_current_tenant_id setting.
+    (secret ch/fixed/dfe_tenant_reader) and carries its SQL_current_tenant_id setting.
     Real registries + real file-backed secrets, no mocks."""
     import json
 
@@ -82,4 +82,4 @@ def test_assemble_artifacts_includes_ch_rbac_ddl_and_hyperdx_connections(tmp_pat
     assert conns[0]["user"] == "dfe_tenant_reader"
     # S3: the password is a placeholder the deploy substitutes, never plaintext-in-git.
     assert conns[0]["password"] == "${DFE_TENANT_READER_PASSWORD}"
-    assert conns[0]["clickhouseSettings"] == {"DFE_current_tenant_id": "acme,acme-sub"}
+    assert conns[0]["clickhouseSettings"] == {"SQL_current_tenant_id": "acme,acme-sub"}

@@ -9,7 +9,7 @@
 """Tests for TenantScopedClient (custom-settings tenant injection).
 
 Uses a simple stub class instead of unittest.mock to verify that
-``DFE_current_tenant_id`` is injected (comma-joined, fail-closed) into the
+``SQL_current_tenant_id`` is injected (comma-joined, fail-closed) into the
 settings kwarg correctly.
 """
 
@@ -47,11 +47,11 @@ class StubCHClient:
         return "df_result"
 
 
-_SETTING = "DFE_current_tenant_id"
+_SETTING = "SQL_current_tenant_id"
 
 
 class TestTenantScopedClient:
-    """Test the DFE_current_tenant_id injection into query settings."""
+    """Test the SQL_current_tenant_id injection into query settings."""
 
     def test_query_injects_tenant(self) -> None:
         stub = StubCHClient()
@@ -107,7 +107,7 @@ class TestTenantScopedClient:
 
     def test_tenant_setting_is_authoritative(self) -> None:
         # A client cannot widen its own scope: our tenant value overwrites a
-        # client-supplied DFE_current_tenant_id.
+        # client-supplied SQL_current_tenant_id.
         stub = StubCHClient()
         client = TenantScopedClient(stub, org_ids=["org-abc"])
 
@@ -145,7 +145,7 @@ class TestReadonlyMode:
     def test_readonly_strips_caller_settings_keeps_tenant(self) -> None:
         # dfe_tenant_reader: readonly + tenant_filtered. The sampler's
         # max_execution_time would be REJECTED under readonly=1, so it is dropped;
-        # DFE_current_tenant_id (the one CHANGEABLE_IN_READONLY setting) survives.
+        # SQL_current_tenant_id (the one CHANGEABLE_IN_READONLY setting) survives.
         stub = StubCHClient()
         client = TenantScopedClient(stub, org_ids=["acme"], readonly=True)
 
@@ -156,7 +156,7 @@ class TestReadonlyMode:
 
     def test_analyst_ro_mode_no_tenant_setting(self) -> None:
         # dfe_analyst_ro: readonly, NOT tenant_filtered (no row policy targets it,
-        # and DFE_current_tenant_id is not changeable for it). Caller settings are
+        # and SQL_current_tenant_id is not changeable for it). Caller settings are
         # dropped and NO tenant setting is injected.
         stub = StubCHClient()
         client = TenantScopedClient(stub, org_ids=[], tenant_filtered=False, readonly=True)

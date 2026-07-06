@@ -519,23 +519,6 @@ def _detail(doc: dict[str, Any], selected: bool) -> CatalogRuleDetail:
     )
 
 
-_TERMINAL = {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
-
-
-async def _await_task(manager: TaskManager, task_id: str, wait: float) -> TaskInfo | None:
-    """Block until the task is terminal or ``wait`` seconds elapse (sampler pattern)."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + wait
-    while True:
-        info = manager.get(task_id)
-        if info is None or info.status in _TERMINAL:
-            return info
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return info
-        await manager.wait_for_progress(task_id, timeout=remaining)
-
-
 async def _run_sync(provider, catalog, actor, since, *, task) -> dict[str, Any]:
     """TaskManager coroutine: fetch from the provider and upsert into the catalogue."""
     report = await sync_provider(provider, catalog, actor, since=since)
@@ -662,7 +645,7 @@ async def sync_provider_endpoint(
     info = manager.submit("sigma:sync", _run_sync, provider, catalog, user.user_id, since_dt)
     audit_resource_change(user.user_id, "sigma_provider", name, "synced")
     if wait > 0:
-        info = await _await_task(manager, info.id, wait) or info
+        info = await manager.await_terminal(info.id, wait) or info
     return _sync_response(info)
 
 
@@ -954,7 +937,7 @@ async def propagate(
     info = manager.submit("sigma:propagate", _run_propagate, propagator, options)
     audit_resource_change(user.user_id, "sigma_propagation", "selection", "propagated")
     if wait > 0:
-        info = await _await_task(manager, info.id, wait) or info
+        info = await manager.await_terminal(info.id, wait) or info
     return _propagate_response(info)
 
 

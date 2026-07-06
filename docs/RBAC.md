@@ -292,7 +292,7 @@ org_analyst:
   permissions: [query:execute, source:read, sampler:read, dashboard:read]
   hyperdx:
     access: org-scoped        # full | otel | org-scoped | none
-    tenant_scoped: true       # inject the per-org DFE_current_tenant_id setting
+    tenant_scoped: true       # inject the per-org SQL_current_tenant_id setting
 ```
 
 | Field | Value | Meaning |
@@ -301,7 +301,7 @@ org_analyst:
 | | `otel` | The HyperDX OTel self-monitoring stream only (infra) |
 | | `org-scoped` | Only the org's tenant-filtered connection (row-policy isolated) |
 | | `none` (or block absent) | No HyperDX provisioning at all |
-| `tenant_scoped` | bool | Inject the per-org `DFE_current_tenant_id` connection setting |
+| `tenant_scoped` | bool | Inject the per-org `SQL_current_tenant_id` connection setting |
 
 There is deliberately NO `ch_connection` field - the CH connection is resolved
 from the user-privilege precedence (section 5.2), not pinned per role.
@@ -758,28 +758,32 @@ settings pattern with a small fixed set of users:
 -- Multi-org via a comma-joined list; empty setting -> 0 rows (fail closed).
 CREATE ROW POLICY OR REPLACE dfe_tenant_filter ON dfe.events
     AS RESTRICTIVE FOR SELECT
-    USING has(splitByChar(',', getSetting('DFE_current_tenant_id')), _org_id)
+    USING has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)
     TO dfe_tenant_reader;
 
 -- dfe-engine injects the tenant per query (TenantScopedClient). The reader is
--- readonly with DFE_current_tenant_id CHANGEABLE_IN_READONLY, so it can set the
+-- readonly with SQL_current_tenant_id CHANGEABLE_IN_READONLY, so it can set the
 -- one setting while staying read-only.
-SELECT * FROM dfe.events SETTINGS DFE_current_tenant_id = 'acme';  -- acme rows only
+SELECT * FROM dfe.events SETTINGS SQL_current_tenant_id = 'acme';  -- acme rows only
 ```
 
-**REQUIRED CH SERVER CONFIG (deploy, not reconciler DDL):** the row policy reads
-`getSetting('DFE_current_tenant_id')`, a CUSTOM setting, which ClickHouse only
-accepts when the server config.xml declares the prefix:
+**CH SERVER CONFIG - self-hosted only (deploy, not reconciler DDL):** the row
+policy reads `getSetting('SQL_current_tenant_id')`, a CUSTOM setting. The `SQL_`
+prefix is portable across both targets: on **ClickHouse Cloud** it is the
+built-in custom-setting prefix, so nothing needs configuring (live-proven). On
+**self-hosted** ClickHouse you must allow it once in the server config:
 
 ```xml
-<custom_settings_prefixes>DFE_</custom_settings_prefixes>
+<custom_settings_prefixes>SQL_</custom_settings_prefixes>
 ```
 
-Without it, CH rejects every `DFE_*` setting (both `CREATE USER ... SETTINGS` and
-each per-query `SETTINGS`) and tenant scoping cannot apply. This is CH server
-config owned by the DEPLOYER - dfe-infra (ClickHouse chart values / users.d
-overlay) and dfe-docker (container config.xml) - NOT something the engine
-reconciler sets. Also surfaced in `.env.example`.
+Without it on self-host, CH rejects every `SQL_*` setting (both
+`CREATE USER ... SETTINGS` and each per-query `SETTINGS`) and tenant scoping
+cannot apply. This is CH server config owned by the DEPLOYER - dfe-infra
+(ClickHouse chart values / users.d overlay) and dfe-docker (container config.xml)
+- NOT something the engine reconciler sets. We use the `SQL_` prefix specifically
+because a product-specific prefix like `DFE_` is rejected by CH Cloud, which does
+not expose `custom_settings_prefixes`. Also surfaced in `.env.example`.
 
 **Benefits:**
 - A small fixed set of CH users by privilege, not N per org
@@ -855,7 +859,7 @@ role_connections:
 
 ### 5.4 TenantScopedClient
 
-Wraps the clickhouse-connect client to inject `DFE_current_tenant_id` into every
+Wraps the clickhouse-connect client to inject `SQL_current_tenant_id` into every
 query's settings - ALWAYS (fail closed). For a principal with multiple `org_ids`
 the value is the comma-joined list, so queries are scoped to exactly their
 permitted orgs; with no org_ids it is `''` (zero rows), never omitted.
@@ -863,7 +867,7 @@ permitted orgs; with no org_ids it is `''` (zero rows), never omitted.
 ```python
 class TenantScopedClient:
     def query(self, sql, ...):
-        settings = {"DFE_current_tenant_id": ",".join(self.org_ids)}
+        settings = {"SQL_current_tenant_id": ",".join(self.org_ids)}
         return self._client.query(sql, settings=settings, ...)
 ```
 
@@ -894,8 +898,8 @@ flowchart TD
     UNION --> CTX["AuthContext.org_ids = acme.org_ids<br/>grant: org_analyst @ org:acme"]
     CTX --> REQ["read request (query:execute)<br/>authorised org-scoped (TENANT_ACTION)"]
     REQ --> RCLIENT["registry.read_client_for_user()<br/>role -> CH user dfe_tenant_reader"]
-    RCLIENT --> TSC["TenantScopedClient injects<br/>SETTINGS DFE_current_tenant_id = join(org_ids)"]
-    TSC --> POLICY["CH RESTRICTIVE row policy dfe_tenant_filter:<br/>USING has(splitByChar(',',<br/>getSetting('DFE_current_tenant_id')), _org_id)"]
+    RCLIENT --> TSC["TenantScopedClient injects<br/>SETTINGS SQL_current_tenant_id = join(org_ids)"]
+    TSC --> POLICY["CH RESTRICTIVE row policy dfe_tenant_filter:<br/>USING has(splitByChar(',',<br/>getSetting('SQL_current_tenant_id')), _org_id)"]
     POLICY --> ROWS["only acme rows returned<br/>(unset/empty setting -> 0 rows, fail closed)"]
     style ROWS fill:#4a4,color:#fff
     style NOGRP fill:#fa0,color:#fff
@@ -920,7 +924,7 @@ mistake, so document both explicitly.
 flowchart LR
     subgraph data["DATA boundary (tenant isolation)"]
         direction TB
-        Q["any CH query"] --> RP["ClickHouse RESTRICTIVE row policy<br/>getSetting('DFE_current_tenant_id')"]
+        Q["any CH query"] --> RP["ClickHouse RESTRICTIVE row policy<br/>getSetting('SQL_current_tenant_id')"]
         RP --> FILT["rows filtered to the caller's org_ids<br/>at QUERY TIME"]
     end
     subgraph ops["OPERATIONS boundary (service power)"]
@@ -1042,13 +1046,13 @@ Two postures, switched by `DFE_HYPERDX_PER_GROUP` (default `false` = GA):
 flowchart TD
     START["provisioned user"] --> POSTURE{DFE_HYPERDX_PER_GROUP}
     POSTURE -->|false GA default| GA["ONE shared team = DFE_GA_TEAM_NAME (default 'dfe')<br/>every user joins it"]
-    GA --> GACONN["isolation is NOT the team -<br/>it is the per-connection<br/>DFE_current_tenant_id setting<br/>on the shared dfe_tenant_reader"]
+    GA --> GACONN["isolation is NOT the team -<br/>it is the per-connection<br/>SQL_current_tenant_id setting<br/>on the shared dfe_tenant_reader"]
     POSTURE -->|true post-GA| PG["per-org team customer-&lt;org&gt;<br/>provisioned per org"]
     style GA fill:#4a4,color:#fff
 ```
 
 GA rationale: the shared `dfe_tenant_reader` CH user + a per-connection
-`DFE_current_tenant_id` isolates orgs WITHOUT a team per org, so it scales to
+`SQL_current_tenant_id` isolates orgs WITHOUT a team per org, so it scales to
 thousands of orgs with no per-tenant team sprawl. `DFE_HYPERDX_PER_GROUP=true`
 is the post-GA richer model.
 
@@ -1070,9 +1074,9 @@ carry the tenant setting, replacing the retired per-group `dfe_grp_<group>` user
 | admin | GA team (`dfe`) | `dfe_admin` | none (unrestricted) |
 | data_analyst | GA team (`dfe`) | `dfe_analyst` | none |
 | data_viewer | GA team (`dfe`) | `dfe_analyst_ro` | none |
-| org_analyst (acme) | GA team (`dfe`) | `dfe_tenant_reader` | `DFE_current_tenant_id=<acme org_ids>` |
+| org_analyst (acme) | GA team (`dfe`) | `dfe_tenant_reader` | `SQL_current_tenant_id=<acme org_ids>` |
 
-`build_hyperdx_connections_json` emits `clickhouseSettings { DFE_current_tenant_id:
+`build_hyperdx_connections_json` emits `clickhouseSettings { SQL_current_tenant_id:
 join(org_ids) }` per org connection; an empty value fails closed (0 rows).
 
 ### 8.5 Two fork dependencies
@@ -1159,13 +1163,12 @@ class AuthSettings(BaseModel):
 
 class OIDCSettings(BaseModel):
     providers_dir: str = ""       # Path to OIDC provider config dir
-    sync_enabled: bool = True     # Enable background group sync
-    sync_on_startup: bool = True  # Sync providers at startup
 ```
 
-Environment variables: `DFE_AUTH_ENABLED`, `DFE_AUTH_DIR`,
-`DFE_AUTH_OIDC_PROVIDERS_DIR`, `DFE_AUTH_OIDC_SYNC_ENABLED`,
-`DFE_AUTH_OIDC_SYNC_ON_STARTUP`.
+Group sync is NOT a global toggle: each provider's `GroupResolutionConfig`
+(`mode` = `manual` / `token_claim` / `api`, plus `sync_interval` for api mode)
+drives how membership is resolved. Environment variables: `DFE_AUTH_ENABLED`,
+`DFE_AUTH_DIR`, `DFE_AUTH_OIDC_PROVIDERS_DIR`.
 
 ---
 

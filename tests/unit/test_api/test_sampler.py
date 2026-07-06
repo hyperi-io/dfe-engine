@@ -178,7 +178,7 @@ def test_unknown_sample_task_is_404(client, admin_headers):
 
 
 def test_sample_routes_through_tenant_scoped_client(client, app, admin_headers):
-    """A tenant-scoped principal's sample must inject DFE_current_tenant_id.
+    """A tenant-scoped principal's sample must inject SQL_current_tenant_id.
 
     Proves the sampler acquires its client via the per-principal dependency AND
     that a TenantScopedClient's tenant id (+ readonly settings-strip) reaches the
@@ -198,7 +198,7 @@ def test_sample_routes_through_tenant_scoped_client(client, app, admin_headers):
         )
         assert r.status_code == 200, r.text
         # tenant id injected; the sampler's max_execution_time dropped (readonly)
-        assert recording.last_settings == {"DFE_current_tenant_id": "acme"}
+        assert recording.last_settings == {"SQL_current_tenant_id": "acme"}
     finally:
         app.dependency_overrides.pop(get_tenant_scoped_clickhouse_client, None)
 

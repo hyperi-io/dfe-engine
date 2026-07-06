@@ -141,7 +141,7 @@ def _default_conn_config():
 async def test_create_org_connection_uses_tenant_reader_and_tenant_setting(registry, tmp_path):
     """Task A: the org's HyperDX connection authenticates as the SHARED
     dfe_tenant_reader (secret ch/fixed/dfe_tenant_reader) and carries the org's
-    DFE_current_tenant_id = comma-joined org_ids - NOT a per-group dfe_grp_<org> user."""
+    SQL_current_tenant_id = comma-joined org_ids - NOT a per-group dfe_grp_<org> user."""
     secrets = _file_secrets(tmp_path)
     secrets.put("ch/fixed/dfe_tenant_reader", "reader-pw")  # where the reconciler stores it
 
@@ -160,7 +160,7 @@ async def test_create_org_connection_uses_tenant_reader_and_tenant_setting(regis
     assert conn["name"] == "acme"
     assert conn["user"] == "dfe_tenant_reader"  # shared fixed reader
     assert conn["password"] == "reader-pw"  # sourced from ch/fixed/dfe_tenant_reader
-    assert conn["settings"] == {"DFE_current_tenant_id": "acme,globex"}
+    assert conn["settings"] == {"SQL_current_tenant_id": "acme,globex"}
     assert conn["host"] == "ch-host"  # network coords from the `default` connection
     assert conn["port"] == 8123
     assert conn["database"] == "dfe"
@@ -257,17 +257,18 @@ async def test_delete_org_under_per_group_deletes_own_team(registry, tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_revoke_member_everywhere_hits_all_orgs(registry, monkeypatch):
+async def test_revoke_member_everywhere_hits_all_orgs(registry, tmp_path):
     """Account disable/delete revokes HyperDX membership across every org."""
+    secrets = _file_secrets(tmp_path)
     registry.create("acme", org_ids=["acme"])
-    registry.update("acme", hyperdx_team_api_key_env="HDX_ACME")
+    registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
+    secrets.put("hyperdx/team-api-key/acme", "key-acme")
     registry.create("globex", org_ids=["globex"])
-    registry.update("globex", hyperdx_team_api_key_env="HDX_GLOBEX")
-    monkeypatch.setenv("HDX_ACME", "key-acme")
-    monkeypatch.setenv("HDX_GLOBEX", "key-globex")
+    registry.update("globex", hyperdx_team_api_key_path="hyperdx/team-api-key/globex")
+    secrets.put("hyperdx/team-api-key/globex", "key-globex")
 
     hdx = _FakeHyperDX()
-    manager = OrgLifecycleManager(registry, hyperdx_client=hdx)
+    manager = OrgLifecycleManager(registry, hyperdx_client=hdx, secrets_store=secrets)
 
     issued = await manager.revoke_member_everywhere("user@corp.com")
 
@@ -285,15 +286,16 @@ async def test_revoke_member_everywhere_noop_without_email(registry):
 
 
 @pytest.mark.asyncio
-async def test_revoke_member_issues_hyperdx_removal(registry, monkeypatch):
+async def test_revoke_member_issues_hyperdx_removal(registry, tmp_path):
     """5c.4: an account-disable / group-member-removal propagates a HyperDX team
     revoke via the lifecycle seam."""
+    secrets = _file_secrets(tmp_path)
     registry.create("acme", org_ids=["acme"])
-    registry.update("acme", hyperdx_team_api_key_env="HDX_KEY_ACME")
-    monkeypatch.setenv("HDX_KEY_ACME", "team-api-key")
+    registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
+    secrets.put("hyperdx/team-api-key/acme", "team-api-key")
 
     hdx = _FakeHyperDX()
-    manager = OrgLifecycleManager(registry, hyperdx_client=hdx)
+    manager = OrgLifecycleManager(registry, hyperdx_client=hdx, secrets_store=secrets)
 
     issued = await manager.revoke_member("acme", "user@corp.com")
 
@@ -303,7 +305,7 @@ async def test_revoke_member_issues_hyperdx_removal(registry, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_revoke_member_without_team_key_is_noop(registry):
-    registry.create("acme", org_ids=["acme"])  # no hyperdx_team_api_key_env stored
+    registry.create("acme", org_ids=["acme"])  # no hyperdx_team_api_key_path stored
     hdx = _FakeHyperDX()
     manager = OrgLifecycleManager(registry, hyperdx_client=hdx)
 
@@ -311,3 +313,55 @@ async def test_revoke_member_without_team_key_is_noop(registry):
 
     assert issued is False
     assert hdx.removed == []
+
+
+@pytest.mark.asyncio
+async def test_revoke_member_without_secrets_store_is_noop(registry, tmp_path):
+    """A recorded path with NO secrets store wired must fail soft, not raise."""
+    registry.create("acme", org_ids=["acme"])
+    registry.update("acme", hyperdx_team_api_key_path="hyperdx/team-api-key/acme")
+    hdx = _FakeHyperDX()
+    manager = OrgLifecycleManager(registry, hyperdx_client=hdx)  # no secrets_store
+
+    issued = await manager.revoke_member("acme", "user@corp.com")
+
+    assert issued is False
+    assert hdx.removed == []
+
+
+@pytest.mark.asyncio
+async def test_provision_hyperdx_persists_team_api_key_via_secrets(registry, tmp_path):
+    """The bug fix under test: the minted team API key must land in the
+    scalo.secrets seam (durable, cross-pod) - never os.environ (per-process,
+    lost on restart, invisible to sibling pods in a multi-replica deploy)."""
+    secrets = _file_secrets(tmp_path)
+    hdx = _FakeHyperDX()
+    manager = OrgLifecycleManager(
+        registry,
+        hyperdx_client=hdx,
+        connection_config=_default_conn_config(),
+        secrets_store=secrets,
+        ga_team_name="dfe",
+    )
+
+    org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
+
+    assert org.hyperdx_team_api_key_path == "hyperdx/team-api-key/dfe"
+    assert secrets.get("hyperdx/team-api-key/dfe") == "api-key-team-1"
+
+
+@pytest.mark.asyncio
+async def test_provision_hyperdx_without_secrets_store_does_not_persist_key(registry):
+    """No secrets store wired -> the team key is minted by HyperDX but simply not
+    persisted anywhere (non-fatal), never silently stashed in os.environ."""
+    hdx = _FakeHyperDX()
+    manager = OrgLifecycleManager(
+        registry,
+        hyperdx_client=hdx,
+        connection_config=_default_conn_config(),
+        ga_team_name="dfe",
+    )
+
+    org = await manager.create_org("acme", org_ids=["acme"], admin_id="admin")
+
+    assert org.hyperdx_team_api_key_path == ""

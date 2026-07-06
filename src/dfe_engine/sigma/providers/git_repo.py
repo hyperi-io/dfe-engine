@@ -27,6 +27,8 @@ from pathlib import Path
 
 from scalo.logger import logger
 
+from dfe_engine.gitops.dulwich_auth import authed_https_url, scrub_remote_credentials
+
 from .base import ProviderConfig, SigmaProvider, SigmaRuleDoc, modified_since, parse_sigma_yaml
 
 
@@ -50,15 +52,11 @@ class GitRepoProvider(SigmaProvider):
     def _authed_url(self, url: str) -> str:
         """Embed HTTPS token creds in the URL (git_token auth); pass others through.
 
-        Mirrors GitopsRepo._authed_url: dulwich carries HTTPS auth in the URL. A
-        local-path or SSH url, or a no-auth public repo, is returned unchanged.
+        Shared with GitopsRepo via
+        :func:`~dfe_engine.gitops.dulwich_auth.authed_https_url` - a local-path or
+        SSH url, or a no-auth public repo, is returned unchanged.
         """
-        token = self._secret()
-        if token and url.startswith(("http://", "https://")):
-            username = self.config.auth.username or "x-access-token"
-            scheme, rest = url.split("://", 1)
-            return f"{scheme}://{username}:{token}@{rest}"
-        return url
+        return authed_https_url(url, self.config.auth.username, self._secret())
 
     def _clone_or_refresh(self) -> None:
         """Clone the repo if absent, else fetch + hard-reset to the remote branch tip.
@@ -100,16 +98,15 @@ class GitRepoProvider(SigmaProvider):
         self._scrub_credentials(url)
 
     def _scrub_credentials(self, bare_url: str) -> None:
-        """Rewrite remote.origin.url back to the credential-free URL after a clone."""
+        """Rewrite remote.origin.url back to the credential-free URL after a clone.
+
+        Shared scrub (see GitopsRepo); best-effort here - a cache clone that keeps
+        its credential is a hardening miss, not a sync failure.
+        """
         if not self._secret():
             return
-        from dulwich.repo import Repo
-
         try:
-            with Repo(str(self._clone_path)) as repo:
-                config = repo.get_config()
-                config.set((b"remote", b"origin"), b"url", bare_url.encode())
-                config.write_to_path()
+            scrub_remote_credentials(self._clone_path, bare_url)
         except Exception:  # scrubbing is best-effort hardening, never fatal
             logger.warning(
                 "sigma git provider: could not scrub clone credentials", provider=self.name

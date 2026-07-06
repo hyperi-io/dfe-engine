@@ -26,14 +26,15 @@ Usage::
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
+from dfe_engine.env_refs import resolve_env_ref
 from dfe_engine.governance.ch import TENANT_READER_USER, TENANT_SETTING
+from dfe_engine.resilience import CircuitBreaker, CircuitBreakerConfig
 
 # Deploy-repo path where the per-org DEFAULT_CONNECTIONS JSON lands. The HyperDX
 # fork chart consumes this file (raw JSON array) as its DEFAULT_CONNECTIONS env so
@@ -55,10 +56,19 @@ class HyperDXClient:
     warning and return gracefully.  Callers should not depend on success.
     """
 
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(
+        self, base_url: str, api_key: str, *, breaker: CircuitBreaker | None = None
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
-        self._connected = True  # Optimistic; set False on first failure
+        # Trip-and-reject circuit (scalo, via dfe_engine.resilience). Replaces the
+        # old ``_connected = False`` latch that, once tripped, NEVER recovered:
+        # this one HALF_OPENs after ``reset_timeout`` and closes on the next
+        # success. failure_threshold=1 preserves "one admin-path outage
+        # short-circuits the rest of this provisioning sequence".
+        self._breaker = breaker or CircuitBreaker(
+            "hyperdx", CircuitBreakerConfig(failure_threshold=1, reset_timeout=30.0)
+        )
 
     async def create_team(self, name: str) -> str | None:
         """Create a HyperDX team.
@@ -104,7 +114,7 @@ class HyperDXClient:
             user: ClickHouse username.
             password: ClickHouse password.
             settings: Optional per-connection ClickHouse custom settings (e.g.
-                ``{"DFE_current_tenant_id": "acme,globex"}``). Emitted under
+                ``{"SQL_current_tenant_id": "acme,globex"}``). Emitted under
                 ``clickhouseSettings`` - the same clearly-named key the
                 DEFAULT_CONNECTIONS artifact uses. See ``build_hyperdx_connections_json``
                 for the fork-dependency note (the fork must merge this into each query).
@@ -318,7 +328,7 @@ class HyperDXClient:
                 "port": conn.port,
                 "database": conn.database,
                 "user": conn.user,
-                "password": os.environ.get(conn.password_env, ""),
+                "password": resolve_env_ref(conn.password_env),
             }
             for name, conn in conn_config.connections.items()
         ]
@@ -348,16 +358,18 @@ class HyperDXClient:
         Response (body/status) to its own result, or the ``None`` sentinel to its
         own default.
 
-        ``mark_disconnected`` gates the ``_connected = False`` latch: the
-        admin-key methods trip it (one HyperDX outage short-circuits the rest),
-        but the team-scoped ``invite_member`` / ``remove_member`` do NOT - a
-        single team's API-key failure must not disable the whole client.
+        ``mark_disconnected`` gates the circuit breaker: the admin-key methods
+        record success/failure so one HyperDX outage OPENs the circuit and
+        short-circuits the rest, but the team-scoped ``invite_member`` /
+        ``remove_member`` do NOT record (a single team's API-key failure must not
+        trip the whole client) - they only observe the gate. When the circuit is
+        OPEN every call fast-skips, until it HALF_OPENs and a probe recovers it.
 
-        Returns the ``Response`` on success, or ``None`` on the disconnected
-        guard or any failure.
+        Returns the ``Response`` on success, or ``None`` on the open-circuit gate
+        or any failure.
         """
-        if not self._connected:
-            logger.warning(f"HyperDX unreachable, skipping {op}", **context)
+        if not self._breaker.is_call_permitted():
+            logger.warning(f"HyperDX circuit open, skipping {op}", **context)
             return None
         try:
             from scalo.http import AsyncHttpClient
@@ -368,10 +380,12 @@ class HyperDXClient:
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await getattr(client, method)(path, **request_kwargs)
                 response.raise_for_status()
+                if mark_disconnected:
+                    self._breaker.record_success()  # admin-path success closes the circuit
                 return response
         except Exception as exc:
             if mark_disconnected:
-                self._connected = False
+                self._breaker.record_failure()  # only admin-path failures trip the circuit
             logger.warning(f"HyperDX {op} failed (non-fatal)", **context, error=str(exc))
             return None
 
@@ -405,7 +419,7 @@ def build_hyperdx_connections_json(
     as the SAME shared, row-filtered reader ``dfe_tenant_reader`` (secret path
     ``ch/fixed/dfe_tenant_reader``, minted by ``ChRbacReconciler``). Isolation is
     NO LONGER the CH identity - the retired per-group ``dfe_grp_<group>`` users are
-    gone. Each connection instead carries a baked-in ``DFE_current_tenant_id``
+    gone. Each connection instead carries a baked-in ``SQL_current_tenant_id``
     custom setting = the org's comma-joined ``org_ids``; the ONE restrictive row
     policy on every ``_org_id`` table (governance.ch.render_tenant_policies) reads
     that setting via ``getSetting`` and scopes the reader to exactly those orgs. An
@@ -445,7 +459,7 @@ def build_hyperdx_connections_json(
 
 
 def _tenant_value(org: Any) -> str:
-    """Comma-joined org_ids for the org's DFE_current_tenant_id setting ('' -> 0 rows)."""
+    """Comma-joined org_ids for the org's SQL_current_tenant_id setting ('' -> 0 rows)."""
     return ",".join(getattr(org, "org_ids", None) or [])
 
 

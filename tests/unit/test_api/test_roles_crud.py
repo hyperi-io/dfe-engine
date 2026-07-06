@@ -136,6 +136,40 @@ class TestRolesCrud:
         missing = client.get("/api/v1/auth/roles/api_test_role", headers=admin_headers)
         assert missing.status_code == 404
 
+    def test_create_update_delete_role_emits_audit(self, client, admin_headers, monkeypatch):
+        import dfe_engine.api.v1.roles as roles_mod
+
+        calls = []
+        monkeypatch.setattr(roles_mod, "audit_resource_change", lambda *a: calls.append(a))
+
+        create = client.post(
+            "/api/v1/auth/roles",
+            json={
+                "name": "audit_test_role",
+                "description": "Temporary",
+                "permissions": ["query:execute"],
+                "scoped": False,
+            },
+            headers=admin_headers,
+        )
+        assert create.status_code == 201
+
+        update = client.put(
+            "/api/v1/auth/roles/audit_test_role",
+            json={"description": "Updated"},
+            headers=admin_headers,
+        )
+        assert update.status_code == 200
+
+        delete = client.delete("/api/v1/auth/roles/audit_test_role", headers=admin_headers)
+        assert delete.status_code == 204
+
+        assert calls == [
+            ("admin", "role", "audit_test_role", "created"),
+            ("admin", "role", "audit_test_role", "updated"),
+            ("admin", "role", "audit_test_role", "deleted"),
+        ]
+
     def test_delete_role_in_use_returns_409(self, client, admin_headers):
         resp = client.delete("/api/v1/auth/roles/admin", headers=admin_headers)
         assert resp.status_code == 409

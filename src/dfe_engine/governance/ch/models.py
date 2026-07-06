@@ -13,7 +13,7 @@ A TIER is "how much you can consume + what you can do" (grants + settings profil
 Tenant isolation uses the PRODUCTION-STANDARD custom-settings model (PostHog /
 Grafana / LaunchDarkly), NOT a CH user per group or a row policy per (org, table):
 a SMALL FIXED set of users by privilege (``ChFixedUser`` / ``FIXED_USERS``) plus
-ONE row policy per ``_org_id`` table driven by the ``DFE_current_tenant_id``
+ONE row policy per ``_org_id`` table driven by the ``SQL_current_tenant_id``
 custom setting (rendered by ``render_tenant_policies``). Adding the thousandth org
 is zero DDL - the reader user and the per-table policy already exist; the engine
 just injects that org's id into the per-query setting. This REPLACES the retired
@@ -39,13 +39,19 @@ _GiB = 1024**3
 # setting, targeting the single row-filtered reader - not a policy per (org,
 # table) and not a CH user per group.
 
-# The ONE custom setting the tenant row policy reads. It MUST be server-allowed
-# via ``<custom_settings_prefixes>DFE_</custom_settings_prefixes>`` in the CH
-# config.xml - a DEPLOY prerequisite (dfe-infra CH chart / dfe-docker), NOT
-# reconciler DDL. Without the prefix, CH rejects both ``CREATE USER ... SETTINGS
-# DFE_current_tenant_id`` and every per-query ``SETTINGS DFE_current_tenant_id``,
-# so tenant scoping cannot apply. See docs/RBAC.md section 5 + .env.example.
-TENANT_SETTING = "DFE_current_tenant_id"
+# The ONE custom setting the tenant row policy reads. Uses ClickHouse's SQL_
+# custom-settings prefix, which is PORTABLE across both deployment targets
+# (live-proven 2026-07-06): on ClickHouse Cloud SQL_ is the BUILT-IN
+# custom-setting prefix (nothing to configure); on self-hosted CH it must be
+# allowed once via ``<custom_settings_prefixes>SQL_</custom_settings_prefixes>``
+# in the server config - a DEPLOY prerequisite (dfe-infra CH chart / dfe-docker),
+# NOT reconciler DDL. We use SQL_ (not a product-specific prefix) precisely
+# because CH Cloud REJECTS a custom prefix like DFE_ and does not expose
+# custom_settings_prefixes. Without the prefix on self-host, CH rejects both
+# ``CREATE USER ... SETTINGS SQL_current_tenant_id`` and every per-query
+# ``SETTINGS SQL_current_tenant_id``, so tenant scoping cannot apply. See
+# docs/RBAC.md section 5 + .env.example.
+TENANT_SETTING = "SQL_current_tenant_id"
 
 # The single row-policy short-name reused on every ``_org_id`` table. A CH
 # row-policy name is scoped per-table, so the same name on two tables is two
@@ -126,7 +132,7 @@ class ChFixedUser(BaseModel):
     """One of the small fixed set of CH users distinguished only by PRIVILEGE.
 
     Not per-org, not per-group. The tenant axis is ONE row policy per ``_org_id``
-    table (render_tenant_policies) driven by the ``DFE_current_tenant_id`` custom
+    table (render_tenant_policies) driven by the ``SQL_current_tenant_id`` custom
     setting, targeting only ``tenant_filtered`` users; every other fixed user is
     targeted by NO policy and therefore sees ALL rows (the CH restrictive-only
     property). Fields:
@@ -136,7 +142,7 @@ class ChFixedUser(BaseModel):
     - ``readonly`` : set the CH ``readonly = 1`` profile bit (belt-and-braces on
       top of SELECT-only grants).
     - ``tenant_filtered`` : the row-filtered reader. Additionally makes
-      ``DFE_current_tenant_id`` CHANGEABLE_IN_READONLY so it can be set per query
+      ``SQL_current_tenant_id`` CHANGEABLE_IN_READONLY so it can be set per query
       while the user stays read-only, and is the user the tenant policy targets.
     """
 
@@ -144,26 +150,6 @@ class ChFixedUser(BaseModel):
     grants: list[str] = Field(default_factory=list)
     readonly: bool = False
     tenant_filtered: bool = False
-
-
-class GroupChBinding(BaseModel):
-    """An RBAC group's resolved org axis (a group -> single-org pointer).
-
-    Under the fixed-user model the reconciler no longer mints a CH user per group,
-    so this is no longer a CH-minting binding: it is retained ONLY as the group ->
-    org resolver that ``bindings_from_groups`` produces for the HyperDX connection
-    builder + org lifecycle (which still need "which one org does this group map
-    to"). ``tier`` is vestigial. See the Phase 3 follow-up: HyperDX should move to
-    the ``dfe_tenant_reader`` user + a per-connection ``DFE_current_tenant_id``.
-    """
-
-    group: str
-    ch_user: str = ""  # defaults to dfe_grp_{group}
-    tier: str = ""  # vestigial (no per-group tier axis under the fixed-user model)
-    org: str = ""  # resolved Org NAME (empty = no single-org resolution)
-
-    def user(self) -> str:
-        return self.ch_user or f"dfe_grp_{self.group}"
 
 
 # ---- Seeded defaults (opinionated, non-destructive seeds) ------------------
@@ -284,7 +270,7 @@ FIXED_USERS: list[ChFixedUser] = [
         readonly=True,
     ),
     # org_analyst -> read-only AND row-filtered to the caller's org(s) by the ONE
-    # tenant row policy via DFE_current_tenant_id (empty setting = 0 rows).
+    # tenant row policy via SQL_current_tenant_id (empty setting = 0 rows).
     ChFixedUser(
         name=TENANT_READER_USER,
         grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],

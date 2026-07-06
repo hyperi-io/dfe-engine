@@ -21,6 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
+from dfe_engine.env_refs import resolve_env_ref
 from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
 
 
@@ -154,7 +155,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if settings.hyperdx.enabled and settings.hyperdx.base_url:
         from dfe_engine.hyperdx.client import HyperDXClient
 
-        api_key = os.environ.get(settings.hyperdx.api_key_env, "")
+        api_key = resolve_env_ref(settings.hyperdx.api_key_env)
         app.state.hyperdx_client = HyperDXClient(
             base_url=settings.hyperdx.base_url,
             api_key=api_key,
@@ -163,7 +164,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
     # Reconciles the seeded quota tiers + service roles + fixed users by privilege
-    # + ONE DFE_current_tenant_id row policy per _org_id table into ClickHouse.
+    # + ONE SQL_current_tenant_id row policy per _org_id table into ClickHouse.
     # Default-off so startup is unaffected; fully non-fatal. The service + fixed
     # user secrets are minted only when a secrets store is configured (below).
     if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
@@ -189,6 +190,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("CH RBAC reconcile complete")
         except Exception:
             logger.exception("CH RBAC reconcile failed; continuing without it")
+
+    # ClickHouse migrations (opt-in via clickhouse.migrate_on_startup). The
+    # bootstrap-apply-that-senses runner: connects, senses the topology, and applies
+    # any pending engine DDL (query_log_archive today) with the right engine + ON
+    # CLUSTER form. Idempotent + tracked, so re-runs / racing pods are safe. Fully
+    # non-fatal - a CH that is down must not stop the API from serving.
+    if settings.clickhouse.migrate_on_startup:
+        try:
+            from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+            from dfe_engine.clickhouse.migrations import run_migrations
+            from dfe_engine.settings import get_clickhouse_config
+
+            wrapper = ClickHouseManager.get_instance(
+                get_clickhouse_config(settings)
+            ).get_clickhouse_client()
+            run_migrations(wrapper)
+        except Exception:
+            logger.exception("CH migrations failed; continuing without them")
 
     # Secrets seam (scalo.secrets) for the secrets the engine mints. Guarded: a
     # misconfigured backend must not break startup - the org lifecycle then mints
@@ -223,7 +242,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Bootstrap JIT provisioner. role_config drives the HyperDX scope gate (Task C:
     # no HyperDX user for a principal whose effective access is none); per_group /
-    # ga_team_name select the team model (Task D).
+    # ga_team_name select the team model (Task D). secrets_store resolves the team
+    # API key for the first-login invite (minted via the same seam as org_lifecycle).
     from dfe_engine.auth.jit import JitProvisioner
 
     app.state.jit_provisioner = JitProvisioner(
@@ -232,6 +252,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         hyperdx_client=getattr(app.state, "hyperdx_client", None),
         org_registry=getattr(app.state, "org_registry", None),
         role_config=role_config,
+        secrets_store=secrets_store,
         per_group=settings.hyperdx.per_group,
         ga_team_name=settings.hyperdx.ga_team_name,
     )
@@ -260,6 +281,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.info("Query view executor ready")
         except Exception as exc:
             logger.warning("Query view executor unavailable", error=str(exc))
+
+    # CH readiness (Phase 0/3): reflect the resilience outage state so k8s holds
+    # traffic during a CH Cloud warm-up (WAKING) or a genuine outage (DEAD), but
+    # keeps serving through a brief blip (HEALTHY/TRANSIENT - ops retry beneath).
+    # A stopped CH Cloud service auto-wakes on first use (Phase 2) when opted in;
+    # the readiness gate then holds traffic until it is running.
+    from dfe_engine.clickhouse.clickhouse_manager import clickhouse_outage_state
+    from dfe_engine.clickhouse.resilience import OutageState
+
+    def _clickhouse_ready() -> bool:
+        return clickhouse_outage_state() not in (OutageState.WAKING, OutageState.DEAD)
+
+    health.register_ready_check("clickhouse", _clickhouse_ready)
 
     health.set_started()
     health.set_ready()

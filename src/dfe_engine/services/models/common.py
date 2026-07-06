@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 
@@ -48,6 +50,28 @@ class SaslConfig(BaseModel):
             msg = f"Unknown SASL mechanism: {v}. Allowed: {', '.join(sorted(allowed))}"
             raise ValueError(msg)
         return v
+
+
+def production_sasl_scram(**overrides: Any) -> dict[str, Any]:
+    """The canonical production Kafka SASL block (SCRAM-SHA-512) as a plain dict.
+
+    DFE-owned brokers run SASL/SCRAM-SHA-512 everywhere (see the Kafka SCRAM
+    standard). This is the ONE source for the production SASL block that the
+    per-service config templates + seeds emit, built FROM :class:`SaslConfig` so
+    the full key set can never drift from the schema again (a hand-typed copy in
+    transform_vrl had silently dropped 10 keys). Values are the production
+    defaults: enabled, scram_sha_512, empty username/password (the deploy fills
+    them from the secret store). Pass ``overrides`` for a rare per-service tweak.
+
+    The SecretStr fields are revealed to their plain (empty) values so the emitted
+    template carries ``""`` - never the masked ``"**********"`` a json dump gives.
+    """
+    cfg = SaslConfig(enabled=True, mechanism="scram_sha_512", **overrides)
+    data = cfg.model_dump()
+    for key, value in list(data.items()):
+        if isinstance(value, SecretStr):
+            data[key] = value.get_secret_value()
+    return data
 
 
 class KafkaTlsConfig(BaseModel):

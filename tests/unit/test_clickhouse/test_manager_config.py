@@ -5,17 +5,17 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The get_instance() singleton is first-call-wins: every seam that can be the
-first caller must pass the settings-derived config, or the whole process binds
-to the hardcoded localhost defaults. clickhouse_connect.get_client is faked to
-capture the kwargs - no live ClickHouse."""
+"""get_instance() is registered per resolved Target: identical configs share a
+manager, a differing config gets its OWN (no first-config-wins footgun), and an
+empty config binds to the settings-derived target (not hardcoded localhost).
+clickhouse_connect.get_client is faked to capture the kwargs - no live
+ClickHouse."""
 
 from __future__ import annotations
 
 import clickhouse_connect
 import pytest
 
-import dfe_engine.clickhouse.clickhouse_manager as ch_module
 import dfe_engine.settings as settings_module
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import ClickHouseSettings, DFESettings
@@ -124,27 +124,15 @@ def test_no_database_key_when_unset(captured_client):
     assert "database" not in captured_client
 
 
-def test_get_instance_warns_when_config_differs(monkeypatch):
-    warnings: list[tuple] = []
-
-    class _StubLogger:
-        def warning(self, msg, **kw):
-            warnings.append((msg, kw))
-
-        def info(self, *a, **kw):
-            pass
-
-        def error(self, *a, **kw):
-            pass
-
-    monkeypatch.setattr(ch_module, "logger", _StubLogger())
-
+def test_get_instance_returns_distinct_manager_per_config():
+    """A differing config gets its OWN manager - the first-config-wins footgun is
+    retired (the cache keys on the resolved Target, so a second target no longer
+    silently binds to the first)."""
     first = ClickHouseManager.get_instance({"ch_host": "a", "ch_port": 8123})
+    # Identical config -> the same manager (registered by Target).
     assert ClickHouseManager.get_instance({"ch_host": "a", "ch_port": 8123}) is first
-    assert warnings == []  # identical config: no noise
-
+    # Differing config -> a distinct manager, bound to its own target.
     other = ClickHouseManager.get_instance({"ch_host": "b", "ch_port": 9440})
-    assert other is first  # still first-call-wins ...
-    assert len(warnings) == 1  # ... but no longer silently
-    assert warnings[0][1]["bound_host"] == "a"
-    assert warnings[0][1]["requested_host"] == "b"
+    assert other is not first
+    assert first.target_config_data["ch_host"] == "a"
+    assert other.target_config_data["ch_host"] == "b"

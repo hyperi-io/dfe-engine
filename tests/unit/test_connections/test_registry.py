@@ -22,7 +22,7 @@ from dfe_engine.connections.models import ClickHouseConnection
 from dfe_engine.connections.registry import ConnectionRegistry
 from dfe_engine.connections.tenant import TenantScopedClient
 
-_TENANT_SETTING = "DFE_current_tenant_id"
+_TENANT_SETTING = "SQL_current_tenant_id"
 
 
 def _conn(name: str, user: str, pw_env: str) -> ClickHouseConnection:

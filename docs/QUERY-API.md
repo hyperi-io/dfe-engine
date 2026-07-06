@@ -43,7 +43,7 @@ sequenceDiagram
 ```
 
 Isolation: for an `org_analyst` the resolved connection authenticates as
-`dfe_tenant_reader` carrying the org's `DFE_current_tenant_id`, and one CH row
+`dfe_tenant_reader` carrying the org's `SQL_current_tenant_id`, and one CH row
 policy scopes every read. An empty tenant setting fails CLOSED (0 rows). See
 [RBAC.md](RBAC.md) section 8. NB the custom-settings mechanism does not enforce
 on ClickHouse Cloud - see [BACKING-SERVICES.md](BACKING-SERVICES.md).

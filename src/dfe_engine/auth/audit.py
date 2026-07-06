@@ -93,69 +93,6 @@ def audit_permission_denied(
     )
 
 
-def audit_account_change(
-    admin_id: str,
-    target_user: str,
-    change: str,
-) -> None:
-    """Emit an audit event for a local account create/update/delete.
-
-    Args:
-        admin_id: Identity of the admin performing the change.
-        target_user: Username of the affected account.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
-    """
-    logger.info(
-        f"auth.account.{change}",
-        admin_id=admin_id,
-        target_user=target_user,
-        change=change,
-    )
-
-
-def audit_group_change(
-    admin_id: str,
-    group_name: str,
-    change: str,
-) -> None:
-    """Emit an audit event for a group create/update/delete.
-
-    Args:
-        admin_id: Identity of the admin performing the change.
-        group_name: Name of the affected group.
-        change: One of ``"created"``, ``"updated"``, ``"deleted"``.
-    """
-    logger.info(
-        f"auth.group.{change}",
-        admin_id=admin_id,
-        group_name=group_name,
-        change=change,
-    )
-
-
-def audit_api_key_change(
-    admin_id: str,
-    key_name: str,
-    short_token: str,
-    change: str,
-) -> None:
-    """Emit an audit event for an API key create/revoke.
-
-    Args:
-        admin_id: Identity of the admin performing the change.
-        key_name: Human-readable name of the API key.
-        short_token: First 16 characters of the token for correlation (safe to log).
-        change: One of ``"created"``, ``"revoked"``.
-    """
-    logger.info(
-        f"auth.api_key.{change}",
-        admin_id=admin_id,
-        key_name=key_name,
-        short_token=short_token,
-        change=change,
-    )
-
-
 def audit_org_change(
     admin_id: str,
     org_name: str,

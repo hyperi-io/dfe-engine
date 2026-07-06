@@ -17,6 +17,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo, OIDCProvider
+from dfe_engine.env_refs import resolve_env_ref
 
 # Google Admin SDK scope for read-only group directory access.
 _DIRECTORY_SCOPE = "https://www.googleapis.com/auth/admin.directory.group.readonly"
@@ -156,10 +157,7 @@ class GoogleAdapter(OIDCGroupAdapter):
             unavailable or invalid.
         """
         env_var = self._provider.groups.service_account_json_env
-        if not env_var:
-            return None
-
-        raw_json = os.environ.get(env_var)
+        raw_json = resolve_env_ref(env_var, default=None)
         if not raw_json:
             return None
 

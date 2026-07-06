@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
-import os
 import re
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 from dfe_engine.auth.accounts import Account, AccountStore
 from dfe_engine.auth.audit import (
@@ -44,6 +44,7 @@ class JitProvisioner:
         hyperdx_client=None,
         org_registry=None,
         role_config=None,
+        secrets_store: Any = None,
         *,
         per_group: bool = False,
         ga_team_name: str = "dfe",
@@ -55,6 +56,13 @@ class JitProvisioner:
         # RoleConfig: source of each principal's config-driven HyperDX access
         # (RoleConfig.effective_hyperdx). Task C gates provisioning on access != none.
         self._role_config = role_config
+        # scalo.secrets seam (DfeSecrets): source of the HyperDX team API key
+        # OrgLifecycleManager mints at team creation (org.hyperdx_team_api_key_path
+        # is the pointer to it). None -> _resolve_team_api_key returns "" and the
+        # invite no-ops - non-fatal, same posture as every other secrets-seam
+        # consumer (never the process environment: lost on restart, invisible to
+        # sibling pods in a multi-replica deploy).
+        self._secrets = secrets_store
         # DFE_HYPERDX_PER_GROUP posture (Task B/D): False (GA) = one shared team
         # `ga_team_name`; True (post-GA) = per-org `customer-<org>` team.
         self._per_group = per_group
@@ -386,29 +394,37 @@ class JitProvisioner:
     def _resolve_team_api_key(self, team_name: str) -> str:
         """Look up the HyperDX team API key for the invite.
 
-        Both team models store the key in an env var recorded on an org's
-        ``hyperdx_team_api_key_env`` (written by OrgLifecycleManager). Per-group:
-        ``customer-<org>`` maps to that org. GA: the shared team is not org-specific,
-        so any org's stored env points at the one shared team's key.
+        Both team models store the key via the scalo.secrets seam (DfeSecrets),
+        pointed to by an org's ``hyperdx_team_api_key_path`` (written by
+        OrgLifecycleManager - never the process environment, which does not
+        survive a restart or reach sibling pods in a multi-replica deploy).
+        Per-group: ``customer-<org>`` maps to that org. GA: the shared team is not
+        org-specific, so any org's stored path points at the one shared team's key.
 
         Returns:
-            API key string, or empty string if unavailable.
+            API key string, or empty string if unavailable (including when no
+            secrets store is wired - non-fatal, the invite simply no-ops).
         """
-        if self._orgs is None:
+        if self._orgs is None or self._secrets is None:
             return ""
 
-        env_var = ""
+        path = ""
         if team_name.startswith("customer-"):
             org = self._orgs.get(team_name[len("customer-") :])
-            env_var = org.hyperdx_team_api_key_env if org is not None else ""
+            path = org.hyperdx_team_api_key_path if org is not None else ""
         else:
-            # GA shared team: reuse whichever org has already recorded the env var.
+            # GA shared team: reuse whichever org has already recorded the path.
             for org in self._orgs.list():
-                if org.hyperdx_team_api_key_env:
-                    env_var = org.hyperdx_team_api_key_env
+                if org.hyperdx_team_api_key_path:
+                    path = org.hyperdx_team_api_key_path
                     break
 
-        return os.environ.get(env_var, "") if env_var else ""
+        if not path:
+            return ""
+        try:
+            return self._secrets.get(path)
+        except Exception:
+            return ""
 
     async def _invite_to_hdx(self, user_id: str, team_name: str, team_api_key: str) -> None:
         """Fire-and-forget coroutine to invite a user to a HyperDX team."""

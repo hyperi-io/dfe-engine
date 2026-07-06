@@ -254,23 +254,19 @@ def test_valhalla_extract_rules_tolerates_shapes():
 
 
 async def test_valhalla_backoff_retries_on_429(monkeypatch):
-    """The retry loop backs off on 429 then succeeds - exercised via a fake client."""
+    """scalo raises HTTPStatusError on a 429; valhalla honours Retry-After + retries.
 
-    class _Resp:
-        def __init__(self, status, payload):
-            self.status_code = status
-            self._payload = payload
+    Models the REAL scalo.http behaviour (raise_for_status inside its own retry, so
+    a 4xx surfaces as an exception - scalo never retries 4xx), not a client that
+    returns a 429 response. valhalla catches the 429, backs off, then succeeds.
+    """
+    import httpx
 
-        def json(self):
-            return self._payload
-
-        def raise_for_status(self):
-            if self.status_code >= 400:
-                raise RuntimeError(f"http {self.status_code}")
+    req = httpx.Request("POST", "http://valhalla/api/v1/getsigma")
 
     class _FakeClient:
-        def __init__(self, responses):
-            self._responses = responses
+        def __init__(self, outcomes):
+            self._outcomes = outcomes
 
         async def __aenter__(self):
             return self
@@ -279,19 +275,26 @@ async def test_valhalla_backoff_retries_on_429(monkeypatch):
             return False
 
         async def post(self, path, data=None):
-            return self._responses.pop(0)
+            outcome = self._outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
 
-    responses = [_Resp(429, {}), _Resp(200, {"rules": [_rule_dict(_UUID_A)]})]
+    resp_429 = httpx.Response(429, headers={"Retry-After": "0"}, request=req)
+    outcomes = [
+        httpx.HTTPStatusError("429 Too Many Requests", request=req, response=resp_429),
+        httpx.Response(200, json={"rules": [_rule_dict(_UUID_A)]}, request=req),
+    ]
 
     def _ctor(base_url=None):
-        return _FakeClient(responses)
+        return _FakeClient(outcomes)
 
     monkeypatch.setattr("scalo.http.AsyncHttpClient", _ctor)
-    # backoff_seconds=0 keeps the retry instant (no real wait).
+    # backoff_seconds=0 + Retry-After:0 keeps the retry instant (no real wait).
     provider = ValhallaProvider(_valhalla_config(demo=True, backoff_seconds=0, max_retries=3))
     docs = await provider.fetch()
     assert {d.id for d in docs} == {_UUID_A}
-    assert responses == []  # both fake responses consumed (429 then 200)
+    assert outcomes == []  # 429 exception then 200 both consumed
 
 
 def test_auth_secret_resolves_via_seam():

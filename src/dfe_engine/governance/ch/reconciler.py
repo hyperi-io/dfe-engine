@@ -10,7 +10,7 @@
 Rendering is pure (``render_all``); ``reconcile`` adds the I/O: discover the
 ``_org_id``-bearing tables, mint-or-reuse the per-identity secrets, execute the
 DDL, and drop stale objects. Tenant isolation is the custom-settings model - a
-fixed set of users by privilege + ONE ``DFE_current_tenant_id``-driven row policy
+fixed set of users by privilege + ONE ``SQL_current_tenant_id``-driven row policy
 per ``_org_id`` table (render_fixed_users / render_tenant_policies) - so adding an
 org is zero DDL, and the drop pass also cleans up the RETIRED per-org roles /
 per-(org,table) policies from the previous model. Every statement is idempotent
@@ -34,7 +34,6 @@ from .models import (
     TENANT_POLICY_NAME,
     ChServiceRole,
     ChTier,
-    GroupChBinding,
 )
 from .render import (
     _bq,
@@ -90,48 +89,6 @@ def compute_drops(
     return drops
 
 
-def bindings_from_groups(groups: list[Any], orgs: list[Any]) -> list[GroupChBinding]:
-    """Resolve each auth group to the ONE org it maps to (group -> org pointer).
-
-    Under the fixed-user model the reconciler no longer mints a CH user per group;
-    this resolver survives ONLY to feed the HyperDX connection builder + org
-    lifecycle, which still need "which single org does this group grant". Each
-    resolvable group yields one ``GroupChBinding`` with ``binding.org`` = the
-    resolved Org NAME (Phase 3 will map that org to a ``DFE_current_tenant_id`` on
-    the shared ``dfe_tenant_reader`` connection instead of a per-group user).
-
-    Resolution is convention-agnostic: an org is indexed by BOTH its name and each
-    of its tenant ``org_ids``, so a group whose ``org_ids`` hold org names OR tenant
-    ids resolves either way (the common name==org_id case is unambiguous). Rules:
-
-    - a group with NO ``org_ids`` yields no binding (no org-scoped data access), and
-    - a group whose ``org_ids`` resolve to MORE THAN ONE distinct org is skipped:
-      the model carries at most one org per group, so we refuse rather than mislabel
-      it (a multi-org tenant view is the caller's explicit comma-joined list, not an
-      accidental group mapping).
-
-    ``tier`` is left empty (vestigial). Pure; duck-typed on ``.name`` / ``.org_ids``
-    so it never imports the auth Group type.
-    """
-    index: dict[str, str] = {}
-    for o in orgs:
-        index.setdefault(o.name, o.name)
-        for oid in getattr(o, "org_ids", None) or []:
-            index.setdefault(oid, o.name)
-
-    bindings: list[GroupChBinding] = []
-    for g in groups:
-        refs = list(getattr(g, "org_ids", None) or [])
-        if not refs:
-            continue  # no org-scoped access -> no CH data user derived
-        resolved = {index[r] for r in refs if r in index}
-        if len(resolved) != 1:
-            continue  # unresolved OR ambiguous (>1 org) -> refuse (fail closed)
-        (org_name,) = tuple(resolved)
-        bindings.append(GroupChBinding(group=g.name, org=org_name))
-    return bindings
-
-
 def load_catalogue_from_gitcrud(handle: Any) -> tuple[list[ChTier], list[ChServiceRole]]:
     """Load the CH tier + service-role catalogue from a gitcrud handle (the e join).
 
@@ -150,7 +107,11 @@ def load_catalogue_from_gitcrud(handle: Any) -> tuple[list[ChTier], list[ChServi
         vdoc = VersionedDoc(handle) if versioned else None
         out: list[Any] = []
         for name in handle.list(cls_name):
-            spec = vdoc.get_published(cls_name, name) if versioned else handle.get(cls_name, name)
+            spec = (
+                vdoc.get_published(cls_name, name)
+                if vdoc is not None
+                else handle.get(cls_name, name)
+            )
             if spec:
                 out.append(model.model_validate(spec))
         return out
@@ -284,7 +245,9 @@ class ChRbacReconciler:
             fixed_hashes=fixed_hashes,
         )
         drops = compute_drops(self._existing_org_roles(), self._existing_row_policies(), org_tables)
-        materialise = render_materialise(orgs, tiers)
+        from dfe_engine.clickhouse.engines import EngineResolver
+
+        materialise = render_materialise(orgs, tiers, EngineResolver(client=self._client))
 
         for stmt in stmts + drops + materialise:
             try:

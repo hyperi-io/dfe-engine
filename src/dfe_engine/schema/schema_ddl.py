@@ -147,10 +147,20 @@ class DDLGenerator:
         body_lines = self._body_lines(columns, cfg)
         lines.append(",\n".join(body_lines))
 
-        # Close columns, ENGINE (topology-aware)
+        # Close columns, ENGINE (topology-aware).
+        # "replicated" -> argumentless Replicated<engine>. We deliberately do NOT
+        # emit the ('/znode/path','{replica}') args: the znode path + replica name
+        # are the SERVER's job, supplied from its default_replica_path /
+        # default_replica_name macros (an infra-layer concern, not the DDL). This
+        # argumentless form is the only portable one - live-proven 2026-07-06:
+        # accepted on-prem inside a Replicated database (or via ON CLUSTER) yielding
+        # a real ReplicatedMergeTree, AND accepted on CH Cloud where it
+        # auto-substitutes to SharedMergeTree. The explicit-path form is REJECTED
+        # (code 36) by BOTH CH Cloud and on-prem Replicated databases, so we never
+        # produce it. "single" -> plain <engine>() for a keeperless standalone
+        # (local dev); on CH Cloud that too auto-substitutes to SharedMergeTree.
         if cfg.topology == "replicated":
-            zk_path = f"/clickhouse/tables/{{shard}}/{cfg.db}/{table_name}"
-            engine_clause = f"Replicated{cfg.engine}('{zk_path}', '{{replica}}')"
+            engine_clause = f"Replicated{cfg.engine}"
         else:
             engine_clause = f"{cfg.engine}()"
         lines.append(f")\nENGINE = {engine_clause}")
