@@ -156,11 +156,10 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | GET | `/sources/{name}/versions` | Get one version snapshot |
 | GET | `/sources/{name}/columns` | Composed schema columns for a source version (paginated `items`; `?version=` source id, default `deployed_version`; `?page=` / `?per_page=`, use `-1` for all) |
 | POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
-| GET | `/sources/{name}/plan` | Get saved ClickHouse deploy plan (`?version=` required) |
-| POST | `/sources/{name}/plan` | Dry-run deploy plan; persists under `source-plans/` (`?version=` defaults to `current`) |
+| POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`; not persisted) |
 | POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
 
-Artifact files mirror source layout: `source-builds/{name}.yaml`, `source-plans/{name}.yaml`, and `source-deploys/{name}.yaml` each hold a `versions` map keyed like `sources/{name}.yaml` (plus `current`; deploys also track `deployed_version`). Legacy per-version files under `{name}/{version}.yaml` are merged on first read.
+Artifact files: `source-builds/{name}.yaml` and `source-deploys/{name}.yaml` (per-version maps like `sources/{name}.yaml`). Plans are not persisted.
 | PUT | `/sources/{name}` | Update source |
 | DELETE | `/sources/{name}` | Delete source |
 | POST | `/sources/bulk` | Bulk import |

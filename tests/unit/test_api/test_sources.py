@@ -241,7 +241,6 @@ class TestGetSource:
         assert data["display_name"] == "Test Source"
         ver = data["versions"]["1.0.0"]
         assert ver["source_build"] is None
-        assert ver["source_plan"] is None
         assert ver["source_deployment"] is None
 
     def test_get_not_found(self, client: TestClient, admin_headers: dict):
@@ -268,7 +267,6 @@ class TestGetSourceVersion:
         assert body["versions"] == ["1.0.0"]
         assert body["version"]["schema"]["engine"] == "MergeTree"
         assert body["version"]["source_build"] is None
-        assert body["version"]["source_plan"] is None
         assert body["version"]["source_deployment"] is None
 
     def test_get_version_after_update_preserves_history(
