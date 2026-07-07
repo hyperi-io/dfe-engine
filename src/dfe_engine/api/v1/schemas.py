@@ -345,6 +345,14 @@ class JsonPathsResponse(BaseModel):
 class SampleRowsResponse(BaseModel):
     """Random sample rows for a source, scoped to its match rule."""
 
+    class PromotedJsonField(BaseModel):
+        """A JSON path already materialized as a typed meta-schema column."""
+
+        name: str = Field(description="Promoted column name in the meta-schema")
+        key: str = Field(
+            description="Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+        )
+
     source_name: str = Field(description="The source these rows were sampled for.")
     table: str = Field(
         description=(
@@ -371,6 +379,13 @@ class SampleRowsResponse(BaseModel):
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
         description="Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
+    )
+    promoted: list[SampleRowsResponse.PromotedJsonField] = Field(
+        default_factory=list,
+        description=(
+            "JSON paths already promoted on the source version's meta-schema "
+            "(empty when the version has no meta_schema or no @copy columns)"
+        ),
     )
 
 
@@ -1394,9 +1409,11 @@ def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None,
     landing = get_settings().clickhouse.landing_table
     match_rule = ver.match
     if ver.effective_schema().meta_schema:
-        _canonical, _meta, columns = _resolve_meta_schema(
+        _canonical, meta, _ = _resolve_meta_schema(
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
+        pin = _pinned_meta_schema_version(ver, meta)
+        columns = _columns_for_meta_version(meta, pin)
         target_table = source.table_name
         if not _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=target_table):
             return landing, match_rule, columns
@@ -1569,6 +1586,7 @@ async def sample_source_rows(
     """
     from dfe_engine.services.schema.json_promotion_service import (
         JsonPromotionError,
+        list_promoted_json_fields,
         sample_rows,
     )
 
@@ -1582,7 +1600,7 @@ async def sample_source_rows(
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_rule, _columns = _discovery_target(
+    target_table, match_rule, schema_columns = _discovery_target(
         source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
     match_kw = _match_query_kwargs(match_rule)
@@ -1601,6 +1619,11 @@ async def sample_source_rows(
             detail={"code": "sample_failed", "message": str(exc)},
         ) from exc
 
+    promoted = [
+        SampleRowsResponse.PromotedJsonField(**item)
+        for item in list_promoted_json_fields(schema_columns)
+    ]
+
     return SampleRowsResponse(
         source_name=source_name,
         table=f"{db}.{target_table}",
@@ -1609,6 +1632,7 @@ async def sample_source_rows(
         match_operator=match_kw["match_operator"] if match_rule is not None else None,
         columns=columns,
         rows=rows,
+        promoted=promoted,
     )
 
 

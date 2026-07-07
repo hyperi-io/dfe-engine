@@ -200,6 +200,20 @@ def promoted_paths(columns: list[MetaSchemaColumn]) -> dict[str, str]:
     return out
 
 
+def list_promoted_json_fields(
+    columns: list[MetaSchemaColumn],
+) -> list[dict[str, str]]:
+    """Promoted columns as ``{name, key}`` entries for API responses.
+
+    ``key`` is the full copy source (e.g. ``_json.user.email``).
+    """
+    paths = promoted_paths(columns)
+    return [
+        {"name": col_name, "key": copy_cel_for_path(json_path)}
+        for json_path, col_name in sorted(paths.items(), key=lambda item: item[1])
+    ]
+
+
 def _json_subcolumn(path: str) -> str:
     """SQL accessor for a discovered JSON path, e.g. ``assumeNotNull(_json).`user.email```.
 

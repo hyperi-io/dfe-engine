@@ -124,6 +124,11 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
                     "summary": "init",
                     "columns": [
                         {"name": "_json", "type": "json", "expr": "@captured: raw_payload as JSON"},
+                        {
+                            "name": "cloud_trail_event_tls_details_cipher_suite",
+                            "type": "string",
+                            "expr": "@copy: _json.CloudTrailEvent.tlsDetails.cipherSuite",
+                        },
                     ],
                 }
             },
@@ -384,6 +389,7 @@ class TestSampleRows:
         assert body["match_value"] == NOMETA_SOURCE
         assert body["columns"] == ["_json"]
         assert body["rows"] == [{"_json": {"user": {"id": 1}}}]
+        assert body["promoted"] == []
         sql, params = ch.calls[0]
         assert f"FROM `{db}`.`{landing}`" in sql
         assert (
@@ -391,6 +397,18 @@ class TestSampleRows:
             in sql
         )
         assert params["match_value"] == NOMETA_SOURCE
+
+    def test_sample_rows_lists_promoted_meta_schema_fields(self, app, client, admin_headers):
+        ch = _SampleClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["promoted"] == [
+            {
+                "name": "cloud_trail_event_tls_details_cipher_suite",
+                "key": "_json.CloudTrailEvent.tlsDetails.cipherSuite",
+            }
+        ]
 
     def test_meta_schema_undeployed_samples_landing(self, app, client, admin_headers):
         db = get_settings().clickhouse.effective_data_database

@@ -11178,6 +11178,27 @@
         "title": "PromoteResult",
         "description": "Per-path outcome of a promotion."
       },
+      "PromotedJsonField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Promoted column name in the meta-schema"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "key"
+        ],
+        "title": "PromotedJsonField",
+        "description": "A JSON path already materialized as a typed meta-schema column."
+      },
       "ProviderResponse": {
         "properties": {
           "name": {
@@ -12035,6 +12056,14 @@
             "type": "array",
             "title": "Rows",
             "description": "Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/PromotedJsonField"
+            },
+            "type": "array",
+            "title": "Promoted",
+            "description": "JSON paths already promoted on the source version's meta-schema (empty when the version has no meta_schema or no @copy columns)"
           }
         },
         "type": "object",
