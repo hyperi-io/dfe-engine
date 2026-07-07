@@ -1,16 +1,16 @@
 #  Project:      dfe-engine
 #  File:         cli/ch_cloud.py
-#  Purpose:      `dfe-api ch-cloud` subcommands -- ClickHouse Cloud lifecycle
+#  Purpose:      `dfe local ch-cloud` subcommands -- ClickHouse Cloud lifecycle
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""``dfe-api ch-cloud`` subcommands - ClickHouse Cloud service lifecycle.
+"""``dfe local ch-cloud`` subcommands - ClickHouse Cloud service lifecycle.
 
 See / start / stop the CH Cloud service directly over the management API (NO HTTP
-hop to the engine), so this doubles as an ops tool AND a k8s initContainer wake
-step - it works even when the engine is not running. Config comes from the
+hop to the daemon), so this doubles as an ops tool AND a k8s initContainer wake
+step - it works even when the daemon is not running. Config comes from the
 ``clickhouse.cloud`` block (``DFE_CLICKHOUSE_CLOUD_*`` - the control-plane key).
 A start is BILLABLE. Replaces the standalone scripts/ch_cloud.py helper.
 """
@@ -78,5 +78,5 @@ def ch_cloud_stop() -> None:
 
 
 def register_ch_cloud_commands(app) -> None:
-    """Register the ``ch-cloud`` command group on the dfe-api CLI."""
+    """Register the ``ch-cloud`` command group (mounted under ``dfe local``)."""
     app.add_typer(ch_cloud_app, name="ch-cloud")

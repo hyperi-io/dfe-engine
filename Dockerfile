@@ -64,5 +64,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -sf http://localhost:8000/health/live > /dev/null || exit 1
 
-ENTRYPOINT ["dfe-api"]
+ENTRYPOINT ["dfe-engine"]
 CMD ["run"]

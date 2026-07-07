@@ -5,11 +5,16 @@ Usage::
     from dfe_engine.api import create_app
     app = create_app()
 
-Or via CLI (uses scalo DfeApp framework)::
+Or via the daemon entry point (uses scalo DfeApp framework)::
 
-    dfe-api run          # start the API server
-    dfe-api version      # show version
-    dfe-api config-check # validate settings
+    dfe-engine run          # start the API server
+    dfe-engine version      # show version
+    dfe-engine config-check # validate settings
+
+``dfe-engine`` is the pure daemon dfe-infra runs in a k8s pod. It carries
+only the scalo base subcommands (run / version / config-check). The
+operator-facing offline commands (auth, gitops, governed-ops, sampler,
+ch-cloud) live on the separate ``dfe`` CLI, not here.
 """
 
 from __future__ import annotations
@@ -17,17 +22,20 @@ from __future__ import annotations
 from dfe_engine.api.app import create_app
 
 
-class _DfeApiApp:
+class _DfeEngineApp:
     """Entry point adapter using scalo DfeApp framework."""
 
-    name = "dfe-api"
+    name = "dfe-engine"
+    # env_prefix stays DFE_API: the API sub-config env vars (DFE_API_HOST,
+    # DFE_API_PORT, DFE_API_JWT_SECRET, ...) and the Helm chart both key off
+    # it. Renaming it would break settings resolution.
     env_prefix = "DFE_API"
 
     def _make_app(self):
         from scalo.cli import DfeApp, VersionInfo
 
-        class DfeApiApp(DfeApp):
-            name = "dfe-api"
+        class DfeEngineApp(DfeApp):
+            name = "dfe-engine"
             env_prefix = "DFE_API"
 
             def version_info(self) -> VersionInfo:
@@ -45,17 +53,11 @@ class _DfeApiApp:
                 return engine_deployment_contract()
 
             def register_commands(self, app) -> None:
-                from dfe_engine.cli import register_auth_commands
-                from dfe_engine.cli.ch_cloud import register_ch_cloud_commands
-                from dfe_engine.cli.gitops import register_gitops_commands
-                from dfe_engine.cli.governed_ops import register_governed_ops_commands
-                from dfe_engine.cli.sampler import register_sampler_commands
-
-                register_auth_commands(app)
-                register_ch_cloud_commands(app)
-                register_gitops_commands(app)
-                register_governed_ops_commands(app)
-                register_sampler_commands(app)
+                # Pure daemon: no offline command registrations. The
+                # operator-facing commands (auth/gitops/governed-ops/
+                # sampler/ch-cloud) live on the separate `dfe` CLI. The
+                # daemon keeps only scalo's base run/version/config-check.
+                pass
 
             def run_service(self, config) -> None:
                 # Delegate to async
@@ -78,17 +80,17 @@ class _DfeApiApp:
                 )
                 await server.serve()
 
-        return DfeApiApp()
+        return DfeEngineApp()
 
 
 def run_dev_server() -> None:
-    """Entry point for ``dfe-api`` console script.
+    """Entry point for the ``dfe-engine`` console script.
 
     Delegates to scalo DfeApp CLI framework which provides:
     ``run``, ``version``, and ``config-check`` subcommands plus
     common flags (--config, --log-level, --verbose, --quiet).
     """
-    _DfeApiApp()._make_app().cli()
+    _DfeEngineApp()._make_app().cli()
 
 
 __all__ = ["create_app", "run_dev_server"]

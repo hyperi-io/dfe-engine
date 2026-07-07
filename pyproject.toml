@@ -59,6 +59,12 @@ dependencies = [
     "msal>=1.37.0",
     "google-auth>=2.55.1",
     "google-api-python-client>=2.198.0",
+    # dfe CLI (auto-generated from OpenAPI) - the `dfe` client CLI imports these
+    # directly: click is the command framework, jmespath backs the `--query`
+    # projection. Both were previously only transitive (click via typer, jmespath
+    # via boto3); declared direct so the CLI cannot lose them on a graph change.
+    "click>=8.4.2",
+    "jmespath>=1.1.0",
     # Optional lazy runtime integrations (NOT locked here, imported on demand so a
     # default install still runs; the code degrades with a clear error when absent):
     #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
@@ -181,6 +187,15 @@ convention = "google"
 
 [tool.ruff.lint.per-file-ignores]
 "src/dfe_engine/sigma/*" = ["S701"]  # Jinja2 autoescape (controlled templates)
+# Vendored Apache-2.0 files (aws-cli/botocore) - kept as close to upstream as
+# possible; do not modernise idioms the upstream still uses. See vendor/NOTICE.
+"src/dfe_engine/cli/auto/vendor/*" = [
+    "UP031",  # percent-format (upstream style)
+    "B905",   # zip() without strict= (upstream targets older Python)
+    "UP032",
+    "C401",
+    "SIM",
+]
 "tests/**/*.py" = [
     "S101",
     "S106",  # test fixtures use hardcoded passwords
@@ -192,8 +207,9 @@ convention = "google"
 
 
 [project.scripts]
-dfe-api = "dfe_engine.api:run_dev_server"
+dfe-engine = "dfe_engine.api:run_dev_server"
 dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
+dfe = "dfe_engine.cli.auto.main:main"
 
 [project.entry-points."dfe_engine.services"]
 receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"
