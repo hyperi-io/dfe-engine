@@ -1215,6 +1215,119 @@ def _header_for_promote_attach(snap, *, had_meta_schema: bool) -> SourceHeader:
     )
 
 
+def _fork_schema_path_for_source(source_name: str, canonical: str) -> str:
+    """``{parent}/{source_name}_{schema_stem}`` fork path for core meta-schemas."""
+    from dfe_engine.schema.registry import _schema_location, canonical_schema_path
+
+    parent, stem = _schema_location(canonical)
+    fork_stem = f"{source_name}_{stem}"
+    rel = f"{parent}/{fork_stem}" if parent else fork_stem
+    return canonical_schema_path(rel)
+
+
+def _pinned_meta_schema_version(ver, meta: MetaSchema) -> str:
+    pin = ver.effective_schema().meta_schema_version
+    if pin and pin in meta.versions:
+        return pin
+    return meta.current
+
+
+def _columns_for_meta_version(meta: MetaSchema, version_id: str):
+    ver = meta.versions.get(version_id)
+    if ver is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": f"Meta-schema version {version_id!r} is not defined",
+            },
+        )
+    return ver.columns
+
+
+def _ensure_writable_meta_schema_for_promote(
+    source,
+    ver,
+    canonical: str,
+    meta: MetaSchema,
+    columns,
+    schema_registry,
+    *,
+    persist: bool,
+    user: CurrentUser,
+) -> tuple[str, MetaSchema, list, bool]:
+    """Use a per-source fork when promotion would mutate a ``resource_type: core`` schema."""
+    if meta.resource_type != "core":
+        return canonical, meta, columns, False
+
+    from dfe_engine.core_resources.policy import schema_registry_path_is_core
+    from dfe_engine.schema.registry import canonical_schema_path
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+    from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+    fork_canonical = _fork_schema_path_for_source(source.source, canonical)
+    pinned = _pinned_meta_schema_version(ver, meta)
+
+    existing = schema_registry.find_schema_at_location(fork_canonical)
+    if existing:
+        fork_canonical = canonical_schema_path(existing)
+        if schema_registry_path_is_core(fork_canonical, schema_registry):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "core_schema_fork",
+                    "message": (
+                        f"Fork schema {fork_canonical!r} is a core resource and cannot be modified"
+                    ),
+                },
+            )
+        fork_meta = schema_registry.get_schema(fork_canonical)
+        fork_ver = _pinned_meta_schema_version(ver, fork_meta)
+        return (
+            fork_canonical,
+            fork_meta,
+            _columns_for_meta_version(fork_meta, fork_ver),
+            False,
+        )
+
+    if not persist:
+        return canonical, meta, columns, True
+
+    src_yaml = schema_registry._yaml_path(canonical)
+    dest_yaml = schema_registry._yaml_path(fork_canonical)
+    try:
+        SchemaManager.clone_meta_schema(
+            src_yaml,
+            dest_yaml,
+            source_version=pinned,
+            new_version=pinned,
+            summary=f"Cloned from {canonical} for source {source.source}",
+        )
+    except (SchemaVersionError, SchemaLoadError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    fork_data = yaml_load(dest_yaml)
+    if isinstance(fork_data, dict):
+        fork_data["resource_type"] = "custom"
+        yaml_dump(fork_data, dest_yaml)
+
+    description = f"schema: fork {canonical} -> {fork_canonical} for source {source.source}"
+    schema_registry.notify_schema_file_updated(
+        fork_canonical,
+        description=description,
+        created_by=git_author(user),
+    )
+    audit_resource_change(user.user_id, "meta_schema", fork_canonical, "created")
+
+    fork_meta = schema_registry.get_schema(fork_canonical)
+    fork_columns = _columns_for_meta_version(fork_meta, fork_meta.current)
+    return fork_canonical, fork_meta, fork_columns, True
+
+
 def _source_write_after_promote(
     source: Source,
     version_id: str,
@@ -1504,8 +1617,10 @@ async def promote_field(
 
     Creates a new schema version on the source's meta-schema (or on ``schema_path``
     when the source has none), adding one column per path with a ``@copy`` directive
-    so dfe-loader copies the value forward.
-    ``?dry_run=true`` returns the proposed diff + DDL without committing.
+    so dfe-loader copies the value forward. Core meta-schemas are forked to
+    ``{source_name}_{schema_stem}`` under the same parent path before promoting.
+    ``?dry_run=true`` (or ``dry_run`` in the body) returns the proposed diff and DDL
+    without forking core schemas, adding meta-schema versions, or updating the source.
     """
     from dfe_engine.schema.schema_manager import (
         SchemaManager,
@@ -1590,8 +1705,9 @@ async def promote_field(
     ]
     new_columns = [o.column for o in outcomes if o.status == "ok" and o.column is not None]
     has_error = any(o.status == "error" for o in outcomes)
+    preview_only = dry_run
 
-    if dry_run:
+    if preview_only:
         diff = SchemaDiff(
             new_columns=[
                 SchemaColumn(
@@ -1623,6 +1739,17 @@ async def promote_field(
 
     if not new_columns:
         return PromoteFieldResponse(source_name=source_name, schema_version=None, results=results)
+
+    canonical, meta, columns, _forked = _ensure_writable_meta_schema_for_promote(
+        source,
+        ver,
+        canonical,
+        meta,
+        columns,
+        schema_registry,
+        persist=True,
+        user=user,
+    )
 
     merged = [col.to_yaml_dict() for col in columns]
     merged.extend(

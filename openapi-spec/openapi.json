@@ -6895,7 +6895,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` (or ``dry_run`` in the body) returns the proposed diff and DDL\nwithout forking core schemas, adding meta-schema versions, or updating the source.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
