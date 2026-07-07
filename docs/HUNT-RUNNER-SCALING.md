@@ -17,13 +17,14 @@ dfe-engine.
 ## The one hard requirement: due-detection with zero workers
 
 KEDA can only wake the first worker if "is any hunt due right now?" is answerable
-with no worker running - i.e. as a query KEDA itself runs against ClickHouse. But
+with no worker running - i.e. from durable state, not a worker's memory. But
 the per-hunt schedule (interval + stable phase offset) otherwise lives only in a
 running worker's memory (loaded from the gitops hunt configs). At zero workers
 there is nobody to ask.
 
 So the schedule is MATERIALISED into a small ClickHouse table, `hunt_schedule`, at
-config-deploy time. The scaler then reads it directly. Three tables already exist
+config-deploy time. The due-query then reads it directly (the engine runs that query
+on KEDA's behalf - see "KEDA ScaledObject" below). Three tables already exist
 for coordination (`ch_coordinator.py`): `hunt_lease`, `hunt_watermark`,
 `hunt_state`. `hunt_schedule` is the fourth, and the only one written outside the
 worker loop.
@@ -38,8 +39,9 @@ waking KEDA, without a DELETE.
 
 ## The scaler query (deterministic-due)
 
-KEDA runs `schedule.due_query(db)` against ClickHouse (via the MySQL scaler - see
-"KEDA ScaledObject" below) - the count of hunts that are due-and-unclaimed. It uses
+The engine runs `schedule.due_query(db)` against ClickHouse and returns the count of
+hunts that are due-and-unclaimed; KEDA reads that count from the engine's
+`/api/v1/system/hunts-due` endpoint (see "KEDA ScaledObject" below). The query uses
 the EXACT arithmetic the worker uses (`spread.current_fire`):
 
 ```
@@ -77,8 +79,8 @@ It cannot, because both compute the same thing from the same inputs:
 2. **Single source of truth for the offset.** The materialiser computes
    `phase_offset` with the same `spread.phase_offset` the worker uses, so the two
    can never drift. Change the offset algorithm once and both move together.
-3. **Gate on the signal, not a timer.** KEDA polls the backlog query (a real
-   readiness signal), it does not race a clock. Worst-case wake latency is
+3. **Gate on the signal, not a timer.** KEDA polls the engine's backlog count (a
+   real readiness signal), it does not race a clock. Worst-case wake latency is
    `pollingInterval + pod-start`; for hunts (minute-plus intervals) that is
    immaterial. This is the "gate on the real condition" rule from the testing
    standard applied to autoscaling.
@@ -99,26 +101,35 @@ next `due_now`. Max lateness for any fire is under one interval - inherent to th
 phase-offset design, and identical whether the decision is made by KEDA or a
 resident worker.
 
-## No operational dependency on dfe-engine
+## Worker hot-path independence from dfe-engine
 
-This is the point of the pull-based design. Once deployed, the running system needs
-only ClickHouse:
+The pull-based design keeps the WORKERS free of any engine dependency at runtime -
+once deployed they need only ClickHouse:
 
 - **Workers** read hunt defs from the gitops config (mounted / cloned), coordinate
   through the four CH tables, and execute queries against CH. No engine call on the
   hot path.
-- **KEDA** reads `hunt_schedule` + the coordination tables from CH. No engine call.
-- **The engine's only role is at CONFIG-DEPLOY time**, not runtime: materialise
-  `hunt_schedule` when the hunt config changes. That runs as an Argo `PostSync` hook
-  Job on the deploy (see below) - a one-shot, idempotent `publish_schedule`. It is
-  invoked by the GitOps sync, not as a live service call.
+- **The engine's role at CONFIG-DEPLOY time**, not on the worker hot path:
+  materialise `hunt_schedule` when the hunt config changes. That runs as an Argo
+  `PostSync` hook Job on the deploy (see below) - a one-shot, idempotent
+  `publish_schedule`. It is invoked by the GitOps sync, not as a live service call.
+- **KEDA reads the due count from the engine** at scaling time: its `metrics-api`
+  scaler polls `GET /api/v1/system/hunts-due` (below). This is the one place the
+  scaling path touches the engine - a deliberate trade. Rather than open a ClickHouse
+  wire port (`mysql_port` / `postgresql_port`) purely so KEDA can count rows, we let
+  the engine (which already holds the CH connection and is the authority on what is
+  due) run the deterministic due-query and hand back `{"due": N}`. It is a cheap
+  read-only poll every `pollingInterval`.
 
-So if the engine pod is down, hunts keep firing and KEDA keeps scaling. The only
-thing you lose while the engine is down is the ability to CHANGE configs - which
-needs the engine anyway. ClickHouse is DFE's single operational store; the runner
-holds to that (no Postgres, no engine, no convenience store on the hot path), which
-is also what lets the same runner work on a non-k8s single deploy (dfe-docker) where
-only ClickHouse is guaranteed present.
+So if the engine pod is down, **in-flight and already-scheduled workers keep firing
+hunts** (they never call the engine), but KEDA cannot change the replica count -
+scale-out and scale-from-zero pause until the engine answers again, and any resident
+worker at >=1 replica keeps the backlog draining meanwhile. The count call itself
+fails SAFE to `due=0` on a transient CH error, so a CH blip never spuriously scales
+up or blocks scale-to-zero. ClickHouse remains DFE's single operational STORE (no
+Postgres, no convenience store on the hot path), which is also what lets the same
+runner work on a non-k8s single deploy (dfe-docker) where only ClickHouse is
+guaranteed present.
 
 ### Coordination needs a SINGLE LOGICAL ClickHouse (scale-tier requirement)
 
@@ -152,44 +163,65 @@ gets a `hunt_schedule` row, so KEDA can wake a worker for it - no chicken-and-eg
 
 ## KEDA ScaledObject (shape)
 
-**KEDA has NO native ClickHouse scaler.** So we scale on the due backlog via KEDA's
-**MySQL scaler pointed at ClickHouse's MySQL-compatible interface** (`mysql_port`,
-default 9004). The query is still ClickHouse SQL, executed by CH - so KEDA still
-reads CH DIRECTLY (no engine on the scaling path). Ships in the engine chart
-(`chart/templates/hunt-runner-scaledobject.yaml`, gated by `huntRunner.keda.enabled`):
+**KEDA has NO native ClickHouse scaler.** Rather than open a CH wire port
+(`mysql_port` / `postgresql_port`) purely so KEDA can count rows - a shared-infra +
+security-surface change for one workload - we scale on the due backlog via KEDA's
+stock **`metrics-api` scaler** pointed at the engine's own
+`GET /api/v1/system/hunts-due` endpoint. The engine already holds the CH connection
+and is the authority on what is due, so it runs `schedule.due_query(db)` and returns
+`{"due": N}`; KEDA reads the count from the `due` field. No CH port, no Prometheus,
+no custom scaler component. Ships in the engine chart
+(`chart/templates/hunt-runner-scaledobject.yaml`, gated by `huntRunner.keda.enabled`),
+which also emits the `TriggerAuthentication` carrying the engine API key:
 
 ```yaml
 apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: dfe-engine-hunt-runner-auth
+spec:
+  secretTargetRef:
+    - parameter: apiKey            # the engine API key (scope hunt:read)
+      name: <apiKeySecretName>     # default: the engine managed secret
+      key: keda-hunt-scaler-api-key
+---
+apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: dfe-hunt-runner
+  name: dfe-engine-hunt-runner
 spec:
   scaleTargetRef:
-    name: dfe-hunt-runner
+    name: dfe-engine-hunt-runner
   minReplicaCount: 0            # scale to zero when due == 0
   maxReplicaCount: 8            # == the global CH cap the runner enforces
   pollingInterval: 30
   cooldownPeriod: 120
   triggers:
-    - type: mysql              # NOT "clickhouse" - KEDA has no CH scaler
+    - type: metrics-api        # NOT "clickhouse" - KEDA has no CH scaler
       metadata:
-        host: <ch-host>
-        port: "9004"           # ClickHouse mysql_port (must be enabled on CH)
-        dbName: <data-database>
-        username: <ch-user>
-        queryValue: "1"        # ceil(due / 1) workers; tune hunts-per-worker here
-        query: >-
-          SELECT count() AS due FROM ( ... schedule.due_query(db) ... )
+        url: "http://dfe-engine:8000/api/v1/system/hunts-due"
+        valueLocation: "due"           # GJSON path into {"due": N}
+        targetValue: "1"               # hunts-per-worker; desiredReplicas = ceil(due / targetValue)
+        activationTargetValue: "0"     # activate from zero whenever due > 0 (strict >)
+        authMode: "apiKey"
+        method: "header"
+        keyParamName: "X-API-Key"      # KEDA sends the engine API key in this header
       authenticationRef:
-        name: dfe-hunt-runner-auth   # CH password via TriggerAuthentication
+        name: dfe-engine-hunt-runner-auth
 ```
 
-Requirements + notes: ClickHouse must have `mysql_port` enabled. `due_query(db)` is
-the source of truth for the `query` field - keep them identical (the unit test pins
-the clauses so a drift fails CI). If enabling `mysql_port` is undesirable, the
-fallback is a KEDA metrics-api scaler over a small always-on endpoint returning
-`due_count` - but that reintroduces an HTTP dependency on the scaling path, so the
-direct MySQL-scaler route is preferred.
+Notes:
+- **`activationTargetValue: "0"` is load-bearing.** KEDA activates from zero when the
+  metric is STRICTLY greater than `activationTargetValue`, so `0` means "wake on any
+  due hunt" (`due >= 1`). `"1"` would need `due >= 2`, and a single due hunt would
+  never wake a worker. Proven in the scratch-cluster KEDA scale test (0 -> 1 -> 0).
+- **Auth.** KEDA sends an engine API key (scope `hunt:read`) as the `X-API-Key`
+  header. Provision the key, store it in the secret the `TriggerAuthentication`
+  references (`huntRunner.keda.apiKeySecretName` / `apiKeySecretKey`), and confirm the
+  `metrics-api` `method` / `keyParamName` field names against the deployed KEDA version.
+- **`due_query(db)` is the source of truth** for the count the endpoint returns - the
+  unit test pins its clauses so a drift fails CI. The endpoint fails SAFE to `due=0`
+  on a transient CH error, so a blip never spuriously scales up or blocks scale-to-zero.
 
 ## Disable = pod count 0
 

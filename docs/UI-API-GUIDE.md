@@ -127,7 +127,17 @@ Query parameters: `page` (1-based), `per_page` (1–100 or `-1` for all, default
 `search` (text filter), `sort_by`, `sort_order` (asc/desc). Schema list also
 accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 
-## API Surface (74 Endpoints)
+These list endpoints now return the `PaginatedResponse` envelope (they previously
+returned a bare array): `GET /auth/accounts`, `/orgs`, `/auth/groups`,
+`/auth/api-keys`, `/auth/oidc-providers`, `/queries/views`, `/sigma/views`,
+`/tasks`, and `/samples`. The remaining list endpoints were already paginated.
+
+## API Surface (selected endpoints)
+
+The tables below are a curated subset for UI integration, not an exhaustive list.
+The authoritative contract is the committed OpenAPI spec
+(`openapi-spec/openapi.json`) - generate types from it rather than treating this
+list as complete.
 
 ### Auth & RBAC (`/api/v1/auth/*`)
 
@@ -231,17 +241,10 @@ View execution returns **JSON** (`QueryResponse`) with fields:
 |--------|------|---------|
 | GET | `/schemas` | List meta schemas (paginated `items` + path `objects` tree) |
 
-### Pipeline (`/api/v1/pipeline`)
-
-| Method | Path | Purpose |
-|--------|------|---------|
-| GET | `/pipeline/templates` | List Vector templates |
-| POST | `/pipeline/build` | Build pipeline manifests (202 + task_id) |
-
 ### Tasks (`/api/v1/tasks`)
 
-Background task polling for long-running operations (hunt execution,
-pipeline builds).
+Background task polling for long-running operations (e.g. ad-hoc hunt
+execution).
 
 | Method | Path | Purpose |
 |--------|------|---------|

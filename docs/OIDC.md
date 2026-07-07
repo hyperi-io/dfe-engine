@@ -186,7 +186,7 @@ groups:
 ```
 
 **Groups -> roles:** after a sync, Entra groups appear as group files (stem from
-`displayName`). Assign roles, e.g. `dfe-api groups update soc-analysts --roles
+`displayName`). Assign roles, e.g. `dfe auth groups update soc-analysts --roles
 data_analyst`. For a tenant org, set `scope: org:<name>` + `org_ids` + role
 `org_analyst`. **Sync mode:** `api` (friendly names) or `token_claim` (GUID group
 files). Graph scope `GroupMember.Read.All` is an app permission, not an OIDC scope.
@@ -331,7 +331,7 @@ POST   /api/v1/auth/oidc-providers/{name}/sync  # force group sync (api mode)
 GET    /api/v1/auth/oidc-providers/{name}/test  # test connectivity
 ```
 
-CLI mirrors these: `dfe-api oidc-providers create|list|show|test|sync|update|delete`.
+CLI mirrors these: `dfe auth oidc-providers create|list|show|test|sync|update|delete`.
 
 **Unfriendly -> friendly upgrade** (Entra/GUID case): attach `mode: manual` or
 `token_claim`, create GUID-named group files so auth works Day 0; later switch to

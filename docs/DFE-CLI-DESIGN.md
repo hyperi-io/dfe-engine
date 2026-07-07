@@ -1,196 +1,245 @@
 <!--
   Project:   dfe-engine
   File:      docs/DFE-CLI-DESIGN.md
-  Purpose:   Design for the `dfe` client CLI, modelled on the AWS CLI v2
+  Purpose:   The dfe-engine daemon + the single `dfe` CLI (HTTP + break-glass)
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
 -->
 
-# `dfe` CLI - design (AWS CLI v2 model)
+# The `dfe-engine` daemon and the `dfe` CLI
 
-The goal: a `dfe` command that installs and behaves like the AWS CLI v2 - a
-self-contained binary, `dfe configure` profiles, a stable auth-resolution chain,
-and a noun-verb command tree that is DATA-DRIVEN from the API's own contract. This
-is the CLIENT half; it speaks HTTP to a deployed dfe-engine, exactly as `aws` speaks
-to AWS service endpoints.
+DFE ships two console entry points, with a clear division of labour:
 
-Reference: the AWS CLI v2 source is cloned to `/Volumes/projects/aws-cli` (the
-bundled-installer machinery under `backends/`/`exe/`/`macpkg/`/`docker/`, and the
-`aws configure` family under `awscli/customizations/configure/`).
+- **`dfe-engine`** - the DAEMON. The server that runs in a Kubernetes pod. It is
+  not a human tool: `dfe-engine run` starts the FastAPI app, `dfe-engine version`
+  and `dfe-engine config-check` round out the base commands. Nothing else lives
+  here.
+- **`dfe`** - the single human CLI. One binary, two internal modes:
+  - **normal** (`dfe <family> <verb>`) - speaks HTTP to a running `dfe-engine`.
+    Its whole command tree is GENERATED from the daemon's OpenAPI spec, so it
+    tracks the API automatically.
+  - **break-glass** (`dfe local <verb>`) - for when the daemon is DOWN. Writes
+    the local deploy-repo (gitops) clone DIRECTLY, through the same write-engine
+    the API uses.
 
-## What exists today (do not confuse the two)
+A third entry point, `dfe-hunt-runner`, is the hunt scheduler/worker and is out of
+scope here.
 
-- **`dfe-api`** - the SERVER entry point (`pyproject [project.scripts]` -> uvicorn).
-  It also carries a server-side, break-glass CLI (`dfe-api governed ...`,
-  `cli/governed_ops.py`) that calls the SAME GitCrud/services the API routers call -
-  the standing "CLI is a wrapper over the API" rule. It runs WHERE the engine libs
-  and the gitops repo live (CI, or on the engine host when the API is down).
-- **`dfe`** - does not exist yet. This document designs it: the remote HTTP client.
+## The three entry points at a glance
 
-Keep them distinct binaries. `dfe` talks to an engine over HTTP; `dfe-api` IS the
-engine (and its in-process break-glass path). Everything below is `dfe`.
+| Entry point | What it is | Where its work happens | Authority |
+|---|---|---|---|
+| `dfe-engine run` | The daemon (server) | In-pod: serves the API, writes ClickHouse + gitops | It IS the control plane |
+| `dfe <family> <verb>` | HTTP client CLI | Sends HTTP to a running daemon; the daemon does the work | The daemon's RBAC |
+| `dfe local <verb>` | Break-glass CLI | Writes the local gitops clone directly, then pushes | Git write-access to the deploy repo |
 
-## 1. Distribution and install (like AWS CLI v2, NOT pip)
-
-AWS CLI v2 deliberately does not install via pip - it ships a self-contained bundle
-(a frozen Python + all deps) so it never collides with a user's Python. Mirror that:
-
-- **Frozen single binary** built with PyInstaller (AWS v2 uses the same approach;
-  `backends/build_system` + `exe/`). One `dfe` executable per OS/arch, no Python
-  required on the target.
-- **Channels:**
-  - GitHub Releases: per-OS/arch archive + `install` script
-    (`curl -sSL https://.../install.sh | sh`), like the AWS v2 Linux zip installer.
-  - Homebrew tap: `brew install hyperi-io/tap/dfe`.
-  - Container: `ghcr.io/hyperi-io/dfe` (for CI - `docker run ... hyperi-io/dfe ...`).
-  - `.pkg` (macOS) / `.msi` (Windows) later, as AWS v2 does (`macpkg/`).
-- **Supply chain:** artifacts SHA-pinned and signed; the install script verifies the
-  digest (matches the repo's pinning standard, docs/SUPPLY-CHAIN-PINNING.md).
-- **Versioning:** `dfe --version` reports the CLI version AND the negotiated API
-  version. The CLI is installed independently of the engine but declares a
-  compatible API range; on mismatch it warns (older CLI vs newer engine is fine
-  because the command tree is regenerated - see section 4).
-- **Self-update:** `dfe --version` checks the release channel; `dfe upgrade` pulls
-  the latest signed binary (optional, later).
-
-For local development the same code is also exposed as a `dfe` console-script in
-`pyproject`, so contributors run it from the venv without the frozen build.
-
-## 2. Configuration and profiles (like ~/.aws/config)
-
-Two files under `~/.dfe/` (env override `DFE_CONFIG_DIR`), splitting config from
-secrets exactly as AWS v2 splits `config` and `credentials`:
-
-```
-~/.dfe/config
-  [default]
-  endpoint_url = https://dfe.example.com
-  output       = json
-  org          = acme            # default org/tenant scope (the DFE analogue of region)
-
-  [profile prod]
-  endpoint_url = https://dfe.prod.internal
-  output       = table
-
-~/.dfe/credentials              # 0600, never logged
-  [default]
-  api_key = dfe_...             # or nothing here if using `dfe login` (OIDC/JWT)
+```mermaid
+flowchart TB
+    op(Operator):::actor
+    dfe[dfe<br/>HTTP client CLI]:::comp
+    local[dfe local<br/>break-glass CLI]:::comp
+    subgraph pod["Kubernetes pod"]
+        daemon[dfe-engine daemon<br/>FastAPI + GitCrud]:::comp
+    end
+    clone[(local deploy-repo clone)]:::store
+    ch[(ClickHouse)]:::store
+    deploy[(deploy repo - remote)]:::store
+    op --> dfe
+    op --> local
+    dfe -->|HTTP + RBAC| daemon
+    daemon --> ch
+    daemon -->|commit + push| deploy
+    local -->|GitCrud commit| clone
+    clone -.->|dfe local push| deploy
+    classDef actor fill:#eef,stroke:#33a;
+    classDef comp fill:#fff,stroke:#333;
+    classDef store fill:#efe,stroke:#3a3;
 ```
 
-- **Selection:** `--profile prod` > `DFE_PROFILE` env > `[default]`.
-- **`dfe configure`** - interactive first-run setup (prompts endpoint, auth, output).
-- **`dfe configure set/get/list/list-profiles`** - the AWS v2 subcommand family
-  (`customizations/configure/`), same verbs.
-- **`dfe configure oidc`** - set up the OIDC login flow for a profile (the analogue
-  of `aws configure sso`).
+Both CLIs are thin windows over ONE write-engine (`GitCrud`): the daemon is
+HTTP + RBAC over it, `dfe local` is local-clone context over it. There is no
+second implementation to drift.
 
-## 3. Authentication resolution chain (like the AWS credential provider chain)
+---
 
-The engine already has four auth paths (OIDC headers, API key, JWT Bearer,
-disabled - `api/deps.py`). The CLI resolves a bearer credential in this fixed order,
-first match wins:
+## Why the CLI is shaped this way
 
-1. Explicit flag: `--token <jwt>` or `--api-key <key>`.
-2. Env: `DFE_TOKEN` / `DFE_API_KEY`.
-3. A cached OIDC/JWT session from `dfe login` (`~/.dfe/cache/<profile>.json`,
-   auto-refreshed while valid).
-4. Profile credential in `~/.dfe/credentials` (`api_key`).
-5. In-cluster: a mounted service-account/JWT token (for CI/Jobs), if present.
+Three deliberate choices explain the whole design:
 
-- **`dfe login`** - the browser OIDC flow (device-code or loopback redirect), the
-  analogue of `aws sso login`; or `dfe login --username u` for the local-auth
-  JWT path (`POST /api/v1/auth/login`). The resulting JWT is cached and refreshed.
-- **`dfe logout`** - clears the cached session.
-- 401 from the API -> the CLI prints "run `dfe login`" (or "check `--api-key`"),
-  never a raw stack trace.
+1. **One write-engine, reused.** Every DFE mutation is a YAML-in-git commit over
+   the deploy repo, produced by `GitCrud`. The daemon calls it behind RBAC; the
+   break-glass path calls the SAME engine against a local clone. A change lands as
+   the same commit either way, so the two surfaces cannot diverge.
+2. **The CLI is generated from the API.** The OpenAPI spec is the single source of
+   truth for BOTH the `dfe` command tree AND the UI's TypeScript types. Extending
+   the API extends the CLI automatically, with no CLI code to write and nothing to
+   keep in step by hand.
+3. **Break-glass is marked and validated, not a bypass.** `dfe local` exists only
+   for a dead daemon. It cannot silently masquerade as a normal change: every write
+   is flagged `[BREAK-GLASS]`, needs a reason, and reuses the API's value-safety
+   checks (as an overridable warning).
 
-## 4. The command tree is DATA-DRIVEN from OpenAPI (the core alignment)
+---
 
-AWS CLI v2's entire command tree is generated from botocore's JSON service models -
-that is what makes it consistent and always in step with the services. DFE already
-ships the equivalent: `openapi-spec/openapi.json` (74 operations, 23 routers). The
-`dfe` command tree is GENERATED from it:
+## `dfe` normal mode: generated from the OpenAPI spec
 
-- **router/tag -> noun group**, **operation -> verb**. So:
-  - `dfe hunts list | get | create | update | delete | run`
-  - `dfe rules list | create | validate | publish | rollback | versions`
-  - `dfe helmvars get | set | list` (Tier-1 dials)
-  - `dfe deployments get | publish | history`
-  - `dfe queries run | views list|get|execute`
-  - `dfe accounts | groups | roles | actions | policies ...` (governance)
-  - `dfe sources | schemas | fieldmaps | sigma | discovery ...`
-  - `dfe system health | version`
-- **Path/query params -> options** (`--name`, `--page`, `--search`); **request-body
-  schema -> flags**, plus `--cli-input-json` / `--cli-input-yaml` and
-  `--generate-cli-skeleton` for the whole body (AWS v2 verbs, invaluable for CRUD
-  of a large YAML resource).
-- **Responses -> the output formatter** (section 5).
-- Regenerated whenever the API changes, so the CLI cannot drift from the contract.
-  An older CLI against a newer engine still works for the operations it knows; new
-  operations appear when the CLI is regenerated/updated.
+The command tree is built at runtime from the daemon's own OpenAPI document - the
+same contract that types the UI.
 
-Implementation: a small generator reads `openapi.json` and emits a Click/Typer tree
-(the repo already uses Typer for `dfe-api governed`). The HTTP layer MUST be pylib's
-`HttpClient`/`AsyncHttpClient` (pylib policy - never raw httpx). Auth, retries,
-pagination, and output live in the shared client core; the generated tree is thin.
+```mermaid
+flowchart TB
+    routers[FastAPI routers<br/>+ x-cli marks]:::comp
+    spec[/OpenAPI spec - SSoT/]:::ssot
+    routers --> spec
+    spec --> tree[dfe command tree<br/>runtime-generated]:::comp
+    spec --> uitypes[UI TypeScript types<br/>openapi-typescript]:::comp
+    tree --> dfe[dfe CLI]:::comp
+    uitypes --> ui[dfe-ui]:::comp
+    classDef comp fill:#fff,stroke:#333;
+    classDef ssot fill:#eef,stroke:#33a,stroke-width:2px;
+```
 
-## 5. Global options (mirror the AWS CLI)
+- **Generated live from the spec.** The tree is read from the in-process app
+  factory (`create_app().openapi()`), so it can never be stale versus the committed
+  `openapi-spec/openapi.json`. There is no code-gen step and no checked-in generated
+  tree - `dfe` builds the tree on each invocation.
+- **Default-on exposure, opt-out via `x-cli`.** Every operation becomes a command
+  UNLESS it carries `x-cli: {enabled: false}` (attached in the routers via
+  `openapi_extra=CLI_HIDDEN`, see `api/cli_exposure.py`). A new API is a new command
+  with no CLI code. The handful of hidden operations are the ones that make no sense
+  as a human command: the UI-prefs repository store, the UI client-config bootstrap,
+  the KEDA scaler metric (`hunts-due`), and `auth/login` + `auth/refresh` (handled
+  specially by the `dfe login` built-in, which stores the returned token).
+- **REST maps to noun groups and verbs.** The router/path becomes the group nesting
+  and the operation becomes the verb, e.g. `/api/v1/auth/groups` -> `dfe auth groups
+  list | create | update | delete`. Path params become command arguments; query
+  params and request-body properties become options.
+- **Help is the OpenAPI text.** Command help and short-help come straight from the
+  operation `summary` / `description`, so there is no separate help copy to drift.
+- **Built on `click`.** click supports the fully-dynamic command construction the
+  generator needs (minting groups, commands, options and arguments at runtime from
+  spec records) - a statically-typed command framework cannot express a tree that
+  only exists at runtime.
 
-Available on every command:
+### Built-in commands (hand-written, not generated)
 
-- `--profile`, `--endpoint-url`, `--region`-analogue `--org`.
-- `--output {json,yaml,table,text}` - `json` default (scripts), `table` for humans.
-- `--query <JMESPath>` - client-side projection (reuse the `jmespath` lib AWS uses).
-- `--no-paginate` / `--page-size N` / `--max-items N`.
-- `--debug` (wire log), `--no-verify-ssl`, `--cli-read-timeout`, `--cli-connect-timeout`.
-- `--cli-input-json|yaml`, `--generate-cli-skeleton`.
+A small set of commands cannot be generated because they act on the CLI's own
+state rather than an API resource:
 
-## 6. Pagination
+- `dfe login` / `dfe logout` - authenticate and cache a credential. `login` takes
+  `--api-key`, or `--username` / `--password` for the local-auth JWT path
+  (`POST /api/v1/auth/login`).
+- `dfe auth list` / `dfe auth print-access-token` - inspect configured accounts and
+  emit the active token for scripts.
+- `dfe config ...` - manage CLI configuration and named profiles.
 
-The API's list endpoints return `PaginatedResponse[T]` with a computed `next_page`.
-The CLI auto-paginates by following `next_page` until exhausted (AWS v2 default),
-assembling one result set; `--no-paginate` returns a single page, `--max-items`
-caps, `--page-size` sets the server page size.
+### Global flags, output and pagination
 
-## 7. Governed-Ops semantics (DFE-specific, beyond AWS)
+- **Root global flags:** `--format {json,yaml,table,value,text}`, `--query`
+  (JMESPath projection), `--quiet` / `-q`, `--url` (override the engine base URL),
+  `--configuration` (select a named profile), `--debug`, `--no-paginate`.
+- **Format defaults are verb-aware:** `describe` -> yaml, `list` -> table, else
+  json; json when the output is not a TTY.
+- **Pagination auto-follows.** For a `list` verb whose response is the paginated
+  envelope, the CLI walks the pages accumulating items until exhausted. `--page-size`
+  sets the server page size, `--limit` caps the total, `--no-paginate` returns a
+  single page.
+- **Outbound HTTP** goes through the shared `HttpClient` (one retry / backoff /
+  breaker / traceparent policy), never a raw client. An api-key credential is sent
+  as `X-API-Key`, a token as `Authorization: Bearer`.
 
-Every mutation in DFE is a git commit over the gitops repo, so the CLI exposes what
-AWS has no analogue for:
+### Configuration and profiles
 
-- `--message "<why>"` on writes -> the commit message (falls back to a sensible
-  default); the CLI prints the resulting revision SHA.
-- `--dry-run` -> validate + show the diff without committing (maps to the API's
-  validate path).
-- Optimistic concurrency: `--if-match <revision>` sends the base revision; on a 409
-  the CLI renders the 3-way view (current-at-head vs yours vs theirs) the
-  `ConcurrencyConflictError` already carries, instead of a bare error.
-- Versioned classes (rules/hunts, via VersionedDoc): the lifecycle verbs
-  `publish` / `rollback` / `versions` / `diff` map to draft/publish/rollback. A dial
-  class (helmvars) has no such verbs (it is unversioned) - the generator omits them,
-  matching the `versioned` opt-in.
+Credentials and named profiles live under `~/.config/dfe` (override the root with
+`$DFE_CONFIG_HOME`):
 
-## 8. Ergonomics (AWS CLI v2 features to match)
+- `configurations/config_<name>` - one INI file per named profile.
+- `active_config` - the pointer to the active profile.
+- `credentials.json` - stored credentials (chmod 0600, keyed by account).
 
-- **`--cli-auto-prompt`** - interactive prompting for required args (AWS v2 flagship
-  feature); `dfe` with no subcommand can drop into it.
-- **Shell completion** - `dfe completion bash|zsh|fish` emits a completer.
-- **Help system** - `dfe help`, `dfe <noun> help`, `dfe <noun> <verb> help`,
-  generated from the OpenAPI summaries/descriptions.
-- **Non-zero exit codes** by error class (auth, not-found, conflict, validation,
-  server) so scripts can branch.
+Profile selection: `--configuration <name>` overrides the `active_config` pointer.
 
-## 9. Build/rollout sketch (phased)
+---
 
-1. **Client core** - config/profile loader, the auth chain + `dfe login`, the pylib
-   HTTP client, output formatters (json/yaml/table/text + JMESPath), pagination.
-2. **Generator** - `openapi.json` -> Typer tree; wire a first vertical slice
-   (`dfe hunts`, `dfe helmvars`, `dfe deployments`) end to end.
-3. **Governed-ops verbs** - `--message`/`--dry-run`/`--if-match`, the versioned
-   lifecycle verbs, the 409 3-way renderer.
-4. **Packaging** - PyInstaller frozen build in CI (per OS/arch), `install.sh`,
-   Homebrew tap, container image; sign + SHA-pin the artifacts.
-5. **Ergonomics** - auto-prompt, completion, `dfe configure` family, self-update.
+## `dfe local`: break-glass direct gitops CRUD
 
-Each phase ships a usable CLI; the generator (phase 2) is the keystone that keeps
-`dfe` in lockstep with the engine's contract the way botocore models keep `aws` in
-lockstep with AWS.
+When the daemon (and therefore the RBAC'd API window over gitops) is down, an
+operator still needs to change the deploy repo - the headline case being a rogue
+pod: scale a Helm var to 0, fix a KEDA dial. `dfe local` writes the local gitops
+clone DIRECTLY, through the SAME `GitCrud` write-engine the API uses.
+
+```mermaid
+flowchart TB
+    op(Operator):::actor
+    cmd[dfe local set / rm / ...]:::comp
+    guard[require reason<br/>+ safety-validate<br/>+ diff + confirm]:::comp
+    gitcrud[GitCrud write-engine<br/>push disabled]:::comp
+    clone[(local deploy-repo clone)]:::store
+    deploy[(deploy repo - remote)]:::store
+    op --> cmd --> guard --> gitcrud
+    gitcrud -->|commit [BREAK-GLASS]| clone
+    clone -.->|dfe local push| deploy
+    classDef actor fill:#eef,stroke:#33a;
+    classDef comp fill:#fff,stroke:#333;
+    classDef store fill:#efe,stroke:#3a3;
+```
+
+What makes it a break-glass surface rather than an RBAC bypass in disguise:
+
+- **Authority is git, not RBAC.** The daemon that enforces RBAC is dead, so write
+  authority here IS git write-access to the clone. Every write first prints the
+  target header + a unified diff and asks for a default-No confirmation.
+- **Every write is marked.** The commit subject is prefixed `[BREAK-GLASS] ` and
+  carries the trailers `DFE-Break-Glass: true`, `DFE-Actor:` and `DFE-Reason:`. A
+  `--reason` is REQUIRED (prompted interactively; a hard error under `--yes`).
+  `dfe local log` flags these entries so the audit trail plainly shows the change
+  went round the daemon.
+- **The same safety validation runs.** Before committing, `dfe local` runs the same
+  value-safety check the daemon's Helm endpoint runs (e.g. an unpinned image ref, a
+  controller-owned KEDA key) - but as an OVERRIDABLE warning, not the API's hard
+  block. The RBAC half of the API guard is deliberately dropped; the safety half is
+  kept, so a stressed operator still gets the steer.
+- **Commit is local; publishing is a separate act.** `GitCrud` is built with push
+  DISABLED, so a break-glass write commits LOCALLY only. Pushing to the remote is a
+  deliberate second step (`dfe local push`, or the post-write prompt), matching the
+  gitops-survivability model: the mutation is a git commit, publishing it is its own
+  act.
+
+### Generic verbs over the class registry
+
+`dfe local` exposes GENERIC verbs over the resource-class registry, not per-resource
+commands - so it does not grow as the API grows:
+
+- **Read:** `classes`, `ls`, `grep`, `get`, `log`, `versions`, `status`.
+- **Write (all marked, all need `--reason`):** `set`, `unset`, `rm`, `revert`,
+  `restore`.
+- **Publish:** `push`.
+- **`ch-cloud`** - the ClickHouse Cloud lifecycle group (status / start / stop),
+  mounted here because it too must run daemon-free.
+
+Example - scale a rogue pod's KEDA dial to zero while the daemon is down:
+
+```
+dfe local set helmvars receiver-default keda.maxReplicas 0 --reason "rogue pod"
+```
+
+Most verbs delegate straight to `GitCrud` (`set_key` / `delete_key` / `delete` /
+`put`). `revert` is the one genuinely-new operation - `GitCrud` has no revert, so
+it computes the inverse of a target commit's tree diff and commits it back through
+the same publish path, marked break-glass.
+
+---
+
+## Distribution
+
+Today `dfe` and `dfe-engine` ship as console-scripts via `pyproject`
+(`[project.scripts]`) - contributors and installs run them from the environment.
+
+> **PLANNED, NOT BUILT: a frozen single-binary `dfe`.** A self-contained bundle
+> (a frozen Python + all deps, built with PyInstaller) so `dfe` installs without a
+> Python on the target, distributed via GitHub Releases, a Homebrew tap, and a
+> container image, with SHA-pinned + signed artifacts. This is a future addition,
+> not a replacement for the console-script.
+
+Other future ergonomics (also NOT built): the browser / device-code OIDC login
+flow, shell completion, and `--cli-auto-prompt` interactive prompting.

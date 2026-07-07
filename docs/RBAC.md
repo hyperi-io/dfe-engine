@@ -8,7 +8,7 @@
 
 | Area | Scope | Status |
 |------|-------|--------|
-| **RBAC roles** | 7-role model (renamed 2026-07), config-driven `hyperdx:` block, cumulative resolution, back-compat aliases | Done |
+| **RBAC roles** | 7-role model (renamed 2026-07, no alias shim), config-driven `hyperdx:` block, cumulative resolution | Done |
 | **Tenant isolation** | Fixed CH users + ONE row policy per `_org_id` table + `TenantScopedClient` (custom-settings model) | Done |
 | **HyperDX** | GA one-team default + per-org `tenant_reader` connection setting + role-driven scope-gate | Done |
 | **Org-domain chain** | email domain -> claimed org -> `org_analyst` group -> `org_ids` -> CH row policy | Done |
@@ -250,8 +250,9 @@ boot if absent). Custom roles load from a separate YAML via `RoleConfig.load(pat
 7 built-in roles (`resource_type: core`), FLAT (no inheritance). A principal's
 effective permissions are the UNION of every role across every group they belong
 to. The 2026-07 rename retired the old names (`infra_admin`, `infra_viewer`,
-`data_analyst_viewer`, `customer_viewer`); back-compat aliases keep them
-resolving (section 2.2.4).
+`data_analyst_viewer`, `customer_viewer`) with NO alias shim - the old names no
+longer resolve. Apply the rename at the source (group/role YAML); a principal
+left on an old name gets zero grants (section 2.2.4).
 
 ```mermaid
 graph TB
@@ -357,22 +358,31 @@ the groups dir is empty; the seeded `admin` account joins `dfe-admins`:
 group. Attach them to custom groups as needed - or, for `org_analyst`, it is
 auto-bound per-org by the JIT org-domain chain (section 7.3).
 
-#### 2.2.4 Back-compat aliases
+#### 2.2.4 Required renames (no alias shim)
 
-The rename ships a one-release alias shim (`ROLE_ALIASES`, `roles.py`). A literal
-role name always wins; an alias only fills in when the literal is absent:
+The 2026-07 rename is applied at the SOURCE. There is deliberately NO deprecation
+window and NO alias shim pre-GA: `ROLE_ALIASES` was removed. `RoleConfig._lookup`
+(`roles.py`) is exact-match, and the connection registry (`get_connection_name`,
+`connections/registry.py`) is exact-match and fail-closed. Rename these in every
+group/role YAML that references them:
 
-| Old name | New name |
+| Old name (no longer resolves) | New name |
 |---|---|
 | `infra_admin` | `infra` |
 | `infra_viewer` | `infra_ro` |
 | `data_analyst_viewer` | `data_analyst_ro` |
 | `customer_viewer` | `org_analyst` |
 
-Both permission resolution (`_lookup`) and the connection registry
-(`get_connection_name`) are alias-aware, so an old group file resolving
-`customer_viewer` maps to `org_analyst` -> `tenant_reader`, never the admin
-fallback. Migrate group files to the new names within the release.
+A principal left on an old name does NOT fall through to the new role:
+
+- Permission resolution: `_lookup` returns None for the unknown name, so the role
+  contributes ZERO permissions (the principal loses all its grants).
+- Connection registry: the unknown role is unmapped, so `get_connection_name`
+  resolves to the MOST-RESTRICTED connection by design (the lowest-privilege
+  mapped role, `org_analyst` -> `tenant_reader`, row-filtered, fail-closed to zero
+  rows on empty org_ids), never the admin `default`.
+
+Migrate the group/role YAML to the new names before GA.
 
 #### 2.2.5 Per-role reference
 
@@ -801,7 +811,7 @@ flowchart TD
     end
 
     subgraph "ConnectionRegistry"
-        PREC["Privilege Precedence<br/>admin → data_analyst → data_analyst_ro<br/>→ data_viewer → infra → infra_ro<br/>→ org_analyst (alias-aware)"]
+        PREC["Privilege Precedence<br/>admin → data_analyst → data_analyst_ro<br/>→ data_viewer → infra → infra_ro<br/>→ org_analyst (exact-match, fail-closed)"]
         CACHE["Client Cache<br/>(lazy-loaded)"]
     end
 

@@ -64,10 +64,10 @@ Manual status / start / stop, via API or CLI. Both drive the same
 `HttpClient`.
 
 ```bash
-# CLI (acts directly - works even when the engine is not running):
-dfe-api ch-cloud status
-dfe-api ch-cloud start --wait      # wake, block until running (billable)
-dfe-api ch-cloud stop
+# CLI (break-glass: acts directly, works even when the daemon is not running):
+dfe local ch-cloud status
+dfe local ch-cloud start --wait      # wake, block until running (billable)
+dfe local ch-cloud stop
 
 # API (admin-gated):
 GET  /api/v1/system/clickhouse-cloud          # status         (system:read)
@@ -133,7 +133,7 @@ crash-loop the pod):
    initContainers:
      - name: ch-cloud-wake
        image: <dfe-engine image>
-       command: ["dfe-api", "ch-cloud", "start", "--wait", "--timeout", "600"]
+       command: ["dfe", "local", "ch-cloud", "start", "--wait", "--timeout", "600"]
        envFrom: [{ secretRef: { name: dfe-clickhouse-cloud } }]
    ```
 

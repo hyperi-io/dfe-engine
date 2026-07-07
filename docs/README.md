@@ -26,6 +26,7 @@ full Sigma pipeline).
 | Doc | Status | What |
 |-----|--------|------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Current | System architecture, module map, data flow. |
+| [DOCKER-DEV.md](DOCKER-DEV.md) | Reference | Local-dev guide: slim single-laptop docker tyre-kicking shape (NOT a deployment). |
 | [dfe-infra.md](dfe-infra.md) | Reference | The engine <-> infra boundary + deployment contract. |
 | [BACKING-SERVICES.md](BACKING-SERVICES.md) | Current | Backing-service swap matrix (CH / Kafka / secrets / storage). |
 | [CLICKHOUSE-CLOUD.md](CLICKHOUSE-CLOUD.md) | Current | CH connection resilience + ClickHouse Cloud service lifecycle (status/start/stop, opt-in auto-wake). |
@@ -67,7 +68,7 @@ full Sigma pipeline).
 | [UI-API-GUIDE.md](UI-API-GUIDE.md) | Reference | API guide for the dfe-ui consumer. |
 | [DFE-UI-GUIDE.md](DFE-UI-GUIDE.md) | Reference | dfe-ui integration guide. |
 | [AUTOMAGIC-TYPE-SAFETY.md](AUTOMAGIC-TYPE-SAFETY.md) | Reference | Contract-first type-safety approach. |
-| [DFE-CLI-DESIGN.md](DFE-CLI-DESIGN.md) | Design | dfe-api CLI design. |
+| [DFE-CLI-DESIGN.md](DFE-CLI-DESIGN.md) | Current | The `dfe-engine` daemon + the single `dfe` CLI (HTTP + `local` break-glass). |
 
 ## Process and operations
 

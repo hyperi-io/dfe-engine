@@ -142,7 +142,7 @@ graph TB
     end
 
     subgraph engine["dfe-engine (Python: library + API server)"]
-        API[FastAPI server<br/>dfe-api]
+        API[FastAPI server<br/>dfe-engine daemon]
         REG[Config registries<br/>git-native YAML CRUD]
         COMP[Compilers<br/>Helm values - DDL - Sigma - field maps]
         BRIDGE[GitOps bridge<br/>writes deploy repo]
@@ -199,7 +199,9 @@ old dfe-control-plane is gone; its API was absorbed into the engine.)
 
 - **App factory:** `src/dfe_engine/api/app.py` - `create_app()` bootstraps every
   registry, auth store, and the OIDC provider registry in a lifespan context.
-- **Entry point:** `dfe-api` (`pyproject.toml [project.scripts]`) starts uvicorn.
+- **Entry point:** `dfe-engine run` (`pyproject.toml [project.scripts]`) starts
+  uvicorn. `dfe-engine` is the pure daemon (a k8s pod); the human CLI is the
+  separate `dfe` binary (see DFE-CLI-DESIGN.md).
 - **Routers:** ~20+ under `src/dfe_engine/api/v1/` covering auth, accounts,
   groups, api-keys, roles, oidc-providers, orgs, sources, services, deployments,
   fieldmaps, rules, alerts, schemas, sigma, hunts, queries, pipeline, tasks,
@@ -290,7 +292,8 @@ deploy repo. It writes config and DDL - NOT Argo Applications.
 - `render_envoy_oidc_values()` (`gitops/oidc.py`) - materialises the engine's
   OIDC provider registry into values the envoy-gateway-config chart consumes.
   Client secrets are NOT written here - ESO materialises those from Vault.
-- CLI: `dfe-api gitops publish/render` (`cli/gitops.py`).
+- Reachable over the API under `/api/v1/gitops` (and thus the `dfe gitops`
+  group in the generated CLI).
 
 **Important:** the Helm compiler emits ONLY the overlay values (+ DDL) written to
 the deploy repo. It no longer authors any Argo objects - the `argo_applications` /
@@ -725,7 +728,7 @@ cooldown in a ReplacingMergeTree state table, fail-open.
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Config storage | YAML + git (no DB) | human-readable, versioned, Rust reads directly |
-| API host | dfe-engine FastAPI (dfe-api) | dfe-control-plane removed; one artifact |
+| API host | dfe-engine FastAPI daemon (`dfe-engine run`) | dfe-control-plane removed; one artifact |
 | Auth | local JWT default; OIDC + API key + disabled | OIDC via X-Oidc-* edge seam |
 | Conflict handling | git blob-SHA ETag + 409 | git-native, standard HTTP semantics |
 | Deployment | Argo CD + Helm, base+overlay multi-source | engine turns dials, appsets author apps |
