@@ -74,6 +74,7 @@ class SchemaBuilderV2:
         schemas_base_dir: str | Path | None = None,
         use_legacy_indexes: bool = False,
         field_map_registry: FieldMapRegistry | None = None,
+        default_engine: str = "MergeTree",
     ) -> None:
         """Initialize the schema builder.
 
@@ -88,11 +89,18 @@ class SchemaBuilderV2:
                                 views (sigma, ecs, cim). When provided and the source
                                 declares mapping_standards, view DDLs are included
                                 in the build result.
+            default_engine: MergeTree-family engine used for tables whose source
+                                schema leaves ``engine`` empty (the inherit sentinel).
+                                Pass the deployment value
+                                (``settings.clickhouse.default_engine``) so an
+                                operator can make e.g. ReplacingMergeTree the default;
+                                falls back to plain MergeTree.
         """
         self._registry = registry or TypeRegistry.default()
         self._schemas_base_dir = Path(schemas_base_dir) if schemas_base_dir else None
         self._ddl_gen = DDLGenerator(self._registry, use_legacy_indexes=use_legacy_indexes)
         self._field_map_registry = field_map_registry
+        self._default_engine = default_engine or "MergeTree"
 
     # ── Main entry points ───────────────────────────────────────────
 
@@ -315,8 +323,9 @@ class SchemaBuilderV2:
         """Build DDLConfig from a source version snapshot."""
         schema_cfg = snap.effective_schema()
         header = snap.effective_header()
+        # Empty engine = inherit the deployment default; a per-source pin wins.
         return DDLConfig(
-            engine=schema_cfg.engine,
+            engine=schema_cfg.engine or self._default_engine,
             ttl_days=schema_cfg.ttl_days,
             profile_name=header.type,
             profile_version=header.version,

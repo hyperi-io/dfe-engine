@@ -5,10 +5,15 @@
 # one of the names listed here. Mirrors type_registry.yaml, but for the
 # table-level ENGINE clause instead of column primitives.
 #
-# Engines are emitted bare (ENGINE = Name()), so only parameterless
-# MergeTree-family engines belong here. Parameterised engines
-# (ReplacingMergeTree(ver), ReplicatedMergeTree('/path','replica'), ...)
-# are out of scope for now.
+# List the MergeTree-family VARIANTS only. Validation gates the variant (the
+# token before any "("), so a parameterised form the SME chooses -
+# ReplacingMergeTree(version_col), SummingMergeTree(a, b) - is accepted: the
+# variant must be listed here, the params are theirs.
+#
+# Do NOT list the Replicated/Shared prefix forms (ReplicatedMergeTree,
+# SharedMergeTree). That prefix is added at DDL time by the engine resolver from
+# the deployment topology (single vs Replicated/Shared db vs Cloud) - it is an
+# infra concern, never declared in a source's config.
 #
 # Maintained by: dfe-engine
 

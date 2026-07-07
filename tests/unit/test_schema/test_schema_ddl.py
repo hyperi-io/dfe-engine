@@ -138,10 +138,31 @@ class TestGenerateCreateTable:
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "TTL" not in ddl
 
-    def test_engine_config(self, gen: DDLGenerator):
-        cfg = DDLConfig(engine="ReplicatedMergeTree")
+    def test_engine_single_topology(self, gen: DDLGenerator):
+        # single topology -> plain <variant>()
+        cfg = DDLConfig(engine="ReplacingMergeTree", topology="single")
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "ENGINE = ReplicatedMergeTree()" in ddl
+        assert "ENGINE = ReplacingMergeTree()" in ddl
+
+    def test_engine_replicated_topology(self, gen: DDLGenerator):
+        # replicated topology -> argumentless Replicated<variant> (server supplies
+        # the znode path/replica; they are never emitted here)
+        cfg = DDLConfig(engine="ReplacingMergeTree", topology="replicated")
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "ENGINE = ReplicatedReplacingMergeTree" in ddl
+        assert "ReplicatedReplacingMergeTree(" not in ddl  # no args on a bare variant
+
+    def test_engine_parameterised_single(self, gen: DDLGenerator):
+        # a version column survives through the resolver, single topology
+        cfg = DDLConfig(engine="ReplacingMergeTree(_timestamp_load)", topology="single")
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "ENGINE = ReplacingMergeTree(_timestamp_load)" in ddl
+
+    def test_engine_parameterised_replicated(self, gen: DDLGenerator):
+        # params ride onto the Replicated form - no double-parens, no dropped arg
+        cfg = DDLConfig(engine="ReplacingMergeTree(_timestamp_load)", topology="replicated")
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "ENGINE = ReplicatedReplacingMergeTree(_timestamp_load)" in ddl
 
     def test_cluster(self, gen: DDLGenerator):
         cfg = DDLConfig(cluster="my_cluster")
@@ -458,11 +479,11 @@ class TestDDLConfig:
     def test_custom_config(self):
         cfg = DDLConfig(
             db="analytics",
-            engine="SharedMergeTree",
+            engine="SummingMergeTree",
             ttl_days=365,
             profile_name="minimal",
         )
         assert cfg.db == "analytics"
-        assert cfg.engine == "SharedMergeTree"
+        assert cfg.engine == "SummingMergeTree"
         assert cfg.ttl_days == 365
         assert cfg.profile_name == "minimal"

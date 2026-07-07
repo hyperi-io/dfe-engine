@@ -343,6 +343,7 @@ async def get_source_schema_columns(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -414,6 +415,7 @@ async def build_source_schema(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
@@ -501,6 +503,7 @@ async def deploy_source_schema(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)

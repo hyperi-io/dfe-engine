@@ -243,7 +243,7 @@ class TestRoundTrip:
                     "meta_schema": "security_edr_crowdstrike",
                     "meta_schema_version": "1.0.0",
                     "ttl_days": 365,
-                    "engine": "ReplicatedMergeTree",
+                    "engine": "ReplacingMergeTree",
                 },
                 "transform": {
                     "engine": "vector",

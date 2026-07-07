@@ -125,6 +125,12 @@ class ClickHouseSettings(BaseModel):
     # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
     # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
     topology: str = Field(default="single")
+    # Default MergeTree-family VARIANT for tables that do not pin their own engine.
+    # The topology above decides the Replicated/Shared prefix; this decides the
+    # family (MergeTree / ReplacingMergeTree / SummingMergeTree / ...). Must be a
+    # variant the engine registry permits; may be parameterised
+    # (e.g. "ReplacingMergeTree(version)").
+    default_engine: str = Field(default="MergeTree")
 
     @property
     def effective_data_database(self) -> str:

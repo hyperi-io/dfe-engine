@@ -307,7 +307,7 @@ class HelmValuesCompiler:
             from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
             from dfe_engine.source.type_registry import TypeRegistry
 
-            builder = SchemaBuilderV2(type_registry=TypeRegistry())
+            builder = SchemaBuilderV2(registry=TypeRegistry())
             for source in self._source.get_all_sources(enabled_only=True):
                 try:
                     result = builder.build(source)

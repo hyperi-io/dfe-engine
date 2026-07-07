@@ -20,6 +20,7 @@ from dataclasses import dataclass, field
 from scalo.logger import logger
 
 from dfe_engine import __version__
+from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -38,8 +39,12 @@ class DDLConfig:
 
     db: str = "{db}"
     engine: str = "MergeTree"
-    # ClickHouse topology: "single" -> MergeTree (standalone, no Keeper);
-    # "replicated" -> ReplicatedMergeTree (cluster mode, Keeper-coordinated).
+    # ClickHouse topology: "single" -> <engine>() standalone (keeperless, e.g.
+    # local dev); "replicated" -> argumentless Replicated<engine>, where the
+    # server supplies the znode path/replica from its default_replica_path /
+    # default_replica_name macros (infra-layer config, never in the DDL). The
+    # replicated form is portable across on-prem Replicated databases and CH
+    # Cloud (auto-substituted to SharedMergeTree).
     topology: str = "single"
     ttl_days: int | None = 90
     ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp", "_timestamp_load"])
@@ -147,12 +152,28 @@ class DDLGenerator:
         body_lines = self._body_lines(columns, cfg)
         lines.append(",\n".join(body_lines))
 
-        # Close columns, ENGINE (topology-aware)
-        if cfg.topology == "replicated":
-            zk_path = f"/clickhouse/tables/{{shard}}/{cfg.db}/{table_name}"
-            engine_clause = f"Replicated{cfg.engine}('{zk_path}', '{{replica}}')"
-        else:
-            engine_clause = f"{cfg.engine}()"
+        # Close columns, ENGINE (topology-aware).
+        # "replicated" -> argumentless Replicated<engine>. We deliberately do NOT
+        # emit the ('/znode/path','{replica}') args: the znode path + replica name
+        # are the SERVER's job, supplied from its default_replica_path /
+        # default_replica_name macros (an infra-layer concern, not the DDL). This
+        # argumentless form is the only portable one - live-proven 2026-07-06:
+        # accepted on-prem inside a Replicated database (or via ON CLUSTER) yielding
+        # a real ReplicatedMergeTree, AND accepted on CH Cloud where it
+        # auto-substitutes to SharedMergeTree. The explicit-path form is REJECTED
+        # (code 36) by BOTH CH Cloud and on-prem Replicated databases, so we never
+        # produce it. "single" -> plain <engine>() for a keeperless standalone
+        # (local dev); on CH Cloud that too auto-substitutes to SharedMergeTree.
+        # Render the ENGINE clause through the shared resolver: split cfg.engine
+        # into variant + params and emit the topology-correct form. This is what
+        # genericises beyond plain MergeTree - ANY family variant with its params
+        # (ReplacingMergeTree(ver), SummingMergeTree(cols), ...) renders correctly:
+        # single -> <variant>(params); replicated -> argumentless
+        # Replicated<variant>(params) (no double-parens, no dropped ver). ON CLUSTER
+        # stays on the header via cfg.cluster - this static config path never senses
+        # a live cluster, so the resolver's sensed on_cluster is empty here.
+        spec = parse_engine(cfg.engine)
+        engine_clause = EngineResolver(override=cfg.topology).resolve(spec, cfg.db).clause
         lines.append(f")\nENGINE = {engine_clause}")
 
         # PARTITION BY
