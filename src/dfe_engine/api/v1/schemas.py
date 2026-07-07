@@ -61,7 +61,8 @@ from dfe_engine.services.schema.elastic_schema_service import (
 )
 from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
 from dfe_engine.settings import get_settings
-from dfe_engine.source.registry import SourceNotFoundError
+from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
+from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -1187,6 +1188,64 @@ def _resolve_promote_meta_schema(
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
+_DEFAULT_PROMOTE_HEADER_TYPE = "common-header/minimal"
+
+
+def _minimal_header_current_version() -> str:
+    """``current`` version marker from the bundled minimal common-header profile."""
+    from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+    from dfe_engine.yaml_utils import yaml_load
+
+    path = _resolve_profile_yaml_path(_DEFAULT_PROMOTE_HEADER_TYPE, None)
+    if not path.is_file():
+        return "1.0.0"
+    data = yaml_load(path)
+    if not isinstance(data, dict):
+        return "1.0.0"
+    return str(data.get("current") or "1.0.0")
+
+
+def _header_for_promote_attach(snap, *, had_meta_schema: bool) -> SourceHeader:
+    """Default ``common-header/minimal`` @ profile ``current`` on first meta-schema pin."""
+    if had_meta_schema and snap.header is not None:
+        return snap.header
+    return SourceHeader(
+        type=_DEFAULT_PROMOTE_HEADER_TYPE,
+        version=_minimal_header_current_version(),
+    )
+
+
+def _source_write_after_promote(
+    source: Source,
+    version_id: str,
+    *,
+    meta_schema: str,
+    meta_schema_version: str,
+    had_meta_schema: bool,
+) -> SourceWriteRequest:
+    """Build a source PUT body that pins the promoted meta-schema on ``version_id``."""
+    snap = source.versions[version_id]
+    schema_cfg = snap.effective_schema().model_copy(
+        update={
+            "meta_schema": meta_schema,
+            "meta_schema_version": meta_schema_version,
+        }
+    )
+    return SourceWriteRequest(
+        enabled=source.enabled,
+        display_name=source.display_name,
+        description=source.description,
+        match=snap.match,
+        header=_header_for_promote_attach(snap, had_meta_schema=had_meta_schema),
+        schema_config=schema_cfg,
+        transform=snap.transform,
+        fetcher=snap.fetcher,
+        sigma=snap.sigma,
+        field_mappings=snap.field_mappings,
+        mapping_standards=snap.mapping_standards or None,
+    )
+
+
 def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
@@ -1471,6 +1530,7 @@ async def promote_field(
         ) from None
 
     _version_id, ver = _resolve_source_version(source, None, source_name)
+    had_meta_schema = bool(ver.effective_schema().meta_schema)
     canonical, meta, columns = _resolve_promote_meta_schema(
         source, ver, schema_registry, schema_path=body.schema_path
     )
@@ -1602,5 +1662,25 @@ async def promote_field(
         canonical, description=description, created_by=git_author(user)
     )
     audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
+
+    try:
+        source_registry.update_source_from_write(
+            source_name,
+            _source_write_after_promote(
+                source,
+                _version_id,
+                meta_schema=canonical,
+                meta_schema_version=new_ver,
+                had_meta_schema=had_meta_schema,
+            ),
+            created_by=git_author(user),
+            description=f"source: attach {canonical} {new_ver} after field promote",
+        )
+    except SourceValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    audit_resource_change(user.user_id, "source", source_name, "updated")
 
     return PromoteFieldResponse(source_name=source_name, schema_version=new_ver, results=results)

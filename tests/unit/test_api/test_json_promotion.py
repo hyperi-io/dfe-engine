@@ -435,6 +435,14 @@ class TestPromoteField:
         )
         assert resp.status_code == 200
         assert resp.json()["schema_version"] == "1.1.0"
+        src = client.get(f"/api/v1/sources/{NOMETA_SOURCE}", headers=admin_headers)
+        assert src.status_code == 200
+        cur = src.json()["current"]
+        schema = src.json()["versions"][cur]["schema"]
+        assert schema["meta_schema"] == SCHEMA_PATH
+        assert schema["meta_schema_version"] == "1.1.0"
+        assert src.json()["versions"][cur]["header"]["type"] == "common-header/minimal"
+        assert src.json()["versions"][cur]["header"]["version"] == "1.0.0"
 
     def test_schema_path_rejected_when_source_has_meta_schema(
         self, client: TestClient, admin_headers
@@ -460,6 +468,10 @@ class TestPromoteField:
         assert body["results"][0]["column_name"] == "user_email"
         assert body["results"][0]["copy_cel"] == "_json.user.email"
         assert "1.1.0" in _schema_versions(client, admin_headers, "1.1.0")
+        src = client.get(f"/api/v1/sources/{PROMO_SOURCE}", headers=admin_headers)
+        cur = src.json()["current"]
+        assert src.json()["versions"][cur]["schema"]["meta_schema_version"] == "1.1.0"
+        assert src.json()["versions"][cur]["header"]["type"] == "time_series"
 
     def test_committed_column_has_copy_directive(self, client: TestClient, admin_headers):
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
