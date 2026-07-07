@@ -1619,8 +1619,8 @@ async def promote_field(
     when the source has none), adding one column per path with a ``@copy`` directive
     so dfe-loader copies the value forward. Core meta-schemas are forked to
     ``{source_name}_{schema_stem}`` under the same parent path before promoting.
-    ``?dry_run=true`` (or ``dry_run`` in the body) returns the proposed diff and DDL
-    without forking core schemas, adding meta-schema versions, or updating the source.
+    ``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,
+    adding meta-schema versions, or updating the source.
     """
     from dfe_engine.schema.schema_manager import (
         SchemaManager,

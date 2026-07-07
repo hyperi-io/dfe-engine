@@ -603,8 +603,9 @@ class TestPromoteField:
         assert not fork_file.is_file()
         resp = client.post(
             f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
-            json={"json_path": "user.email", "data_type": "string", "dry_run": True},
+            json={"json_path": "user.email", "data_type": "string"},
             headers=admin_headers,
+            params={"dry_run": True},
         )
         assert resp.status_code == 200
         assert not fork_file.is_file()
