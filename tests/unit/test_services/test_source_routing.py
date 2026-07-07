@@ -87,7 +87,7 @@ class TestSourceMatchRuleModel:
     def test_serialization(self):
         rule = SourceMatchRule(field="x", value="y", topic="z_land")
         d = rule.model_dump()
-        assert d == {"field": "x", "value": "y", "topic": "z_land"}
+        assert d == {"field": "x", "operator": "equals", "value": "y", "topic": "z_land"}
 
 
 # ---------------------------------------------------------------------------

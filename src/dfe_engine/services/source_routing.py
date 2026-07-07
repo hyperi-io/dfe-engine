@@ -49,6 +49,7 @@ def compile_receiver_routing(
         match_table.append(
             SourceMatchRule(
                 field=source.match.field,
+                operator=source.match.operator,
                 value=source.match.value,
                 topic=source.topic_land,
             )

@@ -61,7 +61,8 @@ from dfe_engine.services.schema.elastic_schema_service import (
 )
 from dfe_engine.services.schema.json_promotion_service import PROMOTED_FIELD_TYPE
 from dfe_engine.settings import get_settings
-from dfe_engine.source.registry import SourceNotFoundError
+from dfe_engine.source.models import Source, SourceHeader, SourceWriteRequest
+from dfe_engine.source.registry import SourceNotFoundError, SourceValidationError
 
 router = APIRouter(prefix="/schemas", tags=["schemas"])
 
@@ -344,6 +345,14 @@ class JsonPathsResponse(BaseModel):
 class SampleRowsResponse(BaseModel):
     """Random sample rows for a source, scoped to its match rule."""
 
+    class PromotedJsonField(BaseModel):
+        """A JSON path already materialized as a typed meta-schema column."""
+
+        name: str = Field(description="Promoted column name in the meta-schema")
+        key: str = Field(
+            description="Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+        )
+
     source_name: str = Field(description="The source these rows were sampled for.")
     table: str = Field(
         description=(
@@ -363,9 +372,20 @@ class SampleRowsResponse(BaseModel):
         default=None,
         description="Match value rows were filtered on, or null for a whole-table sample.",
     )
+    match_operator: str | None = Field(
+        default=None,
+        description="Match operator used when filtering (equals, exists, includes, …).",
+    )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
         description="Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
+    )
+    promoted: list[SampleRowsResponse.PromotedJsonField] = Field(
+        default_factory=list,
+        description=(
+            "JSON paths already promoted on the source version's meta-schema "
+            "(empty when the version has no meta_schema or no @copy columns)"
+        ),
     )
 
 
@@ -390,6 +410,13 @@ class PromoteFieldRequest(BaseModel):
     atomic: bool = Field(
         default=True,
         description="When true, all paths succeed or none commit; else best-effort",
+    )
+    schema_path: str | None = Field(
+        default=None,
+        description=(
+            "Meta-schema path when the source version has no meta_schema assigned "
+            "(forbidden if meta_schema is already set on the source)"
+        ),
     )
 
     @model_validator(mode="after")
@@ -1141,32 +1168,272 @@ def _resolve_source_meta_schema(source, schema_registry):
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
-def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
-    """Resolve where to discover a source version's ``_json`` paths.
+def _resolve_promote_meta_schema(
+    source,
+    ver,
+    schema_registry,
+    *,
+    schema_path: str | None = None,
+):
+    """Meta-schema for promote-field: source config or explicit ``schema_path`` in body."""
+    configured = ver.effective_schema().meta_schema
+    if schema_path and configured:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "schema_path_conflict",
+                "message": (
+                    f"Source '{source.source}' already has meta_schema {configured!r}; "
+                    "do not set schema_path in the request body"
+                ),
+            },
+        )
+    rel = configured or schema_path
+    if not rel:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "no_meta_schema",
+                "message": (
+                    f"Source '{source.source}' has no meta_schema configured; "
+                    "provide schema_path in the request body"
+                ),
+            },
+        )
+    return _resolve_meta_schema(rel, source.source, schema_registry)
 
-    A version with a ``meta_schema`` owns its own table, so discovery targets
-    ``db.<source>`` with that schema's columns when that table exists in
-    ClickHouse. If the dedicated table is not materialized yet, discovery falls
-    back to ``db.<landing>`` filtered by the version's match rule (same as a
-    version without ``meta_schema``). When ``ch``/``db`` are omitted, a version
-    with ``meta_schema`` always targets ``db.<source>``.
 
-    Returns:
-        ``(target_table, match_field, match_value, existing_columns)``.
-    """
+_DEFAULT_PROMOTE_HEADER_TYPE = "common-header/minimal"
+
+
+def _minimal_header_current_version() -> str:
+    """``current`` version marker from the bundled minimal common-header profile."""
+    from dfe_engine.schema.schema_loader import _resolve_profile_yaml_path
+    from dfe_engine.yaml_utils import yaml_load
+
+    path = _resolve_profile_yaml_path(_DEFAULT_PROMOTE_HEADER_TYPE, None)
+    if not path.is_file():
+        return "1.0.0"
+    data = yaml_load(path)
+    if not isinstance(data, dict):
+        return "1.0.0"
+    return str(data.get("current") or "1.0.0")
+
+
+def _header_for_promote_attach(snap, *, had_meta_schema: bool) -> SourceHeader:
+    """Default ``common-header/minimal`` @ profile ``current`` on first meta-schema pin."""
+    if had_meta_schema and snap.header is not None:
+        return snap.header
+    return SourceHeader(
+        type=_DEFAULT_PROMOTE_HEADER_TYPE,
+        version=_minimal_header_current_version(),
+    )
+
+
+def _fork_schema_path_for_source(source_name: str, canonical: str) -> str:
+    """``{parent}/{source_name}_{schema_stem}`` fork path for core meta-schemas."""
+    from dfe_engine.schema.registry import _schema_location, canonical_schema_path
+
+    parent, stem = _schema_location(canonical)
+    fork_stem = f"{source_name}_{stem}"
+    rel = f"{parent}/{fork_stem}" if parent else fork_stem
+    return canonical_schema_path(rel)
+
+
+def _pinned_meta_schema_version(ver, meta: MetaSchema) -> str:
+    pin = ver.effective_schema().meta_schema_version
+    if pin and pin in meta.versions:
+        return pin
+    return meta.current
+
+
+def _columns_for_meta_version(meta: MetaSchema, version_id: str):
+    ver = meta.versions.get(version_id)
+    if ver is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "validation_error",
+                "message": f"Meta-schema version {version_id!r} is not defined",
+            },
+        )
+    return ver.columns
+
+
+def _ensure_writable_meta_schema_for_promote(
+    source,
+    ver,
+    canonical: str,
+    meta: MetaSchema,
+    columns,
+    schema_registry,
+    *,
+    persist: bool,
+    user: CurrentUser,
+) -> tuple[str, MetaSchema, list, bool]:
+    """Use a per-source fork when promotion would mutate a ``resource_type: core`` schema."""
+    if meta.resource_type != "core":
+        return canonical, meta, columns, False
+
+    from dfe_engine.core_resources.policy import schema_registry_path_is_core
+    from dfe_engine.schema.registry import canonical_schema_path
+    from dfe_engine.schema.schema_loader import SchemaLoadError
+    from dfe_engine.schema.schema_manager import SchemaManager, SchemaVersionError
+    from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+    fork_canonical = _fork_schema_path_for_source(source.source, canonical)
+    pinned = _pinned_meta_schema_version(ver, meta)
+
+    existing = schema_registry.find_schema_at_location(fork_canonical)
+    if existing:
+        fork_canonical = canonical_schema_path(existing)
+        if schema_registry_path_is_core(fork_canonical, schema_registry):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail={
+                    "code": "core_schema_fork",
+                    "message": (
+                        f"Fork schema {fork_canonical!r} is a core resource and cannot be modified"
+                    ),
+                },
+            )
+        fork_meta = schema_registry.get_schema(fork_canonical)
+        fork_ver = _pinned_meta_schema_version(ver, fork_meta)
+        return (
+            fork_canonical,
+            fork_meta,
+            _columns_for_meta_version(fork_meta, fork_ver),
+            False,
+        )
+
+    if not persist:
+        return canonical, meta, columns, True
+
+    src_yaml = schema_registry._yaml_path(canonical)
+    dest_yaml = schema_registry._yaml_path(fork_canonical)
+    try:
+        SchemaManager.clone_meta_schema(
+            src_yaml,
+            dest_yaml,
+            source_version=pinned,
+            new_version=pinned,
+            summary=f"Cloned from {canonical} for source {source.source}",
+        )
+    except (SchemaVersionError, SchemaLoadError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+
+    fork_data = yaml_load(dest_yaml)
+    if isinstance(fork_data, dict):
+        fork_data["resource_type"] = "custom"
+        yaml_dump(fork_data, dest_yaml)
+
+    description = f"schema: fork {canonical} -> {fork_canonical} for source {source.source}"
+    schema_registry.notify_schema_file_updated(
+        fork_canonical,
+        description=description,
+        created_by=git_author(user),
+    )
+    audit_resource_change(user.user_id, "meta_schema", fork_canonical, "created")
+
+    fork_meta = schema_registry.get_schema(fork_canonical)
+    fork_columns = _columns_for_meta_version(fork_meta, fork_meta.current)
+    return fork_canonical, fork_meta, fork_columns, True
+
+
+def _source_write_after_promote(
+    source: Source,
+    version_id: str,
+    *,
+    meta_schema: str,
+    meta_schema_version: str,
+    had_meta_schema: bool,
+) -> SourceWriteRequest:
+    """Build a source PUT body that pins the promoted meta-schema on ``version_id``."""
+    snap = source.versions[version_id]
+    schema_cfg = snap.effective_schema().model_copy(
+        update={
+            "meta_schema": meta_schema,
+            "meta_schema_version": meta_schema_version,
+        }
+    )
+    return SourceWriteRequest(
+        enabled=source.enabled,
+        display_name=source.display_name,
+        description=source.description,
+        match=snap.match,
+        header=_header_for_promote_attach(snap, had_meta_schema=had_meta_schema),
+        schema_config=schema_cfg,
+        transform=snap.transform,
+        fetcher=snap.fetcher,
+        sigma=snap.sigma,
+        field_mappings=snap.field_mappings,
+        mapping_standards=snap.mapping_standards or None,
+    )
+
+
+def _dedicated_source_table_ready(
+    source,
+    version_id: str,
+    *,
+    ch: Any | None,
+    db: str | None,
+    table: str,
+) -> bool:
+    """Whether ``version_id`` is deployed and its ClickHouse table is present."""
+    if source.deployed_version != version_id:
+        return False
+    if ch is None or db is None:
+        return True
     from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 
+    return clickhouse_table_exists(ch, db, table)
+
+
+def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None, db=None):
+    """Resolve where to discover a source version's ``_json`` paths.
+
+    A version with a ``meta_schema`` owns its own table once that version is
+    **deployed** and the table exists in ClickHouse. Until then (or when the
+    table is missing), discovery and sampling use ``db.<landing>`` filtered by
+    the version's match rule. When ``ch``/``db`` are omitted and the version is
+    deployed, a version with ``meta_schema`` targets ``db.<source>``.
+
+    Returns:
+        ``(target_table, match_rule_or_none, existing_columns)``. ``match_rule_or_none``
+        is set when sampling/discovery runs on the landing table filtered by the
+        version's match; null when the dedicated source table is queried whole.
+    """
     landing = get_settings().clickhouse.landing_table
-    match_field, match_value = ver.match.field, ver.match.value
+    match_rule = ver.match
     if ver.effective_schema().meta_schema:
-        _canonical, _meta, columns = _resolve_meta_schema(
+        _canonical, meta, _ = _resolve_meta_schema(
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
+        pin = _pinned_meta_schema_version(ver, meta)
+        columns = _columns_for_meta_version(meta, pin)
         target_table = source.table_name
-        if ch is not None and db is not None and not clickhouse_table_exists(ch, db, target_table):
-            return landing, match_field, match_value, columns
-        return target_table, None, None, columns
-    return landing, match_field, match_value, []
+        if not _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=target_table):
+            return landing, match_rule, columns
+        return target_table, None, columns
+    return landing, match_rule, []
+
+
+def _match_query_kwargs(match_rule) -> dict[str, Any]:
+    """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table)."""
+    if match_rule is None:
+        return {
+            "match_field": None,
+            "match_value": None,
+            "match_operator": "equals",
+        }
+    return {
+        "match_field": match_rule.field,
+        "match_value": match_rule.value if match_rule.operator != "exists" else None,
+        "match_operator": match_rule.operator,
+    }
 
 
 def _resolve_source_version(source, version, source_name):
@@ -1215,10 +1482,9 @@ async def discover_json_paths(
     """Discover JSON paths inside a source's ``_json`` column.
 
     Resolves the requested ``version`` (or the source's current version). If that
-    version defines a ``meta_schema`` the source owns its own table and discovery
-    runs against ``db.<source>``. Otherwise the source's data still lives in the
-    shared catch-all landing table, so discovery runs against ``db.<landing>``
-    filtered by the version's match rule.
+    version defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;
+    until then discovery runs on ``db.<landing>`` filtered by the version's
+    match rule. Versions without ``meta_schema`` always use the landing table.
 
     Returns one record per path with observed types, a suggested column name,
     and whether the path is already promoted. ``?samples=N`` adds random
@@ -1240,9 +1506,10 @@ async def discover_json_paths(
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_field, match_value, columns = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
+    target_table, match_rule, columns = _discovery_target(
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
@@ -1252,11 +1519,10 @@ async def discover_json_paths(
             db=db,
             source=target_table,
             existing_columns=columns,
-            match_field=match_field,
-            match_value=match_value,
             paths=path_filter,
             samples=samples,
             stats=stats,
+            **match_kw,
         )
     except JsonPromotionError as exc:
         raise HTTPException(
@@ -1310,10 +1576,9 @@ async def sample_source_rows(
     """Return random sample rows for a source, scoped to its match rule.
 
     Resolves the requested ``version`` (or the source's current version). A
-    version with a ``meta_schema`` owns its own table, so sampling runs against
-    ``db.<source>`` unfiltered. Otherwise the version's data still lives in the
-    shared catch-all landing table, so sampling runs against ``db.<landing>``
-    filtered by the version's match rule.
+    version with a ``meta_schema`` uses ``db.<source>`` only after that version
+    is deployed and the table exists; otherwise rows are read from
+    ``db.<landing>`` filtered by the version's match rule.
 
     Intended for inspecting real data while authoring a match condition or CEL
     before promoting any JSON path -- a row-level companion to the per-path
@@ -1321,6 +1586,7 @@ async def sample_source_rows(
     """
     from dfe_engine.services.schema.json_promotion_service import (
         JsonPromotionError,
+        list_promoted_json_fields,
         sample_rows,
     )
 
@@ -1334,18 +1600,18 @@ async def sample_source_rows(
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_field, match_value, _columns = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
+    target_table, match_rule, schema_columns = _discovery_target(
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     try:
         columns, rows = sample_rows(
             ch,
             db=db,
             source=target_table,
-            match_field=match_field,
-            match_value=match_value,
             limit=limit,
+            **match_kw,
         )
     except JsonPromotionError as exc:
         raise HTTPException(
@@ -1353,13 +1619,20 @@ async def sample_source_rows(
             detail={"code": "sample_failed", "message": str(exc)},
         ) from exc
 
+    promoted = [
+        SampleRowsResponse.PromotedJsonField(**item)
+        for item in list_promoted_json_fields(schema_columns)
+    ]
+
     return SampleRowsResponse(
         source_name=source_name,
         table=f"{db}.{target_table}",
-        match_field=match_field,
-        match_value=match_value,
+        match_field=match_kw["match_field"],
+        match_value=match_kw["match_value"],
+        match_operator=match_kw["match_operator"] if match_rule is not None else None,
         columns=columns,
         rows=rows,
+        promoted=promoted,
     )
 
 
@@ -1379,9 +1652,12 @@ async def promote_field(
 ) -> PromoteFieldResponse:
     """Promote JSON path(s) into dedicated typed columns.
 
-    Creates a new schema version on the source's meta-schema, adding one column
-    per path with a ``@copy`` directive so dfe-loader copies the value forward.
-    ``?dry_run=true`` returns the proposed diff + DDL without committing.
+    Creates a new schema version on the source's meta-schema (or on ``schema_path``
+    when the source has none), adding one column per path with a ``@copy`` directive
+    so dfe-loader copies the value forward. Core meta-schemas are forked to
+    ``{source_name}_{schema_stem}`` under the same parent path before promoting.
+    ``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,
+    adding meta-schema versions, or updating the source.
     """
     from dfe_engine.schema.schema_manager import (
         SchemaManager,
@@ -1405,7 +1681,11 @@ async def promote_field(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         ) from None
 
-    canonical, meta, columns = _resolve_source_meta_schema(source, schema_registry)
+    _version_id, ver = _resolve_source_version(source, None, source_name)
+    had_meta_schema = bool(ver.effective_schema().meta_schema)
+    canonical, meta, columns = _resolve_promote_meta_schema(
+        source, ver, schema_registry, schema_path=body.schema_path
+    )
 
     is_batch = isinstance(body.json_path, list)
     raw_paths = body.json_path if is_batch else [body.json_path]
@@ -1420,10 +1700,10 @@ async def promote_field(
     ]
 
     db = get_settings().clickhouse.effective_data_database
-    _version_id, ver = _resolve_source_version(source, None, source_name)
-    target_table, match_field, match_value, _ = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
+    target_table, match_rule, _ = _discovery_target(
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}
@@ -1434,9 +1714,8 @@ async def promote_field(
                 db=db,
                 source=target_table,
                 existing_columns=columns,
-                match_field=match_field,
-                match_value=match_value,
                 paths=[r.json_path for r in requests],
+                **match_kw,
             )
         except JsonPromotionError as exc:
             raise HTTPException(
@@ -1465,8 +1744,9 @@ async def promote_field(
     ]
     new_columns = [o.column for o in outcomes if o.status == "ok" and o.column is not None]
     has_error = any(o.status == "error" for o in outcomes)
+    preview_only = dry_run
 
-    if dry_run:
+    if preview_only:
         diff = SchemaDiff(
             new_columns=[
                 SchemaColumn(
@@ -1498,6 +1778,17 @@ async def promote_field(
 
     if not new_columns:
         return PromoteFieldResponse(source_name=source_name, schema_version=None, results=results)
+
+    canonical, meta, columns, _forked = _ensure_writable_meta_schema_for_promote(
+        source,
+        ver,
+        canonical,
+        meta,
+        columns,
+        schema_registry,
+        persist=True,
+        user=user,
+    )
 
     merged = [col.to_yaml_dict() for col in columns]
     merged.extend(
@@ -1537,5 +1828,25 @@ async def promote_field(
         canonical, description=description, created_by=git_author(user)
     )
     audit_resource_change(user.user_id, "meta_schema", canonical, "updated")
+
+    try:
+        source_registry.update_source_from_write(
+            source_name,
+            _source_write_after_promote(
+                source,
+                _version_id,
+                meta_schema=canonical,
+                meta_schema_version=new_ver,
+                had_meta_schema=had_meta_schema,
+            ),
+            created_by=git_author(user),
+            description=f"source: attach {canonical} {new_ver} after field promote",
+        )
+    except SourceValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
+    audit_resource_change(user.user_id, "source", source_name, "updated")
 
     return PromoteFieldResponse(source_name=source_name, schema_version=new_ver, results=results)

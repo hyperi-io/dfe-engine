@@ -19,6 +19,7 @@ from dfe_engine.services.schema.json_promotion_service import (
     ch_dynamic_type_to_primitive,
     copy_cel_for_path,
     discover_paths,
+    list_promoted_json_fields,
     promoted_paths,
     promotion_preview_ddl,
     qualified_table,
@@ -193,6 +194,22 @@ class TestPromotedPaths:
     )
     def test_extracts(self, case: PromotedPathsCase):
         assert promoted_paths(case["columns"]) == case["expected"]
+
+
+class TestListPromotedJsonFields:
+    def test_maps_to_name_and_key(self):
+        cols = [
+            make_meta_schema_column(
+                name="cloud_trail_event_tls_details_cipher_suite",
+                expr="@copy: _json.CloudTrailEvent.tlsDetails.cipherSuite",
+            )
+        ]
+        assert list_promoted_json_fields(cols) == [
+            {
+                "name": "cloud_trail_event_tls_details_cipher_suite",
+                "key": "_json.CloudTrailEvent.tlsDetails.cipherSuite",
+            }
+        ]
 
 
 # ── build_promotion_columns ──────────────────────────────────
@@ -658,6 +675,39 @@ class TestSampleRows:
             in sql
         )
         assert params == {"limit": 10, "match_value": "syslog"}
+
+    def test_exists_match_operator(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        sample_rows(
+            client,
+            db="dfe",
+            source="default",
+            match_field="_json.tags.type",
+            match_operator="exists",
+            limit=3,
+        )
+        sql, params = client.calls[0]
+        assert "isNotNull(assumeNotNull(_json).`tags.type`)" in sql
+        assert "notEmpty(toString(assumeNotNull(_json).`tags.type`))" in sql
+        assert params == {"limit": 3}
+
+    def test_includes_match_operator(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        sample_rows(
+            client,
+            db="dfe",
+            source="default",
+            match_field="_json.message",
+            match_value="error",
+            match_operator="includes",
+            limit=5,
+        )
+        sql, params = client.calls[0]
+        assert (
+            "positionCaseInsensitive(toString(assumeNotNull(_json).`message`), {match_value:String})"
+            in sql
+        )
+        assert params == {"limit": 5, "match_value": "error"}
 
     def test_empty_result_still_returns_columns(self):
         client = _SampleRowsClient(columns=["_json"], rows=[])
