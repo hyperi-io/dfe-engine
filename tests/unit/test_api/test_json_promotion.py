@@ -425,6 +425,32 @@ class TestPromoteField:
         assert resp.status_code == 422
         assert resp.json()["code"] == "no_meta_schema"
 
+    def test_promote_with_schema_path_when_source_unassigned(
+        self, client: TestClient, admin_headers
+    ):
+        resp = client.post(
+            f"/api/v1/schemas/{NOMETA_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["schema_version"] == "1.1.0"
+
+    def test_schema_path_rejected_when_source_has_meta_schema(
+        self, client: TestClient, admin_headers
+    ):
+        resp = client.post(
+            f"/api/v1/schemas/{PROMO_SOURCE}/promote-field",
+            json={
+                "json_path": "user.email",
+                "data_type": "string",
+                "schema_path": "meta/other",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schema_path_conflict"
+
     def test_single_commit_creates_new_version(self, client: TestClient, admin_headers):
         resp = _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
         assert resp.status_code == 200

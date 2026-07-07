@@ -153,7 +153,7 @@ class TestSourceMatch:
         assert m.value == ""
 
     def test_value_required_for_equals(self):
-        with pytest.raises(ValueError, match="match.value is required"):
+        with pytest.raises(ValueError, match="match\.value is required"):
             SourceMatch(field="_json.f", operator="includes", value="  ")
 
 

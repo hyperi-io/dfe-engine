@@ -6895,7 +6895,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema, adding one column\nper path with a ``@copy`` directive so dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
@@ -11034,6 +11034,18 @@
             "title": "Atomic",
             "description": "When true, all paths succeed or none commit; else best-effort",
             "default": true
+          },
+          "schema_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Path",
+            "description": "Meta-schema path when the source version has no meta_schema assigned (forbidden if meta_schema is already set on the source)"
           }
         },
         "type": "object",

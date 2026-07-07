@@ -395,6 +395,13 @@ class PromoteFieldRequest(BaseModel):
         default=True,
         description="When true, all paths succeed or none commit; else best-effort",
     )
+    schema_path: str | None = Field(
+        default=None,
+        description=(
+            "Meta-schema path when the source version has no meta_schema assigned "
+            "(forbidden if meta_schema is already set on the source)"
+        ),
+    )
 
     @model_validator(mode="after")
     def _validate_shape(self) -> PromoteFieldRequest:
@@ -1145,6 +1152,41 @@ def _resolve_source_meta_schema(source, schema_registry):
     return _resolve_meta_schema(rel, source.source, schema_registry)
 
 
+def _resolve_promote_meta_schema(
+    source,
+    ver,
+    schema_registry,
+    *,
+    schema_path: str | None = None,
+):
+    """Meta-schema for promote-field: source config or explicit ``schema_path`` in body."""
+    configured = ver.effective_schema().meta_schema
+    if schema_path and configured:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "schema_path_conflict",
+                "message": (
+                    f"Source '{source.source}' already has meta_schema {configured!r}; "
+                    "do not set schema_path in the request body"
+                ),
+            },
+        )
+    rel = configured or schema_path
+    if not rel:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "code": "no_meta_schema",
+                "message": (
+                    f"Source '{source.source}' has no meta_schema configured; "
+                    "provide schema_path in the request body"
+                ),
+            },
+        )
+    return _resolve_meta_schema(rel, source.source, schema_registry)
+
+
 def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
@@ -1401,8 +1443,9 @@ async def promote_field(
 ) -> PromoteFieldResponse:
     """Promote JSON path(s) into dedicated typed columns.
 
-    Creates a new schema version on the source's meta-schema, adding one column
-    per path with a ``@copy`` directive so dfe-loader copies the value forward.
+    Creates a new schema version on the source's meta-schema (or on ``schema_path``
+    when the source has none), adding one column per path with a ``@copy`` directive
+    so dfe-loader copies the value forward.
     ``?dry_run=true`` returns the proposed diff + DDL without committing.
     """
     from dfe_engine.schema.schema_manager import (
@@ -1427,7 +1470,10 @@ async def promote_field(
             detail={"code": "not_found", "message": f"Source '{source_name}' not found"},
         ) from None
 
-    canonical, meta, columns = _resolve_source_meta_schema(source, schema_registry)
+    _version_id, ver = _resolve_source_version(source, None, source_name)
+    canonical, meta, columns = _resolve_promote_meta_schema(
+        source, ver, schema_registry, schema_path=body.schema_path
+    )
 
     is_batch = isinstance(body.json_path, list)
     raw_paths = body.json_path if is_batch else [body.json_path]
@@ -1442,10 +1488,7 @@ async def promote_field(
     ]
 
     db = get_settings().clickhouse.effective_data_database
-    _version_id, ver = _resolve_source_version(source, None, source_name)
-    target_table, match_rule, _ = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
-    )
+    target_table, match_rule, _ = _discovery_target(source, ver, schema_registry, ch=ch, db=db)
     match_kw = _match_query_kwargs(match_rule)
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
