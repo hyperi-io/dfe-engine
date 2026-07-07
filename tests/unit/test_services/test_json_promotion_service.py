@@ -659,6 +659,36 @@ class TestSampleRows:
         )
         assert params == {"limit": 10, "match_value": "syslog"}
 
+    def test_exists_match_operator(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        sample_rows(
+            client,
+            db="dfe",
+            source="default",
+            match_field="_json.tags.type",
+            match_operator="exists",
+            limit=3,
+        )
+        sql, params = client.calls[0]
+        assert "isNotNull(assumeNotNull(_json).`tags.type`)" in sql
+        assert "notEmpty(toString(assumeNotNull(_json).`tags.type`))" in sql
+        assert params == {"limit": 3}
+
+    def test_includes_match_operator(self):
+        client = _SampleRowsClient(columns=["_json"], rows=[])
+        sample_rows(
+            client,
+            db="dfe",
+            source="default",
+            match_field="_json.message",
+            match_value="error",
+            match_operator="includes",
+            limit=5,
+        )
+        sql, params = client.calls[0]
+        assert "positionCaseInsensitive(toString(assumeNotNull(_json).`message`), {match_value:String})" in sql
+        assert params == {"limit": 5, "match_value": "error"}
+
     def test_empty_result_still_returns_columns(self):
         client = _SampleRowsClient(columns=["_json"], rows=[])
         columns, rows = sample_rows(client, db="dfe", source="syslog")

@@ -231,22 +231,45 @@ def _match_accessor(match_field: str) -> str:
 
 
 def _match_condition(
-    match_field: str | None, match_value: str | None
+    match_field: str | None,
+    match_value: str | None,
+    *,
+    match_operator: str = "equals",
 ) -> tuple[str, dict[str, Any]]:
     """SQL boolean condition + params restricting rows to one source's match rule.
 
     Returns ``("", {})`` when no match is supplied (the source owns its whole
-    table). Otherwise compares ``match_field`` to ``match_value`` as a string --
+    table). Otherwise compares ``match_field`` using ``match_operator`` --
     used when discovering against the shared catch-all landing table, where a
     source's rows are identified by its match. ``match_field`` is resolved by
     ``_match_accessor``: ``_json.<path>`` targets a JSON subcolumn, a bare name
-    targets a real column. The value is parameterised (injection-safe); the
+    targets a real column. Operands are parameterised (injection-safe); the
     field goes through ``_match_accessor`` which rejects backticks.
     """
-    if not (match_field and match_value):
+    if not match_field:
         return "", {}
     sub = _match_accessor(match_field)
-    return f"toString({sub}) = {{match_value:String}}", {"match_value": match_value}
+    op = match_operator or "equals"
+
+    if op == "exists":
+        return f"isNotNull({sub}) AND notEmpty(toString({sub}))", {}
+
+    if not match_value:
+        return "", {}
+
+    params = {"match_value": match_value}
+    expr = f"toString({sub})"
+    if op == "equals":
+        return f"{expr} = {{match_value:String}}", params
+    if op == "not_equals":
+        return f"{expr} != {{match_value:String}}", params
+    if op == "includes":
+        return f"positionCaseInsensitive({expr}, {{match_value:String}}) > 0", params
+    if op == "starts_with":
+        return f"startsWith({expr}, {{match_value:String}})", params
+    if op == "ends_with":
+        return f"endsWith({expr}, {{match_value:String}})", params
+    raise JsonPromotionError(f"Unsupported match operator: {op!r}")
 
 
 # ── Discovery (I/O) ──────────────────────────────────────────────────
@@ -260,6 +283,7 @@ def discover_paths(
     existing_columns: list[MetaSchemaColumn],
     match_field: str | None = None,
     match_value: str | None = None,
+    match_operator: str = "equals",
     paths: list[str] | None = None,
     samples: int | None = None,
     stats: bool = False,
@@ -278,7 +302,9 @@ def discover_paths(
     table = qualified_table(db, source)
     promoted = promoted_paths(existing_columns)
     existing_names = {col.name for col in existing_columns}
-    match_sql, match_params = _match_condition(match_field, match_value)
+    match_sql, match_params = _match_condition(
+        match_field, match_value, match_operator=match_operator
+    )
 
     sql = (
         f"SELECT tup.1 AS path, tup.2 AS type FROM {table} "
@@ -397,6 +423,7 @@ def sample_rows(
     source: str,
     match_field: str | None = None,
     match_value: str | None = None,
+    match_operator: str = "equals",
     limit: int = 10,
 ) -> tuple[list[str], list[dict[str, Any]]]:
     """Random sample rows from ``db.source``, scoped to a source's match rule.
@@ -416,7 +443,9 @@ def sample_rows(
             source table does not exist yet).
     """
     table = qualified_table(db, source)
-    match_sql, match_params = _match_condition(match_field, match_value)
+    match_sql, match_params = _match_condition(
+        match_field, match_value, match_operator=match_operator
+    )
     sql = f"SELECT * FROM {table} "
     if match_sql:
         sql += f"WHERE {match_sql} "

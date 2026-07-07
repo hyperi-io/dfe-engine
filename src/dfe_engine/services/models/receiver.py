@@ -142,7 +142,8 @@ class SourceMatchRule(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     field: str = Field(..., description="JSON field to inspect")
-    value: str = Field(..., description="Expected value (exact match)")
+    operator: str = Field(default="equals", description="Match operator (equals, exists, includes, …)")
+    value: str = Field(default="", description="Expected value / operand")
     topic: str = Field(..., description="Target Kafka topic")
 
 

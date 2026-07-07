@@ -363,6 +363,10 @@ class SampleRowsResponse(BaseModel):
         default=None,
         description="Match value rows were filtered on, or null for a whole-table sample.",
     )
+    match_operator: str | None = Field(
+        default=None,
+        description="Match operator used when filtering (equals, exists, includes, …).",
+    )
     columns: list[str] = Field(description="Column names present in the sampled rows.")
     rows: list[dict[str, Any]] = Field(
         description="Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
@@ -1152,21 +1156,38 @@ def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
     with ``meta_schema`` always targets ``db.<source>``.
 
     Returns:
-        ``(target_table, match_field, match_value, existing_columns)``.
+        ``(target_table, match_rule_or_none, existing_columns)``. ``match_rule_or_none``
+        is set when sampling/discovery runs on the landing table filtered by the
+        version's match; null when the dedicated source table is queried whole.
     """
     from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
 
     landing = get_settings().clickhouse.landing_table
-    match_field, match_value = ver.match.field, ver.match.value
+    match_rule = ver.match
     if ver.effective_schema().meta_schema:
         _canonical, _meta, columns = _resolve_meta_schema(
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
         target_table = source.table_name
         if ch is not None and db is not None and not clickhouse_table_exists(ch, db, target_table):
-            return landing, match_field, match_value, columns
-        return target_table, None, None, columns
-    return landing, match_field, match_value, []
+            return landing, match_rule, columns
+        return target_table, None, columns
+    return landing, match_rule, []
+
+
+def _match_query_kwargs(match_rule) -> dict[str, Any]:
+    """ClickHouse filter kwargs from a ``SourceMatch`` (or none for whole-table)."""
+    if match_rule is None:
+        return {
+            "match_field": None,
+            "match_value": None,
+            "match_operator": "equals",
+        }
+    return {
+        "match_field": match_rule.field,
+        "match_value": match_rule.value if match_rule.operator != "exists" else None,
+        "match_operator": match_rule.operator,
+    }
 
 
 def _resolve_source_version(source, version, source_name):
@@ -1240,9 +1261,10 @@ async def discover_json_paths(
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_field, match_value, columns = _discovery_target(
+    target_table, match_rule, columns = _discovery_target(
         source, ver, schema_registry, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     path_filter = [p.strip() for p in paths.split(",") if p.strip()] if paths else None
 
@@ -1252,11 +1274,10 @@ async def discover_json_paths(
             db=db,
             source=target_table,
             existing_columns=columns,
-            match_field=match_field,
-            match_value=match_value,
             paths=path_filter,
             samples=samples,
             stats=stats,
+            **match_kw,
         )
     except JsonPromotionError as exc:
         raise HTTPException(
@@ -1334,18 +1355,18 @@ async def sample_source_rows(
 
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_field, match_value, _columns = _discovery_target(
+    target_table, match_rule, _columns = _discovery_target(
         source, ver, schema_registry, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     try:
         columns, rows = sample_rows(
             ch,
             db=db,
             source=target_table,
-            match_field=match_field,
-            match_value=match_value,
             limit=limit,
+            **match_kw,
         )
     except JsonPromotionError as exc:
         raise HTTPException(
@@ -1356,8 +1377,9 @@ async def sample_source_rows(
     return SampleRowsResponse(
         source_name=source_name,
         table=f"{db}.{target_table}",
-        match_field=match_field,
-        match_value=match_value,
+        match_field=match_kw["match_field"],
+        match_value=match_kw["match_value"],
+        match_operator=match_kw["match_operator"] if match_rule is not None else None,
         columns=columns,
         rows=rows,
     )
@@ -1421,9 +1443,10 @@ async def promote_field(
 
     db = get_settings().clickhouse.effective_data_database
     _version_id, ver = _resolve_source_version(source, None, source_name)
-    target_table, match_field, match_value, _ = _discovery_target(
+    target_table, match_rule, _ = _discovery_target(
         source, ver, schema_registry, ch=ch, db=db
     )
+    match_kw = _match_query_kwargs(match_rule)
 
     # Discover ClickHouse types only when a request relies on auto-derivation.
     path_types: dict[str, list[str]] = {}
@@ -1434,9 +1457,8 @@ async def promote_field(
                 db=db,
                 source=target_table,
                 existing_columns=columns,
-                match_field=match_field,
-                match_value=match_value,
                 paths=[r.json_path for r in requests],
+                **match_kw,
             )
         except JsonPromotionError as exc:
             raise HTTPException(

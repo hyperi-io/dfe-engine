@@ -11995,6 +11995,18 @@
             "title": "Match Value",
             "description": "Match value rows were filtered on, or null for a whole-table sample."
           },
+          "match_operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Operator",
+            "description": "Match operator used when filtering (equals, exists, includes, \u2026)."
+          },
           "columns": {
             "items": {
               "type": "string"
@@ -12759,16 +12771,30 @@
             "title": "Field",
             "description": "Field to match on. Prefix with '_json.' to match a path inside the JSON column (e.g. '_json._source_fetcher'); a bare name matches a real top-level column (e.g. '_org_id')."
           },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "equals",
+              "not_equals",
+              "exists",
+              "includes",
+              "starts_with",
+              "ends_with"
+            ],
+            "title": "Operator",
+            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals",
+            "default": "equals"
+          },
           "value": {
             "type": "string",
             "title": "Value",
-            "description": "Expected value (exact match)"
+            "description": "Operand for the operator (not used when operator is ``exists``)",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
-          "field",
-          "value"
+          "field"
         ],
         "title": "SourceMatch",
         "description": "Receiver match rule \u2014 how the receiver identifies this source."
