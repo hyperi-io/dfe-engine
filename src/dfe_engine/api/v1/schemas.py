@@ -1359,23 +1359,38 @@ def _source_write_after_promote(
     )
 
 
-def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
+def _dedicated_source_table_ready(
+    source,
+    version_id: str,
+    *,
+    ch: Any | None,
+    db: str | None,
+    table: str,
+) -> bool:
+    """Whether ``version_id`` is deployed and its ClickHouse table is present."""
+    if source.deployed_version != version_id:
+        return False
+    if ch is None or db is None:
+        return True
+    from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
+
+    return clickhouse_table_exists(ch, db, table)
+
+
+def _discovery_target(source, ver, schema_registry, *, version_id: str, ch=None, db=None):
     """Resolve where to discover a source version's ``_json`` paths.
 
-    A version with a ``meta_schema`` owns its own table, so discovery targets
-    ``db.<source>`` with that schema's columns when that table exists in
-    ClickHouse. If the dedicated table is not materialized yet, discovery falls
-    back to ``db.<landing>`` filtered by the version's match rule (same as a
-    version without ``meta_schema``). When ``ch``/``db`` are omitted, a version
-    with ``meta_schema`` always targets ``db.<source>``.
+    A version with a ``meta_schema`` owns its own table once that version is
+    **deployed** and the table exists in ClickHouse. Until then (or when the
+    table is missing), discovery and sampling use ``db.<landing>`` filtered by
+    the version's match rule. When ``ch``/``db`` are omitted and the version is
+    deployed, a version with ``meta_schema`` targets ``db.<source>``.
 
     Returns:
         ``(target_table, match_rule_or_none, existing_columns)``. ``match_rule_or_none``
         is set when sampling/discovery runs on the landing table filtered by the
         version's match; null when the dedicated source table is queried whole.
     """
-    from dfe_engine.services.schema.json_promotion_service import clickhouse_table_exists
-
     landing = get_settings().clickhouse.landing_table
     match_rule = ver.match
     if ver.effective_schema().meta_schema:
@@ -1383,7 +1398,7 @@ def _discovery_target(source, ver, schema_registry, *, ch=None, db=None):
             ver.effective_schema().meta_schema, source.source, schema_registry
         )
         target_table = source.table_name
-        if ch is not None and db is not None and not clickhouse_table_exists(ch, db, target_table):
+        if not _dedicated_source_table_ready(source, version_id, ch=ch, db=db, table=target_table):
             return landing, match_rule, columns
         return target_table, None, columns
     return landing, match_rule, []
@@ -1450,10 +1465,9 @@ async def discover_json_paths(
     """Discover JSON paths inside a source's ``_json`` column.
 
     Resolves the requested ``version`` (or the source's current version). If that
-    version defines a ``meta_schema`` the source owns its own table and discovery
-    runs against ``db.<source>``. Otherwise the source's data still lives in the
-    shared catch-all landing table, so discovery runs against ``db.<landing>``
-    filtered by the version's match rule.
+    version defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;
+    until then discovery runs on ``db.<landing>`` filtered by the version's
+    match rule. Versions without ``meta_schema`` always use the landing table.
 
     Returns one record per path with observed types, a suggested column name,
     and whether the path is already promoted. ``?samples=N`` adds random
@@ -1476,7 +1490,7 @@ async def discover_json_paths(
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
     target_table, match_rule, columns = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
     match_kw = _match_query_kwargs(match_rule)
 
@@ -1545,10 +1559,9 @@ async def sample_source_rows(
     """Return random sample rows for a source, scoped to its match rule.
 
     Resolves the requested ``version`` (or the source's current version). A
-    version with a ``meta_schema`` owns its own table, so sampling runs against
-    ``db.<source>`` unfiltered. Otherwise the version's data still lives in the
-    shared catch-all landing table, so sampling runs against ``db.<landing>``
-    filtered by the version's match rule.
+    version with a ``meta_schema`` uses ``db.<source>`` only after that version
+    is deployed and the table exists; otherwise rows are read from
+    ``db.<landing>`` filtered by the version's match rule.
 
     Intended for inspecting real data while authoring a match condition or CEL
     before promoting any JSON path -- a row-level companion to the per-path
@@ -1570,7 +1583,7 @@ async def sample_source_rows(
     _version_id, ver = _resolve_source_version(source, version, source_name)
     db = get_settings().clickhouse.effective_data_database
     target_table, match_rule, _columns = _discovery_target(
-        source, ver, schema_registry, ch=ch, db=db
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
     )
     match_kw = _match_query_kwargs(match_rule)
 
@@ -1663,7 +1676,9 @@ async def promote_field(
     ]
 
     db = get_settings().clickhouse.effective_data_database
-    target_table, match_rule, _ = _discovery_target(source, ver, schema_registry, ch=ch, db=db)
+    target_table, match_rule, _ = _discovery_target(
+        source, ver, schema_registry, version_id=_version_id, ch=ch, db=db
+    )
     match_kw = _match_query_kwargs(match_rule)
 
     # Discover ClickHouse types only when a request relies on auto-derivation.

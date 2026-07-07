@@ -196,6 +196,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "enabled": True,
             "match": {"field": "_json.tags.collector.type", "value": VERSIONED_SOURCE},
             "current": "2.0.0",
+            "deployed_version": "2.0.0",
             "versions": {
                 "1.0.0": {"date_time": "2026-01-01"},
                 "2.0.0": {
@@ -390,6 +391,21 @@ class TestSampleRows:
             in sql
         )
         assert params["match_value"] == NOMETA_SOURCE
+
+    def test_meta_schema_undeployed_samples_landing(self, app, client, admin_headers):
+        db = get_settings().clickhouse.effective_data_database
+        landing = get_settings().clickhouse.landing_table
+        ch = _SampleClient(existing_tables={(db, PROMO_SOURCE)})
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["table"] == f"{db}.{landing}"
+        assert body["match_value"] == PROMO_SOURCE
+        sql, _params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
+        assert f"FROM `{db}`.`{landing}`" in sql
 
     def test_meta_schema_version_samples_whole_table(self, app, client, admin_headers):
         db = get_settings().clickhouse.effective_data_database
