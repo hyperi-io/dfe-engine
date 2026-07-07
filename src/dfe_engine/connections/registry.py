@@ -16,11 +16,9 @@ read-only ``dfe_analyst_ro``; org_analyst -> the row-filtered ``dfe_tenant_reade
 admin > data_analyst > data_analyst_ro > data_viewer > infra > infra_ro >
 org_analyst.
 
-Resolution is ALIAS-AWARE: every role is resolved through ``ROLE_ALIASES`` first,
-so a STALE pre-rename name (e.g. ``customer_viewer``) maps to its canonical target
-(``org_analyst`` -> ``tenant_reader``) instead of falling through to the admin
-``default`` fallback - the phase-1 gap where a stale customer_viewer would have
-been over-privileged to the admin connection.
+Resolution is EXACT-match on the current role names. Fail-CLOSED: a principal with
+no mapped role resolves to the most-restricted connection, never the admin
+``default`` (so an unknown/stale role can never be over-privileged to admin).
 
 Clients are lazily created on first use and cached for the lifetime
 of the registry.
@@ -33,7 +31,6 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.auth.models import AuthContext
-from dfe_engine.auth.roles import ROLE_ALIASES
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
 from dfe_engine.connections.tenant import TenantScopedClient
@@ -89,9 +86,8 @@ class ConnectionRegistry:
     def get_connection_name(self, auth: AuthContext) -> str:
         """Resolve the best connection name for this user's roles.
 
-        Alias-resolves every role (``ROLE_ALIASES``) first, then iterates roles in
-        precedence order and returns the connection mapped to the highest-privilege
-        role the user holds.
+        Iterates roles in precedence order and returns the connection mapped to the
+        highest-privilege role the user holds.
 
         Fail-CLOSED fallback: a principal with NO roles, or only unknown/unmapped
         roles, must NOT land on the admin ``default`` connection (unrestricted,
@@ -109,17 +105,16 @@ class ConnectionRegistry:
         Raises:
             KeyError: When no connection can be resolved for the principal.
         """
-        canonical = {ROLE_ALIASES.get(role, role) for role in auth.roles}
+        held = set(auth.roles)
         for role in _ROLE_PRECEDENCE:
-            if role in canonical and role in self._config.role_connections:
+            if role in held and role in self._config.role_connections:
                 return self._config.role_connections[role]
 
-        # Any non-precedence role with an explicit mapping (alias-resolved too),
-        # preserving the caller's role order for a deterministic pick.
+        # Any non-precedence role with an explicit mapping, preserving the caller's
+        # role order for a deterministic pick.
         for role in auth.roles:
-            resolved = ROLE_ALIASES.get(role, role)
-            if resolved in self._config.role_connections:
-                return self._config.role_connections[resolved]
+            if role in self._config.role_connections:
+                return self._config.role_connections[role]
 
         # No role matched: the LOWEST-privilege mapped connection, never admin.
         for role in reversed(_ROLE_PRECEDENCE):

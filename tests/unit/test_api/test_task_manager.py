@@ -121,7 +121,7 @@ class TestTaskList:
             return "ok"
 
         manager.submit("hunt:execute", noop)
-        manager.submit("pipeline:build", noop)
+        manager.submit("sampler:sample", noop)
         await asyncio.sleep(0.1)
 
         hunts = manager.list(kind="hunt:execute")

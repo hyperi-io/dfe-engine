@@ -80,7 +80,7 @@ class TaskInfo(BaseModel):
     """Public view of a task."""
 
     id: str = Field(description="Unique task ID (UUID)")
-    kind: str = Field(description="Task kind (e.g. 'hunt:execute', 'pipeline:generate')")
+    kind: str = Field(description="Task kind (e.g. 'hunt:execute', 'sampler:sample')")
     status: TaskStatus
     created_at: str = Field(description="ISO 8601 creation time")
     started_at: str | None = None

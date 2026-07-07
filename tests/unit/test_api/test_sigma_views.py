@@ -79,7 +79,7 @@ def test_crud_roundtrip(client, app, admin_headers, tmp_path):
 
     listing = client.get("/api/v1/sigma/views", headers=admin_headers)
     assert listing.status_code == 200
-    rows = {r["source_name"]: r for r in listing.json()}
+    rows = {r["source_name"]: r for r in listing.json()["items"]}
     assert rows["windows_audit"]["column_count"] == 3
     assert rows["windows_audit"]["json_derived_count"] == 2
 

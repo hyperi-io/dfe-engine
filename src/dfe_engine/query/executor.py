@@ -22,10 +22,9 @@ import time
 import uuid
 from typing import Any
 
+from dfe_engine.auth.models import AuthContext, AuthorizationError
 from dfe_engine.query.catalog import RESERVED_PARAMS, ViewCatalog
 from dfe_engine.query.models import (
-    AuthContext,
-    AuthorizationError,
     QueryMetadata,
     QueryOptions,
     ViewDefinition,

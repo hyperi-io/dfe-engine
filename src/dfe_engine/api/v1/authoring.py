@@ -61,8 +61,11 @@ def _module(request: Request, module_type: AIModuleType):
 
 
 class FromHyperdxRequest(BaseModel):
-    query: str
-    time_fields: list[str] | None = None
+    query: str = Field(description="HyperDX query text to convert into a hunt rule")
+    time_fields: list[str] | None = Field(
+        default=None,
+        description="Time-bound field names to strip (auto-detected when omitted)",
+    )
 
 
 @router.post("/from-hyperdx", dependencies=[_READ])
@@ -72,10 +75,15 @@ async def from_hyperdx(body: FromHyperdxRequest, user: CurrentUser) -> dict[str,
 
 
 class ScaffoldRequest(BaseModel):
-    table: str
-    columns: list[str] = Field(default_factory=list)
-    source: str | None = None
-    limit: int = 100
+    table: str = Field(description="Target table the SELECT reads from")
+    columns: list[str] = Field(
+        default_factory=list,
+        description="Column names to project (defaults to discovered columns)",
+    )
+    source: str | None = Field(
+        default=None, description="Source label to scope discovered columns to"
+    )
+    limit: int = Field(default=100, description="Row limit for the generated SELECT")
 
 
 @router.post("/scaffold", dependencies=[_READ])
@@ -87,12 +95,16 @@ async def scaffold(body: ScaffoldRequest, user: CurrentUser) -> dict[str, str]:
 
 
 class ReviewRequest(BaseModel):
-    sql: str
-    execution_profile: dict[str, Any] = Field(default_factory=dict)
+    sql: str = Field(description="SQL query to review")
+    execution_profile: dict[str, Any] = Field(
+        default_factory=dict,
+        description="Optional execution stats (row counts, timings) to inform the review",
+    )
 
 
 @router.post("/ai/review", dependencies=[_READ])
 async def ai_review(body: ReviewRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """AI-review a SQL query for correctness and performance (QueryOptimiser)."""
     mod = _module(request, AIModuleType.QUERY_OPTIMISER)
     return mod.get_result(
         mod.submit(QueryOptimiser.Input(query=body.sql, execution_profile=body.execution_profile))
@@ -100,13 +112,19 @@ async def ai_review(body: ReviewRequest, user: CurrentUser, request: Request) ->
 
 
 class CreateRequest(BaseModel):
-    prompt: str
-    source_name: str | None = None
-    columns: list[dict[str, Any]] = Field(default_factory=list)
+    prompt: str = Field(description="Natural-language description of the query to generate")
+    source_name: str | None = Field(
+        default=None, description="Source to target the generated query at"
+    )
+    columns: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Available columns (name/type dicts) to ground the generation",
+    )
 
 
 @router.post("/ai/create", dependencies=[_READ])
 async def ai_create(body: CreateRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """Generate a SQL query from a natural-language prompt (QueryGenerator)."""
     mod = _module(request, AIModuleType.QUERY_GENERATOR)
     return mod.get_result(
         mod.submit(
@@ -118,12 +136,15 @@ async def ai_create(body: CreateRequest, user: CurrentUser, request: Request) ->
 
 
 class VrlRequest(BaseModel):
-    samples: list[str]
-    source_hint: str | None = None
+    samples: list[str] = Field(description="Sample raw log lines to derive a VRL parser from")
+    source_hint: str | None = Field(
+        default=None, description="Optional source/format hint to guide parsing"
+    )
 
 
 @router.post("/ai/generate-vrl", dependencies=[_READ])
 async def ai_generate_vrl(body: VrlRequest, user: CurrentUser, request: Request) -> AIModuleResult:
+    """Generate a VRL parser from sample log lines (LogParser)."""
     mod = _module(request, AIModuleType.LOG_PARSER)
     return mod.get_result(
         mod.submit(LogParser.Input(samples=body.samples, source_hint=body.source_hint))
@@ -131,15 +152,21 @@ async def ai_generate_vrl(body: VrlRequest, user: CurrentUser, request: Request)
 
 
 class SchemaSuggestRequest(BaseModel):
-    source_name: str
-    source_schema: dict[str, Any] = Field(default_factory=dict)
-    query_patterns: list[str] = Field(default_factory=list)
+    source_name: str = Field(description="Source whose schema to optimise")
+    source_schema: dict[str, Any] = Field(
+        default_factory=dict, description="Current source schema (column definitions)"
+    )
+    query_patterns: list[str] = Field(
+        default_factory=list,
+        description="Representative query patterns to optimise the schema for",
+    )
 
 
 @router.post("/ai/suggest-schema", dependencies=[_READ])
 async def ai_suggest_schema(
     body: SchemaSuggestRequest, user: CurrentUser, request: Request
 ) -> AIModuleResult:
+    """Suggest meta-schema column promotions from a source schema (SchemaOptimiser)."""
     mod = _module(request, AIModuleType.SCHEMA_OPTIMISER)
     return mod.get_result(
         mod.submit(

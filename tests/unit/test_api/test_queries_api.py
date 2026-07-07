@@ -116,7 +116,7 @@ def test_lifespan_wires_view_executor_and_lists_views(app, fake_ch, admin_header
         assert app.state.view_executor is not None
         r = client.get("/api/v1/queries/views", headers=admin_headers)
         assert r.status_code == 200, r.text
-        labels = [v["label"] for v in r.json()]
+        labels = [v["label"] for v in r.json()["items"]]
         assert "analytics/events" in labels
         # auto_bootstrap (default True) applied the builtin views at startup
         assert any(cmd.lstrip().upper().startswith("CREATE") for cmd in admin.commands)

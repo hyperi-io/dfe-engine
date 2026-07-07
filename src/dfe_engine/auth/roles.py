@@ -52,19 +52,6 @@ _HYPERDX_ACCESS_RANK: dict[str, int] = {
     "none": 3,
 }
 
-# One-release back-compat migration shim (old role name -> new). Group YAMLs,
-# JWTs and connection maps authored before the 2026-07 role rename may still
-# carry the OLD names; _lookup() falls back through this map so an old reference
-# still resolves the NEW role's grants. Literal names always win, so a config
-# that genuinely (re)defines a role under an old name is unaffected. Remove once
-# downstream group configs have been migrated to the new names.
-ROLE_ALIASES: dict[str, str] = {
-    "infra_admin": "infra",
-    "infra_viewer": "infra_ro",
-    "data_analyst_viewer": "data_analyst_ro",
-    "customer_viewer": "org_analyst",
-}
-
 _BUILTIN_CORE_ROLE_NAMES: frozenset[str] | None = None
 
 
@@ -185,20 +172,8 @@ class RoleConfig:
         self.roles = roles
 
     def _lookup(self, role_name: str) -> RoleDefinition | None:
-        """Resolve a role name to its definition, honouring back-compat aliases.
-
-        Literal names win: a config that still defines a role under an old name
-        keeps working unchanged. Only when the literal name is absent do we fall
-        back through ROLE_ALIASES (old -> new), so a group or JWT that still
-        references a pre-rename name resolves the renamed role's grants.
-        """
-        role = self.roles.get(role_name)
-        if role is not None:
-            return role
-        aliased = ROLE_ALIASES.get(role_name)
-        if aliased is not None:
-            return self.roles.get(aliased)
-        return None
+        """Resolve a role name to its definition (exact match, no aliasing)."""
+        return self.roles.get(role_name)
 
     def has_permission(self, role_name: str, action: str) -> bool:
         """Check whether a single role grants the given action.
@@ -249,8 +224,8 @@ class RoleConfig:
     def hyperdx_for(self, role_name: str) -> HyperdxAccess | None:
         """Return a role's declared HyperDX capability, or None if undeclared.
 
-        Honours ROLE_ALIASES. A role that ships no ``hyperdx:`` block returns
-        None, which the cumulative resolver treats as access="none".
+        A role that ships no ``hyperdx:`` block returns None, which the
+        cumulative resolver treats as access="none".
         """
         role = self._lookup(role_name)
         if role is None:

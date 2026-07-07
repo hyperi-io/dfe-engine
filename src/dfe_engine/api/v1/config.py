@@ -17,6 +17,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from pydantic import BaseModel
 
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
+
 router = APIRouter(prefix="/config", tags=["Client Config"])
 
 
@@ -32,7 +34,7 @@ class ClientConfig(BaseModel):
     features: dict[str, bool] = {}
 
 
-@router.get("/client", response_model=ClientConfig)
+@router.get("/client", response_model=ClientConfig, openapi_extra=CLI_HIDDEN)
 async def client_config(request: Request) -> ClientConfig:
     """Runtime config for the web UI (no secrets)."""
     settings = request.app.state.settings

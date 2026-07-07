@@ -33,6 +33,7 @@ from dfe_engine.api.deps import (
     check_action,
     require_action,
 )
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
 from dfe_engine.api.task_manager import TaskInfo, TaskManager, TaskStatus
 from dfe_engine.auth import AuthContext
 from dfe_engine.auth.audit import audit_resource_change
@@ -167,7 +168,12 @@ async def get_sample(task_id: str, request: Request, user: CurrentUser) -> Sampl
     return _to_response(info)
 
 
-@router.get("/samples", response_model=list[TaskInfo], dependencies=[_READ])
-async def list_samples(request: Request, user: CurrentUser) -> list[TaskInfo]:
-    """List recent sample tasks (most recent first)."""
-    return _task_manager(request).list(kind="sampler:sample")
+@router.get("/samples", response_model=PaginatedResponse[TaskInfo], dependencies=[_READ])
+async def list_samples(
+    request: Request,
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[TaskInfo]:
+    """List recent sample tasks (most recent first), paginated."""
+    items = _task_manager(request).list(kind="sampler:sample")
+    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)

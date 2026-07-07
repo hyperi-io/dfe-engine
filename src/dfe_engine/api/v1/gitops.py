@@ -147,10 +147,19 @@ def _entry_model(e: LogEntry) -> LogEntryModel:
 async def get_log(
     user: CurrentUser,
     request: Request,
-    limit: int = Query(default=50, ge=1, le=500),
-    before: str | None = Query(default=None),
-    group_by: str | None = Query(default=None, pattern="^(scope|actor|type|day)$"),
-    applied_revision: str | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500, description="Max entries per page (1-500)"),
+    before: str | None = Query(
+        default=None, description="Pagination cursor: return entries older than this SHA"
+    ),
+    group_by: str | None = Query(
+        default=None,
+        pattern="^(scope|actor|type|day)$",
+        description="Bucket the page by scope, actor, type, or day",
+    ),
+    applied_revision: str | None = Query(
+        default=None,
+        description="Argo-synced SHA; marks each entry applied vs pending (else all committed)",
+    ),
 ) -> LogResponse | GroupedLogResponse:
     """Gitcrud audit log: every governed-ops git change, newest-first.
 

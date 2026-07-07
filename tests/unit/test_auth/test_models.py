@@ -77,19 +77,3 @@ class TestAuthorizationError:
     def test_is_exception(self):
         with pytest.raises(AuthorizationError):
             raise AuthorizationError("access denied")
-
-
-class TestBackwardCompat:
-    """Verify that query.models still re-exports auth types."""
-
-    def test_authcontext_from_query_models(self):
-        from dfe_engine.query.models import AuthContext as QAuthContext
-
-        ctx = QAuthContext(org_id="acme", user_id="bob")
-        assert ctx.org_id == "acme"
-
-    def test_authorizationerror_from_query_models(self):
-        from dfe_engine.query.models import AuthorizationError as QAuthError
-
-        with pytest.raises(QAuthError):
-            raise QAuthError("denied")

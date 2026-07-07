@@ -105,30 +105,23 @@ class TestConnectionNameResolution:
         assert ConnectionRegistry(config).get_connection_name(auth) == "tenant_reader"
 
 
-class TestAliasAwareResolution:
-    """A STALE pre-rename role must resolve through ROLE_ALIASES to its canonical
-    connection, NEVER fall through to the admin `default` fallback (phase-1 gap)."""
+class TestStaleRoleFailsClosed:
+    """The pre-rename aliases were removed (no deprecation tail before GA). An
+    unknown or STALE role name now resolves fail-CLOSED to the most-restricted
+    connection, and is NEVER over-privileged to the admin `default`."""
 
-    def test_stale_customer_viewer_maps_to_tenant_reader(self) -> None:
-        # customer_viewer -> org_analyst -> tenant_reader (row-filtered), NOT default.
-        assert _name(["customer_viewer"]) == "tenant_reader"
+    @pytest.mark.parametrize(
+        "stale", ["customer_viewer", "data_analyst_viewer", "infra_admin", "infra_viewer"]
+    )
+    def test_stale_role_fails_closed_to_most_restricted(self, stale: str) -> None:
+        # Unknown role -> the lowest-privilege mapped connection (tenant_reader,
+        # row-filtered), never admin. This is STRICTER than the old alias behaviour
+        # (a stale infra_admin used to reach the admin connection - it no longer does).
+        assert _name([stale]) == "tenant_reader"
+        assert _name([stale]) != "default"
 
-    def test_stale_customer_viewer_not_over_privileged_to_admin(self) -> None:
-        # The exact bug this closes: a lone stale customer_viewer must not land on
-        # the admin `default` connection.
-        assert _name(["customer_viewer"]) != "default"
-
-    def test_stale_data_analyst_viewer_maps_to_analyst_ro(self) -> None:
-        assert _name(["data_analyst_viewer"]) == "analyst_ro"
-
-    def test_stale_infra_admin_maps_to_default(self) -> None:
-        assert _name(["infra_admin"]) == "default"
-
-    def test_stale_infra_viewer_maps_to_analyst_ro(self) -> None:
-        assert _name(["infra_viewer"]) == "analyst_ro"
-
-    def test_alias_and_canonical_together_pick_highest(self) -> None:
-        # A stale customer_viewer alongside admin still yields admin's connection.
+    def test_real_role_alongside_stale_wins(self) -> None:
+        # A real role next to a stale one still uses the real role's connection.
         assert _name(["customer_viewer", "admin"]) == "default"
 
 

@@ -16,11 +16,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 # =============================================================================
-# Exceptions — re-exported from auth.models for backward compat
-# =============================================================================
-from dfe_engine.auth.models import AuthorizationError as AuthorizationError
-
-# =============================================================================
 # Query Request Models (Client -> Server)
 # =============================================================================
 
@@ -183,14 +178,6 @@ class ExplainPlan(BaseModel):
         """Serialise to dict for JSON responses."""
         return self.model_dump(mode="json")
 
-
-# =============================================================================
-# Auth Context Models
-# =============================================================================
-
-
-# AuthContext moved to auth.models — re-export for backward compat
-from dfe_engine.auth.models import AuthContext as AuthContext
 
 # =============================================================================
 # Parameterized View Models

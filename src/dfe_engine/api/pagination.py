@@ -220,8 +220,22 @@ def apply_search(
 def apply_sort(
     items: list[dict[str, Any]], sort_by: str | None, sort_order: str = "asc"
 ) -> list[dict[str, Any]]:
-    """Sort list of dicts by key. None-safe."""
+    """Sort list of dicts by key. None-safe and type-agnostic.
+
+    Any field is orderable deterministically: the key is ``(value is None,
+    str(value))`` so None sorts consistently (after present values) and a
+    bool/list/dict field compares by its string form rather than raising
+    ``TypeError: '<' not supported`` when a page mixes str with bool/list -
+    which used to 500 on e.g. ``sort_by=enabled`` (bool) or ``sort_by=org_ids``
+    (list). Normal string fields (name, updated_at) sort exactly as before,
+    since ``str(s) == s``.
+    """
     if not sort_by:
         return items
     descending = sort_order in ("desc", "descend")
-    return sorted(items, key=lambda x: x.get(sort_by) or "", reverse=descending)
+
+    def _key(x: dict[str, Any]) -> tuple[bool, str]:
+        value = x.get(sort_by)
+        return (value is None, str(value))
+
+    return sorted(items, key=_key, reverse=descending)

@@ -106,7 +106,7 @@ class TestListOrgs:
     def test_list_empty_returns_empty(self, client, admin_headers):
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_list_returns_created_orgs(self, client, admin_headers):
         client.post(
@@ -121,7 +121,7 @@ class TestListOrgs:
         )
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        names = {o["name"] for o in resp.json()}
+        names = {o["name"] for o in resp.json()["items"]}
         assert names == {"acme", "beta"}
 
     def test_list_viewer_can_read(self, client, admin_headers, viewer_headers):
@@ -132,7 +132,32 @@ class TestListOrgs:
         )
         resp = client.get("/api/v1/orgs", headers=viewer_headers)
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        assert resp.json()["total"] == 1
+
+    def test_list_sort_by_bool_field(self, client, admin_headers):
+        # sort_by a non-string (bool) field must not 500 on the mixed-type key
+        # (regression: apply_sort used to raise TypeError on '<' for bool/str).
+        client.post("/api/v1/orgs", json={"name": "acme"}, headers=admin_headers)
+        client.post("/api/v1/orgs", json={"name": "beta"}, headers=admin_headers)
+        resp = client.get("/api/v1/orgs?sort_by=enabled", headers=admin_headers)
+        assert resp.status_code == 200
+        assert {o["name"] for o in resp.json()["items"]} == {"acme", "beta"}
+
+    def test_list_sort_by_list_field(self, client, admin_headers):
+        # sort_by a list field (org_ids) is deterministic, not a 500.
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "acme", "org_ids": ["1", "2"]},
+            headers=admin_headers,
+        )
+        client.post(
+            "/api/v1/orgs",
+            json={"name": "beta", "org_ids": ["3"]},
+            headers=admin_headers,
+        )
+        resp = client.get("/api/v1/orgs?sort_by=org_ids", headers=admin_headers)
+        assert resp.status_code == 200
+        assert {o["name"] for o in resp.json()["items"]} == {"acme", "beta"}
 
 
 # ---------------------------------------------------------------------------

@@ -1,17 +1,17 @@
 {{- if and .Values.huntRunner.enabled .Values.huntRunner.keda.enabled }}
-{{- $db := .Values.config.clickhouse.data_database | default .Values.config.clickhouse.database }}
 # KEDA scales the hunt runner on the deterministic-due backlog.
 #
-# NOTE: KEDA has NO native ClickHouse scaler, so we use the MySQL scaler against
-# ClickHouse's MySQL-compatible interface (`mysql_port`, default 9004). The query is
-# still ClickHouse SQL, executed by CH - this keeps KEDA reading CH DIRECTLY (no
-# engine on the scaling path). Requirements + caveats:
-#   - ClickHouse must have `mysql_port` enabled.
-#   - `query` MUST match `schedule.due_query(db)` (a unit test pins its clauses;
-#     keep the two in step).
-#   - Confirm the MySQL-scaler metadata field names against the deployed KEDA
-#     version when wiring this in dfe-infra (host/port/username/dbName are the
-#     common set; some versions differ).
+# KEDA has NO native ClickHouse scaler. Rather than open a CH wire port
+# (mysql_port / postgresql_port) purely so KEDA can count rows - a shared-infra +
+# security-surface change for one workload - we use KEDA's stock metrics-api scaler
+# against the engine's own /api/v1/system/hunts-due endpoint: the engine ALREADY
+# holds the CH connection and is the authority on what is due, so it runs the
+# deterministic due-query (schedule.due_query(db) - a unit test pins its clauses)
+# and returns {"due": N}. No CH port, no Prometheus, no custom scaler.
+#
+# Auth: KEDA sends an engine API key (scope hunt:read) as the X-API-Key header.
+# Provision that key + store it in the referenced secret. Confirm the metrics-api
+# apiKey `method`/`keyParamName` field names against the deployed KEDA version.
 apiVersion: keda.sh/v1alpha1
 kind: TriggerAuthentication
 metadata:
@@ -20,9 +20,9 @@ metadata:
     {{- include "dfe-engine.labels" . | nindent 4 }}
 spec:
   secretTargetRef:
-    - parameter: password
-      name: {{ include "dfe-engine.clickhouseSecretName" . }}
-      key: {{ .Values.clickhouse.secretKeys.password }}
+    - parameter: apiKey
+      name: {{ .Values.huntRunner.keda.apiKeySecretName | default (include "dfe-engine.fullname" .) }}
+      key: {{ .Values.huntRunner.keda.apiKeySecretKey }}
 ---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
@@ -39,33 +39,22 @@ spec:
   pollingInterval: {{ .Values.huntRunner.keda.pollingInterval }}
   cooldownPeriod: {{ .Values.huntRunner.keda.cooldownPeriod }}
   triggers:
-    - type: mysql
+    - type: metrics-api
       metadata:
-        host: {{ .Values.config.clickhouse.host | quote }}
-        port: {{ .Values.huntRunner.keda.mysqlPort | quote }}
-        dbName: {{ $db | quote }}
-        username: {{ .Values.config.clickhouse.username | quote }}
-        # scale up when the due backlog reaches this many hunts; desiredReplicas =
-        # ceil(due / queryValue), so this is also "hunts per worker".
-        queryValue: {{ .Values.huntRunner.keda.queryValue | quote }}
-        # Activate from zero whenever due > 0. KEDA activates on
-        # metric > activationValue (STRICTLY), so this MUST be 0 - "1" would need
-        # due >= 2, and a single due hunt would never wake a worker. Proven in the
+        url: "http://{{ include "dfe-engine.fullname" . }}:{{ .Values.service.port }}/api/v1/system/hunts-due"
+        # GJSON path into {"due": N}.
+        valueLocation: "due"
+        # Scale out when the due backlog reaches this many hunts;
+        # desiredReplicas = ceil(due / targetValue), so this is "hunts per worker".
+        targetValue: {{ .Values.huntRunner.keda.queryValue | quote }}
+        # Activate from zero whenever due > 0. KEDA activates on metric >
+        # activationTargetValue (STRICTLY), so this MUST be 0 - "1" would need
+        # due >= 2 and a single due hunt would never wake a worker. Proven in the
         # Phase C scratch-cluster KEDA scale test (0 -> 1 -> 0).
-        activationQueryValue: "0"
-        query: >-
-          SELECT count() AS due FROM (SELECT hunt_id, interval_seconds, phase_offset
-          FROM (SELECT hunt_id, argMax(interval_seconds, updated) AS interval_seconds,
-          argMax(phase_offset, updated) AS phase_offset, argMax(enabled, updated) AS
-          enabled FROM `{{ $db }}`.hunt_schedule GROUP BY hunt_id) WHERE enabled = 1) s
-          LEFT JOIN (SELECT hunt_id, argMax(watermark, updated) AS wm FROM
-          `{{ $db }}`.hunt_watermark GROUP BY hunt_id) w USING (hunt_id) LEFT JOIN
-          (SELECT hunt_id, argMax(lease_until, claimed) AS lu FROM `{{ $db }}`.hunt_lease
-          GROUP BY hunt_id) l USING (hunt_id) WHERE toInt64(now()) >=
-          (intDiv(toInt64(now()), s.interval_seconds) * s.interval_seconds +
-          s.phase_offset) AND coalesce(w.wm, 0) < (intDiv(toInt64(now()),
-          s.interval_seconds) * s.interval_seconds + s.phase_offset) AND
-          coalesce(l.lu, 0) <= toInt64(now())
+        activationTargetValue: "0"
+        authMode: "apiKey"
+        method: "header"
+        keyParamName: "X-API-Key"
       authenticationRef:
         name: {{ include "dfe-engine.fullname" . }}-hunt-runner-auth
 {{- end }}

@@ -80,7 +80,7 @@ class TestListAccounts:
     def test_list_accounts(self, client, admin_headers):
         resp = client.get("/api/v1/auth/accounts", headers=admin_headers)
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         assert isinstance(data, list)
         # At minimum, admin account exists from bootstrap
         assert any(a["username"] == "admin" for a in data)

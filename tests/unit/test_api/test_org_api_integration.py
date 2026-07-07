@@ -60,8 +60,8 @@ class TestOrgApiWithLifecycle:
         )
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        orgs = resp.json()
-        # The list endpoint returns a plain array (not paginated)
+        orgs = resp.json()["items"]
+        # The list endpoint returns a paginated envelope; items is the array
         assert isinstance(orgs, list)
         names = [o["name"] for o in orgs]
         assert "list-test" in names

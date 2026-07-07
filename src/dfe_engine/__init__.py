@@ -12,7 +12,6 @@ Modules:
     source      — Source model, type registry, source registry
     schema      — Schema v2 YAML→DDL pipeline
     clickhouse  — ClickHouse client management
-    pipeline    — Vector pipeline generation
     hunts       — Hunt scheduling and execution
     sigma       — Sigma rule conversion and field mapping
     services    — Service config registry and source routing

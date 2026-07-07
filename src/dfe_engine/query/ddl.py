@@ -20,6 +20,11 @@ from dfe_engine.query.catalog import VIEW_PREFIX
 # Directory containing builtin .sql view definitions
 BUILTIN_VIEWS_DIR = Path(__file__).parent / "builtin_views"
 
+# The overall-ingest-throughput view. Engine-GENERATED (not a static .sql) because
+# it must merge() over exactly the _timestamp_load-bearing data tables, whose set is
+# dynamic - see DDLManager.apply_throughput_view.
+_THROUGHPUT_VIEW = "dfe_v_overview_ingest_rows_bytes"
+
 
 class DDLManager:
     """Manages ClickHouse parameterized-view DDL (apply / diff / drop).
@@ -126,6 +131,8 @@ class DDLManager:
 
         for sql_file in sorted(BUILTIN_VIEWS_DIR.glob("*.sql")):
             name = sql_file.stem  # e.g. dfe_v_system_health
+            if name == _THROUGHPUT_VIEW:
+                continue  # engine-generated below (the static single-table form is retired)
             sql = sql_file.read_text()
 
             try:
@@ -134,8 +141,80 @@ class DDLManager:
             except Exception:
                 logger.exception(f"Failed to apply builtin view: {sql_file.name}")
 
+        # The overall-throughput view is ENGINE-GENERATED (see below), applied after
+        # the static ones so it reflects the current source-table set. A live-sensing
+        # failure here must not sink the static views.
+        try:
+            if self.apply_throughput_view():
+                applied.append(_THROUGHPUT_VIEW)
+        except Exception:
+            logger.exception("Failed to apply generated throughput view")
+
         logger.info(f"Applied {len(applied)} builtin views")
         return applied
+
+    def apply_throughput_view(self) -> bool:
+        """Create the overall-ingest-throughput view (rows + approx bytes per time
+        bucket) over EVERY ``_timestamp_load``-bearing table in the data database.
+
+        Generated, NOT a static ``.sql``, on purpose: the data database holds the
+        landing table + per-source data tables (all with ``_timestamp_load``) AND
+        the hunt coordination tables (``hunt_lease``/``hunt_watermark``/
+        ``hunt_state``/``hunt_schedule``, ``detection_checkpoint``) which do NOT.
+        A ``merge(db, '.*')`` therefore ERRORS (a merged table lacks the column,
+        code 10), and source-table names are arbitrary (= the source label), so no
+        static regex catches exactly the data tables. So we SENSE the
+        ``_timestamp_load`` tables from ``system.columns`` and ``merge()`` over an
+        anchored alternation of exactly those - regenerated on each apply pass, so a
+        newly promoted source appears the next time views are applied.
+
+        Returns True when the view was created, False when there is no
+        ``_timestamp_load`` table yet (nothing to aggregate - skip, don't error).
+        """
+        tables = self._timestamp_load_tables()
+        if not tables:
+            logger.info("Throughput view skipped: no _timestamp_load tables yet")
+            return False
+        self.apply_view(_THROUGHPUT_VIEW, self._render_throughput_sql(tables))
+        return True
+
+    def _timestamp_load_tables(self) -> list[str]:
+        """Data-db table names that carry ``_timestamp_load`` (landing + sources)."""
+        result = self._client.query(
+            "SELECT table FROM system.columns "
+            "WHERE database = {db:String} AND name = '_timestamp_load' ORDER BY table",
+            parameters={"db": self._database},
+        )
+        return [row[0] for row in result.result_rows]
+
+    @staticmethod
+    def _render_throughput_sql(tables: list[str]) -> str:
+        """The parameterised throughput view over ``merge()`` of exactly ``tables``.
+
+        The ``{db}`` token + the CREATE head are qualified by ``apply_view``. Table
+        names are regex-escaped and anchored (``^(...)$``) so only those exact
+        tables merge - the coordination tables never match. ``re.escape`` neutralises
+        regex metachars but NOT the SQL ``'`` that delimits the merge() pattern
+        literal, and ``_timestamp_load_tables()`` reads EVERY table (not only
+        validated source names), so a quote-bearing table name from out-of-band DDL
+        could break out of the literal - double each single quote for the SQL string
+        (belt-and-braces on top of the regex escape).
+        """
+        import re
+
+        alternation = "|".join(re.escape(t).replace("'", "''") for t in tables)
+        return (
+            f"CREATE OR REPLACE VIEW {_THROUGHPUT_VIEW} AS\n"
+            "SELECT\n"
+            "    toStartOfInterval(_timestamp_load, INTERVAL {bucket_minutes:UInt32} MINUTE) AS bucket,\n"
+            "    count() AS rows,\n"
+            "    sum(length(coalesce(_raw, ''))) AS approx_bytes\n"
+            f"FROM merge({{db}}, '^({alternation})$')\n"
+            "WHERE _timestamp_load >= {time_from:DateTime64(3)}\n"
+            "  AND _timestamp_load < {time_to:DateTime64(3)}\n"
+            "GROUP BY bucket\n"
+            "ORDER BY bucket"
+        )
 
     def diff_views(self) -> dict[str, list[str]]:
         """Compare builtin .sql files against live views in ClickHouse.

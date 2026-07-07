@@ -20,7 +20,6 @@ from dfe_engine.api.v1.hunts import router as hunts_router
 from dfe_engine.api.v1.lifecycle import router as lifecycle_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
-from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
 from dfe_engine.api.v1.repository import router as repository_router
 from dfe_engine.api.v1.roles import router as roles_router
@@ -60,7 +59,6 @@ v1_router.include_router(transforms_router)
 v1_router.include_router(hunts_router)
 v1_router.include_router(queries_router)
 v1_router.include_router(sampler_router)
-v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
 v1_router.include_router(discovery_router)
 v1_router.include_router(schemas_router)

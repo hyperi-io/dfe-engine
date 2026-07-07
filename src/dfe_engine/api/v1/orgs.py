@@ -23,11 +23,17 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth import Scope
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -134,13 +140,17 @@ async def create_org(
 
 @router.get(
     "",
-    response_model=list[OrgResponse],
+    response_model=PaginatedResponse[OrgResponse],
 )
 async def list_orgs(
     user: CurrentUser,
     request: Request,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in org name/display name"),
+    sort_by: str | None = Query(None, description="Sort field (name, display_name, updated_at)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List organisations visible to the caller.
+    """List organisations visible to the caller, paginated.
 
     System-scope org:read holders see every org; org-scope holders see
     only the orgs their grants cover.
@@ -149,14 +159,31 @@ async def list_orgs(
 
     registry: OrgRegistry = request.app.state.org_registry
     if is_action_allowed(request, user, scopes_dict["org_read"]):
-        return [_org_response(o) for o in registry.list()]
-    return [
-        _org_response(o)
-        for o in registry.list()
-        if is_action_allowed(
-            request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
-        )
+        visible = list(registry.list())
+    else:
+        visible = [
+            o
+            for o in registry.list()
+            if is_action_allowed(
+                request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
+            )
+        ]
+    rows = [
+        {
+            "name": o.name,
+            "display_name": o.display_name,
+            "org_ids": o.org_ids,
+            "domains": o.domains,
+            "enabled": o.enabled,
+            "created_at": o.created_at,
+            "updated_at": o.updated_at,
+        }
+        for o in visible
     ]
+    rows = apply_search(rows, search, ["name", "display_name"])
+    rows = apply_sort(rows, sort_by, sort_order)
+    summaries = [OrgResponse(**row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.get(

@@ -46,6 +46,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -72,6 +75,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -135,24 +141,40 @@
       }
     },
     "/api/v1/auth/accounts": {
-      "get": {
+      "post": {
         "tags": [
           "Accounts"
         ],
-        "summary": "List Accounts",
-        "description": "List all accounts (admin only). No password hashes returned.",
-        "operationId": "list_accounts_api_v1_auth_accounts_get",
+        "summary": "Create Account",
+        "description": "Create a new local user account (admin only).",
+        "operationId": "create_account_api_v1_auth_accounts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AccountResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Accounts Api V1 Auth Accounts Get"
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -164,30 +186,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Accounts"
         ],
-        "summary": "Create Account",
-        "description": "Create a new local user account (admin only).",
-        "operationId": "create_account_api_v1_auth_accounts_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAccountRequest"
-              }
+        "summary": "List Accounts",
+        "description": "List accounts (admin only), paginated. No password hashes returned.",
+        "operationId": "list_accounts_api_v1_auth_accounts_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in username",
+              "title": "Search"
+            },
+            "description": "Search in username"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (username, created_at, updated_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (username, created_at, updated_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_AccountResponse_"
                 }
               }
             }
@@ -410,24 +493,40 @@
       }
     },
     "/api/v1/auth/groups": {
-      "get": {
+      "post": {
         "tags": [
           "Groups"
         ],
-        "summary": "List Groups",
-        "description": "List groups visible to the caller (own memberships + scope grants).",
-        "operationId": "list_groups_api_v1_auth_groups_get",
+        "summary": "Create Group",
+        "description": "Create a new RBAC group at a scope.",
+        "operationId": "create_group_api_v1_auth_groups_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/GroupResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Groups Api V1 Auth Groups Get"
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -439,30 +538,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Groups"
         ],
-        "summary": "Create Group",
-        "description": "Create a new RBAC group at a scope.",
-        "operationId": "create_group_api_v1_auth_groups_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateGroupRequest"
-              }
+        "summary": "List Groups",
+        "description": "List groups visible to the caller (own memberships + scope grants), paginated.",
+        "operationId": "list_groups_api_v1_auth_groups_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in group name/description",
+              "title": "Search"
+            },
+            "description": "Search in group name/description"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, scope)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, scope)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroupResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_GroupResponse_"
                 }
               }
             }
@@ -744,24 +904,40 @@
       }
     },
     "/api/v1/auth/api-keys": {
-      "get": {
+      "post": {
         "tags": [
           "API Keys"
         ],
-        "summary": "List Api Keys",
-        "description": "List all API keys (admin only). No key hashes or full keys returned.",
-        "operationId": "list_api_keys_api_v1_auth_api_keys_get",
+        "summary": "Create Api Key",
+        "description": "Create a new API key (admin only). Returns the full key exactly once.",
+        "operationId": "create_api_key_api_v1_auth_api_keys_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAPIKeyRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/APIKeyResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Api Keys Api V1 Auth Api Keys Get"
+                  "$ref": "#/components/schemas/APIKeyCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -773,30 +949,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "API Keys"
         ],
-        "summary": "Create Api Key",
-        "description": "Create a new API key (admin only). Returns the full key exactly once.",
-        "operationId": "create_api_key_api_v1_auth_api_keys_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAPIKeyRequest"
-              }
+        "summary": "List Api Keys",
+        "description": "List API keys (admin only), paginated. No key hashes or full keys returned.",
+        "operationId": "list_api_keys_api_v1_auth_api_keys_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in key name/description",
+              "title": "Search"
+            },
+            "description": "Search in key name/description"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, created_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, created_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIKeyCreatedResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_APIKeyResponse_"
                 }
               }
             }
@@ -1245,24 +1482,40 @@
       }
     },
     "/api/v1/auth/oidc-providers": {
-      "get": {
+      "post": {
         "tags": [
           "OIDC Providers"
         ],
-        "summary": "List Providers",
-        "description": "List all OIDC providers (admin only).",
-        "operationId": "list_providers_api_v1_auth_oidc_providers_get",
+        "summary": "Create Provider",
+        "description": "Create a new OIDC provider configuration (admin only).",
+        "operationId": "create_provider_api_v1_auth_oidc_providers_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ProviderResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Providers Api V1 Auth Oidc Providers Get"
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1274,30 +1527,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "OIDC Providers"
         ],
-        "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).",
-        "operationId": "create_provider_api_v1_auth_oidc_providers_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProviderRequest"
-              }
+        "summary": "List Providers",
+        "description": "List OIDC providers (admin only), paginated.",
+        "operationId": "list_providers_api_v1_auth_oidc_providers_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in provider name/display name",
+              "title": "Search"
+            },
+            "description": "Search in provider name/display name"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, type, created_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, type, created_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_ProviderResponse_"
                 }
               }
             }
@@ -1567,24 +1881,40 @@
       }
     },
     "/api/v1/orgs": {
-      "get": {
+      "post": {
         "tags": [
           "Organisations"
         ],
-        "summary": "List Orgs",
-        "description": "List organisations visible to the caller.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
-        "operationId": "list_orgs_api_v1_orgs_get",
+        "summary": "Create Org",
+        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
+        "operationId": "create_org_api_v1_orgs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/OrgResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Orgs Api V1 Orgs Get"
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1596,30 +1926,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Organisations"
         ],
-        "summary": "Create Org",
-        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
-        "operationId": "create_org_api_v1_orgs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateOrgRequest"
-              }
+        "summary": "List Orgs",
+        "description": "List organisations visible to the caller, paginated.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
+        "operationId": "list_orgs_api_v1_orgs_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in org name/display name",
+              "title": "Search"
+            },
+            "description": "Search in org name/display name"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, display_name, updated_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, display_name, updated_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrgResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_OrgResponse_"
                 }
               }
             }
@@ -4720,6 +5111,117 @@
         ]
       }
     },
+    "/api/v1/system/clickhouse-cloud": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Status",
+        "description": "CH Cloud service control-plane status (read-only).",
+        "operationId": "clickhouse_cloud_status_api_v1_system_clickhouse_cloud_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clickhouse-cloud/start": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Start",
+        "description": "Start (wake) the CH Cloud service. BILLABLE + admin-gated + audited.",
+        "operationId": "clickhouse_cloud_start_api_v1_system_clickhouse_cloud_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clickhouse-cloud/stop": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Stop",
+        "description": "Stop the CH Cloud service (saves cost). Admin-gated + audited.",
+        "operationId": "clickhouse_cloud_stop_api_v1_system_clickhouse_cloud_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/hunts-due": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Hunts Due",
+        "description": "The deterministic hunt backlog count - the hunt-runner autoscaling metric.\n\nKEDA's stock ``metrics-api`` scaler polls this (``valueLocation: due``) to scale\nthe hunt-runner, so KEDA NEVER needs a ClickHouse wire port (no ``mysql_port`` /\n``postgresql_port`` on CH) and no extra scaler component: the engine already\nholds the CH HTTP connection and is the authority on what is due, so it just\nruns the deterministic due-query and returns the count. Fails SAFE to ``due=0``\non a transient CH error - a scaling metric must never spuriously scale UP (or\nblock scale-to-zero) because the count call blipped.",
+        "operationId": "hunts_due_api_v1_system_hunts_due_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HuntsDueResponse"
+                }
+              }
+            }
+          }
+        },
+        "x-cli": {
+          "enabled": false
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/transforms/compile": {
       "post": {
         "tags": [
@@ -5201,7 +5703,7 @@
           "queries"
         ],
         "summary": "List Views",
-        "description": "List available parameterized views.",
+        "description": "List available parameterized views, paginated.",
         "operationId": "list_views_api_v1_queries_views_get",
         "parameters": [
           {
@@ -5221,6 +5723,27 @@
               "title": "Namespace"
             },
             "description": "Filter by namespace"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
           }
         ],
         "responses": {
@@ -5229,11 +5752,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ViewDefinition"
-                  },
-                  "title": "Response List Views Api V1 Queries Views Get"
+                  "$ref": "#/components/schemas/PaginatedResponse_ViewDefinition_"
                 }
               }
             }
@@ -5433,6 +5952,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -5599,87 +6121,38 @@
           "sampler"
         ],
         "summary": "List Samples",
-        "description": "List recent sample tasks (most recent first).",
+        "description": "List recent sample tasks (most recent first), paginated.",
         "operationId": "list_samples_api_v1_samples_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/TaskInfo"
-                  },
-                  "type": "array",
-                  "title": "Response List Samples Api V1 Samples Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
+        "parameters": [
           {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/pipeline/templates": {
-      "get": {
-        "tags": [
-          "pipeline"
-        ],
-        "summary": "List Templates",
-        "description": "List available Vector pipeline templates.",
-        "operationId": "list_templates_api_v1_pipeline_templates_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/PipelineTemplate"
-                  },
-                  "type": "array",
-                  "title": "Response List Templates Api V1 Pipeline Templates Get"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ]
-      }
-    },
-    "/api/v1/pipeline/build": {
-      "post": {
-        "tags": [
-          "pipeline"
-        ],
-        "summary": "Build Pipeline",
-        "description": "Trigger pipeline manifest generation.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``.",
-        "operationId": "build_pipeline_api_v1_pipeline_build_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/PipelineBuildRequest"
-              }
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "202": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/PipelineBuildResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_TaskInfo_"
                 }
               }
             }
@@ -5708,7 +6181,7 @@
           "tasks"
         ],
         "summary": "List Tasks",
-        "description": "List all tasks, optionally filtered by kind.",
+        "description": "List tasks (most recent first), optionally filtered by kind, paginated.",
         "operationId": "list_tasks_api_v1_tasks_get",
         "parameters": [
           {
@@ -5728,6 +6201,27 @@
               "title": "Kind"
             },
             "description": "Filter by task kind"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
           }
         ],
         "responses": {
@@ -5736,11 +6230,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/TaskInfo"
-                  },
-                  "title": "Response List Tasks Api V1 Tasks Get"
+                  "$ref": "#/components/schemas/PaginatedResponse_TaskInfo_"
                 }
               }
             }
@@ -7146,19 +7636,48 @@
           "sigma"
         ],
         "summary": "List Sigma View Definitions",
-        "description": "List the sources that have a stored Sigma view definition.",
+        "description": "List the sources that have a stored Sigma view definition, paginated.",
         "operationId": "list_sigma_view_definitions_api_v1_sigma_views_get",
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SigmaViewSummary"
-                  },
-                  "title": "Response List Sigma View Definitions Api V1 Sigma Views Get"
+                  "$ref": "#/components/schemas/PaginatedResponse_SigmaViewSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -7459,8 +7978,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource product (e.g. windows, aws)",
               "title": "Product"
-            }
+            },
+            "description": "Sigma logsource product (e.g. windows, aws)"
           },
           {
             "name": "category",
@@ -7475,8 +7996,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource category (e.g. process_creation)",
               "title": "Category"
-            }
+            },
+            "description": "Sigma logsource category (e.g. process_creation)"
           },
           {
             "name": "service",
@@ -7491,8 +8014,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource service (e.g. sysmon, security)",
               "title": "Service"
-            }
+            },
+            "description": "Sigma logsource service (e.g. sysmon, security)"
           }
         ],
         "responses": {
@@ -9020,6 +9545,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "List Actions",
+        "description": "List the names of defined governance actions.",
         "operationId": "list_actions_api_v1_governance_actions_get",
         "responses": {
           "200": {
@@ -9050,6 +9576,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Get Action",
+        "description": "Get one defined action's full definition.",
         "operationId": "get_action_api_v1_governance_actions__name__get",
         "parameters": [
           {
@@ -9115,9 +9642,11 @@
             "required": false,
             "schema": {
               "type": "boolean",
+              "description": "Preview the diff without committing to gitops",
               "default": false,
               "title": "Dry Run"
-            }
+            },
+            "description": "Preview the diff without committing to gitops"
           }
         ],
         "responses": {
@@ -9155,6 +9684,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Create Action",
+        "description": "Create or replace a defined action (admin).",
         "operationId": "create_action_api_v1_governance_admin_actions_post",
         "requestBody": {
           "content": {
@@ -9201,6 +9731,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Delete Action",
+        "description": "Delete a defined action (admin).",
         "operationId": "delete_action_api_v1_governance_admin_actions__name__delete",
         "parameters": [
           {
@@ -9241,6 +9772,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Create Policy",
+        "description": "Create or replace a protected-var policy (admin).",
         "operationId": "create_policy_api_v1_governance_admin_policies_post",
         "requestBody": {
           "content": {
@@ -9287,6 +9819,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Delete Policy",
+        "description": "Delete a protected-var policy (admin).",
         "operationId": "delete_policy_api_v1_governance_admin_policies__name__delete",
         "parameters": [
           {
@@ -9327,7 +9860,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Reconcile Ch Rbac Endpoint",
-        "description": "Reconcile CH quota tiers + service roles + fixed users + the per-table\nDFE_current_tenant_id row policies into ClickHouse, minting the service + fixed\nuser secrets via the secrets seam. Idempotent. governance:write.",
+        "description": "Reconcile CH quota tiers + service roles + fixed users + the per-table\nSQL_current_tenant_id row policies into ClickHouse, minting the service + fixed\nuser secrets via the secrets seam. Idempotent. governance:write.",
         "operationId": "reconcile_ch_rbac_endpoint_api_v1_governance_ch_rbac_reconcile_post",
         "responses": {
           "200": {
@@ -9439,9 +9972,11 @@
               "type": "integer",
               "maximum": 500,
               "minimum": 1,
+              "description": "Max entries per page (1-500)",
               "default": 50,
               "title": "Limit"
-            }
+            },
+            "description": "Max entries per page (1-500)"
           },
           {
             "name": "before",
@@ -9456,8 +9991,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Pagination cursor: return entries older than this SHA",
               "title": "Before"
-            }
+            },
+            "description": "Pagination cursor: return entries older than this SHA"
           },
           {
             "name": "group_by",
@@ -9473,8 +10010,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Bucket the page by scope, actor, type, or day",
               "title": "Group By"
-            }
+            },
+            "description": "Bucket the page by scope, actor, type, or day"
           },
           {
             "name": "applied_revision",
@@ -9489,8 +10028,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Argo-synced SHA; marks each entry applied vs pending (else all committed)",
               "title": "Applied Revision"
-            }
+            },
+            "description": "Argo-synced SHA; marks each entry applied vs pending (else all committed)"
           }
         ],
         "responses": {
@@ -9725,6 +10266,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Review",
+        "description": "AI-review a SQL query for correctness and performance (QueryOptimiser).",
         "operationId": "ai_review_api_v1_authoring_ai_review_post",
         "requestBody": {
           "content": {
@@ -9771,6 +10313,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Create",
+        "description": "Generate a SQL query from a natural-language prompt (QueryGenerator).",
         "operationId": "ai_create_api_v1_authoring_ai_create_post",
         "requestBody": {
           "content": {
@@ -9817,6 +10360,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Generate Vrl",
+        "description": "Generate a VRL parser from sample log lines (LogParser).",
         "operationId": "ai_generate_vrl_api_v1_authoring_ai_generate_vrl_post",
         "requestBody": {
           "content": {
@@ -9863,6 +10407,7 @@
           "Rules: Authoring"
         ],
         "summary": "Ai Suggest Schema",
+        "description": "Suggest meta-schema column promotions from a source schema (SchemaOptimiser).",
         "operationId": "ai_suggest_schema_api_v1_authoring_ai_suggest_schema_post",
         "requestBody": {
           "content": {
@@ -9922,6 +10467,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -9988,6 +10536,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -10058,6 +10609,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -10131,6 +10685,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -10221,6 +10778,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -10287,6 +10847,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -10313,6 +10876,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -11206,6 +11772,45 @@
         "type": "object",
         "title": "ClientConfig"
       },
+      "CloudServiceStateResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "Whether the CH Cloud control-plane key is set."
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "CH Cloud service id.",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "CH Cloud service name.",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "running / stopped / idle / starting / stopping / ...",
+            "default": ""
+          },
+          "is_running": {
+            "type": "boolean",
+            "title": "Is Running",
+            "description": "True when the service is running.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "title": "CloudServiceStateResponse",
+        "description": "CH Cloud service control-plane state (see docs/CLICKHOUSE-CLOUD.md)."
+      },
       "ColumnInfo": {
         "properties": {
           "name": {
@@ -11249,7 +11854,8 @@
               "go",
               "assemblyscript"
             ],
-            "title": "Language"
+            "title": "Language",
+            "description": "Source language: rust, go, or assemblyscript"
           },
           "files": {
             "additionalProperties": {
@@ -11570,7 +12176,8 @@
         "properties": {
           "prompt": {
             "type": "string",
-            "title": "Prompt"
+            "title": "Prompt",
+            "description": "Natural-language description of the query to generate"
           },
           "source_name": {
             "anyOf": [
@@ -11581,7 +12188,8 @@
                 "type": "null"
               }
             ],
-            "title": "Source Name"
+            "title": "Source Name",
+            "description": "Source to target the generated query at"
           },
           "columns": {
             "items": {
@@ -11589,7 +12197,8 @@
               "type": "object"
             },
             "type": "array",
-            "title": "Columns"
+            "title": "Columns",
+            "description": "Available columns (name/type dicts) to ground the generation"
           }
         },
         "type": "object",
@@ -12195,7 +12804,8 @@
         "properties": {
           "query": {
             "type": "string",
-            "title": "Query"
+            "title": "Query",
+            "description": "HyperDX query text to convert into a hunt rule"
           },
           "time_fields": {
             "anyOf": [
@@ -12209,7 +12819,8 @@
                 "type": "null"
               }
             ],
-            "title": "Time Fields"
+            "title": "Time Fields",
+            "description": "Time-bound field names to strip (auto-detected when omitted)"
           }
         },
         "type": "object",
@@ -12961,6 +13572,20 @@
         ],
         "title": "HuntWriteRequest",
         "description": "Hunt scheduler payload for create/update (without hunt file ``name``)."
+      },
+      "HuntsDueResponse": {
+        "properties": {
+          "due": {
+            "type": "integer",
+            "title": "Due",
+            "description": "Count of hunts due to run now (the KEDA scaling metric)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "due"
+        ],
+        "title": "HuntsDueResponse"
       },
       "HyperDXConfig": {
         "properties": {
@@ -13929,6 +14554,138 @@
         ],
         "title": "OrphanedGroupInfo"
       },
+      "PaginatedResponse_APIKeyResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/APIKeyResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[APIKeyResponse]"
+      },
+      "PaginatedResponse_AccountResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[AccountResponse]"
+      },
       "PaginatedResponse_AlertDestinationSummary_": {
         "properties": {
           "items": {
@@ -14259,6 +15016,72 @@
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
       },
+      "PaginatedResponse_GroupResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[GroupResponse]"
+      },
       "PaginatedResponse_HuntSummary_": {
         "properties": {
           "items": {
@@ -14324,6 +15147,138 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[HuntSummary]"
+      },
+      "PaginatedResponse_OrgResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrgResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[OrgResponse]"
+      },
+      "PaginatedResponse_ProviderResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[ProviderResponse]"
       },
       "PaginatedResponse_RoleResponse_": {
         "properties": {
@@ -14522,6 +15477,204 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[ServiceConfigSummary]"
+      },
+      "PaginatedResponse_SigmaViewSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SigmaViewSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SigmaViewSummary]"
+      },
+      "PaginatedResponse_TaskInfo_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/TaskInfo"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[TaskInfo]"
+      },
+      "PaginatedResponse_ViewDefinition_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ViewDefinition"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[ViewDefinition]"
       },
       "PaginatedSchemaSummaryResponse": {
         "properties": {
@@ -14736,79 +15889,6 @@
           "permissions"
         ],
         "title": "PermissionsResponse"
-      },
-      "PipelineBuildRequest": {
-        "properties": {
-          "config_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Config Path",
-            "description": "Path to dfe_package.yaml (uses default if not provided)"
-          },
-          "output_path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Output Path",
-            "description": "Output directory for rendered manifests"
-          },
-          "build_core": {
-            "type": "boolean",
-            "title": "Build Core",
-            "description": "Build core templates (vs custom only)",
-            "default": false
-          }
-        },
-        "type": "object",
-        "title": "PipelineBuildRequest",
-        "description": "Request to build pipeline manifests."
-      },
-      "PipelineBuildResponse": {
-        "properties": {
-          "task_id": {
-            "type": "string",
-            "title": "Task Id",
-            "description": "Task ID for polling via /tasks/{task_id}"
-          }
-        },
-        "type": "object",
-        "required": [
-          "task_id"
-        ],
-        "title": "PipelineBuildResponse",
-        "description": "Response from triggering a pipeline build."
-      },
-      "PipelineTemplate": {
-        "properties": {
-          "type": {
-            "type": "string",
-            "title": "Type",
-            "description": "Template type (core, custom)"
-          },
-          "name": {
-            "type": "string",
-            "title": "Name",
-            "description": "Template filename"
-          }
-        },
-        "type": "object",
-        "required": [
-          "type",
-          "name"
-        ],
-        "title": "PipelineTemplate",
-        "description": "A discovered pipeline template."
       },
       "PreferencesResponse": {
         "properties": {
@@ -15624,12 +16704,14 @@
         "properties": {
           "sql": {
             "type": "string",
-            "title": "Sql"
+            "title": "Sql",
+            "description": "SQL query to review"
           },
           "execution_profile": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Execution Profile"
+            "title": "Execution Profile",
+            "description": "Optional execution stats (row counts, timings) to inform the review"
           }
         },
         "type": "object",
@@ -16487,14 +17569,16 @@
         "properties": {
           "table": {
             "type": "string",
-            "title": "Table"
+            "title": "Table",
+            "description": "Target table the SELECT reads from"
           },
           "columns": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Columns"
+            "title": "Columns",
+            "description": "Column names to project (defaults to discovered columns)"
           },
           "source": {
             "anyOf": [
@@ -16505,11 +17589,13 @@
                 "type": "null"
               }
             ],
-            "title": "Source"
+            "title": "Source",
+            "description": "Source label to scope discovered columns to"
           },
           "limit": {
             "type": "integer",
             "title": "Limit",
+            "description": "Row limit for the generated SELECT",
             "default": 100
           }
         },
@@ -16692,19 +17778,22 @@
         "properties": {
           "source_name": {
             "type": "string",
-            "title": "Source Name"
+            "title": "Source Name",
+            "description": "Source whose schema to optimise"
           },
           "source_schema": {
             "additionalProperties": true,
             "type": "object",
-            "title": "Source Schema"
+            "title": "Source Schema",
+            "description": "Current source schema (column definitions)"
           },
           "query_patterns": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Query Patterns"
+            "title": "Query Patterns",
+            "description": "Representative query patterns to optimise the schema for"
           }
         },
         "type": "object",
@@ -18368,7 +19457,7 @@
           "kind": {
             "type": "string",
             "title": "Kind",
-            "description": "Task kind (e.g. 'hunt:execute', 'pipeline:generate')"
+            "description": "Task kind (e.g. 'hunt:execute', 'sampler:sample')"
           },
           "status": {
             "$ref": "#/components/schemas/TaskStatus"
@@ -19140,7 +20229,8 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Samples"
+            "title": "Samples",
+            "description": "Sample raw log lines to derive a VRL parser from"
           },
           "source_hint": {
             "anyOf": [
@@ -19151,7 +20241,8 @@
                 "type": "null"
               }
             ],
-            "title": "Source Hint"
+            "title": "Source Hint",
+            "description": "Optional source/format hint to guide parsing"
           }
         },
         "type": "object",

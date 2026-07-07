@@ -4,11 +4,10 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from dfe_engine.auth.models import AuthContext, AuthorizationError
 from dfe_engine.query.catalog import ViewCatalog
 from dfe_engine.query.executor import ViewExecutionError, ViewExecutor
 from dfe_engine.query.models import (
-    AuthContext,
-    AuthorizationError,
     QueryOptions,
     ViewDefinition,
     ViewParameter,

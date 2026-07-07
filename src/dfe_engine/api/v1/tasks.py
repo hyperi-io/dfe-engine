@@ -8,7 +8,7 @@
 
 """Tasks router — status polling and SSE streaming for background tasks.
 
-Tasks are created by other routers (hunts, pipeline) via the TaskManager.
+Tasks are created by other routers (hunts, sampler, sigma) via the TaskManager.
 This router only provides read access + cancel.
 """
 
@@ -21,6 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sse_starlette.sse import EventSourceResponse
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
 from dfe_engine.api.task_manager import TaskInfo, TaskManager
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -33,17 +34,19 @@ def _get_task_manager(request: Request) -> TaskManager:
 
 @router.get(
     "",
-    response_model=list[TaskInfo],
+    response_model=PaginatedResponse[TaskInfo],
     dependencies=[Depends(require_action(scopes_dict["task_read"]))],
 )
 async def list_tasks(
     request: Request,
     user: CurrentUser,
+    pagination: PaginationParams = Depends(),
     kind: str | None = Query(None, description="Filter by task kind"),
-) -> list[TaskInfo]:
-    """List all tasks, optionally filtered by kind."""
+) -> PaginatedResponse[TaskInfo]:
+    """List tasks (most recent first), optionally filtered by kind, paginated."""
     manager = _get_task_manager(request)
-    return manager.list(kind=kind)
+    items = manager.list(kind=kind)
+    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
 
 
 @router.get(

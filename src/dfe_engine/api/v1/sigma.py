@@ -196,13 +196,16 @@ async def get_field_mappings(
 # sigma:read (reads) / sigma:write (mutations); gitops must be enabled (else 503).
 
 
-@router.get("/views", response_model=list[SigmaViewSummary], dependencies=[_READ])
+@router.get("/views", response_model=PaginatedResponse[SigmaViewSummary], dependencies=[_READ])
 async def list_sigma_view_definitions(
-    request: Request, user: CurrentUser
-) -> list[SigmaViewSummary]:
-    """List the sources that have a stored Sigma view definition."""
+    request: Request,
+    user: CurrentUser,
+    pagination: PaginationParams = Depends(),
+) -> PaginatedResponse[SigmaViewSummary]:
+    """List the sources that have a stored Sigma view definition, paginated."""
     store = SigmaViewStore(_gitcrud(request))
-    return [SigmaViewSummary(**row) for row in store.summaries()]
+    items = [SigmaViewSummary(**row) for row in store.summaries()]
+    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
 
 
 @router.get("/views/{source_name}", response_model=SigmaViewDefinition, dependencies=[_READ])
@@ -312,9 +315,13 @@ async def generate_all_sigma_views(
 async def find_sources_for_logsource(
     request: Request,
     user: CurrentUser,
-    product: str | None = Query(None),
-    category: str | None = Query(None),
-    service: str | None = Query(None),
+    product: str | None = Query(None, description="Sigma logsource product (e.g. windows, aws)"),
+    category: str | None = Query(
+        None, description="Sigma logsource category (e.g. process_creation)"
+    ),
+    service: str | None = Query(
+        None, description="Sigma logsource service (e.g. sysmon, security)"
+    ),
     _auth: None = Depends(require_action(scopes_dict["sigma_read"])),
 ) -> list[LogsourceMatch]:
     """Find sources matching a Sigma logsource selector."""

@@ -79,9 +79,6 @@ scopes_dict = {
     "org_read": "org:read",
     "org_write": "org:write",
     "org_delete": "org:delete",
-    # pipeline
-    "pipeline_read": "pipeline:read",
-    "pipeline_write": "pipeline:write",
     # query
     "query_read": "query:read",
     "query_execute": "query:execute",

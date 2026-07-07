@@ -83,20 +83,32 @@ class TestListProviders:
     def test_list_empty(self, client, admin_headers):
         resp = client.get("/api/v1/auth/oidc-providers", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_list_after_create(self, client, admin_headers):
         _create_provider(client, admin_headers, name="prov-a")
         _create_provider(client, admin_headers, name="prov-b")
         resp = client.get("/api/v1/auth/oidc-providers", headers=admin_headers)
         assert resp.status_code == 200
-        names = [p["name"] for p in resp.json()]
+        names = [p["name"] for p in resp.json()["items"]]
         assert "prov-a" in names
         assert "prov-b" in names
 
     def test_list_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/oidc-providers", headers=viewer_headers)
         assert resp.status_code == 403
+
+    def test_list_sort_by_nested_object_field(self, client, admin_headers):
+        # sort_by the nested `groups` object must not 500 (regression: apply_sort
+        # raised TypeError comparing dict/str). Deterministic order, 200 back.
+        _create_provider(client, admin_headers, name="prov-a")
+        _create_provider(client, admin_headers, name="prov-b")
+        resp = client.get("/api/v1/auth/oidc-providers?sort_by=groups", headers=admin_headers)
+        assert resp.status_code == 200
+        names = {p["name"] for p in resp.json()["items"]}
+        assert {"prov-a", "prov-b"} <= names
+        # The nested groups object is still reconstructed correctly.
+        assert all(isinstance(p["groups"], dict) for p in resp.json()["items"])
 
 
 class TestGetProvider:

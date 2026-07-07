@@ -68,7 +68,7 @@ class TestOrgGroupVisibility:
     def test_admin_sees_all_groups_with_scope(self, scoped_setup, admin_headers):
         resp = scoped_setup.get(GROUPS, headers=admin_headers)
         assert resp.status_code == 200
-        by_name = {g["name"]: g for g in resp.json()}
+        by_name = {g["name"]: g for g in resp.json()["items"]}
         assert by_name["acme-analysts"]["scope"] == "org:acme"
         assert by_name["dfe-admins"]["scope"] == "system"
         assert "globex-analysts" in by_name
@@ -76,7 +76,7 @@ class TestOrgGroupVisibility:
     def test_member_sees_only_own_groups(self, scoped_setup, api_settings):
         resp = scoped_setup.get(GROUPS, headers=_headers(api_settings, "orguser"))
         assert resp.status_code == 200
-        assert [g["name"] for g in resp.json()] == ["acme-analysts"]
+        assert [g["name"] for g in resp.json()["items"]] == ["acme-analysts"]
 
     def test_org_group_invisible_cross_org(self, scoped_setup, api_settings):
         headers = _headers(api_settings, "orgadmin")
@@ -90,7 +90,7 @@ class TestOrgGroupVisibility:
     def test_org_admin_sees_own_org_groups(self, scoped_setup, api_settings):
         resp = scoped_setup.get(GROUPS, headers=_headers(api_settings, "orgadmin"))
         assert resp.status_code == 200
-        names = {g["name"] for g in resp.json()}
+        names = {g["name"] for g in resp.json()["items"]}
         assert names == {"acme-admins", "acme-analysts"}
 
 
@@ -148,7 +148,7 @@ class TestOrgReads:
     def test_org_admin_lists_only_own_org(self, scoped_setup, api_settings):
         resp = scoped_setup.get(ORGS, headers=_headers(api_settings, "orgadmin"))
         assert resp.status_code == 200
-        assert [o["name"] for o in resp.json()] == ["acme"]
+        assert [o["name"] for o in resp.json()["items"]] == ["acme"]
 
     def test_org_admin_reads_own_org_not_others(self, scoped_setup, api_settings):
         headers = _headers(api_settings, "orgadmin")
@@ -159,7 +159,7 @@ class TestOrgReads:
         # data_analyst_ro (system scope via dfe-viewers) carries org:read
         resp = scoped_setup.get(ORGS, headers=viewer_headers)
         assert resp.status_code == 200
-        assert {o["name"] for o in resp.json()} == {"acme", "globex"}
+        assert {o["name"] for o in resp.json()["items"]} == {"acme", "globex"}
 
 
 class TestScopeValidation:
@@ -183,4 +183,4 @@ class TestScopeValidation:
         # dfe-viewers roles carry no group:read - visibility is membership only.
         resp = scoped_setup.get(GROUPS, headers=viewer_headers)
         assert resp.status_code == 200
-        assert [g["name"] for g in resp.json()] == ["dfe-viewers"]
+        assert [g["name"] for g in resp.json()["items"]] == ["dfe-viewers"]

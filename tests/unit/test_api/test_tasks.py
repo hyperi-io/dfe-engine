@@ -6,11 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tests for Phase 3 operational routers: tasks, hunts, queries, pipeline."""
+"""Tests for Phase 3 operational routers: tasks, hunts, queries."""
 
 from __future__ import annotations
-
-import time
 
 
 class TestTasksRouter:
@@ -19,7 +17,7 @@ class TestTasksRouter:
     def test_list_empty(self, client, admin_headers):
         resp = client.get("/api/v1/tasks", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_get_nonexistent_returns_404(self, client, admin_headers):
         resp = client.get("/api/v1/tasks/nonexistent-id", headers=admin_headers)
@@ -33,7 +31,7 @@ class TestTasksRouter:
     def test_list_filtered_by_kind_empty(self, client, admin_headers):
         resp = client.get("/api/v1/tasks?kind=hunt:execute", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_stream_nonexistent_returns_404(self, client, admin_headers):
         resp = client.get("/api/v1/tasks/nonexistent-id/stream", headers=admin_headers)
@@ -277,41 +275,4 @@ class TestQueriesRouter:
 
     def test_requires_auth_for_views(self, client):
         resp = client.get("/api/v1/queries/views")
-        assert resp.status_code == 401
-
-
-class TestPipelineRouter:
-    """GET/POST /api/v1/pipeline endpoints."""
-
-    def test_list_templates(self, client, admin_headers):
-        """Returns list (possibly empty) without error."""
-        resp = client.get("/api/v1/pipeline/templates", headers=admin_headers)
-        assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
-
-    def test_build_returns_202(self, client, admin_headers):
-        """Build request returns 202 with task_id."""
-        resp = client.post(
-            "/api/v1/pipeline/build",
-            json={"build_core": False},
-            headers=admin_headers,
-        )
-        assert resp.status_code == 202
-        data = resp.json()
-        assert "task_id" in data
-        assert len(data["task_id"]) > 0
-
-        task_id = data["task_id"]
-        detail = None
-        for _ in range(20):
-            detail = client.get(f"/api/v1/tasks/{task_id}", headers=admin_headers)
-            if detail.status_code == 200:
-                break
-            time.sleep(0.05)
-        assert detail is not None, "no response"
-        assert detail.status_code == 200, detail.text
-        assert detail.json()["kind"] == "pipeline:build"
-
-    def test_requires_auth(self, client):
-        resp = client.get("/api/v1/pipeline/templates")
         assert resp.status_code == 401

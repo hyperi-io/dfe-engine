@@ -11,6 +11,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, Field
 
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import (
     CurrentUser,
     Settings,
@@ -57,7 +58,7 @@ class PermissionsResponse(BaseModel):
 # ── Endpoints ────────────────────────────────────────────────
 
 
-@router.post("/login", response_model=TokenResponse)
+@router.post("/login", response_model=TokenResponse, openapi_extra=CLI_HIDDEN)
 async def login(body: LoginRequest, request: Request, settings: Settings):
     """Authenticate with local credentials and receive a JWT token."""
     provider: LocalAuthProvider = request.app.state.auth_provider
@@ -89,7 +90,7 @@ async def login(body: LoginRequest, request: Request, settings: Settings):
     )
 
 
-@router.post("/refresh", response_model=TokenResponse)
+@router.post("/refresh", response_model=TokenResponse, openapi_extra=CLI_HIDDEN)
 async def refresh_token(user: CurrentUser, request: Request, settings: Settings):
     """Refresh the current JWT token. Requires a valid existing token."""
     require_local_account_enabled(request, user.user_id)

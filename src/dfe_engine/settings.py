@@ -395,7 +395,7 @@ class QueryViewSettings(BaseModel):
 
 
 class SamplerSettings(BaseModel):
-    """Source-sampling settings (the /sources/{source}/sample API + `dfe-api sample`).
+    """Source-sampling settings (the /sources/{source}/sample API + `dfe sample`).
 
     Two families of mode: cheap "recent"/"random" reads that run inline, and the
     memory-hungry logreducer modes ("smart"/"anomaly") that are gated. logreducer

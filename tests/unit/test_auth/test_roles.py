@@ -13,7 +13,6 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.auth.roles import (
-    ROLE_ALIASES,
     RoleConfig,
     RoleDefinition,
     permission_matches,
@@ -604,47 +603,31 @@ class TestEffectiveHyperdx:
 
 
 # ---------------------------------------------------------------------------
-# ROLE_ALIASES back-compat shim (old role name -> new)
+# No role aliases (the pre-rename back-compat shim was removed before GA)
 # ---------------------------------------------------------------------------
 
 
-class TestRoleAliases:
-    def test_alias_map_shape(self):
-        assert ROLE_ALIASES == {
-            "infra_admin": "infra",
-            "infra_viewer": "infra_ro",
-            "data_analyst_viewer": "data_analyst_ro",
-            "customer_viewer": "org_analyst",
-        }
+class TestNoRoleAliases:
+    """The old-name -> new-name aliases were removed (no deprecation tail before
+    GA). A stale pre-rename name now resolves NOTHING - it must be migrated."""
 
-    def test_old_infra_admin_resolves_infra_grants(self):
-        """A group still referencing 'infra_admin' resolves the 'infra' grants."""
+    def test_old_names_no_longer_resolve(self):
         config = RoleConfig.load_builtin()
-        # argo:* is an existing infra grant; hunt:* is the newly-added one.
-        assert config.has_permission("infra_admin", "argo:applications:sync") is True
-        assert config.has_permission("infra_admin", "hunt:read") is True
+        # infra_admin / customer_viewer were aliases; now unknown -> no grants.
+        assert config.has_permission("infra_admin", "argo:applications:sync") is False
+        assert config.resolve_permissions(["customer_viewer"]) == set()
+        assert config.hyperdx_for("customer_viewer") is None
 
-    def test_old_names_resolve_via_resolve_permissions(self):
-        config = RoleConfig.load_builtin()
-        perms = config.resolve_permissions(["customer_viewer"])
-        assert "query:execute" in perms
-
-    def test_old_name_resolves_hyperdx(self):
-        config = RoleConfig.load_builtin()
-        hdx = config.hyperdx_for("customer_viewer")
-        assert hdx is not None
-        assert hdx.access == "org-scoped"
-
-    def test_literal_name_wins_over_alias(self):
-        """A config that literally (re)defines an old name keeps its own grants."""
+    def test_literal_name_still_resolves_its_own_grants(self):
+        """A role literally defined under any name resolves its own grants (no alias
+        indirection to a different role)."""
         config = RoleConfig(
             roles={
                 "infra_admin": RoleDefinition(
-                    description="Legacy literal",
+                    description="Custom role",
                     permissions=["source:read"],
                 ),
             }
         )
-        # Literal wins: resolves the custom role, not the aliased 'infra'.
         assert config.has_permission("infra_admin", "source:read") is True
         assert config.has_permission("infra_admin", "argo:applications:sync") is False

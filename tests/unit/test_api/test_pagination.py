@@ -256,5 +256,9 @@ class TestApplySort:
     def test_sort_with_missing_key(self):
         items = [{"name": "b"}, {"other": "val"}, {"name": "a"}]
         result = apply_sort(items, "name", "asc")
-        # Missing key → empty string, sorts first
-        assert result[0].get("name", "") == ""
+        # Missing key (None) sorts consistently AFTER present values (NULLS-LAST),
+        # via the (value is None, str(value)) key - the type-safe form that also
+        # stops a bool/list field from raising TypeError (the sort_by=... 500 fix).
+        assert result[0]["name"] == "a"
+        assert result[1]["name"] == "b"
+        assert "name" not in result[2]

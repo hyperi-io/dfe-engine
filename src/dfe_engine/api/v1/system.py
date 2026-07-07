@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -170,6 +171,39 @@ def clickhouse_cloud_stop(user: CurrentUser, settings: Settings):
     return CloudServiceStateResponse(
         configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )
+
+
+class HuntsDueResponse(BaseModel):
+    due: int = Field(description="Count of hunts due to run now (the KEDA scaling metric)")
+
+
+@router.get(
+    "/hunts-due",
+    response_model=HuntsDueResponse,
+    dependencies=[Depends(require_action(scopes_dict["hunt_read"]))],
+    openapi_extra=CLI_HIDDEN,
+)
+def hunts_due(user: CurrentUser, settings: Settings) -> HuntsDueResponse:
+    """The deterministic hunt backlog count - the hunt-runner autoscaling metric.
+
+    KEDA's stock ``metrics-api`` scaler polls this (``valueLocation: due``) to scale
+    the hunt-runner, so KEDA NEVER needs a ClickHouse wire port (no ``mysql_port`` /
+    ``postgresql_port`` on CH) and no extra scaler component: the engine already
+    holds the CH HTTP connection and is the authority on what is due, so it just
+    runs the deterministic due-query and returns the count. Fails SAFE to ``due=0``
+    on a transient CH error - a scaling metric must never spuriously scale UP (or
+    block scale-to-zero) because the count call blipped.
+    """
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.hunt_runner.schedule import due_count
+    from dfe_engine.settings import get_clickhouse_config
+
+    try:
+        ch = ClickHouseManager.get_instance(get_clickhouse_config(settings)).get_clickhouse_client()
+        return HuntsDueResponse(due=due_count(ch, settings.clickhouse.effective_data_database))
+    except Exception:
+        logger.warning("hunts-due metric unavailable; reporting due=0", exc_info=True)
+        return HuntsDueResponse(due=0)
 
 
 # ── Helpers ──────────────────────────────────────────────────

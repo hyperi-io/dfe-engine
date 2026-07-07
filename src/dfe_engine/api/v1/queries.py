@@ -23,7 +23,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.pagination import PaginatedResponse, PaginationParams
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.query.models import (
@@ -99,16 +101,18 @@ ViewExec = Annotated[Any, Depends(_require_view_executor)]
 
 @router.get(
     "/views",
-    response_model=list[ViewDefinition],
+    response_model=PaginatedResponse[ViewDefinition],
     dependencies=[Depends(require_action(scopes_dict["query_read"]))],
 )
 async def list_views(
     user: CurrentUser,
     executor: ViewExec,
+    pagination: PaginationParams = Depends(),
     namespace: str | None = Query(None, description="Filter by namespace"),
-) -> list[ViewDefinition]:
-    """List available parameterized views."""
-    return executor.list_views(namespace=namespace)
+) -> PaginatedResponse[ViewDefinition]:
+    """List available parameterized views, paginated."""
+    items = executor.list_views(namespace=namespace)
+    return PaginatedResponse.from_list(items, pagination.page, pagination.per_page)
 
 
 @router.get(
@@ -204,6 +208,10 @@ async def execute_view(
     "/raw",
     response_model=QueryResponse,
     dependencies=[Depends(require_action(scopes_dict["query_raw"]))],
+    # Admin-only arbitrary SQL with no org_id injection - keep it OFF the
+    # auto-discovered CLI surface (same posture as hiding auth/login). Stays a
+    # fully available HTTP API; only the generated `dfe queries raw` disappears.
+    openapi_extra=CLI_HIDDEN,
 )
 async def execute_raw_query(
     request: RawQueryRequest,

@@ -89,11 +89,13 @@ def _warn_auto_merge(
 
 @router.get("/actions", dependencies=[Depends(require_action("governance:read"))])
 async def list_actions(user: CurrentUser, request: Request) -> list[str]:
+    """List the names of defined governance actions."""
     return _actions(request).list()
 
 
 @router.get("/actions/{name}", dependencies=[Depends(require_action("governance:read"))])
 async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
+    """Get one defined action's full definition."""
     try:
         return _actions(request).get(name)
     except ResourceNotFoundError as exc:
@@ -105,7 +107,9 @@ async def invoke_action(
     name: str,
     user: CurrentUser,
     request: Request,
-    dry_run: bool = Query(default=False),
+    dry_run: bool = Query(
+        default=False, description="Preview the diff without committing to gitops"
+    ),
 ) -> InvokeResponse:
     """Invoke a defined action - gated on the action's OWN required_action."""
     store = _actions(request)
@@ -170,6 +174,7 @@ async def invoke_action(
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def create_action(body: ActionDef, user: CurrentUser, request: Request) -> ActionDef:
+    """Create or replace a defined action (admin)."""
     res = await asyncio.to_thread(_actions(request).save, body, user.user_id)
     audit_resource_change(user.user_id, "action", body.name, "created")
     if res.changed:
@@ -188,6 +193,7 @@ async def create_action(body: ActionDef, user: CurrentUser, request: Request) ->
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
+    """Delete a defined action (admin)."""
     try:
         res = await asyncio.to_thread(_actions(request).delete, name, user.user_id)
     except ResourceNotFoundError as exc:
@@ -207,6 +213,7 @@ async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
 async def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request
 ) -> ProtectedPolicy:
+    """Create or replace a protected-var policy (admin)."""
     gc = _gitcrud(request)
     res = await asyncio.to_thread(gc.put, _POLICY_CLASS, body.name, body.model_dump(), user.user_id)
     audit_resource_change(user.user_id, "policy", body.name, "created")
@@ -226,6 +233,7 @@ async def create_policy(
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
+    """Delete a protected-var policy (admin)."""
     gc = _gitcrud(request)
     try:
         res = await asyncio.to_thread(gc.delete, _POLICY_CLASS, name, user.user_id)

@@ -32,7 +32,7 @@ Language = Literal["rust", "go", "assemblyscript"]
 
 
 class CompileRequest(BaseModel):
-    language: Language
+    language: Language = Field(description="Source language: rust, go, or assemblyscript")
     files: dict[str, str] = Field(
         description="Source files. Key = filename, value = source content.",
     )

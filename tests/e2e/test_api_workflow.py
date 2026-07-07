@@ -16,13 +16,11 @@ Covers:
 - Source CRUD lifecycle
 - Service config CRUD
 - Account + group management
-- Task manager (submit → poll → complete)
 - RBAC enforcement across workflows
 """
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 
 import pytest
@@ -48,19 +46,6 @@ def e2e_settings(tmp_path: Path) -> DFESettings:
     services_dir.mkdir()
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
-    pipelines_out = tmp_path / "pipelines_out"
-    pipelines_out.mkdir()
-    templates_dir = tmp_path / "custom_templates"
-    templates_dir.mkdir()
-    (tmp_path / "dfe_package.yaml").write_text(
-        f"""global_settings:
-  output: {pipelines_out}
-  vector_files:
-    custom: {templates_dir}
-ingestion_pipelines: {{}}
-""",
-        encoding="utf-8",
-    )
 
     return DFESettings(
         config_dir=str(tmp_path),
@@ -253,56 +238,6 @@ class TestAccountGroupWorkflow:
         data = resp.json()
         assert data["user_id"] == "e2e_user"
         assert "admin" in data["roles"]
-
-
-class TestTaskManagerWorkflow:
-    """Task lifecycle: pipeline build → poll → completion."""
-
-    def _login(self, client) -> dict[str, str]:
-        resp = client.post(
-            "/api/v1/auth/login",
-            json={"username": "admin", "password": "e2e-admin-pw"},
-        )
-        return {"Authorization": f"Bearer {resp.json()['access_token']}"}
-
-    def test_pipeline_build_task_lifecycle(self, e2e_client, e2e_settings):
-        headers = self._login(e2e_client)
-        config_dir = Path(e2e_settings.config_dir)
-
-        # Trigger async pipeline build
-        resp = e2e_client.post(
-            "/api/v1/pipeline/build",
-            json={
-                "build_core": False,
-                "config_path": str(config_dir / "dfe_package.yaml"),
-                "output_path": str(config_dir / "pipelines_out"),
-            },
-            headers=headers,
-        )
-        assert resp.status_code == 202
-        task_id = resp.json()["task_id"]
-        assert task_id
-
-        # Poll task status (background task may finish slightly after 202)
-        data = None
-        for _ in range(20):
-            resp = e2e_client.get(f"/api/v1/tasks/{task_id}", headers=headers)
-            if resp.status_code == 200:
-                data = resp.json()
-                break
-            assert resp.status_code != 404, resp.text
-            time.sleep(0.05)
-        assert data is not None, f"GET /tasks/{task_id} failed: {resp.status_code} {resp.text}"
-        assert data["id"] == task_id
-        assert data["kind"] == "pipeline:build"
-        # Task may be pending, running, completed, or failed
-        assert data["status"] in ("pending", "running", "completed", "failed")
-
-        # List tasks filtered by kind
-        resp = e2e_client.get("/api/v1/tasks?kind=pipeline:build", headers=headers)
-        assert resp.status_code == 200
-        tasks = resp.json()
-        assert any(t["id"] == task_id for t in tasks)
 
 
 class TestCrossRouterConsistency:

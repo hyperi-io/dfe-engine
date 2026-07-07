@@ -165,17 +165,25 @@ huntRunner:
     limits:
       cpu: "1"
       memory: 1Gi
-  # -- KEDA scale-to-zero on the deterministic-due backlog. NOTE: KEDA has NO native
-  # ClickHouse scaler, so this uses the MySQL scaler against CH's mysql_port (the
-  # query is still ClickHouse SQL). ClickHouse must have mysql_port enabled.
+  # -- KEDA scale-to-zero on the deterministic-due backlog. KEDA has NO native
+  # ClickHouse scaler; rather than open a CH wire port (mysql_port / postgresql_port
+  # - a shared-infra + security-surface change just for scaling) we use KEDA's stock
+  # metrics-api scaler against the engine's own /api/v1/system/hunts-due endpoint.
+  # The engine ALREADY holds the CH connection and is the authority on what's due,
+  # so it runs the deterministic due-query and returns the count. No CH port, no
+  # Prometheus, no custom scaler.
   keda:
     enabled: true
     minReplicaCount: 0
     maxReplicaCount: 8   # keep == cap (the runner's own global CH concurrency cap)
     pollingInterval: 30
     cooldownPeriod: 120
-    mysqlPort: 9004      # ClickHouse MySQL-compatible port
     queryValue: 1        # hunts-per-worker; desiredReplicas = ceil(due / queryValue)
+    # The engine API key KEDA sends as X-API-Key to read the metric (needs only the
+    # `hunt:read` scope). Provision an engine API key, store it in this secret, and
+    # KEDA's TriggerAuthentication reads it. Empty name -> the engine managed secret.
+    apiKeySecretName: ""
+    apiKeySecretKey: keda-hunt-scaler-api-key
   # -- Argo CD PostSync hook that materialises hunt_schedule on a config change.
   materialiseHook:
     enabled: true

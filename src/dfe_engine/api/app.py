@@ -5,9 +5,9 @@ Usage::
     from dfe_engine.api.app import create_app
     app = create_app()
 
-Or via CLI::
+Or via the daemon entry point::
 
-    dfe-api
+    dfe-engine run
 """
 
 from __future__ import annotations

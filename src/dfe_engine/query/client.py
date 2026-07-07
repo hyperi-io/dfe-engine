@@ -18,8 +18,8 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.query.models import (
-    AuthContext,
     QueryMetadata,
     QueryOptions,
 )
