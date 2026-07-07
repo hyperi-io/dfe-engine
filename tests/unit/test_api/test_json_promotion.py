@@ -37,7 +37,10 @@ from dfe_engine.yaml_utils import yaml_dump
 PROMO_SOURCE = "promo_source"
 NOMETA_SOURCE = "nometa_source"
 VERSIONED_SOURCE = "versioned_src"
+CORE_SOURCE = "core_source"
 SCHEMA_PATH = "meta/promo"
+CORE_SCHEMA_PATH = "meta/core_tpl"
+CORE_FORK_PATH = "meta/core_source_core_tpl"
 
 
 class _NoCallClient:
@@ -121,11 +124,33 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
                     "summary": "init",
                     "columns": [
                         {"name": "_json", "type": "json", "expr": "@captured: raw_payload as JSON"},
+                        {
+                            "name": "cloud_trail_event_tls_details_cipher_suite",
+                            "type": "string",
+                            "expr": "@copy: _json.CloudTrailEvent.tlsDetails.cipherSuite",
+                        },
                     ],
                 }
             },
         },
         schemas_root / "meta" / "promo.yaml",
+    )
+    yaml_dump(
+        {
+            "resource_type": "core",
+            "current": "1.0.0",
+            "versions": {
+                "1.0.0": {
+                    "date": "2026-01-01",
+                    "type": "model",
+                    "summary": "core template",
+                    "columns": [
+                        {"name": "_json", "type": "json", "expr": "@captured: raw_payload as JSON"},
+                    ],
+                }
+            },
+        },
+        schemas_root / "meta" / "core_tpl.yaml",
     )
 
     sources_dir = tmp_path / "sources"
@@ -152,6 +177,21 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
         },
         sources_dir / f"{NOMETA_SOURCE}.yaml",
     )
+    yaml_dump(
+        {
+            "source": CORE_SOURCE,
+            "display_name": "Core Schema Source",
+            "enabled": True,
+            "match": {"field": "_json.tags.collector.type", "value": CORE_SOURCE},
+            "header": {"type": "time_series", "version": "1.0.0"},
+            "schema_config": {
+                "meta_schema": "meta/core_tpl.yaml",
+                "meta_schema_version": "1.0.0",
+                "engine": "MergeTree",
+            },
+        },
+        sources_dir / f"{CORE_SOURCE}.yaml",
+    )
     # Multi-version source: v1 lands in the catch-all (no meta_schema), v2 owns
     # its own table (has a meta_schema). Current is v2.
     yaml_dump(
@@ -161,6 +201,7 @@ def make_api_settings(tmp_path: Path) -> DFESettings:
             "enabled": True,
             "match": {"field": "_json.tags.collector.type", "value": VERSIONED_SOURCE},
             "current": "2.0.0",
+            "deployed_version": "2.0.0",
             "versions": {
                 "1.0.0": {"date_time": "2026-01-01"},
                 "2.0.0": {
@@ -236,9 +277,15 @@ def _promote(client: TestClient, headers: dict[str, str], body: dict, **params):
     )
 
 
-def _schema_versions(client: TestClient, headers: dict[str, str], version: str) -> list[str]:
+def _schema_versions(
+    client: TestClient,
+    headers: dict[str, str],
+    version: str,
+    *,
+    schema: str = SCHEMA_PATH,
+) -> list[str]:
     resp = client.get(
-        f"/api/v1/schemas/definitions/{SCHEMA_PATH}/versions/columns",
+        f"/api/v1/schemas/definitions/{schema}/versions/columns",
         params={"version": version},
         headers=headers,
     )
@@ -342,6 +389,7 @@ class TestSampleRows:
         assert body["match_value"] == NOMETA_SOURCE
         assert body["columns"] == ["_json"]
         assert body["rows"] == [{"_json": {"user": {"id": 1}}}]
+        assert body["promoted"] == []
         sql, params = ch.calls[0]
         assert f"FROM `{db}`.`{landing}`" in sql
         assert (
@@ -349,6 +397,33 @@ class TestSampleRows:
             in sql
         )
         assert params["match_value"] == NOMETA_SOURCE
+
+    def test_sample_rows_lists_promoted_meta_schema_fields(self, app, client, admin_headers):
+        ch = _SampleClient()
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        assert resp.json()["promoted"] == [
+            {
+                "name": "cloud_trail_event_tls_details_cipher_suite",
+                "key": "_json.CloudTrailEvent.tlsDetails.cipherSuite",
+            }
+        ]
+
+    def test_meta_schema_undeployed_samples_landing(self, app, client, admin_headers):
+        db = get_settings().clickhouse.effective_data_database
+        landing = get_settings().clickhouse.landing_table
+        ch = _SampleClient(existing_tables={(db, PROMO_SOURCE)})
+        app.dependency_overrides[get_clickhouse_client] = lambda: ch
+        resp = client.get(f"/api/v1/schemas/{PROMO_SOURCE}/sample-rows", headers=admin_headers)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["table"] == f"{db}.{landing}"
+        assert body["match_value"] == PROMO_SOURCE
+        sql, _params = next(
+            (sql, p) for sql, p in ch.calls if sql.strip().upper().startswith("SELECT *")
+        )
+        assert f"FROM `{db}`.`{landing}`" in sql
 
     def test_meta_schema_version_samples_whole_table(self, app, client, admin_headers):
         db = get_settings().clickhouse.effective_data_database
@@ -425,6 +500,40 @@ class TestPromoteField:
         assert resp.status_code == 422
         assert resp.json()["code"] == "no_meta_schema"
 
+    def test_promote_with_schema_path_when_source_unassigned(
+        self, client: TestClient, admin_headers
+    ):
+        resp = client.post(
+            f"/api/v1/schemas/{NOMETA_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string", "schema_path": SCHEMA_PATH},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["schema_version"] == "1.1.0"
+        src = client.get(f"/api/v1/sources/{NOMETA_SOURCE}", headers=admin_headers)
+        assert src.status_code == 200
+        cur = src.json()["current"]
+        schema = src.json()["versions"][cur]["schema"]
+        assert schema["meta_schema"] == SCHEMA_PATH
+        assert schema["meta_schema_version"] == "1.1.0"
+        assert src.json()["versions"][cur]["header"]["type"] == "common-header/minimal"
+        assert src.json()["versions"][cur]["header"]["version"] == "1.0.0"
+
+    def test_schema_path_rejected_when_source_has_meta_schema(
+        self, client: TestClient, admin_headers
+    ):
+        resp = client.post(
+            f"/api/v1/schemas/{PROMO_SOURCE}/promote-field",
+            json={
+                "json_path": "user.email",
+                "data_type": "string",
+                "schema_path": "meta/other",
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+        assert resp.json()["code"] == "schema_path_conflict"
+
     def test_single_commit_creates_new_version(self, client: TestClient, admin_headers):
         resp = _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
         assert resp.status_code == 200
@@ -434,6 +543,10 @@ class TestPromoteField:
         assert body["results"][0]["column_name"] == "user_email"
         assert body["results"][0]["copy_cel"] == "_json.user.email"
         assert "1.1.0" in _schema_versions(client, admin_headers, "1.1.0")
+        src = client.get(f"/api/v1/sources/{PROMO_SOURCE}", headers=admin_headers)
+        cur = src.json()["current"]
+        assert src.json()["versions"][cur]["schema"]["meta_schema_version"] == "1.1.0"
+        assert src.json()["versions"][cur]["header"]["type"] == "time_series"
 
     def test_committed_column_has_copy_directive(self, client: TestClient, admin_headers):
         _promote(client, admin_headers, {"json_path": "user.email", "data_type": "string"})
@@ -498,6 +611,60 @@ class TestPromoteField:
             {"json_path": ["a.b"], "column_name": "x", "data_type": "string"},
         )
         assert resp.status_code == 422
+
+    def test_core_meta_schema_forks_before_promote(self, client: TestClient, admin_headers):
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["schema_version"] == "1.1.0"
+        assert _schema_versions(client, admin_headers, "1.0.0", schema=CORE_SCHEMA_PATH) == [
+            "1.0.0"
+        ]
+        assert "1.1.0" in _schema_versions(client, admin_headers, "1.1.0", schema=CORE_FORK_PATH)
+        src = client.get(f"/api/v1/sources/{CORE_SOURCE}", headers=admin_headers).json()
+        cur = src["current"]
+        schema = src["versions"][cur]["schema"]
+        assert schema["meta_schema"] == CORE_FORK_PATH
+        assert schema["meta_schema_version"] == "1.1.0"
+
+    def test_core_meta_schema_dry_run_does_not_fork(
+        self, settings: DFESettings, client: TestClient, admin_headers
+    ):
+        fork_file = Path(settings.schemas.schemas_dir) / "meta" / "core_source_core_tpl.yaml"
+        assert not fork_file.is_file()
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+            params={"dry_run": True},
+        )
+        assert resp.status_code == 200
+        assert not fork_file.is_file()
+        assert _schema_versions(client, admin_headers, "1.0.0", schema=CORE_SCHEMA_PATH) == [
+            "1.0.0"
+        ]
+
+    def test_second_promote_uses_existing_fork(self, client: TestClient, admin_headers):
+        client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.email", "data_type": "string"},
+            headers=admin_headers,
+        )
+        resp = client.post(
+            f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
+            json={"json_path": "user.id", "data_type": "integer"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["schema_version"] == "1.2.0"
+        versions = _schema_versions(client, admin_headers, "1.2.0", schema=CORE_FORK_PATH)
+        assert versions == ["1.0.0", "1.1.0", "1.2.0"]
+        assert _schema_versions(client, admin_headers, "1.0.0", schema=CORE_SCHEMA_PATH) == [
+            "1.0.0"
+        ]
 
     def test_promote_auto_type_queries_landing_when_table_missing(
         self, app, client: TestClient, admin_headers

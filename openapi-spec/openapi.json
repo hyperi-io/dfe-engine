@@ -6699,7 +6699,7 @@
           "schemas"
         ],
         "summary": "Discover Json Paths",
-        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` the source owns its own table and discovery\nruns against ``db.<source>``. Otherwise the source's data still lives in the\nshared catch-all landing table, so discovery runs against ``db.<landing>``\nfiltered by the version's match rule.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
+        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
         "operationId": "discover_json_paths_api_v1_schemas__source_name__json_paths_get",
         "parameters": [
           {
@@ -6815,7 +6815,7 @@
           "schemas"
         ],
         "summary": "Sample Source Rows",
-        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` owns its own table, so sampling runs against\n``db.<source>`` unfiltered. Otherwise the version's data still lives in the\nshared catch-all landing table, so sampling runs against ``db.<landing>``\nfiltered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.",
+        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists; otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.",
         "operationId": "sample_source_rows_api_v1_schemas__source_name__sample_rows_get",
         "parameters": [
           {
@@ -6895,7 +6895,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema, adding one column\nper path with a ``@copy`` directive so dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
@@ -11034,6 +11034,18 @@
             "title": "Atomic",
             "description": "When true, all paths succeed or none commit; else best-effort",
             "default": true
+          },
+          "schema_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Path",
+            "description": "Meta-schema path when the source version has no meta_schema assigned (forbidden if meta_schema is already set on the source)"
           }
         },
         "type": "object",
@@ -11165,6 +11177,27 @@
         ],
         "title": "PromoteResult",
         "description": "Per-path outcome of a promotion."
+      },
+      "PromotedJsonField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Promoted column name in the meta-schema"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "key"
+        ],
+        "title": "PromotedJsonField",
+        "description": "A JSON path already materialized as a typed meta-schema column."
       },
       "ProviderResponse": {
         "properties": {
@@ -11995,6 +12028,18 @@
             "title": "Match Value",
             "description": "Match value rows were filtered on, or null for a whole-table sample."
           },
+          "match_operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Operator",
+            "description": "Match operator used when filtering (equals, exists, includes, \u2026)."
+          },
           "columns": {
             "items": {
               "type": "string"
@@ -12011,6 +12056,14 @@
             "type": "array",
             "title": "Rows",
             "description": "Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/PromotedJsonField"
+            },
+            "type": "array",
+            "title": "Promoted",
+            "description": "JSON paths already promoted on the source version's meta-schema (empty when the version has no meta_schema or no @copy columns)"
           }
         },
         "type": "object",
@@ -12759,16 +12812,30 @@
             "title": "Field",
             "description": "Field to match on. Prefix with '_json.' to match a path inside the JSON column (e.g. '_json._source_fetcher'); a bare name matches a real top-level column (e.g. '_org_id')."
           },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "equals",
+              "not_equals",
+              "exists",
+              "includes",
+              "starts_with",
+              "ends_with"
+            ],
+            "title": "Operator",
+            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals",
+            "default": "equals"
+          },
           "value": {
             "type": "string",
             "title": "Value",
-            "description": "Expected value (exact match)"
+            "description": "Operand for the operator (not used when operator is ``exists``)",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
-          "field",
-          "value"
+          "field"
         ],
         "title": "SourceMatch",
         "description": "Receiver match rule \u2014 how the receiver identifies this source."

@@ -434,6 +434,7 @@ class SourceRegistry:
                 rules.append(
                     {
                         "field": source.match.field,
+                        "operator": source.match.operator,
                         "value": source.match.value,
                         "source": source.source,
                     }
@@ -471,6 +472,7 @@ class SourceRegistry:
                 and existing.enabled
                 and source.enabled
                 and candidate_match.field == existing.match.field
+                and candidate_match.operator == existing.match.operator
                 and candidate_match.value == existing.match.value
             ):
                 raise SourceMatchConflictError(

@@ -145,6 +145,16 @@ class TestSourceMatch:
         m = SourceMatch(field="tags.collector.type", value="filebeat")
         assert m.field == "tags.collector.type"
         assert m.value == "filebeat"
+        assert m.operator == "equals"
+
+    def test_exists_operator_allows_empty_value(self):
+        m = SourceMatch(field="_json.tags.type", operator="exists", value="")
+        assert m.operator == "exists"
+        assert m.value == ""
+
+    def test_value_required_for_equals(self):
+        with pytest.raises(ValueError, match="match\.value is required"):
+            SourceMatch(field="_json.f", operator="includes", value="  ")
 
 
 # ---------------------------------------------------------------------------

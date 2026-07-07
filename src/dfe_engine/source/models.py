@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import re
 from datetime import date
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -34,6 +34,15 @@ from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 # _source naming: lowercase alphanumeric + underscores, starts with letter
 _SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 _SOURCE_MAX_LENGTH = 64
+
+SourceMatchOperator = Literal[
+    "equals",
+    "not_equals",
+    "exists",
+    "includes",
+    "starts_with",
+    "ends_with",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +175,25 @@ class SourceMatch(BaseModel):
             "real top-level column (e.g. '_org_id')."
         ),
     )
-    value: str = Field(..., description="Expected value (exact match)")
+    operator: SourceMatchOperator = Field(
+        default="equals",
+        description=(
+            "How to compare ``field`` to ``value``: equals (default), exists, "
+            "includes, starts_with, ends_with, not_equals"
+        ),
+    )
+    value: str = Field(
+        default="",
+        description="Operand for the operator (not used when operator is ``exists``)",
+    )
+
+    @model_validator(mode="after")
+    def _validate_value_for_operator(self) -> SourceMatch:
+        if self.operator == "exists":
+            return self
+        if not self.value.strip():
+            raise ValueError(f"match.value is required when operator is {self.operator!r}")
+        return self
 
 
 class SourceSchema(BaseModel):
