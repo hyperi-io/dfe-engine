@@ -462,8 +462,6 @@ def _build_merged_version_snapshot(existing: Source, write: SourceWriteRequest) 
     snapshot = write.to_version_snapshot()
     if write.transform is None and existing.transform is not None:
         snapshot = snapshot.model_copy(update={"transform": existing.transform})
-    if write.header is None:
-        snapshot = snapshot.model_copy(update={"header": existing.version(existing.current).header})
     return snapshot
 
 
