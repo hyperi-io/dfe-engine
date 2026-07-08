@@ -498,6 +498,69 @@ class TestDeleteSource:
         assert resp.status_code == 403
 
 
+class TestPatchSourceEnabled:
+    """PATCH /api/v1/sources/{name}"""
+
+    def test_disable_and_enable(self, client: TestClient, admin_headers: dict, sample_source: dict):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+
+        disable = client.patch(
+            "/api/v1/sources/test_source",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert disable.status_code == 200
+        assert disable.json()["message"] == "disabled"
+        assert (
+            client.get("/api/v1/sources/test_source", headers=admin_headers).json()["enabled"]
+            is False
+        )
+
+        enable = client.patch(
+            "/api/v1/sources/test_source",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+        assert enable.status_code == 200
+        assert enable.json()["message"] == "enabled"
+        assert (
+            client.get("/api/v1/sources/test_source", headers=admin_headers).json()["enabled"]
+            is True
+        )
+
+    def test_idempotent_when_already_enabled(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.patch(
+            "/api/v1/sources/test_source",
+            json={"enabled": True},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "enabled"
+
+    def test_not_found(self, client: TestClient, admin_headers: dict):
+        resp = client.patch(
+            "/api/v1/sources/missing_src",
+            json={"enabled": False},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "not_found"
+
+    def test_rejects_extra_fields(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.patch(
+            "/api/v1/sources/test_source",
+            json={"enabled": False, "description": "nope"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+
 class TestBulkAction:
     """POST /api/v1/sources/bulk"""
 

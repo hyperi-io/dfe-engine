@@ -9,6 +9,7 @@ POST   /api/v1/sources/{name}/build     → Build DDL from a version snapshot
 POST   /api/v1/sources/{name}/plan      → Dry-run deploy plan (not persisted)
 POST   /api/v1/sources/{name}/deploy    → Deploy version to ClickHouse
 PUT    /api/v1/sources/{name}           → Update source
+PATCH  /api/v1/sources/{name}           → Enable or disable source
 DELETE /api/v1/sources/{name}           → Delete source
 POST   /api/v1/sources/bulk             → Bulk enable/disable/delete
 POST   /api/v1/sources/seed             → Seed built-in defaults
@@ -19,7 +20,7 @@ from __future__ import annotations
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
@@ -104,6 +105,14 @@ def _source_response(source: Source, *, message: str) -> SourceResponse:
         deployed_version=source.deployed_version,
         versions=sorted(source.versions.keys()),
     )
+
+
+class SourceEnabledPatchRequest(BaseModel):
+    """Partial update for source enabled status only."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(description="Whether the source is active")
 
 
 class BulkActionRequest(BaseModel):
@@ -778,6 +787,60 @@ async def update_source(
         _raise_save_validation_http(e)
     audit_resource_change(user.user_id, "source", source.source, "updated")
     return _source_response(source, message="updated")
+
+
+@router.patch(
+    "/{name}",
+    response_model=SourceResponse,
+    responses={
+        409: {
+            "model": MatchConflictErrorResponse,
+            "description": "Enabling would duplicate another enabled source's receiver match",
+        },
+    },
+    dependencies=[Depends(require_action(scopes_dict["source_write"]))],
+)
+async def patch_source_enabled(
+    name: str,
+    body: SourceEnabledPatchRequest,
+    user: CurrentUser,
+    registry: SourceReg,
+):
+    """Enable or disable a source without changing versioned configuration.
+
+    Does not create a new source version. Enabling may return ``409 match_conflict``
+    if another enabled source already uses the same receiver match rule.
+    """
+    try:
+        source = registry.get_source(name)
+    except SourceNotFoundError:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "not_found",
+                "message": f"Source {name!r} not found",
+            },
+        ) from None
+
+    if source.enabled == body.enabled:
+        return _source_response(
+            source,
+            message="enabled" if body.enabled else "disabled",
+        )
+
+    updated = source.model_copy(update={"enabled": body.enabled})
+    try:
+        saved = registry.save_source(
+            updated,
+            created_by=git_author(user),
+            description=(f"source: {'enable' if body.enabled else 'disable'} {name}"),
+        )
+    except SourceValidationError as e:
+        _raise_save_validation_http(e)
+
+    action = "enabled" if body.enabled else "disabled"
+    audit_resource_change(user.user_id, "source", saved.source, action)
+    return _source_response(saved, message=action)
 
 
 @router.delete(

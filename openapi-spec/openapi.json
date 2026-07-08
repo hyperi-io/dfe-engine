@@ -2436,6 +2436,72 @@
           }
         ]
       },
+      "patch": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Patch Source Enabled",
+        "description": "Enable or disable a source without changing versioned configuration.\n\nDoes not create a new source version. Enabling may return ``409 match_conflict``\nif another enabled source already uses the same receiver match rule.",
+        "operationId": "patch_source_enabled_api_v1_sources__name__patch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceEnabledPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Enabling would duplicate another enabled source's receiver match",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
       "delete": {
         "tags": [
           "Sources"
@@ -12714,6 +12780,22 @@
         ],
         "title": "SourceDetailResponse",
         "description": "Full source definition with per-version build/plan/deploy status."
+      },
+      "SourceEnabledPatchRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SourceEnabledPatchRequest",
+        "description": "Partial update for source enabled status only."
       },
       "SourceFetcher": {
         "properties": {
