@@ -624,6 +624,34 @@ class TestSourceWriteRequest:
         assert updated.current == "1.0.0"
         assert updated.versions["1.0.0"].schema_config.meta_schema_version == "2.0.0"
 
+    def test_apply_write_update_omitted_header_not_persisted(self):
+        existing = Source.model_validate(
+            {
+                "source": "src_a",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "time_series", "version": "1.0.0"},
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"engine": "MergeTree"},
+                    }
+                },
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {
+                "match": {"field": "f", "value": "v"},
+                "schema": {"engine": "MergeTree", "ttl_days": 30},
+            }
+        )
+        updated = apply_source_write_update(existing, write)
+        ver = updated.versions["1.0.0"]
+        assert ver.header is None
+        assert "header" not in ver.to_yaml_dict()
+        assert ver.schema_config.ttl_days == 30
+
     def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
         existing = Source.model_validate(
             {
@@ -802,6 +830,29 @@ class TestSourceWriteRequest:
             update={"match": SourceMatch(field="g", value="v")}
         )
         assert draft_build_version_to_invalidate(existing, updated) is None
+
+    def test_draft_build_invalidate_before_first_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "x",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
+                    }
+                },
+            }
+        )
+        updated = existing.model_copy(deep=True)
+        updated.versions["1.0.0"] = updated.versions["1.0.0"].model_copy(
+            update={
+                "schema_config": SourceSchema(meta_schema="meta/b", meta_schema_version="1.0.0")
+            }
+        )
+        assert draft_build_version_to_invalidate(existing, updated) == "1.0.0"
 
     def test_source_version_bump_required_sigma(self):
         base = {
