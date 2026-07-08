@@ -493,18 +493,36 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
 
 
 def draft_build_version_to_invalidate(existing: Source, updated: Source) -> str | None:
-    """Return a draft ``current`` version id whose persisted build should be dropped after edit."""
+    """Return a version id whose persisted source-build should be dropped after an edit.
+
+    Drops builds for draft work: versions that are not the live ``deployed_version``,
+    including the pre-deploy case (``deployed_version`` is null). In-place bump-worthy
+    schema/mapping changes on such a version invalidate its build. When a new major
+    version is appended from the live deployed ``current``, the deployed version's
+    build is kept.
+    """
     deployed = updated.deployed_version
     current = updated.current
-    if deployed is None or deployed == current:
+
+    if existing.current == current:
+        if deployed is not None and deployed == current:
+            return None
+        previous = existing.versions[current]
+        new_snap = updated.versions[current]
+        if source_version_bump_required(previous, new_snap):
+            return current
         return None
-    if existing.current != current:
+
+    bumped_from = existing.current
+    if deployed is not None and deployed == bumped_from:
         return None
-    previous = existing.versions[current]
-    new_snap = updated.versions[current]
-    if not source_version_bump_required(previous, new_snap):
+    if bumped_from not in updated.versions:
         return None
-    return current
+    previous = existing.versions[bumped_from]
+    new_snap = updated.versions[bumped_from]
+    if source_version_bump_required(previous, new_snap):
+        return bumped_from
+    return None
 
 
 def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> Source:

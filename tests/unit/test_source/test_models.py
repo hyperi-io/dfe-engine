@@ -831,6 +831,29 @@ class TestSourceWriteRequest:
         )
         assert draft_build_version_to_invalidate(existing, updated) is None
 
+    def test_draft_build_invalidate_before_first_deploy(self):
+        existing = Source.model_validate(
+            {
+                "source": "x",
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
+                    }
+                },
+            }
+        )
+        updated = existing.model_copy(deep=True)
+        updated.versions["1.0.0"] = updated.versions["1.0.0"].model_copy(
+            update={
+                "schema_config": SourceSchema(meta_schema="meta/b", meta_schema_version="1.0.0")
+            }
+        )
+        assert draft_build_version_to_invalidate(existing, updated) == "1.0.0"
+
     def test_source_version_bump_required_sigma(self):
         base = {
             "date_time": "2026-01-01",

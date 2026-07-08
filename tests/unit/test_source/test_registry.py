@@ -346,6 +346,54 @@ class TestRoundTrip:
         assert store.load_build("draft_src", "2.0.0") is None
         assert store.load_build("draft_src", "1.0.0") is None
 
+    def test_update_pre_deploy_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        registry.save_source(
+            {
+                "source": "pre_deploy",
+                "match": {"field": "f", "value": "v"},
+                "deployed_version": None,
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "match": {"field": "f", "value": "v"},
+                        "schema": {"meta_schema": "meta/a", "meta_schema_version": "1.0.0"},
+                    }
+                },
+            }
+        )
+        source = registry.get_source("pre_deploy")
+        store.save_build(
+            artifact_from_build(
+                SchemaBuildResult(
+                    source_name="pre_deploy",
+                    columns=[],
+                    create_table_ddl="CREATE TABLE t",
+                ),
+                version="1.0.0",
+            ),
+            source,
+        )
+        registry.update_source_from_write(
+            "pre_deploy",
+            SourceWriteRequest.model_validate(
+                {
+                    "match": {"field": "f", "value": "v"},
+                    "schema": {
+                        "meta_schema": "meta/b",
+                        "meta_schema_version": "1.0.0",
+                    },
+                }
+            ),
+            deployment_store=store,
+        )
+        assert store.load_build("pre_deploy", "1.0.0") is None
+
 
 # ---------------------------------------------------------------------------
 # Singleton
