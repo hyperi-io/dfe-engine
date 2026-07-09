@@ -18,6 +18,7 @@ from dfe_engine.api.v1.governance import router as governance_router
 from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
 from dfe_engine.api.v1.lifecycle import router as lifecycle_router
+from dfe_engine.api.v1.oidc_login import router as oidc_login_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
@@ -35,6 +36,8 @@ from dfe_engine.api.v1.transforms import router as transforms_router
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router)
+# OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
+v1_router.include_router(oidc_login_router)
 
 # Auth sub-routers mounted under /auth prefix
 _auth_sub = APIRouter(prefix="/auth")
