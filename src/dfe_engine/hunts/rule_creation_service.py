@@ -37,8 +37,8 @@ import re
 from datetime import UTC, datetime
 from typing import Any, Literal
 
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field, model_validator
+from scalo.logger import logger
 
 from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .rule_model import Rule, RuleCreate
@@ -306,7 +306,7 @@ class RuleCreationService:
             from ..clickhouse.clickhouse_manager import ClickHouseManager
 
             ch = ClickHouseManager.get_instance()
-            client = ch.get_client()
+            client = ch.get_clickhouse_client()
 
             # Build a minimal SELECT to estimate cost
             db_table = (

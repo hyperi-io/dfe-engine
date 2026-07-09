@@ -62,29 +62,19 @@ class TestOrgModel:
         assert org.name == "acme"
         assert org.display_name == "Acme Corp"
 
-    def test_org_dedicated_database_default_false(self):
+    def test_org_metadata_defaults(self):
         org = Org(name="test")
-        assert org.dedicated_database is False
-        assert org.database_name == ""
+        assert org.enabled is True
         assert org.hyperdx_team_id == ""
         assert org.ch_password_env == ""
-
-    def test_org_dedicated_database_enabled(self):
-        org = Org(name="acme", dedicated_database=True, database_name="dfe_acme")
-        assert org.dedicated_database is True
-        assert org.database_name == "dfe_acme"
 
     def test_org_internal_metadata_roundtrip(self):
         org = Org(
             name="acme",
-            dedicated_database=True,
-            database_name="dfe_acme",
             hyperdx_team_id="team-abc",
             ch_password_env="DFE_ACME_CH_PASSWORD",
         )
         data = org.model_dump()
-        assert data["dedicated_database"] is True
-        assert data["database_name"] == "dfe_acme"
         assert data["hyperdx_team_id"] == "team-abc"
         assert data["ch_password_env"] == "DFE_ACME_CH_PASSWORD"
         restored = Org.model_validate(data)

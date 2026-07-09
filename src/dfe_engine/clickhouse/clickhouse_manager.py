@@ -13,11 +13,12 @@ Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
 """
 
 from threading import Lock
-from typing import Annotated
+from typing import Annotated, Any
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
-from hyperi_pylib.logger import logger
+from scalo.crypto import tls_parts
+from scalo.logger import logger
 
 from ..settings import get_settings
 
@@ -35,6 +36,27 @@ class ClickHouseClientWrapper:
 
     def __init__(self, client: Client):
         self._client = client
+
+    def __enter__(self) -> "ClickHouseClientWrapper":
+        # The ClickHouseManager singleton owns the underlying client's lifecycle;
+        # `with get_clickhouse_client() as ch` is scoping sugar only, so __exit__
+        # must NOT close the shared client out from under other callers.
+        return self
+
+    def __exit__(self, *exc: object) -> bool:
+        return False
+
+    def query(self, query: str, *args, **kwargs):
+        """Raw SELECT -> the clickhouse-connect QueryResult (``.column_names`` /
+        ``.result_rows``). Use when the caller needs the result object;
+        ``execute()`` yields only result_rows and ``query_rows()`` returns
+        ``(columns, rows)``.
+        """
+        return self._client.query(query, *args, **kwargs)
+
+    def command(self, statement: str, *args, **kwargs):
+        """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
+        return self._client.command(statement, *args, **kwargs)
 
     def query_rows(self, query: str, *args, **kwargs):
         """Run a SELECT and return ``(column_names, result_rows)``.
@@ -174,6 +196,8 @@ class ClickHouseManager:
         try:
             if self._client is None:
                 self._initialize_client()
+            if self._client is None:  # _initialize_client sets it or raises
+                raise RuntimeError("ClickHouse client failed to initialise")
             return ClickHouseClientWrapper(self._client)
 
         except Exception as e:
@@ -188,7 +212,17 @@ class ClickHouseManager:
             user = self.target_config_data.get("ch_username")
             password = self.target_config_data.get("ch_password")
             secure = self.target_config_data.get("ch_secure", True)
-            verify = self.target_config_data.get("ch_verify", False)
+            # verify defaults to None -> scalo's SCALO_TLS_VERIFY escape valve
+            # (cert verification ON unless the whole environment disables it). An
+            # explicit ch_verify (DFE_CLICKHOUSE_VERIFY) overrides per-CH.
+            verify = self.target_config_data.get("ch_verify")
+            ca_cert = self.target_config_data.get("ch_ca_cert")
+
+            # scalo crypto posture in PRIMITIVES form: clickhouse-connect / urllib3
+            # take a verify flag + CA path, not a full SSLContext. This carries
+            # cert verification (ON by default) and the internal-CA trust anchor;
+            # tls_parts.verify resolves None via the escape valve.
+            tls = tls_parts(ca_paths=[ca_cert] if ca_cert else None, verify=verify)
 
             is_password_set = password is not None
 
@@ -198,18 +232,25 @@ class ClickHouseManager:
                 host=host,
                 port=port,
                 secure=secure,
+                verify=tls.verify,
                 password_set=is_password_set,
             )
 
-            # Create a custom pool manager for connection pooling
-            # clickhouse-connect uses urllib3 under the hood
+            # Custom pool manager for connection pooling (clickhouse-connect uses
+            # urllib3). TLS verification + CA are configured HERE so pooled
+            # connections carry the posture; cert_reqs/ca_certs only bite on the
+            # HTTPS (secure) path.
             self._pool_manager = httputil.get_pool_manager(
                 maxsize=self.connections_max,
                 num_pools=10,
+                verify=tls.verify,
+                ca_cert=(tls.ca_paths[0] if tls.ca_paths else None),
             )
 
-            # Build connection parameters
-            connect_params = {
+            # Build connection parameters. Typed dict[str, Any] because the values
+            # are heterogeneous (str/int/PoolManager/bool) and get **-unpacked into
+            # clickhouse_connect.get_client's precisely-typed kwargs.
+            connect_params: dict[str, Any] = {
                 "host": host,
                 "port": port,
                 "pool_mgr": self._pool_manager,
@@ -224,7 +265,7 @@ class ClickHouseManager:
             # Configure HTTPS
             if secure:
                 connect_params["secure"] = True
-                connect_params["verify"] = verify
+                connect_params["verify"] = tls.verify
 
             if host == "localhost" and (user is not None or password is not None):
                 logger.warning(

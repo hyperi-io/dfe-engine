@@ -15,10 +15,10 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from hyperi_pylib.config import DirectoryConfigStore
-from hyperi_pylib.logger import logger
+from scalo.config import DirectoryConfigStore
+from scalo.logger import logger
 
 from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config
@@ -276,6 +276,7 @@ class DeploymentConfigRegistry:
         repo = self._store._repo
 
         try:
+            from dulwich.objects import Commit, Tree
             from dulwich.walk import Walker
 
             rel_path = yaml_file.encode("utf-8")
@@ -287,15 +288,15 @@ class DeploymentConfigRegistry:
                     break
 
                 commit = entry.commit
-                tree = repo[commit.tree]
+                tree = cast("Tree", repo[commit.tree])
                 try:
                     tree.lookup_path(repo.__getitem__, rel_path)
                 except KeyError:
                     continue
 
                 if commit.parents:
-                    parent = repo[commit.parents[0]]
-                    parent_tree = repo[parent.tree]
+                    parent = cast("Commit", repo[commit.parents[0]])
+                    parent_tree = cast("Tree", repo[parent.tree])
                     try:
                         parent_entry = parent_tree.lookup_path(repo.__getitem__, rel_path)
                         current_entry = tree.lookup_path(repo.__getitem__, rel_path)

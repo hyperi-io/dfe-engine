@@ -5,7 +5,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 _SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
@@ -165,7 +165,7 @@ class HuntCheckpointManager:
                 engine = "MergeTree()" if no_cluster_declarations_needed else "SharedMergeTree()"
                 create_table_sql = f"""
                 CREATE TABLE IF NOT EXISTS {self.database_name}.{self.table_name} (
-                    customer_name LowCardinality(String) CODEC(LZ4),
+                    _org_id LowCardinality(String) CODEC(LZ4),
                     rule_name LowCardinality(String) CODEC(LZ4),
                     thread_id LowCardinality(String) CODEC(LZ4),
                     log_buffer UInt32 CODEC(Delta, ZSTD),
@@ -187,7 +187,7 @@ class HuntCheckpointManager:
                     query_fingerprint LowCardinality(String) DEFAULT '' CODEC(LZ4)
                 ) ENGINE = {engine}
                 PARTITION BY toYYYYMM(query_checkpoint_time)
-                ORDER BY (customer_name, hunt_name, rule_name, query_checkpoint_time);
+                ORDER BY (_org_id, hunt_name, rule_name, query_checkpoint_time);
                 """
                 ch_client.execute(create_table_sql)
             except Exception as e:
@@ -292,7 +292,7 @@ class HuntCheckpointManager:
             f"FROM {self.database_name}.{self.table_name} "
             "WHERE rule_name = %(rule_name)s "
             "AND hunt_name = %(hunt_name)s "
-            "AND customer_name = %(customer)s "
+            "AND _org_id = %(customer)s "
             "ORDER BY last_success_time DESC LIMIT 1"
         )
         params = {
@@ -329,7 +329,7 @@ class HuntCheckpointManager:
         Args:
             hunt_name (str): Hunt name.
             rule_name (str): Rule name.
-            customer_name (str): Customer name.
+            customer (str): Org id (tenant identifier).
             file_path (str): Path to the checkpoint file.
             logger (logging.Logger): Logger instance.
 
@@ -344,7 +344,7 @@ class HuntCheckpointManager:
             relevant_checkpoints = [
                 cp
                 for cp in checkpoints
-                if cp["customer_name"] == customer
+                if cp["_org_id"] == customer
                 and cp["hunt_name"] == hunt_name
                 and cp["rule_name"] == rule_name
             ]
@@ -375,13 +375,13 @@ class HuntCheckpointManager:
         hunt_name: str = "",
         thread_id: str = "",
         query_id: str = "",
-        log_buffer: int = None,
-        end_time_str: str = None,
+        log_buffer: int = 0,
+        end_time_str: str = "",
         execution_time_ms: int = 0,
-        execution_time_str: str = None,
-        query_schedule_time_str: str = None,
-        previous_successful_checkpoint_str: str = None,
-        query_checkpoint_time_str: str = None,
+        execution_time_str: str = "",
+        query_schedule_time_str: str = "",
+        previous_successful_checkpoint_str: str = "",
+        query_checkpoint_time_str: str = "",
         file_path: str = "",
     ) -> None:
         """
@@ -473,25 +473,35 @@ class HuntCheckpointManager:
             thread_id (str): Thread ID.
         """
 
+        if not (customer or "").strip():
+            logger.warning(
+                "Checkpoint: refusing ClickHouse checkpoint with empty _org_id "
+                f"(hunt={hunt_name}, rule={rule})"
+            )
+            return
+
         try:
             insert_sql = (
                 f"INSERT INTO {self.database_name}.{self.table_name} "
-                "(customer_name, rule_name, thread_id, log_buffer, "
+                "(_org_id, rule_name, thread_id, log_buffer, "
                 "query_schedule_time, execution_time, end_time, "
                 "previous_successful_checkpoint, query_checkpoint_time, "
                 "execution_time_ms, hunt_name, query_id) VALUES"
             )
+            # clickhouse-connect's insert() needs real datetime objects for the
+            # DateTime columns, not strings (the batch path already does this).
+            _fmt = "%Y-%m-%d %H:%M:%S"
             data = [
                 (
                     customer,
                     rule,
                     thread_id,
                     int(log_buffer),
-                    query_schedule_time_str,
-                    execution_time_str,
-                    end_time_str,
-                    previous_successful_checkpoint_str,
-                    query_checkpoint_time_str,
+                    datetime.strptime(query_schedule_time_str, _fmt),
+                    datetime.strptime(execution_time_str, _fmt),
+                    datetime.strptime(end_time_str, _fmt),
+                    datetime.strptime(previous_successful_checkpoint_str, _fmt),
+                    datetime.strptime(query_checkpoint_time_str, _fmt),
                     execution_time_ms,
                     hunt_name,
                     query_id,
@@ -535,6 +545,13 @@ class HuntCheckpointManager:
             file_path (str): Path to the checkpoint file.
         """
 
+        if not (customer or "").strip():
+            logger.warning(
+                "Checkpoint: refusing file checkpoint with empty _org_id "
+                f"(hunt={hunt_name}, rule={rule})"
+            )
+            return
+
         try:
             if os.path.exists(file_path) and os.path.getsize(file_path) > 0:
                 with open(file_path) as file:
@@ -543,7 +560,7 @@ class HuntCheckpointManager:
                 checkpoints = []
 
             checkpoint = {
-                "customer_name": customer,
+                "_org_id": customer,
                 "rule_name": rule,
                 "hunt_name": hunt_name,
                 "log_buffer": log_buffer,
@@ -577,21 +594,32 @@ class HuntCheckpointManager:
         """
 
         logger.debug(f"Starting batch checkpointing into [{self.database_name}.{self.table_name}].")
+        valid_checkpoints = []
+        for cp in checkpoints:
+            if not str(cp.get("_org_id") or "").strip():
+                logger.warning(
+                    "Checkpoint: skipping batch checkpoint with empty _org_id "
+                    f"(hunt={cp.get('hunt_name', 'na')}, rule={cp.get('rule_name', 'na')})"
+                )
+                continue
+            valid_checkpoints.append(cp)
+        if not valid_checkpoints:
+            return
         try:
             data = [
                 (
-                    str(checkpoint.get("customer_name", "na")),
+                    str(checkpoint.get("_org_id", "na")),
                     str(checkpoint.get("rule_name", "na")),
                     str(checkpoint.get("thread_id", "na")),
                     int(checkpoint.get("log_buffer", 0)),
-                    datetime.strptime(checkpoint.get("query_schedule_time"), "%Y-%m-%d %H:%M:%S"),
-                    datetime.strptime(checkpoint.get("execution_time"), "%Y-%m-%d %H:%M:%S"),
-                    datetime.strptime(checkpoint.get("end_time"), "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime(checkpoint["query_schedule_time"], "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime(checkpoint["execution_time"], "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime(checkpoint["end_time"], "%Y-%m-%d %H:%M:%S"),
                     datetime.strptime(
-                        checkpoint.get("previous_successful_checkpoint"),
+                        checkpoint["previous_successful_checkpoint"],
                         "%Y-%m-%d %H:%M:%S",
                     ),
-                    datetime.strptime(checkpoint.get("query_checkpoint_time"), "%Y-%m-%d %H:%M:%S"),
+                    datetime.strptime(checkpoint["query_checkpoint_time"], "%Y-%m-%d %H:%M:%S"),
                     int(checkpoint.get("execution_time_ms", 0)),
                     str(checkpoint.get("hunt_name", "na")),
                     str(checkpoint.get("query_id", "na")),
@@ -604,14 +632,14 @@ class HuntCheckpointManager:
                     int(checkpoint.get("result_rows") or 0),
                     str(checkpoint.get("query_fingerprint") or ""),
                 )
-                for checkpoint in checkpoints
+                for checkpoint in valid_checkpoints
             ]
 
             ch_client.execute(
                 f"""
                 INSERT INTO {self.database_name}.{self.table_name}
                 (
-                    customer_name,
+                    _org_id,
                     rule_name,
                     thread_id,
                     log_buffer,

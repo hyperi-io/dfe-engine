@@ -13,7 +13,7 @@ implementation -- callers don't change.
 
 from __future__ import annotations
 
-from dfe_engine.auth.models import AuthContext, AuthzResult
+from dfe_engine.auth.models import AuthContext, AuthzResult, Scope, ScopedGrant
 from dfe_engine.auth.roles import RoleConfig
 
 # ---------------------------------------------------------------------------
@@ -75,15 +75,25 @@ def authorize(
     action: str,
     resource: str = "",
     *,
+    scope: Scope | None = None,
     enabled: bool = True,
     role_config: RoleConfig | None = None,
 ) -> AuthzResult:
-    """Evaluate whether an action is permitted.
+    """Evaluate whether an action is permitted at a scope.
+
+    Grant-only union over the caller's scoped grants: a grant allows the
+    action when its role's permission patterns match AND its scope covers
+    the requested scope. No deny rules, no shadowing - system grants are
+    simply wider. ``scope=None`` is a SYSTEM-scope check ("no scope"
+    never implicitly means "all scopes"), which keeps every existing
+    unscoped require_action() call meaning what it always did: only
+    system-wide role holders pass.
 
     Args:
         auth: Identity context (None = root mode in dev/test).
         action: Action string (e.g. "config:read").
         resource: Resource identifier (accepted, ignored -- for caller compat).
+        scope: Requested scope; None means system scope.
         enabled: Whether auth is enabled. When False, all calls return allow.
         role_config: Override role configuration. Defaults to builtin roles.yaml.
 
@@ -97,9 +107,16 @@ def authorize(
         return AuthzResult(allowed=True, reason="root_mode")
 
     config = role_config or RoleConfig.load_builtin()
+    requested = scope if scope is not None else Scope()
 
-    granting_role = config.check_roles(auth.roles, action)
-    if granting_role is not None:
-        return AuthzResult(allowed=True, reason=f"role:{granting_role}")
+    # Contexts built without scoped grants (dev root, tests, legacy JWT)
+    # carry bare role names - those have always meant system-wide.
+    grants = auth.grants or [ScopedGrant(role=name) for name in auth.roles]
 
-    return AuthzResult(allowed=False, reason=f"no role grants '{action}'")
+    for grant in grants:
+        if grant.scope.covers(requested) and config.has_permission(grant.role, action):
+            # System grants keep the historical "role:<name>" reason form.
+            suffix = "" if grant.scope.type == "system" else f"@{grant.scope}"
+            return AuthzResult(allowed=True, reason=f"role:{grant.role}{suffix}")
+
+    return AuthzResult(allowed=False, reason=f"no role grants '{action}' at scope '{requested}'")

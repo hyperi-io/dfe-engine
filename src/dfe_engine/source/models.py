@@ -30,6 +30,7 @@ from pydantic import (
 )
 
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
+from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 
 # _source naming: lowercase alphanumeric + underscores, starts with letter
 _SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
@@ -43,6 +44,10 @@ SourceMatchOperator = Literal[
     "starts_with",
     "ends_with",
 ]
+
+# Single permitted-engine registry, shared by every SourceSchema validation so the
+# allow-list cannot drift from the DDL path. Loaded once (the YAML is packaged).
+_ENGINE_REGISTRY = EngineRegistry.default()
 
 
 # ---------------------------------------------------------------------------
@@ -220,16 +225,31 @@ class SourceSchema(BaseModel):
         description="Data retention in days",
     )
     engine: str = Field(
-        default="MergeTree",
-        description="Table engine (MergeTree, ReplicatedMergeTree, SharedMergeTree)",
+        default="",
+        description=(
+            "MergeTree-family engine VARIANT, optionally parameterised - e.g. "
+            "MergeTree, ReplacingMergeTree, ReplacingMergeTree(version_col), "
+            "SummingMergeTree(a, b). Declare the base variant only: the topology "
+            "(single vs Replicated/Shared/Cloud) is resolved at DDL time, so do NOT "
+            "prefix Replicated/Shared here. Empty (the default) means inherit the "
+            "deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree "
+            "unless overridden)."
+        ),
     )
 
     @field_validator("engine")
     @classmethod
     def _validate_engine(cls, v: str) -> str:
-        valid = {"MergeTree", "ReplicatedMergeTree", "SharedMergeTree"}
-        if v not in valid:
-            raise ValueError(f"Invalid engine {v!r}. Valid: {', '.join(sorted(valid))}")
+        # Empty = inherit the deployment default (resolved at DDL-build time); do
+        # not gate it. Otherwise gate the VARIANT (the token before any "(") against
+        # the single engine registry - the same allow-list the DDL generator uses,
+        # so config and DDL cannot drift. Params inside the parens are the caller's.
+        if not v:
+            return v
+        try:
+            _ENGINE_REGISTRY.validate(v)
+        except InvalidEngineError as e:
+            raise ValueError(str(e)) from e
         return v
 
 

@@ -1,7 +1,7 @@
 import re
 
-from hyperi_pylib.logger import logger
 from pydantic import StrictInt, validate_call
+from scalo.logger import logger
 
 
 class ClickHouseErrorHandler:

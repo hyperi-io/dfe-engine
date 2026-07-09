@@ -14,7 +14,7 @@ for DDL pipeline execution.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, model_validator
@@ -550,7 +550,7 @@ async def get_meta_schema(
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -588,7 +588,7 @@ async def get_meta_schema(
         )
     except ValueError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     columns_page = PaginatedResponse.from_list(
@@ -640,13 +640,13 @@ async def add_meta_schema_version(
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
     if not body.columns:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "validation_error",
                 "message": "columns must contain at least one column",
@@ -665,7 +665,7 @@ async def add_meta_schema_version(
         ) from None
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -687,12 +687,12 @@ async def add_meta_schema_version(
         )
     except SchemaVersionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     except SchemaLoadError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
@@ -726,7 +726,7 @@ async def create_meta_schema(
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -735,12 +735,12 @@ async def create_meta_schema(
             body_path = canonical_schema_path(body.path)
         except SchemaValidationError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "validation_error", "message": str(exc)},
             ) from exc
         if body_path != canonical_path:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={
                     "code": "path_mismatch",
                     "message": f"Body path {body.path!r} must match URL path {schema_path!r}",
@@ -748,7 +748,7 @@ async def create_meta_schema(
             )
     if registry.find_schema_at_location(canonical_path) is not None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "validation_error",
                 "message": f"A meta-schema already exists at {canonical_path!r}",
@@ -760,7 +760,7 @@ async def create_meta_schema(
         SchemaManager.validate_meta_schema_columns(to_save)
     except SchemaVersionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -771,7 +771,7 @@ async def create_meta_schema(
         )
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", canonical_path, "created")
@@ -806,7 +806,7 @@ async def update_meta_schema(
         canonical_path = canonical_schema_path(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -823,7 +823,7 @@ async def update_meta_schema(
 
     if body.summary is not None and not version:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "validation_error",
                 "message": "Query parameter 'version' is required when updating summary",
@@ -846,7 +846,7 @@ async def update_meta_schema(
             summary_version = version
             if summary_version is None:
                 raise HTTPException(
-                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                     detail={
                         "code": "validation_error",
                         "message": "Query parameter 'version' is required when updating summary",
@@ -860,12 +860,12 @@ async def update_meta_schema(
             description_parts.append(f"set current to {body.current}")
     except SchemaVersionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     except SchemaLoadError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "schema_error", "message": str(exc)},
         ) from exc
 
@@ -906,7 +906,7 @@ async def delete_meta_schema(
         registry.delete_schema(schema_path)
     except SchemaValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "meta_schema", schema_path, "deleted")
@@ -952,14 +952,14 @@ async def elastic_converter(
         raise
     except Exception as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "upload_read_error", "message": str(exc)},
         ) from exc
     try:
         return ElasticSchemaService.template_json_to_columns(raw)
     except ElasticSchemaConversionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "elastic_convert_error", "message": str(exc)},
         ) from exc
 
@@ -1020,6 +1020,7 @@ async def get_schema_columns(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
     )
     try:
         columns = builder.load_columns_for_source_version(source, source_version=version_id)
@@ -1096,6 +1097,7 @@ async def build_schema(
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
+        default_engine=settings.clickhouse.default_engine,
     )
     try:
         result = builder.build_for_source_version(source, source_version=version_id)
@@ -1159,7 +1161,7 @@ def _resolve_source_meta_schema(source, schema_registry):
     rel = source.schema_config.meta_schema
     if not rel:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "no_meta_schema",
                 "message": f"Source '{source.source}' has no meta_schema configured",
@@ -1526,7 +1528,7 @@ async def discover_json_paths(
         )
     except JsonPromotionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "discovery_failed", "message": str(exc)},
         ) from exc
 
@@ -1615,7 +1617,7 @@ async def sample_source_rows(
         )
     except JsonPromotionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "sample_failed", "message": str(exc)},
         ) from exc
 
@@ -1719,7 +1721,7 @@ async def promote_field(
             )
         except JsonPromotionError as exc:
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={"code": "discovery_failed", "message": str(exc)},
             ) from exc
         path_types = {d.path: d.types for d in discovered}
@@ -1733,7 +1735,7 @@ async def promote_field(
     results = [
         PromoteResult(
             json_path=o.json_path,
-            status=o.status,
+            status=cast('Literal["ok", "error"]', o.status),
             column_name=o.column_name,
             data_type=o.data_type,
             index_type=o.index_type,
@@ -1768,7 +1770,7 @@ async def promote_field(
 
     if body.atomic and has_error:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "promotion_failed",
                 "message": "Atomic promotion aborted: one or more paths failed",
@@ -1819,7 +1821,7 @@ async def promote_field(
         )
     except SchemaVersionError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 

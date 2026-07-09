@@ -9,8 +9,8 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 import httpx
-from hyperi_pylib.http import HttpClient
-from hyperi_pylib.logger import logger
+from scalo.http import HttpClient
+from scalo.logger import logger
 
 
 class StorageError(Exception):

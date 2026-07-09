@@ -516,7 +516,7 @@ class TestCelErrors:
 
     def test_invalid_cel_syntax_raises_at_creation(self):
         """Invalid CEL syntax should raise during from_create()."""
-        from hyperi_pylib.expression import ExpressionError
+        from scalo.expression import ExpressionError
 
         with pytest.raises(ExpressionError):
             Rule.from_create(
@@ -535,7 +535,7 @@ class TestCelErrors:
 
     def test_disallowed_cel_function_raises(self):
         """DFE profile disallows map/filter/exists etc."""
-        from hyperi_pylib.expression import ExpressionError
+        from scalo.expression import ExpressionError
 
         with pytest.raises(ExpressionError):
             Rule.from_create(

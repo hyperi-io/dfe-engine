@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import copy
 import re
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
@@ -249,7 +250,7 @@ class SchemaManager:
     def add_version(
         path: str | Path,
         new_version: str,
-        columns: list[dict[str, Any] | SchemaColumn],
+        columns: Sequence[dict[str, Any] | SchemaColumn],
         *,
         type: str = "addition",
         summary: str = "",
@@ -385,7 +386,7 @@ class SchemaManager:
     @staticmethod
     def create_meta_schema(
         path: str | Path,
-        columns: list[dict[str, Any] | SchemaColumn],
+        columns: Sequence[dict[str, Any] | SchemaColumn],
         *,
         initial_version: str = "1.0.0",
         type: str = "model",

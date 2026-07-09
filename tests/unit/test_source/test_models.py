@@ -166,7 +166,7 @@ class TestSourceSchema:
     def test_minimal(self):
         s = SourceSchema(ttl_days=90)
         assert s.ttl_days == 90
-        assert s.engine == "MergeTree"
+        assert s.engine == ""  # empty = inherit the deployment default at DDL time
         assert s.meta_schema is None
 
     def test_full(self):
@@ -176,14 +176,26 @@ class TestSourceSchema:
             derived_schema="filebeat/derived",
             additional_fields="filebeat/add",
             ttl_days=90,
-            engine="ReplicatedMergeTree",
+            engine="ReplacingMergeTree",
         )
         assert s.meta_schema == "logs_beats_filebeat"
-        assert s.engine == "ReplicatedMergeTree"
+        assert s.engine == "ReplacingMergeTree"
+
+    def test_parameterised_engine(self):
+        # A parameterised variant is accepted - the registry gates the variant,
+        # the params (a version column here) are the caller's.
+        s = SourceSchema(engine="ReplacingMergeTree(_timestamp_load)")
+        assert s.engine == "ReplacingMergeTree(_timestamp_load)"
 
     def test_invalid_engine(self):
         with pytest.raises(ValueError, match="Invalid engine"):
             SourceSchema(engine="InvalidEngine")
+
+    def test_replicated_prefix_rejected(self):
+        # The Replicated/Shared prefix is topology-derived at DDL time, never
+        # declared in source config - so it is not a permitted variant.
+        with pytest.raises(ValueError, match="Invalid engine"):
+            SourceSchema(engine="ReplicatedMergeTree")
 
 
 # ---------------------------------------------------------------------------
@@ -264,7 +276,7 @@ class TestSource:
         assert s.display_name == "Syslog"
         assert s.version().header is None
         assert s.header == SourceHeader()
-        assert s.schema_config.engine == "MergeTree"
+        assert s.schema_config.engine == ""  # empty = inherit deployment default
 
     def test_full(self):
         s = Source.model_validate(
@@ -438,7 +450,7 @@ class TestSourceYaml:
             "schema": {
                 "meta_schema": "test_meta",
                 "ttl_days": 30,
-                "engine": "SharedMergeTree",
+                "engine": "SummingMergeTree",
             },
         }
         s1 = Source.model_validate(data)

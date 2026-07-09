@@ -20,7 +20,7 @@ All endpoints require admin role (org:write).
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Literal, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
@@ -140,7 +140,8 @@ async def list_casbin_scopes(
 ) -> CasbinScopesResponse:
     """Return assignable Casbin permission scopes for role configuration."""
     data = casbin_scope_catalog()
-    rows = [{"scope": s} for s in data["scopes"]]
+    # catalog is dict[str, object] (heterogeneous values); scopes is a list[str].
+    rows = [{"scope": s} for s in cast("list[str]", data["scopes"])]
     if prefix:
         rows = [row for row in rows if str(row["scope"]).startswith(prefix)]
     rows = apply_search(rows, search, ["scope"])

@@ -30,8 +30,9 @@ class ServicePlugin:
     Attributes:
         descriptor: Static service metadata (name, image, ports, health paths).
         config_class: Pydantic model for the service runtime config (YAML).
-        deployment_class: Pydantic model for K8s deployment config.
-            Typed as ``type`` to avoid circular import between services/ and deployment/.
+        deployment_class: Pydantic model for K8s deployment config, or None.
+            ``BaseModel`` is a TYPE_CHECKING-only import, so the annotation stays
+            lazy and introduces no services/ -> deployment/ runtime cycle.
         validate_config: Optional cross-field validation callback.
             Signature: ``(config: BaseModel, errors: list[str], warnings: list[str]) -> None``
         sizing_overrides: Per t-shirt size service config overrides.
@@ -45,7 +46,7 @@ class ServicePlugin:
 
     descriptor: ServiceDescriptor
     config_class: type[BaseModel]
-    deployment_class: type | None = None
+    deployment_class: type[BaseModel] | None = None
     validate_config: Callable[..., None] | None = None
     sizing_overrides: dict[str, dict[str, Any]] = field(default_factory=dict)
     keda_defaults: dict[str, Any] = field(default_factory=dict)

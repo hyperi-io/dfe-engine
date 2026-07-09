@@ -29,7 +29,7 @@ import json
 import os
 from dataclasses import dataclass, field
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.orgs.models import Org
@@ -78,7 +78,7 @@ class HyperDXClient:
             return None
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.post(
@@ -133,7 +133,7 @@ class HyperDXClient:
             return None
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.post(
@@ -187,7 +187,7 @@ class HyperDXClient:
             return False
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.delete(
@@ -228,7 +228,7 @@ class HyperDXClient:
             return False
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.delete(
@@ -272,7 +272,7 @@ class HyperDXClient:
             return False
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.put(
@@ -397,7 +397,7 @@ class HyperDXClient:
             return False
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.post(
@@ -434,7 +434,7 @@ class HyperDXClient:
             return None
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient(base_url=self._base_url) as client:
                 response = await client.get(

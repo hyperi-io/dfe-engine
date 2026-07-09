@@ -86,8 +86,9 @@ async def cancel_task(
             detail={"code": "not_found", "message": f"Task '{task_id}' not found"},
         )
     manager.cancel(task_id)
-    # Re-fetch after cancel request (status may not have changed yet)
-    return manager.get(task_id)  # type: ignore[return-value]
+    # Re-fetch after cancel request (status may not have changed yet); fall back
+    # to the pre-cancel info if the task vanished between cancel and re-fetch.
+    return manager.get(task_id) or info
 
 
 @router.get(

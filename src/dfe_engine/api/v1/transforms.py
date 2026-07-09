@@ -18,6 +18,7 @@ from typing import Literal
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from scalo.crypto import ssl_context
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.audit import audit_resource_change
@@ -89,7 +90,7 @@ async def compile_transform(
     """
     compiler_url = settings.services.transform_wasm_compiler_url
 
-    async with httpx.AsyncClient(timeout=300.0) as client:
+    async with httpx.AsyncClient(timeout=300.0, verify=ssl_context()) as client:
         try:
             resp = await client.post(
                 f"{compiler_url}/compile",
@@ -146,7 +147,7 @@ async def test_transform(
     """
     wasm_url = settings.services.transform_wasm_url
 
-    async with httpx.AsyncClient(timeout=60.0) as client:
+    async with httpx.AsyncClient(timeout=60.0, verify=ssl_context()) as client:
         try:
             resp = await client.post(
                 f"{wasm_url}/test",

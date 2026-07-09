@@ -13,7 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.query.catalog import VIEW_PREFIX
 
@@ -22,83 +22,23 @@ BUILTIN_VIEWS_DIR = Path(__file__).parent / "builtin_views"
 
 
 class DDLManager:
-    """Manages ClickHouse RBAC and parameterized view DDL.
+    """Manages ClickHouse parameterized-view DDL (apply / diff / drop).
 
-    All operations use the admin connection. The restricted user/role
-    created here is used by ViewExecutor for query execution.
+    All operations use the admin connection. The restricted READER identity is
+    no longer defined here - it is the ``query_reader`` service role reconciled by
+    governance.ch.ChRbacReconciler (a single definition of the restricted reader).
+    Views grant SELECT to that role (``dfe_query_reader_role``).
 
     Args:
         client: A clickhouse-connect client (admin connection)
         database: Target database for views
-        restricted_user: Username for the restricted query user
-        restricted_password: Password for the restricted query user
-        max_execution_time: Max query execution time in seconds
-        max_rows_to_read: Max rows a query can scan
-        max_memory_usage: Max memory per query (e.g. "2G")
     """
 
-    def __init__(
-        self,
-        client: Any,
-        database: str = "default",
-        restricted_user: str = "dfe_query_user",
-        restricted_password: str = "",
-        max_execution_time: int = 30,
-        max_rows_to_read: int = 10_000_000,
-        max_memory_usage: str = "2G",
-    ):
+    _READER_ROLE = "dfe_query_reader_role"
+
+    def __init__(self, client: Any, database: str = "default"):
         self._client = client
         self._database = database
-        self._restricted_user = restricted_user
-        self._restricted_password = restricted_password
-        self._max_execution_time = max_execution_time
-        self._max_rows_to_read = max_rows_to_read
-        self._max_memory_usage = max_memory_usage
-
-    def ensure_rbac(self) -> None:
-        """Bootstrap the restricted role, settings profile, and user.
-
-        All statements are idempotent (IF NOT EXISTS).
-        """
-        statements = self._build_rbac_statements()
-
-        for stmt in statements:
-            try:
-                self._client.command(stmt)
-            except Exception:
-                logger.exception(f"Failed to execute RBAC DDL: {stmt[:100]}...")
-                raise
-
-        logger.info(
-            f"RBAC bootstrapped: user={self._restricted_user}, "
-            f"max_execution_time={self._max_execution_time}, "
-            f"max_rows_to_read={self._max_rows_to_read}"
-        )
-
-    def _build_rbac_statements(self) -> list[str]:
-        """Build the RBAC bootstrap SQL statements.
-
-        Returns:
-            List of SQL statements to execute
-        """
-        return [
-            (
-                f"CREATE SETTINGS PROFILE IF NOT EXISTS dfe_query_profile "
-                f"SETTINGS "
-                f"readonly = 1 CONST, "
-                f"max_execution_time = {self._max_execution_time} CONST, "
-                f"max_rows_to_read = {self._max_rows_to_read} CONST, "
-                f"max_memory_usage = '{self._max_memory_usage}' CONST, "
-                f"allow_ddl = 0 CONST"
-            ),
-            "CREATE ROLE IF NOT EXISTS dfe_query_reader",
-            (
-                f"CREATE USER IF NOT EXISTS {self._restricted_user} "
-                f"IDENTIFIED WITH sha256_password BY '{self._restricted_password}' "
-                f"DEFAULT ROLE dfe_query_reader "
-                f"SETTINGS PROFILE dfe_query_profile"
-            ),
-        ]
 
     def apply_view(self, name: str, sql: str) -> None:
         """Apply a single parameterized view and grant access.
@@ -122,13 +62,15 @@ class DDLManager:
             raise
 
     def _grant_view(self, name: str) -> None:
-        """Grant SELECT on a view to the restricted role."""
-        self._client.command(f"GRANT SELECT ON {self._database}.{name} TO dfe_query_reader")
+        """Grant SELECT on a view to the reconciled query_reader role."""
+        self._client.command(f"GRANT SELECT ON {self._database}.{name} TO {self._READER_ROLE}")
 
     def _revoke_view(self, name: str) -> None:
-        """Revoke SELECT on a view from the restricted role."""
+        """Revoke SELECT on a view from the reconciled query_reader role."""
         try:
-            self._client.command(f"REVOKE SELECT ON {self._database}.{name} FROM dfe_query_reader")
+            self._client.command(
+                f"REVOKE SELECT ON {self._database}.{name} FROM {self._READER_ROLE}"
+            )
         except Exception:
             logger.warning(f"Failed to revoke view (may not exist): {name}")
 
@@ -209,13 +151,9 @@ class DDLManager:
         }
 
     def bootstrap(self) -> list[str]:
-        """Full bootstrap: RBAC + all builtin views.
-
-        Convenience method that runs ensure_rbac() followed by
-        apply_all_builtin_views().
+        """Apply all builtin views (the reader RBAC is the reconciler's job now).
 
         Returns:
             List of applied view names
         """
-        self.ensure_rbac()
         return self.apply_all_builtin_views()

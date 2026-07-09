@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.engine import ARGO_ACTION_PREFIX
 from dfe_engine.auth.roles import RoleConfig

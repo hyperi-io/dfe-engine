@@ -1,6 +1,6 @@
 """Tests for hunt scoring — generic conditional score computation.
 
-Uses CEL (Common Expression Language) via hyperi_pylib.expression.
+Uses CEL (Common Expression Language) via scalo.expression.
 """
 
 from unittest.mock import patch

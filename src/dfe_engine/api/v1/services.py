@@ -201,7 +201,14 @@ async def get_service_config_history(
     limit: int = Query(10, ge=1, le=100),
 ):
     """Get git history for a service config (git-backed registries only)."""
-    entries = registry.get_config_history(service, instance, limit=limit)
+    try:
+        entries = registry.get_config_history(service, instance, limit=limit)
+    except ValueError as exc:
+        # Unknown/schema-less service -> _validate_service raises ValueError.
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": str(exc)},
+        ) from exc
     return [
         ConfigHistoryEntry(
             commit=e.get("commit", ""),

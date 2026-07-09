@@ -10,7 +10,7 @@ Order of operations:
 4. Clamp to 0–100
 
 Condition expressions use **CEL (Common Expression Language)** via
-``hyperi_pylib.expression``. See ``docs/EXPRESSIONS-CEL.md`` for the
+``scalo.expression``. See ``docs/EXPRESSIONS-CEL.md`` for the
 DFE expression profile.
 
 Hunt YAML format::
@@ -35,13 +35,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from hyperi_pylib.expression import (
+from pydantic import BaseModel, Field, field_validator, model_validator
+from scalo.expression import (
     evaluate_condition,
 )
-from hyperi_pylib.expression import (
+from scalo.expression import (
     validate as validate_condition,
 )
-from pydantic import BaseModel, Field, field_validator, model_validator
 
 # ── Models ─────────────────────────────────────────────────────
 

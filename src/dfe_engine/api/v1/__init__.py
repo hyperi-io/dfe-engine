@@ -7,18 +7,28 @@ from dfe_engine.api.v1.accounts import router as accounts_router
 from dfe_engine.api.v1.alerts import router as alerts_router
 from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.auth import router as auth_router
+from dfe_engine.api.v1.authoring import router as authoring_router
 from dfe_engine.api.v1.cel import router as cel_router
+from dfe_engine.api.v1.config import router as config_router
 from dfe_engine.api.v1.deployments import router as deployments_router
 from dfe_engine.api.v1.discovery import router as discovery_router
 from dfe_engine.api.v1.fieldmaps import router as fieldmaps_router
+from dfe_engine.api.v1.gitops import router as gitops_router
+from dfe_engine.api.v1.governance import router as governance_router
+from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
+from dfe_engine.api.v1.lifecycle import router as lifecycle_router
+from dfe_engine.api.v1.oidc_login import router as oidc_login_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
 from dfe_engine.api.v1.orgs import router as orgs_router
 from dfe_engine.api.v1.pipeline import router as pipeline_router
 from dfe_engine.api.v1.queries import router as queries_router
+from dfe_engine.api.v1.repository import router as repository_router
 from dfe_engine.api.v1.roles import router as roles_router
 from dfe_engine.api.v1.rules import router as rules_router
+from dfe_engine.api.v1.sampler import router as sampler_router
 from dfe_engine.api.v1.schemas import router as schemas_router
+from dfe_engine.api.v1.scim import router as scim_router
 from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
 from dfe_engine.api.v1.services import router as services_router
 from dfe_engine.api.v1.sigma import router as sigma_router
@@ -29,6 +39,8 @@ from dfe_engine.api.v1.transforms import router as transforms_router
 
 v1_router = APIRouter(prefix="/v1")
 v1_router.include_router(auth_router)
+# OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
+v1_router.include_router(oidc_login_router)
 
 # Auth sub-routers mounted under /auth prefix
 _auth_sub = APIRouter(prefix="/auth")
@@ -51,11 +63,23 @@ v1_router.include_router(system_router)
 v1_router.include_router(transforms_router)
 v1_router.include_router(hunts_router)
 v1_router.include_router(queries_router)
+v1_router.include_router(sampler_router)
 v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
 v1_router.include_router(discovery_router)
 v1_router.include_router(schemas_router)
+# SCIM 2.0 provisioning face (/scim/v2) over the account/group stores
+v1_router.include_router(scim_router)
 v1_router.include_router(sigma_router)
 v1_router.include_router(cel_router)
+# Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
+v1_router.include_router(helm_router)
+v1_router.include_router(governance_router)
+v1_router.include_router(gitops_router)
+v1_router.include_router(lifecycle_router)
+v1_router.include_router(authoring_router)
+# Runtime client-config bootstrap for the UI (public, no secrets)
+v1_router.include_router(config_router)
+v1_router.include_router(repository_router)
 
 __all__ = ["v1_router"]

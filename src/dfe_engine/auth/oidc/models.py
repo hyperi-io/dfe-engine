@@ -107,6 +107,17 @@ class OIDCProvider(BaseModel):
     client_id_env: str = ""
     """Env var name holding the OIDC client ID."""
 
+    client_secret_env: str = ""
+    """Env var name holding the OIDC client secret used in the RP auth-code exchange.
+
+    Distinct from ``GroupResolutionConfig.client_secret_env`` (that one backs the
+    Entra Graph API sync). This one is the confidential-client secret the engine
+    presents to the IdP token endpoint when terminating the login flow.
+    """
+
+    scopes: str = "openid email profile groups"
+    """Space-separated OAuth scopes requested at login. ``openid`` is mandatory."""
+
     groups: GroupResolutionConfig = Field(default_factory=GroupResolutionConfig)
     """Group resolution configuration for this provider."""
 

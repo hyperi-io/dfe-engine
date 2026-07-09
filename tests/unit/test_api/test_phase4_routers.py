@@ -96,6 +96,112 @@ class TestSchemasRouter:
         )
         assert resp.status_code == 404
 
+    def test_deploy_source_not_found(self, client, admin_headers):
+        resp = client.post("/api/v1/sources/nonexistent/deploy", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_deploy_requires_auth(self, client):
+        assert client.post("/api/v1/sources/x/deploy").status_code == 401
+
+    def test_deploy_no_schema_source_returns_404(self, client, admin_headers, sample_source):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.post(
+            f"/api/v1/sources/{sample_source['source']}/deploy", headers=admin_headers
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "no_schema"
+
+    def test_deploy_dry_run_plans_ddl_without_touching_clickhouse(self, tmp_path, monkeypatch):
+        # A source WITH a real schema; dry_run must return the DDL and apply nothing
+        # (no ClickHouse configured here - if plan touched CH this would 503).
+        import shutil
+
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import create_access_token
+        from dfe_engine.schema.schema_loader import _BUNDLED_PROFILES_DIR
+        from dfe_engine.settings import (
+            APISettings,
+            AuthSettings,
+            DFESettings,
+            SchemasSettings,
+            ServicesSettings,
+            SourceSettings,
+            reset_settings,
+        )
+        from dfe_engine.yaml_utils import yaml_dump
+
+        reset_settings()
+        schemas_root = tmp_path / "schemas"
+        schemas_root.mkdir()
+        common_header = schemas_root / "common-header"
+        common_header.mkdir()
+        shutil.copy(_BUNDLED_PROFILES_DIR / "minimal.yaml", common_header / "minimal.yaml")
+        monkeypatch.setenv("DFE_SCHEMAS_DIR", str(schemas_root))
+        yaml_dump(
+            {
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "columns": [
+                            {"name": "alpha", "type": "string", "use_case": "dimension"},
+                            {"name": "beta", "type": "integer"},
+                        ]
+                    }
+                },
+            },
+            schemas_root / "meta_cols.yaml",
+        )
+        sources_dir = tmp_path / "sources"
+        sources_dir.mkdir()
+        yaml_dump(
+            {
+                "source": "dep_src",
+                "enabled": True,
+                "match": {"field": "tags.collector.type", "value": "dep_src"},
+                "deployed_version": "1.0.0",
+                "current": "1.0.0",
+                "versions": {
+                    "1.0.0": {
+                        "date_time": "2026-01-01",
+                        "header": {"type": "minimal", "version": "1.0.0"},
+                        "schema": {
+                            "meta_schema": "meta_cols.yaml",
+                            "meta_schema_version": "1.0.0",
+                            "engine": "MergeTree",
+                        },
+                    }
+                },
+            },
+            sources_dir / "dep_src.yaml",
+        )
+        (tmp_path / "services").mkdir()
+        (tmp_path / "auth").mkdir()
+        settings = DFESettings(
+            config_dir=str(tmp_path),
+            schemas=SchemasSettings(schemas_dir=str(schemas_root)),
+            source=SourceSettings(sources_dir=str(sources_dir)),
+            services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+            auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-deploy"),
+        )
+        app = create_app(settings)
+        token = create_access_token(
+            data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
+            settings=settings,
+        )
+        headers = {"Authorization": f"Bearer {token}"}
+        try:
+            with TestClient(app, raise_server_exceptions=False) as tc:
+                resp = tc.post("/api/v1/sources/dep_src/deploy?dry_run=true", headers=headers)
+                assert resp.status_code == 200, resp.text
+                body = resp.json()
+                assert body["dry_run"] is True
+                assert body["applied"] is False
+                assert body["statements_applied"] == 0
+                assert "CREATE TABLE" in body["create_table"].upper()
+        finally:
+            reset_settings()
+
     def test_columns_with_existing_source(self, client, admin_headers, sample_source):
         """Create a source, then try to get columns (404 when version has no schema YAML refs)."""
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
@@ -329,7 +435,7 @@ class TestSchemasRouter:
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
             auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
-            api=APISettings(jwt_secret="test-secret-plan"),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-plan"),
         )
         (tmp_path / "services").mkdir()
         (tmp_path / "auth").mkdir()

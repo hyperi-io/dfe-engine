@@ -40,7 +40,7 @@ class ViewExecutor:
     """Executes parameterized views via a restricted ClickHouse connection.
 
     Args:
-        restricted_client: clickhouse-connect client authenticated as dfe_query_user
+        restricted_client: clickhouse-connect client authenticated as dfe_query_reader
         catalog: ViewCatalog for view discovery
         database: ClickHouse database containing the views
         default_limit: Default row limit if not specified

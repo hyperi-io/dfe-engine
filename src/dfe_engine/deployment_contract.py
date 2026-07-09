@@ -1,7 +1,7 @@
 """Deployment contract for dfe-engine itself.
 
 Mirrors the pattern dfe-loader uses (Rust): the app exports a single
-:class:`hyperi_pylib.deployment.DeploymentContract` describing its
+:class:`scalo.deployment.DeploymentContract` describing its
 deployment-facing surface (image, ports, health probes, secrets, OCI labels).
 pylib's Python-native generators consume that contract to emit:
 
@@ -21,15 +21,20 @@ committed ``Dockerfile`` and ``chart/`` aligned with it.
 
 from __future__ import annotations
 
-from hyperi_pylib.deployment import (
+import os
+
+from scalo.deployment import (
     DeploymentContract,
     HealthContract,
     ImageProfile,
     OciLabels,
     SecretEnvContract,
     SecretGroupContract,
-    image_registry_from_cascade,
 )
+
+# dfe identity default; scalo's cascade helper neutralises to localhost:5000, so
+# default to dfe's registry here and let ops override via env (#60).
+_DEFAULT_IMAGE_REGISTRY = "ghcr.io/hyperi-io"
 
 
 def engine_deployment_contract() -> DeploymentContract:
@@ -51,9 +56,9 @@ def engine_deployment_contract() -> DeploymentContract:
             metrics_path="/metrics",
         ),
         env_prefix="DFE",
-        metric_prefix="engine",
+        metric_prefix="dfe",
         config_mount_path="/etc/dfe/config",
-        image_registry=image_registry_from_cascade(),
+        image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.12",
         entrypoint_args=["run"],
         secrets=[
@@ -85,6 +90,8 @@ def engine_deployment_contract() -> DeploymentContract:
         oci_labels=OciLabels(
             title="dfe-engine",
             description="DFE Engine -- REST API and config control plane",
+            # Explicit: scalo's DEFAULT_VENDOR is being neutralised; keep dfe identity (#60).
+            vendor="HyperI",
         ),
     )
 
