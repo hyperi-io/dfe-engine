@@ -4,7 +4,7 @@ from importlib import resources
 from pathlib import Path
 from zipfile import ZipFile
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 from tabulate import tabulate
 
 from ..settings import get_settings

@@ -15,7 +15,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth import AuthContext, AuthorizationError, authorize
 from dfe_engine.auth.api_keys import APIKeyStore

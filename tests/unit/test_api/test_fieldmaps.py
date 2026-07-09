@@ -30,7 +30,7 @@ def app_with_fieldmaps(tmp_path):
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
         ),
-        api=APISettings(jwt_secret="test-secret"),
+        api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
     )
     for d in ["sources", "services"]:
         (tmp_path / d).mkdir(exist_ok=True)
@@ -51,7 +51,7 @@ def fm_admin_headers(app_with_fieldmaps):
     from dfe_engine.api.deps import create_access_token
     from dfe_engine.settings import APISettings, DFESettings
 
-    settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
+    settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
     token = create_access_token(
         data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
         settings=settings,

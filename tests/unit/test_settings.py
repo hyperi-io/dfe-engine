@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from pydantic import ValidationError
 
 from dfe_engine.settings import DFESettings, load_settings, reset_settings
 
@@ -13,6 +14,20 @@ def _clean_settings():
     reset_settings()
     yield
     reset_settings()
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_env(monkeypatch):
+    """Isolate settings tests from a populated developer .env.
+
+    tests/conftest.py loads the project .env with override=True, so a real .env
+    (CH host, DFE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
+    default / fallback / production-guard assertions here. Strip every DFE_* and
+    legacy CLICKHOUSE_* var so each test controls exactly the environment it sets.
+    """
+    for key in list(os.environ):
+        if key.startswith(("DFE_", "CLICKHOUSE_")):
+            monkeypatch.delenv(key, raising=False)
 
 
 @pytest.fixture
@@ -189,9 +204,9 @@ class TestEnvOverrides:
         assert settings.api.port == 9090
 
     def test_api_jwt_secret_override(self, monkeypatch):
-        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "super-secret-hmac-key-at-least-32-bytes")
         settings = load_settings()
-        assert settings.api.jwt_secret == "super-secret"
+        assert settings.api.jwt_secret == "super-secret-hmac-key-at-least-32-bytes"
 
     def test_api_cors_origins_override(self, monkeypatch):
         monkeypatch.setenv("DFE_API_CORS_ORIGINS", "http://a.com,http://b.com")
@@ -215,8 +230,26 @@ class TestEnvOverrides:
 
     def test_auth_enabled_override(self, monkeypatch):
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.auth.enabled is True
+
+    def test_placeholder_jwt_secret_rejected_in_production(self, monkeypatch):
+        # Security guard: auth on + production posture + the known dev secret must
+        # fail fast rather than run with a forgeable token key.
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")  # env defaults to production
+        with pytest.raises(ValidationError):
+            load_settings()
+
+    def test_placeholder_jwt_secret_allowed_in_dev(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")
+        assert load_settings().auth.enabled is True
+
+    def test_production_accepts_real_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
+        assert load_settings().auth.enabled is True
 
     def test_auth_dir_override(self, monkeypatch, tmp_path):
         monkeypatch.setenv("DFE_AUTH_DIR", str(tmp_path / "auth"))
@@ -346,8 +379,51 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_CLICKHOUSE_PORT", "9000")
         monkeypatch.setenv("DFE_API_PORT", "9090")
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
+        monkeypatch.setenv("DFE_ENV", "dev")  # dev posture: placeholder secret allowed
         settings = load_settings()
         assert settings.clickhouse.host == "ch1.example.com"
         assert settings.clickhouse.port == 9000
         assert settings.api.port == 9090
         assert settings.auth.enabled is True
+
+
+class TestGitopsMode:
+    def test_default_is_team(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings().mode == "team"
+
+    def test_solo_accepted(self):
+        from dfe_engine.settings import GitopsSettings
+
+        assert GitopsSettings(mode="solo").mode == "solo"
+
+    def test_invalid_mode_rejected(self):
+        import pytest
+        from pydantic import ValidationError
+
+        from dfe_engine.settings import GitopsSettings
+
+        with pytest.raises(ValidationError):
+            GitopsSettings(mode="duo")
+
+    def test_env_override(self, monkeypatch):
+        from dfe_engine.settings import _get_env_overrides
+
+        monkeypatch.setenv("DFE_GITOPS_MODE", "solo")
+        overrides = _get_env_overrides()
+        assert overrides["gitops"]["mode"] == "solo"
+
+
+class TestIsDevPosture:
+    def test_dev_postures(self):
+        from dfe_engine.settings import is_dev_posture
+
+        for env in ("dev", "development", "local", "test", "ci", " DEV "):
+            assert is_dev_posture(env) is True
+
+    def test_production_postures(self):
+        from dfe_engine.settings import is_dev_posture
+
+        for env in ("production", "prod", "staging", ""):
+            assert is_dev_posture(env) is False

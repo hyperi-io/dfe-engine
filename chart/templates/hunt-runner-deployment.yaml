@@ -1,0 +1,84 @@
+{{- if .Values.huntRunner.enabled }}
+# The pull-based hunt runner: `dfe-hunt-runner run` on the SAME engine image, a
+# background worker (no HTTP surface) that coordinates entirely through ClickHouse.
+# KEDA owns the replica count when enabled (scale-to-zero on an empty backlog), so
+# the Deployment sets replicas only when KEDA is off. See docs/HUNT-RUNNER-SCALING.md.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dfe-engine.fullname" . }}-hunt-runner
+  labels:
+    {{- include "dfe-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hunt-runner
+spec:
+  {{- if not .Values.huntRunner.keda.enabled }}
+  replicas: {{ .Values.huntRunner.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "dfe-engine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: hunt-runner
+  template:
+    metadata:
+      labels:
+        {{- include "dfe-engine.labels" . | nindent 8 }}
+        app.kubernetes.io/component: hunt-runner
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "dfe-engine.serviceAccountName" . }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      # SIGTERM drains the current tick then exits (daemon.run_loop re-checks the stop
+      # flag after each tick); give it a little grace for an in-flight hunt query.
+      terminationGracePeriodSeconds: {{ .Values.huntRunner.terminationGracePeriodSeconds }}
+      containers:
+        - name: hunt-runner
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - dfe-hunt-runner
+            - run
+            - --poll
+            - {{ .Values.huntRunner.poll | quote }}
+            - --cap
+            - {{ .Values.huntRunner.cap | quote }}
+            - --reload-every
+            - {{ .Values.huntRunner.reloadEvery | quote }}
+          resources:
+            {{- toYaml .Values.huntRunner.resources | nindent 12 }}
+          env:
+            # ClickHouse - the runner's ONLY operational dependency (lease/watermark/
+            # schedule live here; no engine call on the hot path).
+            {{- include "dfe-engine.clickhouseEnv" . | nindent 12 }}
+            # Hunt configs (read from the mounted gitops config).
+            {{- include "dfe-engine.configDirEnv" . | nindent 12 }}
+          {{- if .Values.configVolume.enabled }}
+          volumeMounts:
+            - name: config
+              mountPath: {{ .Values.configVolume.mountPath }}
+              readOnly: true
+          {{- end }}
+      {{- if .Values.configVolume.enabled }}
+      volumes:
+        - name: config
+          persistentVolumeClaim:
+            claimName: {{ if .Values.configVolume.existingClaim }}{{ .Values.configVolume.existingClaim }}{{ else }}{{ include "dfe-engine.fullname" . }}-config{{ end }}
+      {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

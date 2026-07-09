@@ -79,8 +79,9 @@ API (Elasticsearch template elastic-converter upload limits):
 
 import os
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from .yaml_utils import yaml_load
 
@@ -131,6 +132,15 @@ class ClickHouseSettings(BaseModel):
     verify: bool = Field(default=False)
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
+    # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
+    # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
+    topology: str = Field(default="single")
+    # Default MergeTree-family VARIANT for tables that do not pin their own engine.
+    # The topology above decides the Replicated/Shared prefix; this decides the
+    # family (MergeTree / ReplacingMergeTree / SummingMergeTree / ...). Must be a
+    # variant the engine registry permits; may be parameterised
+    # (e.g. "ReplacingMergeTree(version)").
+    default_engine: str = Field(default="MergeTree")
 
     @property
     def effective_data_database(self) -> str:
@@ -285,12 +295,16 @@ class QueryViewSettings(BaseModel):
     """
 
     restricted_user: str = Field(
-        default="dfe_query_user", description="Username for restricted query user"
+        # The query_reader service user minted by governance.ch.ChRbacReconciler;
+        # its password comes from the secrets seam (ch/service/query_reader),
+        # injected via DFE_QUERY_VIEWS_RESTRICTED_PASSWORD.
+        default="dfe_query_reader",
+        description="Username for the restricted query user (the query_reader service user)",
     )
     restricted_password: str = Field(default="", description="Password for restricted query user")
     auto_bootstrap: bool = Field(
         default=True,
-        description="Automatically bootstrap RBAC and builtin views on startup",
+        description="Automatically apply builtin views on startup (reader RBAC is reconciled separately)",
     )
     view_prefix: str = Field(default="dfe_v_", description="Prefix for parameterized view names")
     catalog_cache_ttl: int = Field(default=60, description="View catalog cache TTL in seconds")
@@ -428,6 +442,21 @@ class OIDCSettings(BaseModel):
     sync_on_startup: bool = Field(default=True, description="Sync on startup")
 
 
+class LocalAuthSettings(BaseModel):
+    """Built-in local-account bootstrap config (nested under auth.local).
+
+    When enabled, the engine seeds admin/operator/viewer accounts at startup with
+    these passwords. Populated by load_settings from the DFE_AUTH_LOCAL_* env
+    vars; field names must match the keys set there.
+    """
+
+    enabled: bool = Field(default=False, description="Seed built-in local accounts")
+    org_id: str = Field(default="default", description="Org id for the seeded accounts")
+    admin_password: str = Field(default="", description="Bootstrap admin password")
+    operator_password: str = Field(default="", description="Bootstrap operator password")
+    viewer_password: str = Field(default="", description="Bootstrap viewer password")
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -447,6 +476,7 @@ class AuthSettings(BaseModel):
         description="Auth config directory (accounts, groups, api-keys)",
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
+    local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
 
 class HyperDXSettings(BaseModel):
@@ -464,6 +494,59 @@ class HyperDXSettings(BaseModel):
         description="Env var for HyperDX API key",
     )
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
+
+
+class GitopsSettings(BaseModel):
+    """Deploy-specific gitops repo the engine renders artifacts into.
+
+    Disabled by default. When enabled, the engine clones/pulls repo_url (or uses
+    an existing local_path), writes rendered artifacts, commits only on change,
+    and pushes when push=True. Secrets never go here -- only declarative config
+    Argo consumes.
+
+    Environment variables (DFE_GITOPS_ prefix):
+    - DFE_GITOPS_ENABLED -> gitops.enabled
+    - DFE_GITOPS_REPO_URL -> gitops.repo_url
+    - DFE_GITOPS_BRANCH -> gitops.branch
+    - DFE_GITOPS_LOCAL_PATH -> gitops.local_path
+    - DFE_GITOPS_PUSH -> gitops.push
+    - DFE_GITOPS_USERNAME / DFE_GITOPS_TOKEN -> HTTPS push auth
+    - DFE_GITOPS_AUTHOR_NAME / DFE_GITOPS_AUTHOR_EMAIL -> commit identity
+    - DFE_GITOPS_MODE -> gitops.mode
+    """
+
+    enabled: bool = Field(default=False, description="Enable gitops publishing")
+    repo_url: str = Field(default="", description="Deploy repo URL (empty = local-only)")
+    branch: str = Field(default="main", description="Branch to commit/push")
+    local_path: str = Field(default="", description="Working clone path")
+    push: bool = Field(default=True, description="Push after commit")
+    username: str = Field(default="", description="HTTPS push username")
+    token: str = Field(default="", description="HTTPS push token/password")
+    author_name: str = Field(default="dfe-engine", description="Commit author name")
+    author_email: str = Field(default="dfe-engine@hyperi.io", description="Commit author email")
+    mode: Literal["solo", "team"] = Field(
+        default="team",
+        description=(
+            "Operator posture. 'solo' declares a single-operator deployment and "
+            "is the explicit override that permits gitops auto-merge in a "
+            "production DFE_ENV; 'team' (default) refuses auto-merge outside "
+            "dev postures."
+        ),
+    )
+
+
+# Known placeholder JWT secret - fine for local dev, REJECTED in a production
+# posture when auth is on (see DFESettings._reject_placeholder_secret).
+_DEV_JWT_SECRET = "dev-secret-key-change-in-production"
+
+# Postures that are NOT production; anything else (incl. the default
+# "production") is treated as production for the placeholder-secret guard.
+_NON_PROD_ENVS = frozenset({"dev", "development", "local", "test", "ci"})
+
+
+def is_dev_posture(env: str) -> bool:
+    """True when DFE_ENV declares a non-production posture (dev/local/test/ci)."""
+    return env.strip().lower() in _NON_PROD_ENVS
 
 
 class APISettings(BaseModel):
@@ -492,8 +575,12 @@ class APISettings(BaseModel):
         description="CORS allowed origins",
     )
     jwt_secret: str = Field(
-        default="dev-secret-key-change-in-production",
-        description="JWT signing secret (HS256). Change in production!",
+        default=_DEV_JWT_SECRET,
+        description=(
+            "JWT signing secret (HS256), >= 32 bytes. This dev default is a KNOWN "
+            "placeholder - operators MUST override it via DFE_API_JWT_SECRET in "
+            "production, else tokens can be forged."
+        ),
     )
     jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
@@ -515,6 +602,44 @@ class APISettings(BaseModel):
             "extra bytes when comparing Content-Length to elastic_converter_max_upload_bytes"
         ),
     )
+
+    @field_validator("jwt_secret")
+    @classmethod
+    def _jwt_secret_min_length(cls, v: str) -> str:
+        # HS256 best practice: signing key >= 32 bytes (RFC 7518 3.2). Fail fast at
+        # config load rather than let PyJWT warn on every encode/decode - so a
+        # too-short secret can never reach production silently.
+        if len(v.encode("utf-8")) < 32:
+            raise ValueError(
+                "api.jwt_secret must be at least 32 bytes (HS256 minimum); "
+                "set a strong DFE_API_JWT_SECRET"
+            )
+        return v
+
+
+class SecretsSettings(BaseModel):
+    """Backing-service seam for secrets the engine MINTS - backend by config.
+
+    The engine reads runtime config secrets from env; this is the WRITE seam for
+    secrets it generates (per-group ClickHouse passwords, OIDC client secrets, API
+    keys). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
+    product: 'file'/'ansible_vault' for dfe-docker (a local encrypted file, no extra
+    service), 'openbao' on k8s (external-first), 'aws'/'gcp'/'azure' for cloud
+    (deferred). See docs/BACKING-SERVICES.md.
+
+    Environment variables (DFE_SECRETS_ prefix):
+    - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|aws|gcp|azure)
+    - DFE_SECRETS_PATH -> secrets.path (file/ansible_vault root)
+    - DFE_SECRETS_ADDR -> secrets.addr (openbao/vault address)
+    - DFE_SECRETS_MOUNT -> secrets.mount (kv mount / key prefix)
+    - DFE_SECRETS_ROLE -> secrets.role (openbao AppRole role id)
+    """
+
+    provider: str = Field(default="file", description="scalo.secrets backend provider")
+    path: str = Field(default="./.secrets", description="file/ansible_vault root path")
+    addr: str = Field(default="", description="openbao/vault address")
+    mount: str = Field(default="dfe", description="kv mount / key prefix")
+    role: str = Field(default="", description="openbao AppRole role id")
 
 
 class DFESettings(BaseModel):
@@ -539,7 +664,31 @@ class DFESettings(BaseModel):
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
+    gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
+    secrets: SecretsSettings = Field(default_factory=SecretsSettings)
+    env: str = Field(
+        default="production",
+        description=(
+            "Deployment posture. 'production' (default, secure) rejects the "
+            "placeholder api.jwt_secret when auth is enabled; set DFE_ENV to "
+            "dev/development/local/test/ci for local development. DFE_ENV."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def _reject_placeholder_secret(self) -> "DFESettings":
+        # Fail fast if a production deployment turns auth on but never overrode
+        # the known dev jwt_secret - otherwise anyone can forge tokens. Local dev
+        # opts out via DFE_ENV. Minimum length is enforced on the field itself.
+        is_prod = not is_dev_posture(self.env)
+        if is_prod and self.auth.enabled and self.api.jwt_secret == _DEV_JWT_SECRET:
+            raise ValueError(
+                "api.jwt_secret is the known dev placeholder but env is "
+                f"'{self.env}' with auth enabled; set a strong DFE_API_JWT_SECRET "
+                "(or DFE_ENV=dev for local development)"
+            )
+        return self
 
 
 def _load_defaults() -> dict:
@@ -571,7 +720,9 @@ def _get_env_overrides() -> dict:
         "helm": {},
         "auth": {},
         "hyperdx": {},
+        "gitops": {},
         "api": {},
+        "secrets": {},
     }
 
     # ClickHouse settings (DFE_ prefix with legacy fallbacks)
@@ -601,6 +752,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_min"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
         overrides["clickhouse"]["connections_max"] = int(val)
+    if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
+        overrides["clickhouse"]["topology"] = val
 
     # Hunts settings
     if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):
@@ -731,6 +884,8 @@ def _get_env_overrides() -> dict:
         overrides["services"]["transform_vector_url"] = val
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
         overrides["services"]["transform_wasm_url"] = val
+    if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
+        overrides["services"]["transform_wasm_compiler_url"] = val
     if val := _get_env("DFE_SERVICES_FETCHER_URL"):
         overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
@@ -764,6 +919,22 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
 
+    # OIDC settings (nested under auth.oidc)
+    if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
+        overrides["auth"].setdefault("oidc", {})["providers_dir"] = val
+    if val := _get_env("DFE_AUTH_OIDC_SYNC_ENABLED"):
+        overrides["auth"].setdefault("oidc", {})["sync_enabled"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+    if val := _get_env("DFE_AUTH_OIDC_SYNC_ON_STARTUP"):
+        overrides["auth"].setdefault("oidc", {})["sync_on_startup"] = val.lower() in (
+            "true",
+            "1",
+            "yes",
+        )
+
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):
         overrides["hyperdx"]["base_url"] = val
@@ -771,6 +942,28 @@ def _get_env_overrides() -> dict:
         overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
         overrides["hyperdx"]["api_key_env"] = val
+
+    # Gitops settings
+    if val := _get_env("DFE_GITOPS_ENABLED"):
+        overrides["gitops"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_GITOPS_REPO_URL"):
+        overrides["gitops"]["repo_url"] = val
+    if val := _get_env("DFE_GITOPS_BRANCH"):
+        overrides["gitops"]["branch"] = val
+    if val := _get_env("DFE_GITOPS_LOCAL_PATH"):
+        overrides["gitops"]["local_path"] = val
+    if val := _get_env("DFE_GITOPS_PUSH"):
+        overrides["gitops"]["push"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_GITOPS_USERNAME"):
+        overrides["gitops"]["username"] = val
+    if val := _get_env("DFE_GITOPS_TOKEN"):
+        overrides["gitops"]["token"] = val
+    if val := _get_env("DFE_GITOPS_AUTHOR_NAME"):
+        overrides["gitops"]["author_name"] = val
+    if val := _get_env("DFE_GITOPS_AUTHOR_EMAIL"):
+        overrides["gitops"]["author_email"] = val
+    if val := _get_env("DFE_GITOPS_MODE"):
+        overrides["gitops"]["mode"] = val.strip().lower()
 
     # API settings
     if val := _get_env("DFE_API_HOST"):
@@ -789,6 +982,22 @@ def _get_env_overrides() -> dict:
         overrides["api"]["elastic_converter_read_chunk_size"] = int(val)
     if val := _get_env("DFE_API_ELASTIC_CONVERTER_CONTENT_LENGTH_SLACK_BYTES"):
         overrides["api"]["elastic_converter_content_length_slack_bytes"] = int(val)
+
+    # Secrets settings (the scalo.secrets seam for minted secrets)
+    if val := _get_env("DFE_SECRETS_PROVIDER"):
+        overrides["secrets"]["provider"] = val
+    if val := _get_env("DFE_SECRETS_PATH"):
+        overrides["secrets"]["path"] = val
+    if val := _get_env("DFE_SECRETS_ADDR"):
+        overrides["secrets"]["addr"] = val
+    if val := _get_env("DFE_SECRETS_MOUNT"):
+        overrides["secrets"]["mount"] = val
+    if val := _get_env("DFE_SECRETS_ROLE"):
+        overrides["secrets"]["role"] = val
+
+    # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
+    if val := _get_env("DFE_ENV"):
+        overrides["env"] = val
 
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.

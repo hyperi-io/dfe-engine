@@ -36,6 +36,14 @@ def ch_client():
     return ch_client
 
 
+@pytest.fixture
+def unique_names():
+    """A unique (database, table) pair per test so runs never collide and each
+    test creates + drops its own throwaway audit table on the shared cluster."""
+    unique_id = uuid.uuid4().hex
+    return f"dfe_audit_{unique_id}", f"detection_checkpoint_{unique_id}"
+
+
 @pytest.mark.parametrize(
     ("log_prefix", "ensure_kwargs", "expected_result"),
     [
@@ -170,7 +178,7 @@ def test_create_batch_checkpoint(num_records: int, ch_client, setup_paths, uniqu
             last_success_time = scheduled_start_time - timedelta(seconds=query_window_seconds)
 
             checkpoint = {
-                "customer_name": customer,
+                "_org_id": customer,
                 "rule_name": "pc_posh_test_rule_larger_name_" + str(generated_query_id),
                 "hunt_name": "test_hunt_batch" + str(generated_query_id),
                 "query_id": generated_query_id,

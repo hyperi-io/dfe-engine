@@ -26,7 +26,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from ..schema.schema_loader import SchemaLoader
 

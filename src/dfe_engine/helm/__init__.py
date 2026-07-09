@@ -30,7 +30,9 @@ from dfe_engine.helm.environment import (
 )
 from dfe_engine.helm.models import (
     CompilationResult,
-    HelmKedaConfig,
+    HelmDeployMeta,
+    HelmImage,
+    HelmKeda,
     HelmKedaTrigger,
     HelmServiceValues,
 )
@@ -42,7 +44,9 @@ __all__ = [
     "ClickHouseEnvironment",
     "CompilationResult",
     "EnvironmentConfig",
-    "HelmKedaConfig",
+    "HelmDeployMeta",
+    "HelmImage",
+    "HelmKeda",
     "HelmKedaTrigger",
     "HelmServiceValues",
     "HelmValuesCompiler",

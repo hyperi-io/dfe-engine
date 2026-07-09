@@ -52,29 +52,3 @@ class TestDockerFixtures:
             f"SELECT count() FROM {clickhouse_test_database}.test_table"
         )
         assert result.result_rows[0][0] == 3
-
-    @pytest.mark.integration
-    def test_postgres_test_database_created(self, postgres_test_database):
-        """Verify PostgreSQL test database is created."""
-        assert postgres_test_database is not None
-        assert postgres_test_database.startswith("dfe_test_")
-
-    @pytest.mark.integration
-    def test_postgres_connection_works(self, postgres_connection):
-        """Verify PostgreSQL connection can execute queries."""
-        cursor = postgres_connection.cursor()
-
-        # Create a test table
-        cursor.execute("CREATE TABLE IF NOT EXISTS test_table (id SERIAL PRIMARY KEY, name TEXT)")
-        postgres_connection.commit()
-
-        # Insert data
-        cursor.execute("INSERT INTO test_table (name) VALUES ('test1'), ('test2'), ('test3')")
-        postgres_connection.commit()
-
-        # Query data
-        cursor.execute("SELECT count(*) FROM test_table")
-        result = cursor.fetchone()
-        assert result[0] == 3
-
-        cursor.close()

@@ -51,7 +51,7 @@ def api_settings(tmp_path: Path) -> DFESettings:
             auth_dir=str(auth_dir),
         ),
         api=APISettings(
-            jwt_secret="test-secret-key-for-unit-tests",
+            jwt_secret="test-secret-key-for-unit-tests-hmac32",
             jwt_expire_minutes=30,
         ),
     )

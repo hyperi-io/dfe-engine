@@ -24,7 +24,7 @@ class _DfeApiApp:
     env_prefix = "DFE_API"
 
     def _make_app(self):
-        from hyperi_pylib.cli import DfeApp, VersionInfo
+        from scalo.cli import DfeApp, VersionInfo
 
         class DfeApiApp(DfeApp):
             name = "dfe-api"
@@ -46,8 +46,12 @@ class _DfeApiApp:
 
             def register_commands(self, app) -> None:
                 from dfe_engine.cli import register_auth_commands
+                from dfe_engine.cli.gitops import register_gitops_commands
+                from dfe_engine.cli.governed_ops import register_governed_ops_commands
 
                 register_auth_commands(app)
+                register_gitops_commands(app)
+                register_governed_ops_commands(app)
 
             def run_service(self, config) -> None:
                 # Delegate to async

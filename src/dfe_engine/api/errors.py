@@ -11,8 +11,8 @@ from typing import Annotated, Any, Literal
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 # ── Response models ──────────────────────────────────────────
 

@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager
 
@@ -86,5 +86,5 @@ def test_create_update_checkpoint(
         f"Expected last_success_time to be not None, but got {last_success_time}. "
         f"File: {file_path}, Content: {file_path.read_text(errors='ignore')}"
     )
-    # Note: hyperi_pylib logger (structlog) doesn't write to pytest caplog,
+    # Note: scalo logger (structlog) doesn't write to pytest caplog,
     # so we verify success by checking last_success_time is not None above

@@ -23,12 +23,12 @@ field, the UI POSTs the string, and gets back a structured result with:
 
 This module layers THREE independent checks:
 
-1. **Syntax** — delegated to ``hyperi_pylib.expression.validate()`` which
+1. **Syntax** — delegated to ``scalo.expression.validate()`` which
    wraps the real ``common-expression-language`` package (same Rust
    ``cel-interpreter`` v0.10.0 that rustlib uses at runtime). Zero drift
    between UI validation and runtime behaviour.
 
-2. **DFE profile** — also from ``hyperi_pylib.expression`` — rejects
+2. **DFE profile** — also from ``scalo.expression`` — rejects
    disallowed functions (regex, iteration, time) when the profile is
    strict.
 
@@ -44,7 +44,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from hyperi_pylib.expression import validate as pylib_validate
+from scalo.expression import validate as pylib_validate
 
 from dfe_engine.cel.classify import (
     FilterTier,

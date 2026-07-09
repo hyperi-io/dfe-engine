@@ -2,8 +2,8 @@ import os
 import re
 
 import jinja2
-from hyperi_pylib.logger import logger
 from jinja2 import Environment, FileSystemLoader, meta
+from scalo.logger import logger
 
 from ..yaml_utils import YAMLError, yaml_load_string
 from .pipeline_util import (

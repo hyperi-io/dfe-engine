@@ -33,7 +33,7 @@ import os
 from typing import TYPE_CHECKING
 
 import msal
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.oidc.adapters.base import OIDCGroupAdapter
 from dfe_engine.auth.oidc.models import GroupInfo
@@ -88,7 +88,7 @@ class EntraAdapter(OIDCGroupAdapter):
             )
             return {gid: gid for gid in group_ids}
 
-        from hyperi_pylib.http import AsyncHttpClient
+        from scalo.http import AsyncHttpClient
 
         result: dict[str, str] = {}
         headers = {"Authorization": f"Bearer {token}"}
@@ -129,7 +129,7 @@ class EntraAdapter(OIDCGroupAdapter):
             )
             return []
 
-        from hyperi_pylib.http import AsyncHttpClient
+        from scalo.http import AsyncHttpClient
 
         groups: list[GroupInfo] = []
         headers = {"Authorization": f"Bearer {token}"}
@@ -182,7 +182,7 @@ class EntraAdapter(OIDCGroupAdapter):
                 "tenant_id, client_id, and client_secret",
             )
 
-        from hyperi_pylib.http import AsyncHttpClient
+        from scalo.http import AsyncHttpClient
 
         url = f"{self.GRAPH_BASE}/groups?$top=1&$select=id"
         headers = {"Authorization": f"Bearer {token}"}

@@ -1,6 +1,6 @@
 import os
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 from sigma.collection import SigmaCollection
 
 from ..sigma.field_mapping_service import FieldMappingService

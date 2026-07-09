@@ -23,6 +23,7 @@ Secret env var names are visible but their actual values are never exposed.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
@@ -31,6 +32,9 @@ from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
+if TYPE_CHECKING:
+    from dfe_engine.auth.oidc.models import OIDCProvider
+
 router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
 
@@ -38,7 +42,7 @@ router = APIRouter(prefix="/oidc-providers", tags=["OIDC Providers"])
 
 
 class GroupResolutionRequest(BaseModel):
-    mode: str = Field(
+    mode: Literal["manual", "token_claim", "api"] = Field(
         default="manual",
         description="Group resolution mode: manual, token_claim, api",
     )
@@ -55,7 +59,9 @@ class GroupResolutionRequest(BaseModel):
 
 class CreateProviderRequest(BaseModel):
     name: str = Field(description="Unique provider name (used as filename stem)")
-    type: str = Field(description="Provider type: generic, google, entra_id, okta")
+    type: Literal["generic", "google", "entra_id", "okta"] = Field(
+        description="Provider type: generic, google, entra_id, okta"
+    )
     display_name: str = Field(default="", description="Human-readable label")
     issuer: str = Field(default="", description="OIDC issuer URL")
     client_id_env: str = Field(default="", description="Env var name for OIDC client ID")
@@ -124,11 +130,9 @@ class TestResponse(BaseModel):
 # ── Helpers ──────────────────────────────────────────────────
 
 
-def _provider_to_response(name: str, provider: object) -> ProviderResponse:
+def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse:
     """Convert an OIDCProvider model to a ProviderResponse."""
-    from dfe_engine.auth.oidc.models import OIDCProvider
-
-    p: OIDCProvider = provider  # type: ignore[assignment]
+    p = provider
     return ProviderResponse(
         name=name,
         type=p.type,

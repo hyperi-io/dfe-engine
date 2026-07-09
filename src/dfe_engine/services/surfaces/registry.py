@@ -18,10 +18,11 @@ load when the target directory is empty.
 
 from __future__ import annotations
 
+import builtins
 import importlib.resources
 from pathlib import Path
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.services.surfaces.models import ServiceSurface
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
@@ -52,7 +53,7 @@ class SurfaceRegistry:
             return None
         return self._load_surface(path)
 
-    def list(self) -> list[ServiceSurface]:
+    def list(self) -> builtins.list[ServiceSurface]:
         """List all service surfaces sorted by service name."""
         surfaces: list[ServiceSurface] = []
         for path in sorted(self._dir.glob("*.yaml")):
@@ -126,7 +127,7 @@ class SurfaceRegistry:
             return surface
 
         try:
-            from hyperi_pylib.http import AsyncHttpClient
+            from scalo.http import AsyncHttpClient
 
             async with AsyncHttpClient() as client:
                 response = await client.get(surface.manifest_url)

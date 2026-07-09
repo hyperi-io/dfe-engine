@@ -35,7 +35,7 @@ def app_with_alerts(tmp_path):
             enabled=True,
             auth_dir=str(tmp_path / "auth"),
         ),
-        api=APISettings(jwt_secret="test-secret"),
+        api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"),
     )
     for d in ["sources", "services"]:
         (tmp_path / d).mkdir(exist_ok=True)
@@ -56,7 +56,7 @@ def alert_admin_headers(app_with_alerts):
     from dfe_engine.api.deps import create_access_token
     from dfe_engine.settings import APISettings, DFESettings
 
-    settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
+    settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
     token = create_access_token(
         data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
         settings=settings,
@@ -425,7 +425,7 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.api.deps import create_access_token
         from dfe_engine.settings import APISettings, DFESettings
 
-        settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
+        settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
@@ -439,7 +439,7 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.api.deps import create_access_token
         from dfe_engine.settings import APISettings, DFESettings
 
-        settings = DFESettings(api=APISettings(jwt_secret="test-secret"))
+        settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
