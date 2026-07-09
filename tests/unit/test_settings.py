@@ -289,6 +289,44 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.verify is True
 
+    def test_clickhouse_verify_default_is_none(self):
+        # None -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
+        # default). Replaces the old insecure default of verify=False.
+        settings = load_settings()
+        assert settings.clickhouse.verify is None
+
+    def test_clickhouse_verify_false(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_VERIFY", "false")
+        settings = load_settings()
+        assert settings.clickhouse.verify is False
+
+    def test_clickhouse_ca_cert_override_flows_to_config(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_CA_CERT", "/etc/ssl/internal-ca.pem")
+        settings = load_settings()
+        assert settings.clickhouse.ca_cert == "/etc/ssl/internal-ca.pem"
+        from dfe_engine.settings import get_clickhouse_config
+
+        assert get_clickhouse_config(settings)["ch_ca_cert"] == "/etc/ssl/internal-ca.pem"
+
+    def test_dfe_tls_verify_bridges_to_scalo_env(self, monkeypatch):
+        # The DFE_-prefixed valve maps onto scalo's env seam so one setting flips
+        # every scalo client. monkeypatch.delenv restores SCALO_TLS_VERIFY on teardown.
+        from scalo.crypto import tls_verify_default
+
+        monkeypatch.delenv("SCALO_TLS_VERIFY", raising=False)
+        monkeypatch.setenv("DFE_TLS_VERIFY", "false")
+        load_settings()
+        assert os.environ.get("SCALO_TLS_VERIFY") == "false"
+        assert tls_verify_default() is False
+
+    def test_dfe_tls_allow_weak_bridges_to_scalo_env(self, monkeypatch):
+        from scalo.crypto import tls_allow_weak
+
+        monkeypatch.delenv("SCALO_TLS_ALLOW_WEAK", raising=False)
+        monkeypatch.setenv("DFE_TLS_ALLOW_WEAK", "true")
+        load_settings()
+        assert tls_allow_weak() is True
+
     def test_clickhouse_password_override(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_PASSWORD", "secret123")
         settings = load_settings()

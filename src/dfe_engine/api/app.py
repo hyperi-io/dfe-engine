@@ -177,6 +177,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 "ch_password": settings.clickhouse.password,
                 "ch_secure": settings.clickhouse.secure,
                 "ch_verify": settings.clickhouse.verify,
+                "ch_ca_cert": settings.clickhouse.ca_cert,
             }
             admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
             # The secrets store mints the loader / query_reader service users;
