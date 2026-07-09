@@ -134,6 +134,98 @@
         ]
       }
     },
+    "/api/v1/auth/oidc/{provider}/login": {
+      "get": {
+        "tags": [
+          "OIDC Login"
+        ],
+        "summary": "Oidc Login",
+        "description": "Redirect the user agent to the IdP to begin the OIDC auth-code flow.",
+        "operationId": "oidc_login_api_v1_auth_oidc__provider__login_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/oidc/{provider}/callback": {
+      "get": {
+        "tags": [
+          "OIDC Login"
+        ],
+        "summary": "Oidc Callback",
+        "description": "Complete the OIDC flow and re-mint the engine token (single issuer).",
+        "operationId": "oidc_callback_api_v1_auth_oidc__provider__callback_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Provider"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/accounts": {
       "get": {
         "tags": [
@@ -1915,7 +2007,7 @@
           "Sources"
         ],
         "summary": "Create Source",
-        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).",
+        "description": "Create a new source from a flat source definition (initial version ``1.0.0``).\n\n``header`` is optional: when omitted, no common-header profile is stored on the\nversion (DDL compose uses meta/derived columns only until a header is set).",
         "operationId": "create_source_api_v1_sources_post",
         "requestBody": {
           "required": true,
@@ -1981,14 +2073,14 @@
         ]
       }
     },
-    "/api/v1/sources/{name}/versions": {
+    "/api/v1/sources/{name}/versions/{version}": {
       "get": {
         "tags": [
           "Sources"
         ],
         "summary": "Get Source Version",
-        "description": "Get one immutable source version snapshot by id.",
-        "operationId": "get_source_version_api_v1_sources__name__versions_get",
+        "description": "Get one immutable source version snapshot by id, with build/deploy status.",
+        "operationId": "get_source_version_api_v1_sources__name__versions__version__get",
         "parameters": [
           {
             "name": "name",
@@ -2001,15 +2093,12 @@
           },
           {
             "name": "version",
-            "in": "query",
+            "in": "path",
             "required": true,
             "schema": {
               "type": "string",
-              "minLength": 1,
-              "description": "Source version id to return (required)",
               "title": "Version"
-            },
-            "description": "Source version id to return (required)"
+            }
           }
         ],
         "responses": {
@@ -2018,7 +2107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SourceVersionGetResponse"
+                  "$ref": "#/components/schemas/SourceVersionGetDetailResponse"
                 }
               }
             }
@@ -2194,13 +2283,157 @@
         ]
       }
     },
+    "/api/v1/sources/{name}/plan": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Plan Source Deploy",
+        "description": "Dry-run ClickHouse deploy: DDL statements and validation errors (not persisted).",
+        "operationId": "plan_source_deploy_api_v1_sources__name__plan_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to current working version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to current working version)"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourcePlanResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/{name}/deploy": {
+      "post": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Deploy Source Schema",
+        "description": "Plan (``dry_run=true``) or deploy a source version's schema to ClickHouse.\n\nRuns the v2 YAML -> DDL pipeline. In plan mode the CREATE TABLE (+ any standard\nviews) and validation errors are returned for review WITHOUT touching\nClickHouse. In deploy mode the DDL is applied - it is idempotent (CREATE ... IF\nNOT EXISTS) so a re-deploy is a no-op. A schema that failed validation is never\ndeployed.",
+        "operationId": "deploy_source_schema_api_v1_sources__name__deploy_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source version id (defaults to deployed_version)",
+              "title": "Version"
+            },
+            "description": "Source version id (defaults to deployed_version)"
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "Plan only: generate + validate the DDL without applying it",
+              "default": false,
+              "title": "Dry Run"
+            },
+            "description": "Plan only: generate + validate the DDL without applying it"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SchemaDeployResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{name}": {
       "get": {
         "tags": [
           "Sources"
         ],
         "summary": "Get Source",
-        "description": "Get a full source definition by name.",
+        "description": "Get a full source definition by name, including build/deploy per version.",
         "operationId": "get_source_api_v1_sources__name__get",
         "parameters": [
           {
@@ -2219,7 +2452,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Source"
+                  "$ref": "#/components/schemas/SourceDetailResponse"
                 }
               }
             }
@@ -2246,7 +2479,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body (appends next major version).",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.\n\n``header`` is optional: when omitted, no header is stored on the written version snapshot\n(same as create). Send ``header`` explicitly to set or change it.",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
@@ -2282,6 +2515,72 @@
           },
           "409": {
             "description": "Receiver match duplicates another enabled source",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MatchConflictErrorResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Sources"
+        ],
+        "summary": "Patch Source Enabled",
+        "description": "Enable or disable a source without changing versioned configuration.\n\nDoes not create a new source version. Enabling may return ``409 match_conflict``\nif another enabled source already uses the same receiver match rule.",
+        "operationId": "patch_source_enabled_api_v1_sources__name__patch",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SourceEnabledPatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SourceResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Enabling would duplicate another enabled source's receiver match",
             "content": {
               "application/json": {
                 "schema": {
@@ -4742,7 +5041,7 @@
           "hunts"
         ],
         "summary": "Get Engine Status",
-        "description": "Get the current status of the hunt scheduler.",
+        "description": "Report hunt scheduling status.\n\nHunts execute in the separate dfe-hunt-runner service (pull-based, coordinated\nvia ClickHouse), not in this API process. ``running`` reflects whether any\nrunner currently holds a hunt lease; ``hunt_count`` is the configured-hunt\ncount.",
         "operationId": "get_engine_status_api_v1_hunts_status_get",
         "responses": {
           "200": {
@@ -5065,7 +5364,7 @@
           "hunts"
         ],
         "summary": "Trigger Hunt",
-        "description": "Trigger an ad-hoc hunt execution.\n\nReturns 202 with a task_id that can be polled via ``GET /tasks/{task_id}``\nor streamed via ``GET /tasks/{task_id}/stream``.",
+        "description": "Trigger an ad-hoc hunt execution.\n\nHunts run in the separate dfe-hunt-runner service on their schedule. On-demand\nexecution from the API (enqueue a one-shot fire the runner claims) is not wired\nyet, so this returns 501 after validating the hunt exists.",
         "operationId": "trigger_hunt_api_v1_hunts__name__run_post",
         "parameters": [
           {
@@ -5350,6 +5649,190 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sources/{source}/sample": {
+      "post": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Sample Source",
+        "description": "Sample a registered source. The path ``source`` wins over any in the body.",
+        "operationId": "sample_source_api_v1_sources__source__sample_post",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sample": {
+      "post": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Sample Adhoc",
+        "description": "Ad-hoc sample - supply an explicit ``table``/``topic`` (or a ``source``).",
+        "operationId": "sample_adhoc_api_v1_sample_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SampleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/samples/{task_id}": {
+      "get": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "Get Sample",
+        "description": "Poll a sample task's status and result.",
+        "operationId": "get_sample_api_v1_samples__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/samples": {
+      "get": {
+        "tags": [
+          "sampler"
+        ],
+        "summary": "List Samples",
+        "description": "List recent sample tasks (most recent first).",
+        "operationId": "list_samples_api_v1_samples_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Samples Api V1 Samples Get"
                 }
               }
             }
@@ -6203,7 +6686,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MetaSchema-Input"
+                "$ref": "#/components/schemas/MetaSchemaCreateRequest"
               }
             }
           }
@@ -6214,7 +6697,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MetaSchema-Output"
+                  "$ref": "#/components/schemas/MetaSchema"
                 }
               }
             }
@@ -6375,7 +6858,7 @@
               "application/json": {
                 "schema": {
                   "items": {
-                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+                    "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
                   },
                   "type": "array",
                   "title": "Response Elastic Converter Api V1 Schemas Elastic Converter Post"
@@ -6475,7 +6958,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3"
+                  "$ref": "#/components/schemas/SourceSchemaColumnsResponse"
                 }
               }
             }
@@ -6570,7 +7053,7 @@
           "schemas"
         ],
         "summary": "Discover Json Paths",
-        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` the source owns its own table and discovery\nruns against ``db.<source>``. Otherwise the source's data still lives in the\nshared catch-all landing table, so discovery runs against ``db.<landing>``\nfiltered by the version's match rule.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
+        "description": "Discover JSON paths inside a source's ``_json`` column.\n\nResolves the requested ``version`` (or the source's current version). If that\nversion defines a ``meta_schema`` it uses ``db.<source>`` only after deploy;\nuntil then discovery runs on ``db.<landing>`` filtered by the version's\nmatch rule. Versions without ``meta_schema`` always use the landing table.\n\nReturns one record per path with observed types, a suggested column name,\nand whether the path is already promoted. ``?samples=N`` adds random\ndistinct example values; ``?stats=true`` adds coverage + distinct counts.",
         "operationId": "discover_json_paths_api_v1_schemas__source_name__json_paths_get",
         "parameters": [
           {
@@ -6686,7 +7169,7 @@
           "schemas"
         ],
         "summary": "Sample Source Rows",
-        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` owns its own table, so sampling runs against\n``db.<source>`` unfiltered. Otherwise the version's data still lives in the\nshared catch-all landing table, so sampling runs against ``db.<landing>``\nfiltered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.",
+        "description": "Return random sample rows for a source, scoped to its match rule.\n\nResolves the requested ``version`` (or the source's current version). A\nversion with a ``meta_schema`` uses ``db.<source>`` only after that version\nis deployed and the table exists; otherwise rows are read from\n``db.<landing>`` filtered by the version's match rule.\n\nIntended for inspecting real data while authoring a match condition or CEL\nbefore promoting any JSON path -- a row-level companion to the per-path\n``?samples=N`` on ``/json-paths``.",
         "operationId": "sample_source_rows_api_v1_schemas__source_name__sample_rows_get",
         "parameters": [
           {
@@ -6766,7 +7249,7 @@
           "schemas"
         ],
         "summary": "Promote Field",
-        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema, adding one column\nper path with a ``@copy`` directive so dfe-loader copies the value forward.\n``?dry_run=true`` returns the proposed diff + DDL without committing.",
+        "description": "Promote JSON path(s) into dedicated typed columns.\n\nCreates a new schema version on the source's meta-schema (or on ``schema_path``\nwhen the source has none), adding one column per path with a ``@copy`` directive\nso dfe-loader copies the value forward. Core meta-schemas are forked to\n``{source_name}_{schema_stem}`` under the same parent path before promoting.\n``?dry_run=true`` returns the proposed diff and DDL without forking core schemas,\nadding meta-schema versions, or updating the source.",
         "operationId": "promote_field_api_v1_schemas__source_name__promote_field_post",
         "parameters": [
           {
@@ -6819,6 +7302,533 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/Users": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "List Users",
+        "description": "List users (SCIM ListResponse). Supports ``userName eq`` filter + paging.",
+        "operationId": "list_users_api_v1_scim_v2_Users_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Create User",
+        "description": "Provision a user. IdP-owned; local password is randomised when omitted.",
+        "operationId": "create_user_api_v1_scim_v2_Users_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/Users/{user_id}": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Get User",
+        "description": "Fetch a single user by id (username).",
+        "operationId": "get_user_api_v1_scim_v2_Users__user_id__get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Replace User",
+        "description": "Replace a user's writable attributes (SCIM PUT).",
+        "operationId": "replace_user_api_v1_scim_v2_Users__user_id__put",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Patch User",
+        "description": "Apply a PatchOp - primarily the ``active`` toggle IdPs use to deprovision.",
+        "operationId": "patch_user_api_v1_scim_v2_Users__user_id__patch",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Delete User",
+        "description": "Delete a user (SCIM 204).",
+        "operationId": "delete_user_api_v1_scim_v2_Users__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "User Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/Groups": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "List Groups",
+        "description": "List groups (SCIM ListResponse). Supports ``displayName eq`` filter + paging.",
+        "operationId": "list_groups_api_v1_scim_v2_Groups_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Create Group",
+        "description": "Provision a group with its member set (member Account.groups kept in sync).",
+        "operationId": "create_group_api_v1_scim_v2_Groups_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/Groups/{group_id}": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Get Group",
+        "description": "Fetch a single group by id (name).",
+        "operationId": "get_group_api_v1_scim_v2_Groups__group_id__get",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Replace Group",
+        "description": "Replace a group's member set (SCIM PUT).",
+        "operationId": "replace_group_api_v1_scim_v2_Groups__group_id__put",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Patch Group",
+        "description": "Apply a PatchOp on group membership (add/remove/replace members).",
+        "operationId": "patch_group_api_v1_scim_v2_Groups__group_id__patch",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Delete Group",
+        "description": "Delete a group. Members are detached first so the store permits removal.",
+        "operationId": "delete_group_api_v1_scim_v2_Groups__group_id__delete",
+        "parameters": [
+          {
+            "name": "group_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Group Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/ServiceProviderConfig": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Service Provider Config",
+        "description": "Static SCIM capability advertisement (RFC 7643 s5).",
+        "operationId": "service_provider_config_api_v1_scim_v2_ServiceProviderConfig_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/ResourceTypes": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Resource Types",
+        "description": "Advertise the User and Group resource types.",
+        "operationId": "resource_types_api_v1_scim_v2_ResourceTypes_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/scim/v2/Schemas": {
+      "get": {
+        "tags": [
+          "SCIM"
+        ],
+        "summary": "Schemas",
+        "description": "Advertise the User and Group core schemas (generated from scim2-models).",
+        "operationId": "schemas_api_v1_scim_v2_Schemas_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -7178,6 +8188,1144 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/helm/files": {
+      "get": {
+        "tags": [
+          "Governed Ops: Helm Vars"
+        ],
+        "summary": "List Files",
+        "description": "List helm-var overlay resources.",
+        "operationId": "list_files_api_v1_helm_files_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Files Api V1 Helm Files Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/helm/files/{name}/vars": {
+      "get": {
+        "tags": [
+          "Governed Ops: Helm Vars"
+        ],
+        "summary": "List Vars",
+        "description": "Flattened dot-path vars for a resource, each marked protected or not.",
+        "operationId": "list_vars_api_v1_helm_files__name__vars_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Vars Api V1 Helm Files  Name  Vars Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/helm/files/{name}/vars/{path}": {
+      "put": {
+        "tags": [
+          "Governed Ops: Helm Vars"
+        ],
+        "summary": "Set Var",
+        "description": "Set a helm var (-> gitops commit). 409 on stale If-Match; 403 if protected.",
+        "operationId": "set_var_api_v1_helm_files__name__vars__path__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVarRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Governed Ops: Helm Vars"
+        ],
+        "summary": "Delete Var",
+        "description": "Revert a helm var to its chart default (remove the override).",
+        "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "List Actions",
+        "operationId": "list_actions_api_v1_governance_actions_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Actions Api V1 Governance Actions Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions/{name}": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Get Action",
+        "operationId": "get_action_api_v1_governance_actions__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionDef"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/actions/{name}/invoke": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Invoke Action",
+        "description": "Invoke a defined action - gated on the action's OWN required_action.",
+        "operationId": "invoke_action_api_v1_governance_actions__name__invoke_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "dry_run",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Dry Run"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvokeResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/actions": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Create Action",
+        "operationId": "create_action_api_v1_governance_admin_actions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionDef"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActionDef"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/actions/{name}": {
+      "delete": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Delete Action",
+        "operationId": "delete_action_api_v1_governance_admin_actions__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/policies": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Create Policy",
+        "operationId": "create_policy_api_v1_governance_admin_policies_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProtectedPolicy"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedPolicy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/admin/policies/{name}": {
+      "delete": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Delete Policy",
+        "operationId": "delete_policy_api_v1_governance_admin_policies__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/ch-rbac/reconcile": {
+      "post": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Reconcile Ch Rbac Endpoint",
+        "description": "Reconcile CH quota tiers + service roles + per-org row policies into\nClickHouse, minting the service-user secrets via the secrets seam. Idempotent.\ngovernance:write.",
+        "operationId": "reconcile_ch_rbac_endpoint_api_v1_governance_ch_rbac_reconcile_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Reconcile Ch Rbac Endpoint Api V1 Governance Ch Rbac Reconcile Post"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gitops/auto-merge": {
+      "get": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Get Auto Merge",
+        "description": "Auto-merge status for the UI banner: stored flag, gate verdict, net effect.",
+        "operationId": "get_auto_merge_api_v1_gitops_auto_merge_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoMergeStatus"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Put Auto Merge",
+        "description": "Toggle auto-merge. Enabling requires the deployment gate; disabling always works.",
+        "operationId": "put_auto_merge_api_v1_gitops_auto_merge_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoMergeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoMergeStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/gitops/log": {
+      "get": {
+        "tags": [
+          "Governed Ops: Gitops"
+        ],
+        "summary": "Get Log",
+        "description": "Gitcrud audit log: every governed-ops git change, newest-first.\n\nFlat + cursor-paginated by default; ?group_by= buckets the page for\nsummaries. applied_revision (the Argo-synced SHA) turns state into\napplied/pending; without it every entry is 'committed'.",
+        "operationId": "get_log_api_v1_gitops_log_get",
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 50,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "before",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Before"
+            }
+          },
+          {
+            "name": "group_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "pattern": "^(scope|actor|type|day)$"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Group By"
+            }
+          },
+          {
+            "name": "applied_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Applied Revision"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/LogResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/GroupedLogResponse"
+                    }
+                  ],
+                  "title": "Response Get Log Api V1 Gitops Log Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/lifecycle": {
+      "get": {
+        "tags": [
+          "Governed Ops: Lifecycle"
+        ],
+        "summary": "List Services",
+        "description": "List services with their tier and current lifecycle state.",
+        "operationId": "list_services_api_v1_lifecycle_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ServiceInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Services Api V1 Lifecycle Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/lifecycle/{name}": {
+      "post": {
+        "tags": [
+          "Governed Ops: Lifecycle"
+        ],
+        "summary": "Set Lifecycle",
+        "description": "Set a service's lifecycle state - per-service RBAC; pinned services are 404.",
+        "operationId": "set_lifecycle_api_v1_lifecycle__name__post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LifecycleRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LifecycleResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/from-hyperdx": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "From Hyperdx",
+        "description": "Strip a HyperDX query's time bounds -> {window}, ready to save as a rule.",
+        "operationId": "from_hyperdx_api_v1_authoring_from_hyperdx_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FromHyperdxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response From Hyperdx Api V1 Authoring From Hyperdx Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/scaffold": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Scaffold",
+        "description": "A starter SELECT over discovered columns (source meta + landed _json keys).",
+        "operationId": "scaffold_api_v1_authoring_scaffold_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScaffoldRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Scaffold Api V1 Authoring Scaffold Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/review": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Review",
+        "operationId": "ai_review_api_v1_authoring_ai_review_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/create": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Create",
+        "operationId": "ai_create_api_v1_authoring_ai_create_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/generate-vrl": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Generate Vrl",
+        "operationId": "ai_generate_vrl_api_v1_authoring_ai_generate_vrl_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VrlRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/authoring/ai/suggest-schema": {
+      "post": {
+        "tags": [
+          "Rules: Authoring"
+        ],
+        "summary": "Ai Suggest Schema",
+        "operationId": "ai_suggest_schema_api_v1_authoring_ai_suggest_schema_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SchemaSuggestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AIModuleResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/config/client": {
+      "get": {
+        "tags": [
+          "Client Config"
+        ],
+        "summary": "Client Config",
+        "description": "Runtime config for the web UI (no secrets).",
+        "operationId": "client_config_api_v1_config_client_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ClientConfig"
                 }
               }
             }
@@ -7580,68 +9728,93 @@
           }
         ]
       }
-    },
-    "/health/live": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Liveness",
-        "description": "Liveness probe -- is the process alive?\n\nChecks run concurrently via ``run_blocking`` with per-check\ntimeout so a single slow check can't stall the kubelet probe.",
-        "operationId": "liveness_health_live_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/health/ready": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Readiness",
-        "operationId": "readiness_health_ready_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
-    },
-    "/health/startup": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Startup",
-        "operationId": "startup_health_startup_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {}
-              }
-            }
-          }
-        }
-      }
     }
   },
   "components": {
     "schemas": {
+      "AIModuleResult": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Unique task identifier"
+          },
+          "module_name": {
+            "type": "string",
+            "title": "Module Name",
+            "description": "Module that produced this result"
+          },
+          "module_type": {
+            "$ref": "#/components/schemas/AIModuleType",
+            "description": "Module type"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AIModuleStatus",
+            "description": "Task status",
+            "default": "pending"
+          },
+          "output": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Output",
+            "description": "Module-specific output"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Error message if failed"
+          },
+          "duration_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Ms",
+            "description": "Execution duration in milliseconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "module_name",
+          "module_type"
+        ],
+        "title": "AIModuleResult",
+        "description": "Result of an AI module execution."
+      },
+      "AIModuleStatus": {
+        "type": "string",
+        "enum": [
+          "pending",
+          "running",
+          "completed",
+          "failed"
+        ],
+        "title": "AIModuleStatus",
+        "description": "Status of an async AI module task."
+      },
+      "AIModuleType": {
+        "type": "string",
+        "enum": [
+          "query_optimiser",
+          "query_generator",
+          "schema_optimiser",
+          "log_parser"
+        ],
+        "title": "AIModuleType",
+        "description": "Discriminator for AI module types."
+      },
       "APIKeyCreatedResponse": {
         "properties": {
           "name": {
@@ -7769,6 +9942,37 @@
         "title": "AccountResponse",
         "description": "Account detail \u2014 password_hash is NEVER included."
       },
+      "ActionDef": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "required_action": {
+            "type": "string",
+            "title": "Required Action"
+          },
+          "changes": {
+            "items": {
+              "$ref": "#/components/schemas/VarChange"
+            },
+            "type": "array",
+            "title": "Changes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "required_action"
+        ],
+        "title": "ActionDef",
+        "description": "A curated, RBAC-gated bundle of var changes (a \"big dial\").\n\nInvoking the action applies ALL ``changes`` in ONE commit, gated on\n``required_action`` (an RBAC string checked at invoke time)."
+      },
       "AddMemberRequest": {
         "properties": {
           "username": {
@@ -7854,6 +10058,47 @@
           "name"
         ],
         "title": "AlertDestinationSummary"
+      },
+      "AutoMergeRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "AutoMergeRequest"
+      },
+      "AutoMergeStatus": {
+        "properties": {
+          "stored": {
+            "type": "boolean",
+            "title": "Stored"
+          },
+          "effective": {
+            "type": "boolean",
+            "title": "Effective"
+          },
+          "allowed": {
+            "type": "boolean",
+            "title": "Allowed"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason"
+          }
+        },
+        "type": "object",
+        "required": [
+          "stored",
+          "effective",
+          "allowed",
+          "reason"
+        ],
+        "title": "AutoMergeStatus"
       },
       "Body_elastic_converter_api_v1_schemas_elastic_converter_post": {
         "properties": {
@@ -8183,6 +10428,37 @@
         "title": "CelCheckResponse",
         "description": "Result of a single CEL expression check."
       },
+      "ClientConfig": {
+        "properties": {
+          "api_base": {
+            "type": "string",
+            "title": "Api Base",
+            "default": ""
+          },
+          "hyperdx": {
+            "$ref": "#/components/schemas/HyperDXConfig",
+            "default": {
+              "enabled": false,
+              "url": ""
+            }
+          },
+          "auth_mode": {
+            "type": "string",
+            "title": "Auth Mode",
+            "default": "jwt"
+          },
+          "features": {
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "type": "object",
+            "title": "Features",
+            "default": {}
+          }
+        },
+        "type": "object",
+        "title": "ClientConfig"
+      },
       "ColumnInfo": {
         "properties": {
           "name": {
@@ -8480,12 +10756,6 @@
             "type": "array",
             "title": "Org Ids",
             "description": "Tenant IDs for ClickHouse row-level security"
-          },
-          "dedicated_database": {
-            "type": "boolean",
-            "title": "Dedicated Database",
-            "description": "Whether to provision a dedicated ClickHouse database",
-            "default": false
           }
         },
         "type": "object",
@@ -8503,6 +10773,12 @@
           },
           "type": {
             "type": "string",
+            "enum": [
+              "generic",
+              "google",
+              "entra_id",
+              "okta"
+            ],
             "title": "Type",
             "description": "Provider type: generic, google, entra_id, okta"
           },
@@ -8534,6 +10810,38 @@
           "type"
         ],
         "title": "CreateProviderRequest"
+      },
+      "CreateRequest": {
+        "properties": {
+          "prompt": {
+            "type": "string",
+            "title": "Prompt"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "columns": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Columns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "prompt"
+        ],
+        "title": "CreateRequest"
       },
       "CreateRoleRequest": {
         "properties": {
@@ -8805,13 +11113,19 @@
             ],
             "title": "Comment",
             "description": "Human-readable column description (defaults to the source path)."
+          },
+          "_field_type": {
+            "type": "string",
+            "title": "Field Type",
+            "description": "Column classification for JSON promotion drafts (always 'promoted')."
           }
         },
         "type": "object",
         "required": [
           "name",
           "type",
-          "expr"
+          "expr",
+          "_field_type"
         ],
         "title": "DraftColumn",
         "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type; for a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
@@ -9128,10 +11442,42 @@
         "title": "FilterTier",
         "description": "Performance tier for a filter expression."
       },
+      "FromHyperdxRequest": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "time_fields": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "title": "FromHyperdxRequest"
+      },
       "GroupResolutionRequest": {
         "properties": {
           "mode": {
             "type": "string",
+            "enum": [
+              "manual",
+              "token_claim",
+              "api"
+            ],
             "title": "Mode",
             "description": "Group resolution mode: manual, token_claim, api",
             "default": "manual"
@@ -9290,6 +11636,22 @@
           "scope"
         ],
         "title": "GroupResponse"
+      },
+      "GroupedLogResponse": {
+        "properties": {
+          "groups": {
+            "items": {
+              "$ref": "#/components/schemas/LogGroup"
+            },
+            "type": "array",
+            "title": "Groups"
+          }
+        },
+        "type": "object",
+        "required": [
+          "groups"
+        ],
+        "title": "GroupedLogResponse"
       },
       "HTTPValidationError": {
         "properties": {
@@ -9851,6 +12213,65 @@
         "title": "HuntWriteRequest",
         "description": "Hunt scheduler payload for create/update (without hunt file ``name``)."
       },
+      "HyperDXConfig": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": false
+          },
+          "url": {
+            "type": "string",
+            "title": "Url",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "HyperDXConfig"
+      },
+      "InvokeResponse": {
+        "properties": {
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "diff": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Diff"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dry_run",
+          "changed",
+          "diff"
+        ],
+        "title": "InvokeResponse"
+      },
       "JsonPathInfo": {
         "properties": {
           "path": {
@@ -9972,6 +12393,195 @@
         ],
         "title": "JsonPathsResponse",
         "description": "Discovered JSON paths for a source."
+      },
+      "LifecycleRequest": {
+        "properties": {
+          "state": {
+            "$ref": "#/components/schemas/LifecycleState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "LifecycleRequest"
+      },
+      "LifecycleResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "pending_reconcile": {
+            "type": "boolean",
+            "title": "Pending Reconcile",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "state",
+          "changed"
+        ],
+        "title": "LifecycleResponse"
+      },
+      "LifecycleState": {
+        "type": "string",
+        "enum": [
+          "running",
+          "paused",
+          "stopped"
+        ],
+        "title": "LifecycleState",
+        "description": "The gitops state dial value."
+      },
+      "LogEntryModel": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          },
+          "ctype": {
+            "type": "string",
+            "title": "Ctype"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope"
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor"
+          },
+          "role": {
+            "type": "string",
+            "title": "Role"
+          },
+          "action": {
+            "type": "string",
+            "title": "Action"
+          },
+          "request_id": {
+            "type": "string",
+            "title": "Request Id"
+          },
+          "files": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Files"
+          },
+          "resources": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Resources"
+          },
+          "conforming": {
+            "type": "boolean",
+            "title": "Conforming"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "timestamp",
+          "ctype",
+          "scope",
+          "summary",
+          "actor",
+          "role",
+          "action",
+          "request_id",
+          "files",
+          "resources",
+          "conforming",
+          "state"
+        ],
+        "title": "LogEntryModel"
+      },
+      "LogGroup": {
+        "properties": {
+          "key": {
+            "type": "string",
+            "title": "Key"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/LogEntryModel"
+          }
+        },
+        "type": "object",
+        "required": [
+          "key",
+          "count",
+          "latest"
+        ],
+        "title": "LogGroup"
+      },
+      "LogResponse": {
+        "properties": {
+          "entries": {
+            "items": {
+              "$ref": "#/components/schemas/LogEntryModel"
+            },
+            "type": "array",
+            "title": "Entries"
+          },
+          "next_before": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Before"
+          }
+        },
+        "type": "object",
+        "required": [
+          "entries"
+        ],
+        "title": "LogResponse"
       },
       "LoginRequest": {
         "properties": {
@@ -10106,47 +12716,25 @@
         "title": "MatchConflictErrorResponse",
         "description": "409 when two enabled sources share the same receiver match rule."
       },
-      "MetaSchema-Input": {
+      "MetaSchema": {
         "properties": {
-          "current": {
+          "resource_type": {
             "type": "string",
-            "title": "Current",
-            "description": "Current version of the schema"
-          },
-          "versions": {
-            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_-Input",
-            "description": "Dictionary of versions and their metadata"
-          },
-          "path": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
+            "enum": [
+              "core",
+              "custom"
             ],
-            "title": "Path",
-            "description": "DirectoryConfigStore table key / relative path (not stored in YAML files)"
-          }
-        },
-        "type": "object",
-        "required": [
-          "current",
-          "versions"
-        ],
-        "title": "MetaSchema",
-        "description": "A schema for a ClickHouse table.\n\nAttributes:\n    current: Current version of the schema.\n    versions: Dictionary of versions and their metadata.\n    path: Registry path key (e.g. ``aws/cloudtrail``); omitted from YAML on disk."
-      },
-      "MetaSchema-Output": {
-        "properties": {
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
             "description": "Current version of the schema"
           },
           "versions": {
-            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_-Output",
+            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersion_",
             "description": "Dictionary of versions and their metadata"
           },
           "path": {
@@ -10195,7 +12783,7 @@
             "description": "Human-readable summary stored on the new version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn__MinLen_min_length_1_",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumnWrite__MinLen_min_length_1_",
             "minItems": 1,
             "description": "Complete column snapshot for the new version (at least one column)"
           }
@@ -10209,8 +12797,51 @@
         "title": "MetaSchemaAddVersionRequest",
         "description": "Add a new schema version (semver bump from current)."
       },
+      "MetaSchemaCreateRequest": {
+        "properties": {
+          "current": {
+            "type": "string",
+            "title": "Current",
+            "description": "Current version of the schema"
+          },
+          "versions": {
+            "$ref": "#/components/schemas/NonEmptyDict_str_SchemaVersionCreate_",
+            "description": "Dictionary of versions and their metadata"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path",
+            "description": "DirectoryConfigStore table key / relative path (must match URL when set)"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "current",
+          "versions"
+        ],
+        "title": "MetaSchemaCreateRequest",
+        "description": "Create a new custom meta-schema (``resource_type`` is set by the server)."
+      },
       "MetaSchemaGetResponse": {
         "properties": {
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
+          },
           "current": {
             "type": "string",
             "title": "Current",
@@ -10353,15 +12984,15 @@
         "title": "MetricEntry",
         "description": "A single metric from the service's manifest."
       },
-      "NonEmptyDict_str_SchemaVersion_-Input": {
+      "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/SchemaVersion-Input"
+          "$ref": "#/components/schemas/SchemaVersionCreate"
         },
         "type": "object"
       },
-      "NonEmptyDict_str_SchemaVersion_-Output": {
+      "NonEmptyDict_str_SchemaVersion_": {
         "additionalProperties": {
-          "$ref": "#/components/schemas/SchemaVersion-Output"
+          "$ref": "#/components/schemas/SchemaVersion"
         },
         "type": "object"
       },
@@ -10371,21 +13002,21 @@
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn_-Input": {
+      "NonEmptyList_SchemaColumnWrite_": {
         "items": {
-          "$ref": "#/components/schemas/SchemaColumn-Input"
+          "$ref": "#/components/schemas/SchemaColumnWrite"
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn_-Output": {
+      "NonEmptyList_SchemaColumnWrite__MinLen_min_length_1_": {
         "items": {
-          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
+          "$ref": "#/components/schemas/SchemaColumnWrite"
         },
         "type": "array"
       },
-      "NonEmptyList_SchemaColumn__MinLen_min_length_1_": {
+      "NonEmptyList_SchemaColumn_": {
         "items": {
-          "$ref": "#/components/schemas/SchemaColumn-Input"
+          "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
         },
         "type": "array"
       },
@@ -10505,10 +13136,6 @@
             "type": "boolean",
             "title": "Enabled"
           },
-          "dedicated_database": {
-            "type": "boolean",
-            "title": "Dedicated Database"
-          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -10524,7 +13151,6 @@
           "display_name",
           "org_ids",
           "enabled",
-          "dedicated_database",
           "created_at",
           "updated_at"
         ],
@@ -11401,6 +14027,18 @@
             "title": "Atomic",
             "description": "When true, all paths succeed or none commit; else best-effort",
             "default": true
+          },
+          "schema_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Schema Path",
+            "description": "Meta-schema path when the source version has no meta_schema assigned (forbidden if meta_schema is already set on the source)"
           }
         },
         "type": "object",
@@ -11532,6 +14170,53 @@
         ],
         "title": "PromoteResult",
         "description": "Per-path outcome of a promotion."
+      },
+      "PromotedJsonField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Promoted column name in the meta-schema"
+          },
+          "key": {
+            "type": "string",
+            "title": "Key",
+            "description": "Copy source path (e.g. ``_json.CloudTrailEvent.tlsDetails.cipherSuite``)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "key"
+        ],
+        "title": "PromotedJsonField",
+        "description": "A JSON path already materialized as a typed meta-schema column."
+      },
+      "ProtectedPolicy": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "protected": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Protected"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "ProtectedPolicy",
+        "description": "Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.\n\ne.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.\nA protected var can only be changed by a caller holding the override grant."
       },
       "ProviderResponse": {
         "properties": {
@@ -11869,6 +14554,24 @@
         ],
         "title": "ResetPasswordRequest"
       },
+      "ReviewRequest": {
+        "properties": {
+          "sql": {
+            "type": "string",
+            "title": "Sql"
+          },
+          "execution_profile": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Execution Profile"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sql"
+        ],
+        "title": "ReviewRequest"
+      },
       "RoleResponse": {
         "properties": {
           "name": {
@@ -11986,6 +14689,10 @@
           },
           "source_type": {
             "type": "string",
+            "enum": [
+              "raw",
+              "hyperdx"
+            ],
             "title": "Source Type",
             "description": "'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
             "default": "raw"
@@ -12296,6 +15003,26 @@
         "title": "RuleUpdateRequest",
         "description": "Update an existing hunt rule (re-runs creation pipeline; ``source_type`` is not accepted)."
       },
+      "SampleBackend": {
+        "type": "string",
+        "enum": [
+          "clickhouse",
+          "kafka"
+        ],
+        "title": "SampleBackend",
+        "description": "Where the data is read from."
+      },
+      "SampleMode": {
+        "type": "string",
+        "enum": [
+          "recent",
+          "random",
+          "smart",
+          "anomaly"
+        ],
+        "title": "SampleMode",
+        "description": "How to pick the sample.\n\n- ``recent``  - newest rows first (fast tail; ClickHouse ORDER BY ts DESC,\n  Kafka reads from the partition high-watermark backwards).\n- ``random``  - uniform-ish random rows (fair distribution, no recency bias).\n- ``smart``   - logreducer representative/diverse sample (default). Gated.\n- ``anomaly`` - logreducer isolation-forest outliers (the weird events). Gated."
+      },
       "SampleRecord": {
         "properties": {
           "key": {
@@ -12325,6 +15052,237 @@
           "value"
         ],
         "title": "SampleRecord"
+      },
+      "SampleRequest": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SampleMode",
+            "default": "smart"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/SampleBackend",
+            "default": "clickhouse"
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Limit",
+            "description": "Rows to return (defaults to sampler.default_limit)"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Registered source name"
+          },
+          "table": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Table",
+            "description": "Explicit ClickHouse table (overrides source's table)"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic",
+            "description": "Explicit Kafka topic (overrides source's land topic)"
+          },
+          "filter": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filter",
+            "description": "Trusted SQL WHERE predicate (ClickHouse backend only)"
+          },
+          "since": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Since",
+            "description": "Lower time bound (ISO 8601) on the timestamp column"
+          },
+          "until": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Until",
+            "description": "Upper time bound (ISO 8601) on the timestamp column"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Seed for random mode (determinism)"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level",
+            "description": "logreducer level override: standard | enhanced | maximum"
+          },
+          "wait": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait",
+            "description": "Seconds to block for inline completion before returning pending"
+          }
+        },
+        "type": "object",
+        "title": "SampleRequest",
+        "description": "A request to sample a source.\n\nProvide EITHER a registered ``source`` (its CH table / land topic are\nresolved for you) OR an explicit ``table``/``topic`` (ad-hoc - for a source\nthat is not registered yet, e.g. AI onboarding). ``filter`` is a trusted SQL\npredicate (ClickHouse backend only), consistent with the query-authoring\nsurface - callers already hold the sampler scope."
+      },
+      "SampleResult": {
+        "properties": {
+          "mode": {
+            "$ref": "#/components/schemas/SampleMode"
+          },
+          "backend": {
+            "$ref": "#/components/schemas/SampleBackend"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target",
+            "description": "Resolved table or topic sampled",
+            "default": ""
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "description": "Rows returned",
+            "default": 0
+          },
+          "requested_limit": {
+            "type": "integer",
+            "title": "Requested Limit",
+            "default": 0
+          },
+          "lines": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Lines",
+            "description": "Raw event strings (_json / Kafka message values)"
+          },
+          "rows": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Rows",
+            "description": "Parsed JSON objects (best-effort; skips non-JSON)"
+          },
+          "keys": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Keys",
+            "description": "Top-level keys discovered across the sample"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "True when more rows were available than returned",
+            "default": false
+          },
+          "stats": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Stats",
+            "description": "Mode-specific stats (scan counts, logreducer stop reason)"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note",
+            "description": "Any caveat about how the sample was taken"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode",
+          "backend"
+        ],
+        "title": "SampleResult",
+        "description": "The sampled data + provenance."
       },
       "SampleRowsResponse": {
         "properties": {
@@ -12362,6 +15320,18 @@
             "title": "Match Value",
             "description": "Match value rows were filtered on, or null for a whole-table sample."
           },
+          "match_operator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Operator",
+            "description": "Match operator used when filtering (equals, exists, includes, \u2026)."
+          },
           "columns": {
             "items": {
               "type": "string"
@@ -12378,6 +15348,14 @@
             "type": "array",
             "title": "Rows",
             "description": "Sampled rows, each a column-name -> value mapping. Empty when nothing matched."
+          },
+          "promoted": {
+            "items": {
+              "$ref": "#/components/schemas/PromotedJsonField"
+            },
+            "type": "array",
+            "title": "Promoted",
+            "description": "JSON paths already promoted on the source version's meta-schema (empty when the version has no meta_schema or no @copy columns)"
           }
         },
         "type": "object",
@@ -12390,7 +15368,86 @@
         "title": "SampleRowsResponse",
         "description": "Random sample rows for a source, scoped to its match rule."
       },
-      "SchemaColumn-Input": {
+      "SampleSubmitResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID; poll via GET /samples/{task_id}"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "pending | running | completed | failed | cancelled"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SampleResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present once completed"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Present on failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "SampleSubmitResponse",
+        "description": "Envelope returned by a sample submit and by the poll endpoint."
+      },
+      "ScaffoldRequest": {
+        "properties": {
+          "table": {
+            "type": "string",
+            "title": "Table"
+          },
+          "columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "type": "object",
+        "required": [
+          "table"
+        ],
+        "title": "ScaffoldRequest"
+      },
+      "SchemaColumnWrite": {
         "properties": {
           "name": {
             "type": "string",
@@ -12453,6 +15510,11 @@
             "title": "Comment",
             "description": "Comment for the column"
           },
+          "_field_type": {
+            "type": "string",
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
           "matched_searchable": {
             "items": {
               "type": "string"
@@ -12465,10 +15527,68 @@
         "type": "object",
         "required": [
           "name",
-          "type"
+          "type",
+          "_field_type"
         ],
-        "title": "SchemaColumn",
-        "description": "A column in the schema."
+        "title": "SchemaColumnWrite",
+        "description": "Column payload for API writes (create schema / add version)."
+      },
+      "SchemaDeployResult": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "dry_run": {
+            "type": "boolean",
+            "title": "Dry Run",
+            "description": "True = plan only; the DDL was NOT applied"
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "description": "Whether the DDL was executed against ClickHouse"
+          },
+          "create_table": {
+            "type": "string",
+            "title": "Create Table",
+            "description": "CREATE TABLE DDL"
+          },
+          "views": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Views",
+            "description": "View name \u2192 DDL"
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
+          },
+          "statements_applied": {
+            "type": "integer",
+            "title": "Statements Applied",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "dry_run",
+          "applied",
+          "create_table"
+        ],
+        "title": "SchemaDeployResult",
+        "description": "Plan / deploy result for a source's schema."
       },
       "SchemaDiff": {
         "properties": {
@@ -12502,12 +15622,47 @@
         "title": "SchemaDiff",
         "description": "Proposed schema change returned by ``?dry_run=true``."
       },
+      "SchemaSuggestRequest": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "source_schema": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Source Schema"
+          },
+          "query_patterns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Query Patterns"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name"
+        ],
+        "title": "SchemaSuggestRequest"
+      },
       "SchemaSummaryObject": {
         "properties": {
           "name": {
             "type": "string",
             "title": "Name",
             "description": "Name of the schema"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "core for system schemas, custom for user-created schemas",
+            "default": "custom"
           },
           "current": {
             "type": "string",
@@ -12540,7 +15695,7 @@
         "title": "SchemaSummaryObject",
         "description": "Summary of a schema.\n\nAttributes:\n    name: Name of the schema.\n    current: Current version of the schema.\n    versions: List of versions.\n    updated_at: Last updated timestamp.\n    column_count: Number of columns in the schema."
       },
-      "SchemaVersion-Input": {
+      "SchemaVersion": {
         "properties": {
           "date": {
             "type": "string",
@@ -12558,7 +15713,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Input",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_",
             "description": "List of columns in the version"
           }
         },
@@ -12572,7 +15727,7 @@
         "title": "SchemaVersion",
         "description": "A version in the schema."
       },
-      "SchemaVersion-Output": {
+      "SchemaVersionCreate": {
         "properties": {
           "date": {
             "type": "string",
@@ -12590,7 +15745,7 @@
             "description": "Summary of the version"
           },
           "columns": {
-            "$ref": "#/components/schemas/NonEmptyList_SchemaColumn_-Output",
+            "$ref": "#/components/schemas/NonEmptyList_SchemaColumnWrite_",
             "description": "List of columns in the version"
           }
         },
@@ -12601,8 +15756,8 @@
           "summary",
           "columns"
         ],
-        "title": "SchemaVersion",
-        "description": "A version in the schema."
+        "title": "SchemaVersionCreate",
+        "description": "Initial version entry when creating a meta-schema via the API."
       },
       "SchemaVersionGet": {
         "properties": {
@@ -12693,6 +15848,29 @@
         ],
         "title": "ServiceConfigSummary"
       },
+      "ServiceInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "tier": {
+            "type": "string",
+            "title": "Tier"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "tier",
+          "state"
+        ],
+        "title": "ServiceInfo"
+      },
       "ServiceSurface": {
         "properties": {
           "service": {
@@ -12735,6 +15913,18 @@
         ],
         "title": "ServiceSurface",
         "description": "Complete surface definition for a Rust service.\n\nLoaded from YAML files in the service-surfaces config directory.\nOne file per service (e.g. ``dfe-receiver.yaml``)."
+      },
+      "SetVarRequest": {
+        "properties": {
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "value"
+        ],
+        "title": "SetVarRequest"
       },
       "SettingsSummary": {
         "properties": {
@@ -12859,7 +16049,64 @@
         ],
         "title": "SizeResponse"
       },
-      "Source": {
+      "SourceDeployResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "deployed_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deployed Version"
+          },
+          "deployed_at": {
+            "type": "string",
+            "title": "Deployed At"
+          },
+          "ddl_executed": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Ddl Executed"
+          },
+          "ddl_failed": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Ddl Failed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "success",
+          "deployed_at"
+        ],
+        "title": "SourceDeployResponse",
+        "description": "Result of deploying a source version to ClickHouse."
+      },
+      "SourceDetailResponse": {
         "properties": {
           "source": {
             "type": "string",
@@ -12916,11 +16163,11 @@
           },
           "versions": {
             "additionalProperties": {
-              "$ref": "#/components/schemas/SourceVersion"
+              "$ref": "#/components/schemas/SourceVersionDetail"
             },
             "type": "object",
             "title": "Versions",
-            "description": "Version id \u2192 configuration snapshot"
+            "description": "Version id \u2192 configuration snapshot and pipeline artifacts"
           },
           "match": {
             "anyOf": [
@@ -12953,8 +16200,24 @@
           "match",
           "transform"
         ],
-        "title": "Source",
-        "description": "The top-level data entity in the DFE platform.\n\nA Source represents a distinct data stream entering the platform.\nEverything flows from the _source label.\n\nSee docs/SOURCE.md for the full specification."
+        "title": "SourceDetailResponse",
+        "description": "Full source definition with per-version build/plan/deploy status."
+      },
+      "SourceEnabledPatchRequest": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Whether the source is active"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "SourceEnabledPatchRequest",
+        "description": "Partial update for source enabled status only."
       },
       "SourceFetcher": {
         "properties": {
@@ -13053,16 +16316,30 @@
             "title": "Field",
             "description": "Field to match on. Prefix with '_json.' to match a path inside the JSON column (e.g. '_json._source_fetcher'); a bare name matches a real top-level column (e.g. '_org_id')."
           },
+          "operator": {
+            "type": "string",
+            "enum": [
+              "equals",
+              "not_equals",
+              "exists",
+              "includes",
+              "starts_with",
+              "ends_with"
+            ],
+            "title": "Operator",
+            "description": "How to compare ``field`` to ``value``: equals (default), exists, includes, starts_with, ends_with, not_equals",
+            "default": "equals"
+          },
           "value": {
             "type": "string",
             "title": "Value",
-            "description": "Expected value (exact match)"
+            "description": "Operand for the operator (not used when operator is ``exists``)",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
-          "field",
-          "value"
+          "field"
         ],
         "title": "SourceMatch",
         "description": "Receiver match rule \u2014 how the receiver identifies this source."
@@ -13094,6 +16371,76 @@
         ],
         "title": "SourceNameConflictErrorResponse",
         "description": "409 when POST /sources and the source name already exists."
+      },
+      "SourcePlanResponse": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "version": {
+            "type": "string",
+            "title": "Version"
+          },
+          "planned_at": {
+            "type": "string",
+            "title": "Planned At"
+          },
+          "table_exists": {
+            "type": "boolean",
+            "title": "Table Exists",
+            "default": false
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
+          },
+          "statements": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Statements"
+          },
+          "ddl": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DDLResult"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ready": {
+            "type": "boolean",
+            "title": "Ready",
+            "default": false
+          },
+          "ready_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ready Reason",
+            "description": "Why the plan is or is not ready to deploy"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name",
+          "version",
+          "planned_at"
+        ],
+        "title": "SourcePlanResponse",
+        "description": "Dry-run ClickHouse deploy plan for a source version."
       },
       "SourceResponse": {
         "properties": {
@@ -13206,13 +16553,90 @@
           "engine": {
             "type": "string",
             "title": "Engine",
-            "description": "Table engine (MergeTree, ReplicatedMergeTree, SharedMergeTree)",
-            "default": "MergeTree"
+            "description": "MergeTree-family engine VARIANT, optionally parameterised - e.g. MergeTree, ReplacingMergeTree, ReplacingMergeTree(version_col), SummingMergeTree(a, b). Declare the base variant only: the topology (single vs Replicated/Shared/Cloud) is resolved at DDL time, so do NOT prefix Replicated/Shared here. Empty (the default) means inherit the deployment default (DFE_CLICKHOUSE_DEFAULT_ENGINE, itself MergeTree unless overridden).",
+            "default": ""
           }
         },
         "type": "object",
         "title": "SourceSchema",
         "description": "Schema configuration for the source's ClickHouse table."
+      },
+      "SourceSchemaColumnsResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "resource_type": {
+            "type": "string",
+            "enum": [
+              "core",
+              "custom"
+            ],
+            "title": "Resource Type",
+            "description": "resource_type from the source version's meta-schema, when configured",
+            "default": "custom"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "SourceSchemaColumnsResponse",
+        "description": "Composed source columns plus meta-schema ``resource_type``."
       },
       "SourceSigma": {
         "properties": {
@@ -13394,7 +16818,7 @@
         "title": "SourceTransform",
         "description": "Transform stage configuration (vector or wasm)."
       },
-      "SourceVersion": {
+      "SourceVersionDetail": {
         "properties": {
           "date_time": {
             "type": "string",
@@ -13410,7 +16834,7 @@
                 "type": "null"
               }
             ],
-            "description": "Common schema header configuration (None when the version did not author one)"
+            "description": "Common schema header configuration (optional; applied at DDL compose time)"
           },
           "schema": {
             "anyOf": [
@@ -13482,6 +16906,28 @@
               }
             ],
             "description": "Transform stage (optional)"
+          },
+          "source_build": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__sources__SchemaBuildResult"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last schema build for this version (source-builds)"
+          },
+          "source_deployment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SourceDeployResponse"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Last deploy run for this version (source-deploys)"
           }
         },
         "type": "object",
@@ -13489,10 +16935,10 @@
           "date_time",
           "match"
         ],
-        "title": "SourceVersion",
-        "description": "Versioned source configuration snapshot (schema, mappings, fetcher, etc.)."
+        "title": "SourceVersionDetail",
+        "description": "Source version snapshot plus persisted build/deploy payloads."
       },
-      "SourceVersionGetResponse": {
+      "SourceVersionGetDetailResponse": {
         "properties": {
           "source": {
             "type": "string",
@@ -13549,7 +16995,7 @@
           "selected": {
             "type": "string",
             "title": "Selected",
-            "description": "Version id requested via query parameter"
+            "description": "Version id requested in the URL path"
           },
           "versions": {
             "items": {
@@ -13559,9 +17005,17 @@
             "title": "Versions",
             "description": "All version ids defined on this source"
           },
+          "previous_deployed_versions": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Previous Deployed Versions",
+            "description": "Version ids with a successful deploy in source-deploys history, excluding the live deployed_version"
+          },
           "version": {
-            "$ref": "#/components/schemas/SourceVersion",
-            "description": "Immutable configuration snapshot for ``selected``"
+            "$ref": "#/components/schemas/SourceVersionDetail",
+            "description": "Configuration snapshot for ``selected`` plus pipeline artifacts"
           }
         },
         "type": "object",
@@ -13572,8 +17026,8 @@
           "versions",
           "version"
         ],
-        "title": "SourceVersionGetResponse",
-        "description": "Source payload for a single requested version (mirrors ``MetaSchemaGetResponse``)."
+        "title": "SourceVersionGetDetailResponse",
+        "description": "Single-version GET with build/plan/deploy status on ``version``."
       },
       "SourceWriteRequest": {
         "properties": {
@@ -14244,24 +17698,6 @@
             ],
             "title": "Enabled",
             "description": "Enable or disable the org"
-          },
-          "dedicated_database": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Dedicated Database",
-            "description": "Enable or disable a dedicated ClickHouse database"
-          },
-          "confirm_merge": {
-            "type": "boolean",
-            "title": "Confirm Merge",
-            "description": "Required when disabling dedicated_database \u2014 confirms data migration is handled",
-            "default": false
           }
         },
         "type": "object",
@@ -14433,6 +17869,34 @@
           "type"
         ],
         "title": "ValidationError"
+      },
+      "VarChange": {
+        "properties": {
+          "cls": {
+            "type": "string",
+            "title": "Cls"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "type": "string",
+            "title": "Path"
+          },
+          "value": {
+            "title": "Value"
+          }
+        },
+        "type": "object",
+        "required": [
+          "cls",
+          "name",
+          "path",
+          "value"
+        ],
+        "title": "VarChange",
+        "description": "One var mutation in an action: set ``cls/name`` dot-``path`` to ``value``."
       },
       "VersionResponse": {
         "properties": {
@@ -14655,6 +18119,62 @@
         "title": "ViewParameter",
         "description": "Parameter discovered from a ClickHouse parameterized view.\n\nExtracted from the view's CREATE SQL by parsing {param:Type} patterns.\nProvides type metadata across the full stack (ClickHouse \u2192 Python \u2192 TypeScript \u2192 HTML)."
       },
+      "VrlRequest": {
+        "properties": {
+          "samples": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Samples"
+          },
+          "source_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Hint"
+          }
+        },
+        "type": "object",
+        "required": [
+          "samples"
+        ],
+        "title": "VrlRequest"
+      },
+      "WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
+      },
       "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
         "properties": {
           "items": {
@@ -14725,73 +18245,7 @@
         "properties": {
           "items": {
             "items": {
-              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn-Output"
-            },
-            "type": "array",
-            "title": "Items"
-          },
-          "total": {
-            "type": "integer",
-            "title": "Total",
-            "description": "Total matching items across all pages"
-          },
-          "page": {
-            "type": "integer",
-            "title": "Page",
-            "description": "Current page number (1-based)"
-          },
-          "per_page": {
-            "type": "integer",
-            "title": "Per Page",
-            "description": "Items per page"
-          },
-          "total_pages": {
-            "type": "integer",
-            "title": "Total Pages",
-            "readOnly": true
-          },
-          "next_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Page",
-            "readOnly": true
-          },
-          "prev_page": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Prev Page",
-            "readOnly": true
-          }
-        },
-        "type": "object",
-        "required": [
-          "items",
-          "total",
-          "page",
-          "per_page",
-          "total_pages",
-          "next_page",
-          "prev_page"
-        ],
-        "title": "PaginatedResponse[SchemaColumn]"
-      },
-      "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___3": {
-        "properties": {
-          "items": {
-            "items": {
-              "$ref": "#/components/schemas/dfe_engine__api__v1__schemas__SchemaColumn"
+              "$ref": "#/components/schemas/dfe_engine__schema__models__SchemaColumn"
             },
             "type": "array",
             "title": "Items"
@@ -14985,6 +18439,18 @@
             "type": "string",
             "title": "Description",
             "default": ""
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           }
         },
         "type": "object",
@@ -15055,6 +18521,37 @@
                 "type": "null"
               }
             ]
+          },
+          "validation_errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Validation Errors"
+          },
+          "built_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Built At",
+            "description": "When the build was persisted (source-builds); omitted on live-only builds"
+          },
+          "column_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Column Count",
+            "description": "Column count at build time when columns are not included in the payload"
           }
         },
         "type": "object",
@@ -15140,7 +18637,7 @@
         ],
         "title": "TestResponse"
       },
-      "dfe_engine__schema__models__SchemaColumn-Output": {
+      "dfe_engine__schema__models__SchemaColumn": {
         "properties": {
           "name": {
             "type": "string",
@@ -15202,6 +18699,18 @@
             ],
             "title": "Comment",
             "description": "Comment for the column"
+          },
+          "_field_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Type",
+            "description": "Column classification (e.g. base); stored as _field_type in YAML"
           },
           "_matched_searchable": {
             "items": {
