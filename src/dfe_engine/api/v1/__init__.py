@@ -26,6 +26,7 @@ from dfe_engine.api.v1.queries import router as queries_router
 from dfe_engine.api.v1.roles import router as roles_router
 from dfe_engine.api.v1.rules import router as rules_router
 from dfe_engine.api.v1.schemas import router as schemas_router
+from dfe_engine.api.v1.scim import router as scim_router
 from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
 from dfe_engine.api.v1.services import router as services_router
 from dfe_engine.api.v1.sigma import router as sigma_router
@@ -64,6 +65,8 @@ v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
 v1_router.include_router(discovery_router)
 v1_router.include_router(schemas_router)
+# SCIM 2.0 provisioning face (/scim/v2) over the account/group stores
+v1_router.include_router(scim_router)
 v1_router.include_router(sigma_router)
 v1_router.include_router(cel_router)
 # Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
