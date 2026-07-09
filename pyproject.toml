@@ -40,6 +40,11 @@ dependencies = [
     "dulwich>=1.2.7",
     # Authentication
     "bcrypt>=5.0.0",
+    # OIDC relying-party (external IdP termination) + SCIM identity schema
+    "authlib>=1.7.2",
+    # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
+    "itsdangerous>=2.2.0",
+    "scim2-models>=0.6.12",
     # Alerting / notifications
     "apprise>=1.11.0",
     # API server

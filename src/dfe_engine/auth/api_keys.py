@@ -13,7 +13,8 @@ API keys use a prefix+short_token+long_token format:
     dfe_ak_{short_token}_{long_token}
 
 - short_token: 8 hex chars stored plaintext for O(1) file lookup
-- long_token:  32 hex chars stored as SHA-256 hash ("sha256:{hex}")
+- long_token:  32 hex chars stored as a SHA-384 hash ("sha384:{hex}", CNSA;
+  pre-existing "sha256:" keys still verify)
 
 The full key is shown exactly once — at creation time. Only the hash is
 persisted on disk; there is no way to reconstruct the full key from
@@ -48,7 +49,7 @@ class APIKey(BaseModel):
 
     name: str
     short_token: str
-    key_hash: str  # "sha256:{hex}"
+    key_hash: str  # "sha384:{hex}" (CNSA); legacy "sha256:{hex}" still verifies
     enabled: bool = True
     groups: list[str] = Field(default_factory=list)
     description: str = ""
@@ -97,7 +98,7 @@ class APIKeyStore:
 
         short_token = secrets.token_hex(_SHORT_BYTES)
         long_token = secrets.token_hex(_LONG_BYTES)
-        key_hash = "sha256:" + hashlib.sha256(long_token.encode()).hexdigest()
+        key_hash = "sha384:" + hashlib.sha384(long_token.encode()).hexdigest()
         full_key = f"{_KEY_PREFIX}_{short_token}_{long_token}"
 
         key_meta = APIKey(
@@ -158,9 +159,12 @@ class APIKeyStore:
         if not key_meta.enabled:
             return None
 
-        # Timing-safe comparison of the hash
-        submitted_hash = hashlib.sha256(long_token.encode()).hexdigest()
-        stored_hash = key_meta.key_hash.removeprefix("sha256:")
+        # Timing-safe comparison. New keys are SHA-384 (CNSA); pre-existing
+        # sha256: keys still verify under their stored algorithm.
+        algo, _, stored_hash = key_meta.key_hash.partition(":")
+        if algo not in ("sha256", "sha384"):
+            return None
+        submitted_hash = hashlib.new(algo, long_token.encode()).hexdigest()
         if not hmac.compare_digest(submitted_hash, stored_hash):
             return None
 

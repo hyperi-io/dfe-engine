@@ -21,7 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
-from dfe_engine.settings import DFESettings, load_settings
+from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
 
 
 @asynccontextmanager
@@ -70,6 +70,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
+    # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
+    from dfe_engine.api.deps import jwt_authority_for
+
+    app.state.jwt_authority = jwt_authority_for(settings)
+
     # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). None when
     # gitops is disabled -> the governance routers return 503 (not_configured).
     from dfe_engine.gitcrud.factory import build_gitcrud
@@ -93,6 +99,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     oidc_dir = auth_dir / "oidc-providers"
     oidc_dir.mkdir(parents=True, exist_ok=True)
     app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
+
+    # Build the OIDC relying party from the enabled providers. The engine is the
+    # RP + single token issuer: it terminates the IdP login and re-mints its own
+    # ES384 token. Zero providers is fine (an empty registry -> every login 404s).
+    from dfe_engine.auth.oidc.rp import OidcRelyingParty
+
+    try:
+        app.state.oidc_rp = OidcRelyingParty(app.state.oidc_provider_registry)
+    except Exception as exc:  # never let RP setup break app startup
+        logger.warning("OIDC relying party unavailable", error=str(exc))
+        app.state.oidc_rp = None
 
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader
@@ -255,6 +272,19 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # Session cookie for the OIDC relying-party flow: Authlib's starlette client
+    # stashes the OAuth state + nonce in request.session across the login/callback
+    # redirect. Keyed by session_secret (>= jwt_secret's 32-byte floor when it
+    # falls back). Not used by any other request path.
+    from starlette.middleware.sessions import SessionMiddleware
+
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.api.session_secret or settings.api.jwt_secret,
+        same_site="lax",
+        https_only=not is_dev_posture(settings.env),
+    )
+
     # Exception handlers
     from dfe_engine.api.errors import install_exception_handlers
 
@@ -264,6 +294,11 @@ def create_app(
     from dfe_engine.api.v1 import v1_router
 
     app.include_router(v1_router, prefix="/api")
+
+    # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
+    from dfe_engine.api.well_known import router as well_known_router
+
+    app.include_router(well_known_router)
 
     # K8s health probes — /health/live, /health/ready, /health/startup
     # include_in_schema=False: probes are not API surface, AND scalo's health

@@ -49,6 +49,8 @@ class Account(BaseModel):
     groups: list[str] = Field(default_factory=list)
     external: bool = False
     source_provider: str = ""
+    external_id: str = ""
+    """Provider-specific external identifier (SCIM externalId / IdP object ID)."""
     last_login_at: str = ""
     created_at: str = ""
     updated_at: str = ""
@@ -160,6 +162,8 @@ class AccountStore:
             account = account.model_copy(update={"external": fields["external"]})
         if "source_provider" in fields:
             account = account.model_copy(update={"source_provider": fields["source_provider"]})
+        if "external_id" in fields:
+            account = account.model_copy(update={"external_id": fields["external_id"]})
         if "last_login_at" in fields:
             account = account.model_copy(update={"last_login_at": fields["last_login_at"]})
 

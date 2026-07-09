@@ -650,13 +650,30 @@ class APISettings(BaseModel):
     jwt_secret: str = Field(
         default=_DEV_JWT_SECRET,
         description=(
-            "JWT signing secret (HS256), >= 32 bytes. This dev default is a KNOWN "
-            "placeholder - operators MUST override it via DFE_API_JWT_SECRET in "
-            "production, else tokens can be forged."
+            "Legacy HS256 secret - UNUSED. The JWT authority signs ES384 with an "
+            "asymmetric key held in scalo.secrets; retained only for config compat."
         ),
     )
-    jwt_algorithm: str = Field(default="HS256", description="JWT algorithm")
+    jwt_algorithm: str = Field(
+        default="ES384",
+        description="JWT signing algorithm - ES384 (ECDSA P-384 + SHA-384, CNSA-aligned). Crypto-agile.",
+    )
     jwt_expire_minutes: int = Field(default=60, description="JWT token expiry in minutes")
+    jwt_issuer: str = Field(
+        default="https://dfe.local/api",
+        description="JWT issuer (iss) claim + JWKS issuer; set to the deployment engine origin.",
+    )
+    jwt_key_path: str = Field(
+        default="jwt/signing-key",
+        description="scalo.secrets path holding the ES384 signing private key (PEM).",
+    )
+    session_secret: str = Field(
+        default="",
+        description=(
+            "Secret keying the signed session cookie SessionMiddleware uses for the "
+            "OIDC RP flow (Authlib state/nonce). Empty -> falls back to jwt_secret."
+        ),
+    )
     elastic_converter_max_upload_bytes: int = Field(
         default=5 * 1024 * 1024,
         ge=1,
@@ -1077,6 +1094,8 @@ def _get_env_overrides() -> dict:
         overrides["api"]["port"] = int(val)
     if val := _get_env("DFE_API_JWT_SECRET"):
         overrides["api"]["jwt_secret"] = val
+    if val := _get_env("DFE_API_SESSION_SECRET"):
+        overrides["api"]["session_secret"] = val
     if val := _get_env("DFE_API_CORS_ORIGINS"):
         overrides["api"]["cors_origins"] = [o.strip() for o in val.split(",") if o.strip()]
     if val := _get_env("DFE_API_JWT_EXPIRE_MINUTES"):

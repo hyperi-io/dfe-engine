@@ -19,6 +19,7 @@ Thumbs.db
 .env
 .env.local
 .env.*.local
+.secrets/
 
 # Logs
 *.log
