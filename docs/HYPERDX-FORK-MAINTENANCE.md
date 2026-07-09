@@ -32,7 +32,7 @@ upstream by tag with a rebase + CI guardrail. Authority stays in the engine/gito
    at seams; the DFE delta stays visible as the top commits.
 6. **CI guardrail on every bump.** Automate: rebase onto the new tag -> build -> run
    a DFE SEAM-INTEGRATION suite (assert: dfe middleware registered; OIDC group
-   headers honoured; group->connection selection works; Casbin enforces). A broken
+   headers honoured; group->connection selection works; engine JWT verified). A broken
    seam fails CI immediately, not in production.
 7. **Lock-step the fork release with dfe-ui.** One coordinated bump; the fork image
    and dfe-ui move together.
@@ -48,7 +48,7 @@ upstream by tag with a rebase + CI guardrail. Authority stays in the engine/gito
 
 ## What our delta SHOULD be (target shape)
 
-- Added: `packages/api/src/dfe/**` (oidc-identity, casbin-authz, user-provisioning,
+- Added: `packages/api/src/dfe/**` (oidc-identity, jwt-verify, user-provisioning,
   config, connection-selector) - self-contained.
 - Seam: ONE middleware-registration line wiring `dfe/` into the app pipeline.
 - NOT touched: query engine, connection model/storage, `clickhouseProxy` core,

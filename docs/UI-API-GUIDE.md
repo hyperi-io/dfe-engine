@@ -140,7 +140,7 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | CRUD | `/auth/accounts` | Account management |
 | CRUD | `/auth/groups` | Group + role management |
 | CRUD | `/auth/roles` | Role definitions (`config/rbac/roles.yaml`) |
-| GET | `/auth/roles/scopes` | Casbin permission scopes for role editors |
+| GET | `/auth/roles/scopes` | RBAC permission scopes for role editors |
 | CRUD | `/auth/api-keys` | API key management |
 | CRUD | `/auth/oidc-providers` | OIDC provider configuration |
 | POST | `/auth/oidc-providers/{name}/sync` | Force group sync |
