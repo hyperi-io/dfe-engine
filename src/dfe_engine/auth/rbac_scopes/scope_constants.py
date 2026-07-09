@@ -94,6 +94,10 @@ role_scopes = {
     "role_scopes": "role:scopes",
 }
 
+sampler_scopes = {
+    "sampler_read": "sampler:read",
+}
+
 rules_scopes = {
     "rule_read": "rule:read",
     "rule_write": "rule:write",
