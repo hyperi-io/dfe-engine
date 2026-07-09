@@ -62,6 +62,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
+    # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
+    from dfe_engine.api.deps import jwt_authority_for
+
+    app.state.jwt_authority = jwt_authority_for(settings)
+
     # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). None when
     # gitops is disabled -> the governance routers return 503 (not_configured).
     from dfe_engine.gitcrud.factory import build_gitcrud
@@ -251,6 +257,11 @@ def create_app(
     from dfe_engine.api.v1 import v1_router
 
     app.include_router(v1_router, prefix="/api")
+
+    # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
+    from dfe_engine.api.well_known import router as well_known_router
+
+    app.include_router(well_known_router)
 
     # K8s health probes — /health/live, /health/ready, /health/startup
     # include_in_schema=False: probes are not API surface, AND scalo's health

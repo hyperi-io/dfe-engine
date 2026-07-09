@@ -11,8 +11,8 @@ per-request via ``Depends()``.  Authentication checks four paths in order:
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from datetime import timedelta
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, status
 from scalo.logger import logger
@@ -27,6 +27,9 @@ from dfe_engine.auth.audit import (
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings
+
+if TYPE_CHECKING:
+    from dfe_engine.auth.jwt_authority import JwtAuthority
 
 # ── Settings ──────────────────────────────────────────────────
 
@@ -507,15 +510,10 @@ async def get_current_user(request: Request) -> AuthContext:
     if auth_header and auth_header.startswith("Bearer "):
         token = auth_header[7:]
 
-        import jwt
         from jwt.exceptions import InvalidTokenError
 
         try:
-            payload = jwt.decode(
-                token,
-                settings.api.jwt_secret,
-                algorithms=[settings.api.jwt_algorithm],
-            )
+            payload = request.app.state.jwt_authority.verify(token)
         except InvalidTokenError as e:
             audit_login_denied("unknown", "jwt", client_ip, str(e))
             raise HTTPException(
@@ -599,17 +597,46 @@ def require_action(action: str):
 # ── JWT helpers ──────────────────────────────────────────────
 
 
+# One JwtAuthority per distinct (secrets + jwt) config, reused: the app's
+# app.state.jwt_authority and create_access_token resolve the SAME instance (hence
+# the same signing key + kid), so a token minted here verifies at the app.
+_authority_cache: dict[tuple, JwtAuthority] = {}
+
+
+def jwt_authority_for(settings: DFESettings) -> JwtAuthority:
+    """Get (or build) the ES384 JWT authority for these settings."""
+    from dfe_engine.auth.jwt_authority import JwtAuthority
+    from dfe_engine.secrets import build_secrets
+
+    s = settings.secrets
+    a = settings.api
+    cache_key = (
+        s.provider,
+        s.path,
+        s.addr,
+        s.mount,
+        s.role,
+        a.jwt_issuer,
+        a.jwt_algorithm,
+        a.jwt_key_path,
+    )
+    authority = _authority_cache.get(cache_key)
+    if authority is None:
+        authority = JwtAuthority(
+            build_secrets(s),
+            issuer=a.jwt_issuer,
+            algorithm=a.jwt_algorithm,
+            key_path=a.jwt_key_path,
+            expire_minutes=a.jwt_expire_minutes,
+        )
+        _authority_cache[cache_key] = authority
+    return authority
+
+
 def create_access_token(
     data: dict,
     settings: DFESettings,
     expires_delta: timedelta | None = None,
 ) -> str:
-    """Create a signed JWT access token."""
-    import jwt
-
-    to_encode = data.copy()
-    expire = datetime.now(UTC) + (
-        expires_delta or timedelta(minutes=settings.api.jwt_expire_minutes)
-    )
-    to_encode["exp"] = expire
-    return jwt.encode(to_encode, settings.api.jwt_secret, algorithm=settings.api.jwt_algorithm)
+    """Create a signed ES384 DFE identity token (via the JWT authority)."""
+    return jwt_authority_for(settings).sign(data, expires_delta=expires_delta)

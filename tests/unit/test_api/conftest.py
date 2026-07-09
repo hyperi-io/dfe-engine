@@ -18,6 +18,7 @@ from dfe_engine.settings import (
     AuthSettings,
     DFESettings,
     HuntsSettings,
+    SecretsSettings,
     ServicesSettings,
     SourceSettings,
 )
@@ -36,6 +37,8 @@ def api_settings(tmp_path: Path) -> DFESettings:
     hunts_dir.mkdir()
     auth_dir = tmp_path / "auth"
     auth_dir.mkdir()
+    secrets_dir = tmp_path / "secrets"
+    secrets_dir.mkdir()
 
     return DFESettings(
         config_dir=str(tmp_path),
@@ -46,6 +49,7 @@ def api_settings(tmp_path: Path) -> DFESettings:
             enabled=True,
             auth_dir=str(auth_dir),
         ),
+        secrets=SecretsSettings(provider="file", path=str(secrets_dir)),
         api=APISettings(
             jwt_secret="test-secret-key-for-unit-tests-hmac32",
             jwt_expire_minutes=30,
