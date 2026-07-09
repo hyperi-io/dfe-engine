@@ -285,6 +285,92 @@ es.addEventListener('complete', (e) => {
 | GET | `/system/version` | API version |
 | GET | `/system/settings` | Current settings |
 
+## Repository (UI preferences + small objects)
+
+A scope-aligned small-object store for the UI: preferences (light/dark
+mode), JSON docs, and small files. Scopes: `system` / `org` / `group` /
+`user`. Backed by an engine-only ClickHouse table - never queried directly
+by the UI.
+
+### Preferences (the fast path)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/repository/preferences` | Effective merged preferences for the caller |
+| PATCH | `/repository/preferences` | JSON merge-patch applied to the caller's USER layer |
+
+GET returns the deep merge of the caller's layers - system, then each of
+their orgs, then each of their groups, then the user layer (user wins per
+key) - plus the user-layer etag:
+
+```json
+{ "preferences": { "theme": "dark", "brand": "hyperi" }, "etag": "2026-07-03T12:00:00.000+00:00" }
+```
+
+PATCH takes an RFC 7396 merge patch, writes ONLY the user layer, and
+returns the same shape with the new effective doc. `null` deletes a
+user-layer key so the value falls back to the inherited layer. The theme
+toggle is one call: `PATCH {"theme": "dark"}`.
+
+```typescript
+// One GET on boot, PATCH merge-patches after
+const prefsQuery = useQuery({
+  queryKey: ['preferences'],
+  queryFn: () => fetch('/api/v1/repository/preferences').then(r => r.json()),
+});
+
+const patchPrefs = useMutation({
+  mutationFn: (patch: object) =>
+    fetch('/api/v1/repository/preferences', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    }).then(r => r.json()),
+  // Response IS the new effective doc - no refetch needed
+  onSuccess: (data) => queryClient.setQueryData(['preferences'], data),
+});
+
+patchPrefs.mutate({ theme: 'dark' });        // set
+patchPrefs.mutate({ theme: null });          // clear -> inherit org/system value
+```
+
+Admin/settings UIs write the system/org/group preference layers through
+the object endpoints below (namespace `preferences`, key `default`).
+
+### Objects (generic)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/repository/objects/{scope}/{scope_id}/{namespace}` | List metadata (key, content_type, size, updated_by, updated_at, etag) |
+| GET | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Raw bytes with stored `Content-Type` + `ETag` headers |
+| PUT | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Store raw body (`Content-Type` header is kept; default `application/octet-stream`) |
+| DELETE | `/repository/objects/{scope}/{scope_id}/{namespace}/{key}` | Delete (204; 404 if absent) |
+
+Path rules: `scope` is one of `system|org|group|user` (422 otherwise).
+For `system` the `scope_id` MUST be `-`. `namespace` and `key` match
+`^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$` (422 otherwise).
+
+Access: any authenticated user reads the system layer; members read their
+own org/group layers and their own user layer; everything else needs the
+`repository:read` / `repository:write` RBAC actions at the matching scope
+(admins system-wide, org-wildcard admins within their org). Reads you
+cannot see return 404 (existence stays hidden); forbidden writes return 403.
+
+### ETag semantics
+
+Every stored object carries an opaque etag (returned in the `ETag`
+header and in metadata). Send `If-Match: <etag>` on PUT/PATCH for
+optimistic concurrency - a mismatch returns
+`412 {"code": "precondition_failed"}` with the current etag in the
+`ETag` response header. Omit `If-Match` for last-write-wins.
+
+### Size caps
+
+| What | Limit | Over-limit response |
+|------|-------|---------------------|
+| Preferences doc (PATCH) | 256 KiB (`DFE_REPOSITORY_MAX_PREFS_BYTES`) | `413 {"code": "payload_too_large"}` |
+| Object value (PUT) | 1 MiB (`DFE_REPOSITORY_MAX_OBJECT_BYTES`) | `413 {"code": "payload_too_large"}` |
+
 ## TypeScript Type Generation
 
 ```bash

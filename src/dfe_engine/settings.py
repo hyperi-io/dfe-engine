@@ -64,6 +64,11 @@ Auth (local):
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
 - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 
+Repository (scope-aligned small-object store):
+- DFE_REPOSITORY_DATABASE -> repository.database
+- DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
+- DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
+
 Storage:
 - DFE_STORAGE_TYPE -> storage.type (local, s3, http - auto-detected from path if not set)
 - DFE_STORAGE_PATH -> storage.path (local path, S3 URI, or HTTP URL)
@@ -408,6 +413,32 @@ class SamplerSettings(BaseModel):
     )
     max_execution_time: int = Field(
         default=30, ge=1, description="ClickHouse max_execution_time (s) for sample reads"
+    )
+
+
+class RepositorySettings(BaseModel):
+    """Repository (scope-aligned small-object store) settings.
+
+    Environment variables:
+    - DFE_REPOSITORY_DATABASE -> repository.database
+    - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
+    - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
+    """
+
+    database: str = Field(
+        default="dfe_internal",
+        description="ClickHouse database for the repository table (engine-only, hidden "
+        "from HyperDX per-group users)",
+    )
+    max_prefs_bytes: int = Field(
+        default=262144,
+        ge=1,
+        description="Max serialized size (bytes) of a preferences document",
+    )
+    max_object_bytes: int = Field(
+        default=1048576,
+        ge=1,
+        description="Max size (bytes) of a stored object value",
     )
 
 
@@ -763,6 +794,7 @@ class DFESettings(BaseModel):
     source: SourceSettings = Field(default_factory=SourceSettings)
     fieldmap: FieldMapSettings = Field(default_factory=FieldMapSettings)
     services: ServicesSettings = Field(default_factory=ServicesSettings)
+    repository: RepositorySettings = Field(default_factory=RepositorySettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
@@ -820,6 +852,7 @@ def _get_env_overrides() -> dict:
         "source": {},
         "fieldmap": {},
         "services": {},
+        "repository": {},
         "deployment": {},
         "helm": {},
         "auth": {},
@@ -1037,6 +1070,14 @@ def _get_env_overrides() -> dict:
         overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
+
+    # Repository (small-object store) settings
+    if val := _get_env("DFE_REPOSITORY_DATABASE"):
+        overrides["repository"]["database"] = val
+    if val := _get_env("DFE_REPOSITORY_MAX_PREFS_BYTES"):
+        overrides["repository"]["max_prefs_bytes"] = int(val)
+    if val := _get_env("DFE_REPOSITORY_MAX_OBJECT_BYTES"):
+        overrides["repository"]["max_object_bytes"] = int(val)
 
     # Deployment settings
     if val := _get_env("DFE_DEPLOYMENT_CONFIG_DIR"):
