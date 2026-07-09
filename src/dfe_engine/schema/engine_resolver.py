@@ -33,7 +33,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 
 @dataclass(frozen=True)

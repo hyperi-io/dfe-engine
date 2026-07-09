@@ -119,7 +119,19 @@ class ClickHouseSettings(BaseModel):
         description="Catch-all table where un-split source data lands (db.landing_table)",
     )
     secure: bool = Field(default=True)
-    verify: bool = Field(default=False)
+    verify: bool | None = Field(
+        default=None,
+        description=(
+            "Verify the ClickHouse server certificate. None (default) follows the "
+            "SCALO_TLS_VERIFY escape valve - i.e. verify ON unless the whole "
+            "environment disables it; DFE_CLICKHOUSE_VERIFY overrides per-CH "
+            "(set false for self-signed dev/test infra)."
+        ),
+    )
+    ca_cert: str | None = Field(
+        default=None,
+        description="PEM CA file trusted to verify the ClickHouse server cert (internal CA); DFE_CLICKHOUSE_CA_CERT.",
+    )
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
     # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
@@ -719,6 +731,19 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["secure"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_CLICKHOUSE_VERIFY", "CLICKHOUSE_VERIFY"):
         overrides["clickhouse"]["verify"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_CLICKHOUSE_CA_CERT", "CLICKHOUSE_CA_CERT"):
+        overrides["clickhouse"]["ca_cert"] = val
+
+    # Engine-wide TLS escape valves (config cascade): map the DFE_-prefixed knobs
+    # onto scalo's env seam so ONE setting relaxes every scalo-minted client - CH,
+    # scalo.http (HyperDX/OIDC), scalo.secrets (OpenBao) - consistently. Both are
+    # secure-by-default; setdefault lets an explicit SCALO_* env win.
+    #   DFE_TLS_VERIFY=false    -> drop cert verification (self-signed dev/test).
+    #   DFE_TLS_ALLOW_WEAK=true -> accept a legacy peer below the algorithm floor.
+    if val := _get_env("DFE_TLS_VERIFY"):
+        os.environ.setdefault("SCALO_TLS_VERIFY", val)
+    if val := _get_env("DFE_TLS_ALLOW_WEAK"):
+        os.environ.setdefault("SCALO_TLS_ALLOW_WEAK", val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MIN"):
         overrides["clickhouse"]["connections_min"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_CONNECTIONS_MAX"):
@@ -1051,6 +1076,7 @@ def get_clickhouse_config(settings: DFESettings | None = None) -> dict:
         "ch_database": settings.clickhouse.database,
         "ch_secure": settings.clickhouse.secure,
         "ch_verify": settings.clickhouse.verify,
+        "ch_ca_cert": settings.clickhouse.ca_cert,
     }
 
 

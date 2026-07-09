@@ -17,6 +17,7 @@ from typing import Annotated, Any
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
+from scalo.crypto import tls_parts
 from scalo.logger import logger
 
 from ..settings import get_settings
@@ -211,7 +212,17 @@ class ClickHouseManager:
             user = self.target_config_data.get("ch_username")
             password = self.target_config_data.get("ch_password")
             secure = self.target_config_data.get("ch_secure", True)
-            verify = self.target_config_data.get("ch_verify", False)
+            # verify defaults to None -> scalo's SCALO_TLS_VERIFY escape valve
+            # (cert verification ON unless the whole environment disables it). An
+            # explicit ch_verify (DFE_CLICKHOUSE_VERIFY) overrides per-CH.
+            verify = self.target_config_data.get("ch_verify")
+            ca_cert = self.target_config_data.get("ch_ca_cert")
+
+            # scalo crypto posture in PRIMITIVES form: clickhouse-connect / urllib3
+            # take a verify flag + CA path, not a full SSLContext. This carries
+            # cert verification (ON by default) and the internal-CA trust anchor;
+            # tls_parts.verify resolves None via the escape valve.
+            tls = tls_parts(ca_paths=[ca_cert] if ca_cert else None, verify=verify)
 
             is_password_set = password is not None
 
@@ -221,14 +232,19 @@ class ClickHouseManager:
                 host=host,
                 port=port,
                 secure=secure,
+                verify=tls.verify,
                 password_set=is_password_set,
             )
 
-            # Create a custom pool manager for connection pooling
-            # clickhouse-connect uses urllib3 under the hood
+            # Custom pool manager for connection pooling (clickhouse-connect uses
+            # urllib3). TLS verification + CA are configured HERE so pooled
+            # connections carry the posture; cert_reqs/ca_certs only bite on the
+            # HTTPS (secure) path.
             self._pool_manager = httputil.get_pool_manager(
                 maxsize=self.connections_max,
                 num_pools=10,
+                verify=tls.verify,
+                ca_cert=(tls.ca_paths[0] if tls.ca_paths else None),
             )
 
             # Build connection parameters. Typed dict[str, Any] because the values
@@ -249,7 +265,7 @@ class ClickHouseManager:
             # Configure HTTPS
             if secure:
                 connect_params["secure"] = True
-                connect_params["verify"] = verify
+                connect_params["verify"] = tls.verify
 
             if host == "localhost" and (user is not None or password is not None):
                 logger.warning(

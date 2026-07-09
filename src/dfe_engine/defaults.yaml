@@ -11,7 +11,9 @@ clickhouse:
   password: ""
   database: "default"
   secure: true
-  verify: false
+  # null -> follow the SCALO_TLS_VERIFY escape valve (cert verification ON by
+  # default). Set false (DFE_CLICKHOUSE_VERIFY) only for self-signed dev/test CH.
+  verify: null
   connections_min: 10
   connections_max: 300
 
