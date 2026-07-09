@@ -172,3 +172,6 @@ pip-wheel-metadata/
 # ones like tests/tmp/. Mirrored in attach.py _DEFAULT_EXCLUDES.
 .tmp/
 tmp/
+
+# Playwright MCP session artefacts (tool output, never committed)
+.playwright-mcp/
