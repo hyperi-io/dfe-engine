@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 from pydantic import BaseModel, Field
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult

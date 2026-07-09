@@ -435,7 +435,7 @@ class TestSchemasRouter:
             source=SourceSettings(sources_dir=str(sources_dir)),
             services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
             auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
-            api=APISettings(jwt_secret="test-secret-plan"),
+            api=APISettings(jwt_secret="test-secret-key-for-unit-tests-phase4-plan"),
         )
         (tmp_path / "services").mkdir()
         (tmp_path / "auth").mkdir()

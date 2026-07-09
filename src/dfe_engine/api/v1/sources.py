@@ -36,9 +36,7 @@ from dfe_engine.source.deployment import (
     SourcePlanArtifact,
     deploy_statements_for_build,
     ensure_build_artifact,
-    execute_ddl_statements,
     plan_from_build,
-    plan_ready_status,
     previous_deployed_version_ids,
 )
 from dfe_engine.source.models import (
@@ -608,123 +606,6 @@ async def plan_source_deploy(
     )
     audit_resource_change(user.user_id, "source", name, "planned")
     return _plan_to_response(plan)
-
-
-@router.post(
-    "/{name}/deploy",
-    response_model=SourceDeployResponse,
-    dependencies=[Depends(require_action(scopes_dict["source_deploy"]))],
-)
-async def deploy_source(
-    name: str,
-    user: CurrentUser,
-    registry: SourceReg,
-    ch_client: ClickHouseClient,
-    version: str | None = Query(
-        None,
-        description="Source version id to deploy (defaults to current working version)",
-    ),
-) -> SourceDeployResponse:
-    """Apply DDL for a source version to ClickHouse and set deployed_version."""
-    from dfe_engine.schema.schema_builder_v2 import SchemaBuildError, SchemaBuilderV2
-    from dfe_engine.source.type_registry import TypeRegistry
-
-    source, version_id = _resolve_source_version(registry, name, version, default_current=True)
-    snap = source.versions[version_id]
-    if not SchemaBuilderV2.version_snapshot_has_schema_files(snap):
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "code": "no_schema",
-                "message": f"Source '{name}' version '{version_id}' has no schema configured",
-            },
-        )
-
-    settings = get_settings()
-    store = SourceDeploymentStore.from_settings(settings)
-    try:
-        result, _artifact = ensure_build_artifact(
-            store,
-            source,
-            version_id=version_id,
-            schemas_base_dir=settings.schemas.schemas_dir or None,
-            refresh=True,
-        )
-    except SchemaBuildError as exc:
-        raise HTTPException(
-            status_code=400,
-            detail={"code": "build_error", "message": str(exc)},
-        ) from exc
-    builder = SchemaBuilderV2(
-        TypeRegistry.default(),
-        schemas_base_dir=settings.schemas.schemas_dir or None,
-    )
-    statements, table_exists = deploy_statements_for_build(
-        builder,
-        source,
-        version_id,
-        result,
-        db=settings.clickhouse.effective_data_database,
-        ch_client=ch_client,
-    )
-    ready, ready_reason = plan_ready_status(
-        validation_errors=list(result.validation_errors),
-        statements=statements,
-        table_exists=table_exists,
-    )
-    if not ready:
-        code = "plan_not_ready" if result.validation_errors else "nothing_to_deploy"
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": code,
-                "message": ready_reason,
-                "validation_errors": list(result.validation_errors),
-            },
-        )
-
-    executed, failed = execute_ddl_statements(ch_client, statements)
-    deployed_at = _utc_now_iso()
-    success = not failed
-    deployed_version: str | None = None
-
-    if success:
-        try:
-            updated = registry.set_deployed_version(
-                name,
-                version_id,
-                created_by=git_author(user),
-            )
-            deployed_version = updated.deployed_version
-        except SourceValidationError as exc:
-            success = False
-            failed.append(("", str(exc)))
-
-    deploy_artifact = SourceDeployArtifact(
-        source_name=name,
-        version=version_id,
-        deployed_at=deployed_at,
-        success=success,
-        deployed_version=deployed_version,
-        ddl_executed=executed,
-        ddl_failed=[{"statement": stmt, "error": err} for stmt, err in failed],
-    )
-    store.save_deploy(deploy_artifact, source)
-
-    if success:
-        audit_resource_change(user.user_id, "source", name, "deployed")
-    else:
-        audit_resource_change(user.user_id, "source", name, "deploy_failed")
-
-    return SourceDeployResponse(
-        source_name=name,
-        version=version_id,
-        success=success,
-        deployed_version=deployed_version,
-        deployed_at=deployed_at,
-        ddl_executed=executed,
-        ddl_failed=deploy_artifact.ddl_failed,
-    )
 
 
 @router.post(
