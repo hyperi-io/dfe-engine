@@ -30,9 +30,11 @@ class DDLFileWriter:
     Orchestrates SchemaLoader and DDLGenerator to produce standalone ``.sql`` files for each known table structure.
     """
 
-    def __init__(self, registry: TypeRegistry | None = None) -> None:
+    def __init__(self, registry: TypeRegistry | None = None, *, topology: str = "single") -> None:
         self._registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._registry)
+        # "single" -> MergeTree; "replicated" -> ReplicatedMergeTree + ON CLUSTER.
+        self._topology = topology
 
     @staticmethod
     def _profile_version(profile_name: str) -> str:
@@ -82,7 +84,10 @@ class DDLFileWriter:
             profile_name=profile_name, profile_version=profile_version
         )
         config = DDLConfig(
-            profile_name=profile_name, profile_version=profile_version, description=description
+            profile_name=profile_name,
+            profile_version=profile_version,
+            description=description,
+            topology=self._topology,
         )
         ddl = self._ddl_gen.generate_create_table(
             table_name=table_name, columns=columns, config=config, generated_time=None
@@ -131,6 +136,7 @@ class DDLFileWriter:
             schema_version=detection_checkpoint_version,
             description=table_description,
             ttl_days=ttl_days,
+            topology=self._topology,
         )
         return self._ddl_gen.generate_create_table(
             table_name=table_name,
@@ -168,6 +174,7 @@ class DDLFileWriter:
             schema_version=hunt_results_version,
             description=table_description,
             ttl_days=ttl_days,
+            topology=self._topology,
         )
         return self._ddl_gen.generate_create_table(
             table_name=table_name, columns=all_columns, config=config, generated_time=None

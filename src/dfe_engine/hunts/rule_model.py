@@ -168,7 +168,7 @@ class Rule(BaseModel):
 
         # Transpile CEL filter to SQL and merge with parsed WHERE
         if create.cel_filter:
-            from hyperi_pylib.expression import transpile_to_clickhouse
+            from scalo.expression import transpile_to_clickhouse
 
             cel_sql = transpile_to_clickhouse(create.cel_filter)
 
@@ -226,7 +226,7 @@ class Rule(BaseModel):
             )
 
         if self.cel_filter:
-            from hyperi_pylib.expression import validate as validate_cel
+            from scalo.expression import validate as validate_cel
 
             cel_errors = validate_cel(self.cel_filter)
             if cel_errors:

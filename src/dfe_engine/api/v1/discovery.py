@@ -72,7 +72,9 @@ def _get_ch_client(request: Request):
             },
         )
     try:
-        return conn_registry.get_admin_client()
+        # "default" is the registry's fallback connection (see get_connection_name);
+        # discovery is an admin-level cross-database listing.
+        return conn_registry.get_client("default")
     except Exception as exc:
         raise HTTPException(
             status_code=503,

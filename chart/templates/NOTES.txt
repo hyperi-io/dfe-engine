@@ -22,8 +22,10 @@ Health check: /api/v1/system/health
 
 {{- if eq .Values.jwt.secret "dev-secret-key-change-in-production" }}
 
-WARNING: JWT secret is set to the insecure default. Set jwt.secret or reference
-an existing secret via jwt.existingSecret before deploying to production.
+WARNING: jwt.secret is the insecure placeholder. With auth enabled and
+env="production" (the default), the engine now REFUSES to start on this
+placeholder. Set jwt.secret (>= 32 bytes) or jwt.existingSecret for a real
+deploy, or set env=dev for a local/tyre-kicker deploy on the placeholder.
 {{- end }}
 {{- if eq .Values.auth.admin.password "changeme" }}
 

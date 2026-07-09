@@ -62,7 +62,7 @@ def auth_settings(tmp_path: Path) -> DFESettings:
             auth_dir=str(auth_dir),
         ),
         api=APISettings(
-            jwt_secret="independence-test-secret",
+            jwt_secret="independence-test-secret-hmac-32-bytes",
             jwt_expire_minutes=30,
         ),
     )

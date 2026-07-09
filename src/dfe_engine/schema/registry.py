@@ -30,9 +30,9 @@ from typing import Any
 
 from dulwich import porcelain as git
 from dulwich.repo import InvalidUserIdentity, check_user_identity
-from hyperi_pylib.config import DirectoryConfigStore
-from hyperi_pylib.logger import logger
 from pydantic import ValidationError
+from scalo.config import DirectoryConfigStore
+from scalo.logger import logger
 
 from dfe_engine.git_identity import commit_file
 from dfe_engine.schema.models import MetaSchema

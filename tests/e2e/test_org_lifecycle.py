@@ -90,24 +90,7 @@ class TestOrgLifecycleE2E:
         assert data["name"] == "lifecycle-test"
         assert data["display_name"] == "Lifecycle Test Org"
         assert data["org_ids"] == ["lt"]
-        assert data["dedicated_database"] is False
         assert data["enabled"] is True
-
-    def test_create_org_with_dedicated_db(self, e2e_client: TestClient):
-        """Create org requesting dedicated database."""
-        headers = self._login(e2e_client)
-        resp = e2e_client.post(
-            "/api/v1/orgs",
-            json={
-                "name": "dedicated-test",
-                "org_ids": ["dt"],
-                "dedicated_database": True,
-            },
-            headers=headers,
-        )
-        assert resp.status_code == 201
-        data = resp.json()
-        assert data["dedicated_database"] is True
 
     def test_create_org_minimal(self, e2e_client: TestClient):
         """Create org with only required name field."""
@@ -121,7 +104,6 @@ class TestOrgLifecycleE2E:
         data = resp.json()
         assert data["name"] == "minimal-org"
         assert data["org_ids"] == []
-        assert data["dedicated_database"] is False
 
     def test_get_org_after_create(self, e2e_client: TestClient):
         """Get a specific org after creating it."""
@@ -187,54 +169,6 @@ class TestOrgLifecycleE2E:
         )
         assert resp.status_code == 200
         assert resp.json()["display_name"] == "Updated"
-
-    def test_toggle_dedicated_db_off_requires_confirm(self, e2e_client: TestClient):
-        """Disabling dedicated DB without confirm_merge returns 400."""
-        headers = self._login(e2e_client)
-        e2e_client.post(
-            "/api/v1/orgs",
-            json={"name": "toggle-test", "org_ids": ["tt"], "dedicated_database": True},
-            headers=headers,
-        )
-        resp = e2e_client.put(
-            "/api/v1/orgs/toggle-test",
-            json={"dedicated_database": False},
-            headers=headers,
-        )
-        assert resp.status_code == 400
-        assert resp.json()["code"] == "confirmation_required"
-
-    def test_toggle_dedicated_db_off_with_confirm(self, e2e_client: TestClient):
-        """Disabling dedicated DB with confirm_merge=True succeeds."""
-        headers = self._login(e2e_client)
-        e2e_client.post(
-            "/api/v1/orgs",
-            json={"name": "confirm-test", "org_ids": ["ct"], "dedicated_database": True},
-            headers=headers,
-        )
-        resp = e2e_client.put(
-            "/api/v1/orgs/confirm-test",
-            json={"dedicated_database": False, "confirm_merge": True},
-            headers=headers,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["dedicated_database"] is False
-
-    def test_toggle_dedicated_db_on(self, e2e_client: TestClient):
-        """Enabling dedicated DB on an existing shared-DB org."""
-        headers = self._login(e2e_client)
-        e2e_client.post(
-            "/api/v1/orgs",
-            json={"name": "enable-ded", "org_ids": ["ed"]},
-            headers=headers,
-        )
-        resp = e2e_client.put(
-            "/api/v1/orgs/enable-ded",
-            json={"dedicated_database": True},
-            headers=headers,
-        )
-        assert resp.status_code == 200
-        assert resp.json()["dedicated_database"] is True
 
     def test_update_org_not_found_returns_404(self, e2e_client: TestClient):
         """PUT on nonexistent org returns 404."""

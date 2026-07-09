@@ -40,16 +40,16 @@ def ch_client():
 @pytest.fixture(scope="module")
 def test_db(ch_client):
     db_name = f"dfe_test_alertgrp_{uuid.uuid4().hex[:8]}"
-    ch_client.command(f"CREATE DATABASE IF NOT EXISTS {db_name}")
+    ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {db_name}")
     yield db_name
-    ch_client.command(f"DROP DATABASE IF EXISTS {db_name}")
+    ch_client.execute(f"DROP DATABASE IF EXISTS {db_name}")
 
 
 @pytest.fixture(scope="module")
 def results_table(ch_client, test_db):
     """Create a hunt results table and seed test data."""
     table = "detection"
-    ch_client.command(f"""
+    ch_client.execute(f"""
         CREATE TABLE {test_db}.{table} (
             _timestamp      DateTime64(3, 'UTC'),
             _timestamp_load DateTime64(3, 'UTC') DEFAULT now64(3),
@@ -80,11 +80,12 @@ def results_table(ch_client, test_db):
         ts = (base_ts + timedelta(minutes=i)).strftime("%Y-%m-%d %H:%M:%S.000")
         json_str = f'{{"source_ip": "{ip}", "index": {i}}}'
         rows.append(
-            f"('{ts}', 'acme', 'test_rule_1', 'priv_esc', 'hunt_alpha', '{sev}', '{json_str}')"
+            f"('{ts}', 'acme', 'test_rule_1', 'priv_esc', 'test_source', "
+            f"'hunt_alpha', '{sev}', '{json_str}')"
         )
 
     values = ", ".join(rows)
-    ch_client.command(
+    ch_client.execute(
         f"INSERT INTO {test_db}.{table} "
         f"(_timestamp, _org_id, rule_id, rule_name, source_table, hunt_name, severity, _json) "
         f"VALUES {values}"
@@ -135,8 +136,7 @@ class TestGroupingQuery:
             time_end="2026-03-03 11:00:00",
             results_table_columns=RESULTS_COLS,
         )
-        result = ch_client.query(sql)
-        rows = result.result_rows
+        rows = ch_client.execute(sql)
 
         assert len(rows) == 3  # high, medium, low
         # Each row: (severity, match_count, first_seen, last_seen, sample_events)
@@ -156,8 +156,7 @@ class TestGroupingQuery:
             time_end="2026-03-03 11:00:00",
             results_table_columns=RESULTS_COLS,
         )
-        result = ch_client.query(sql)
-        rows = result.result_rows
+        rows = ch_client.execute(sql)
 
         assert len(rows) == 4  # 4 distinct IPs
         ips = {r[0] for r in rows}
@@ -178,8 +177,7 @@ class TestGroupingQuery:
             time_end="2026-03-03 11:00:00",
             results_table_columns=RESULTS_COLS,
         )
-        result = ch_client.query(sql)
-        rows = result.result_rows
+        rows = ch_client.execute(sql)
 
         # 3 severities x 4 IPs = up to 12 groups
         assert len(rows) >= 3  # at least one per severity
@@ -200,8 +198,7 @@ class TestGroupingQuery:
             time_end="2026-03-03 11:00:00",
             results_table_columns=RESULTS_COLS,
         )
-        result = ch_client.query(sql)
-        rows = result.result_rows
+        rows = ch_client.execute(sql)
 
         for row in rows:
             severity, match_count, first_seen, last_seen, sample_events = row
@@ -224,8 +221,7 @@ class TestGroupingQuery:
             results_table_columns=RESULTS_COLS,
             max_sample_events=3,
         )
-        result = ch_client.query(sql)
-        rows = result.result_rows
+        rows = ch_client.execute(sql)
 
         for row in rows:
             sample_events = row[4]

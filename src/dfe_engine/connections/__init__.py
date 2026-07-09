@@ -27,7 +27,6 @@ Usage::
 
 from dfe_engine.connections.config import ConnectionConfig, ConnectionConfigLoader
 from dfe_engine.connections.models import ClickHouseConnection
-from dfe_engine.connections.reconciler import Reconciler, ReconcileResult
 from dfe_engine.connections.registry import ConnectionRegistry
 from dfe_engine.connections.tenant import TenantScopedClient
 
@@ -36,7 +35,5 @@ __all__ = [
     "ConnectionConfig",
     "ConnectionConfigLoader",
     "ConnectionRegistry",
-    "Reconciler",
-    "ReconcileResult",
     "TenantScopedClient",
 ]

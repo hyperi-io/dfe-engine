@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.helm.environment import EnvironmentConfig
 from dfe_engine.helm.models import CompilationResult

@@ -1,19 +1,25 @@
-"""Tests for Helm values models."""
+"""Tests for Helm values models (chart-shaped overlay schema)."""
 
 from dfe_engine.helm.models import (
     CompilationResult,
-    HelmKedaConfig,
+    HelmDeployMeta,
+    HelmImage,
+    HelmKeda,
     HelmKedaTrigger,
     HelmServiceValues,
 )
 
 
+def _meta() -> HelmDeployMeta:
+    return HelmDeployMeta(service="dfe-receiver", instance="production")
+
+
 class TestHelmKedaTrigger:
     def test_defaults(self):
         t = HelmKedaTrigger()
-        assert t.type == "kafka"
+        assert t.type == "metrics-api"
         assert t.metadata == {}
-        assert t.authentication_ref == ""
+        assert t.authenticationRef is None
 
     def test_kafka_trigger(self):
         t = HelmKedaTrigger(
@@ -23,54 +29,57 @@ class TestHelmKedaTrigger:
                 "consumerGroup": "dfe-receiver",
                 "lagThreshold": "100",
             },
-            authentication_ref="kafka-auth",
+            authenticationRef={"name": "dfe-receiver-trigger-auth"},
         )
         assert t.metadata["consumerGroup"] == "dfe-receiver"
+        assert t.authenticationRef["name"] == "dfe-receiver-trigger-auth"
 
 
-class TestHelmKedaConfig:
+class TestHelmKeda:
     def test_defaults(self):
-        k = HelmKedaConfig()
+        k = HelmKeda()
         assert not k.enabled
-        assert k.triggers == []
+        # triggers default None so the overlay omits it (chart default stands).
+        assert k.triggers is None
 
-    def test_enabled_with_triggers(self):
-        k = HelmKedaConfig(
-            enabled=True,
-            min_replicas=2,
-            max_replicas=10,
-            triggers=[HelmKedaTrigger(type="kafka", metadata={"lagThreshold": "100"})],
-        )
+    def test_enabled_bounds_only(self):
+        k = HelmKeda(enabled=True, minReplicaCount=2, maxReplicaCount=10)
         assert k.enabled
-        assert len(k.triggers) == 1
+        assert k.minReplicaCount == 2
+        assert k.triggers is None
 
 
 class TestHelmServiceValues:
     def test_minimal(self):
-        v = HelmServiceValues(image="harbor.hyperi.io/dfe/dfe-receiver")
-        assert v.image_tag == "latest"
-        assert v.replicas == 1
+        v = HelmServiceValues(deploy=_meta())
+        assert v.replicaCount == 1
+        assert v.image.pullPolicy == "IfNotPresent"
         assert v.keda.enabled is False
+        assert v.deploy.service == "dfe-receiver"
 
     def test_full(self):
         v = HelmServiceValues(
-            image="harbor.hyperi.io/dfe/dfe-receiver",
-            image_tag="1.2.0",
-            replicas=2,
+            deploy=_meta(),
+            image=HelmImage(repository="harbor.hyperi.io/dfe/dfe-receiver", tag="1.2.0"),
+            replicaCount=2,
             resources={"requests": {"cpu": "500m", "memory": "1Gi"}},
+            nodeScheduling={"nodeSelector": {"dfe.hyperi.io/pool": "dfe-k8s"}},
             config={"server": {"bind_address": "0.0.0.0:8080"}},
             secret_refs={"config-secrets": "dfe-receiver-secrets"},
             extra_env={"LOG_LEVEL": "debug"},
         )
-        assert v.replicas == 2
+        assert v.replicaCount == 2
+        assert v.image.tag == "1.2.0"
         assert v.config["server"]["bind_address"] == "0.0.0.0:8080"
-        assert v.extra_env["LOG_LEVEL"] == "debug"
+        assert v.nodeScheduling["nodeSelector"]["dfe.hyperi.io/pool"] == "dfe-k8s"
 
-    def test_serialization(self):
-        v = HelmServiceValues(image="test:latest")
-        data = v.model_dump(mode="json")
+    def test_serialization_omits_none_keda_triggers(self):
+        v = HelmServiceValues(deploy=_meta())
+        data = v.model_dump(mode="json", exclude_none=True)
+        # triggers None -> omitted so it can't clobber the chart's default trigger.
+        assert "triggers" not in data["keda"]
         restored = HelmServiceValues.model_validate(data)
-        assert restored.image == "test:latest"
+        assert restored.keda.triggers is None
 
 
 class TestCompilationResult:
@@ -83,9 +92,7 @@ class TestCompilationResult:
 
     def test_with_values(self):
         r = CompilationResult(
-            helm_values={
-                "receiver-production": HelmServiceValues(image="harbor.hyperi.io/dfe/dfe-receiver"),
-            },
+            helm_values={"receiver-production": HelmServiceValues(deploy=_meta())},
             ddl_statements=["CREATE TABLE ..."],
             kafka_topics=[{"name": "events_land", "partitions": 3}],
             warnings=["no archiver config found"],

@@ -35,7 +35,8 @@ class ClickHouseAdapter(DatasourceAdapter):
             if self.config:
                 self._manager = ClickHouseManager.get_instance(self.config)
             else:
-                self._manager = ClickHouseManager.get_instance_by_target(self.target)
+                # No explicit config -> the default settings-backed singleton.
+                self._manager = ClickHouseManager.get_instance()
         return self._manager
 
     def get_restricted_client(self) -> Any:

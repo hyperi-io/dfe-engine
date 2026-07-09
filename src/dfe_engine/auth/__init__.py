@@ -35,6 +35,8 @@ from dfe_engine.auth.models import (
     AuthorizationError,
     AuthzRequest,
     AuthzResult,
+    Scope,
+    ScopedGrant,
 )
 from dfe_engine.auth.roles import RoleConfig, RoleDefinition
 
@@ -49,5 +51,7 @@ __all__ = [
     "LocalAuthProvider",
     "RoleConfig",
     "RoleDefinition",
+    "Scope",
+    "ScopedGrant",
     "authorize",
 ]

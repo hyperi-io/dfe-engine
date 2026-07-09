@@ -18,11 +18,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from fastapi.routing import APIRoute
-from hyperi_pylib.health import HealthManager, create_health_router
-from hyperi_pylib.logger import logger
+from scalo.health import HealthManager, create_health_router
+from scalo.logger import logger
 
-from dfe_engine.settings import DFESettings, load_settings
+from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
 
 
 @asynccontextmanager
@@ -71,12 +70,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
+    # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
+    from dfe_engine.api.deps import jwt_authority_for
+
+    app.state.jwt_authority = jwt_authority_for(settings)
+
+    # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). None when
+    # gitops is disabled -> the governance routers return 503 (not_configured).
+    from dfe_engine.gitcrud.factory import build_gitcrud
+    from dfe_engine.governance import PolicyStore
+
+    try:
+        gitcrud = build_gitcrud(settings.gitops)
+    except Exception as exc:  # never let gitops setup break app startup
+        logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
+        gitcrud = None
+    app.state.gitcrud = gitcrud
+    if gitcrud is not None:
+        from dfe_engine.gitcrud.auto_merge import resolve_state, startup_banner
+
+        startup_banner(resolve_state(gitcrud, environment=settings.env, mode=settings.gitops.mode))
+    app.state.policy_store = PolicyStore(gitcrud) if gitcrud is not None else None
+
     # Bootstrap OIDC provider registry
     from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
 
     oidc_dir = auth_dir / "oidc-providers"
     oidc_dir.mkdir(parents=True, exist_ok=True)
     app.state.oidc_provider_registry = OIDCProviderRegistry(oidc_dir)
+
+    # Build the OIDC relying party from the enabled providers. The engine is the
+    # RP + single token issuer: it terminates the IdP login and re-mints its own
+    # ES384 token. Zero providers is fine (an empty registry -> every login 404s).
+    from dfe_engine.auth.oidc.rp import OidcRelyingParty
+
+    try:
+        app.state.oidc_rp = OidcRelyingParty(app.state.oidc_provider_registry)
+    except Exception as exc:  # never let RP setup break app startup
+        logger.warning("OIDC relying party unavailable", error=str(exc))
+        app.state.oidc_rp = None
 
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader
@@ -126,14 +159,46 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
+    # Org ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
+    # Reconciles the seeded quota tiers + service roles + per-org roles/row
+    # policies on _org_id into ClickHouse. Default-off so startup is unaffected;
+    # fully non-fatal. Group bindings + user secret-minting are a follow-on
+    # (reconcile via the CLI / governance API with a secrets store configured).
+    if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
+        try:
+            from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+            from dfe_engine.governance.ch import reconcile_ch_rbac
+            from dfe_engine.secrets import build_secrets
+
+            ch_cfg = {
+                "ch_host": settings.clickhouse.host,
+                "ch_port": settings.clickhouse.port,
+                "ch_username": settings.clickhouse.username,
+                "ch_password": settings.clickhouse.password,
+                "ch_secure": settings.clickhouse.secure,
+                "ch_verify": settings.clickhouse.verify,
+                "ch_ca_cert": settings.clickhouse.ca_cert,
+            }
+            admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
+            # The secrets store mints the loader / query_reader service users;
+            # without it only tiers, roles and org row policies reconcile.
+            reconcile_ch_rbac(
+                admin_client,
+                secrets_store=build_secrets(settings.secrets),
+                orgs=app.state.org_registry.list(),
+            )
+            logger.info("CH RBAC reconcile complete")
+        except Exception:
+            logger.exception("CH RBAC reconcile failed; continuing without it")
+
     # Bootstrap org lifecycle manager
     from dfe_engine.orgs.lifecycle import OrgLifecycleManager
 
     hdx_client = getattr(app.state, "hyperdx_client", None)
     app.state.org_lifecycle = OrgLifecycleManager(
         registry=app.state.org_registry,
-        ch_provisioner=None,  # Wired when CH admin client available
         hyperdx_client=hdx_client,
+        connection_config=conn_config,
     )
 
     # Bootstrap JIT provisioner
@@ -150,6 +215,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from dfe_engine.api.task_manager import TaskManager
 
     app.state.task_manager = TaskManager()
+
+    # Sampler singleton (holds the shared logreducer concurrency gate)
+    from dfe_engine.sampling import Sampler
+
+    app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
 
     health.set_started()
     health.set_ready()
@@ -203,6 +273,19 @@ def create_app(
         allow_headers=["*"],
     )
 
+    # Session cookie for the OIDC relying-party flow: Authlib's starlette client
+    # stashes the OAuth state + nonce in request.session across the login/callback
+    # redirect. Keyed by session_secret (>= jwt_secret's 32-byte floor when it
+    # falls back). Not used by any other request path.
+    from starlette.middleware.sessions import SessionMiddleware
+
+    app.add_middleware(
+        SessionMiddleware,
+        secret_key=settings.api.session_secret or settings.api.jwt_secret,
+        same_site="lax",
+        https_only=not is_dev_posture(settings.env),
+    )
+
     # Exception handlers
     from dfe_engine.api.errors import install_exception_handlers
 
@@ -213,34 +296,31 @@ def create_app(
 
     app.include_router(v1_router, prefix="/api")
 
+    # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
+    from dfe_engine.api.well_known import router as well_known_router
+
+    app.include_router(well_known_router)
+
     # K8s health probes — /health/live, /health/ready, /health/startup
-    app.include_router(create_health_router(health_manager))
+    # include_in_schema=False: probes are not API surface, AND scalo's health
+    # router returns `-> JSONResponse` (an unresolved ForwardRef under future
+    # annotations) that breaks Pydantic OpenAPI generation. These routes nest
+    # BELOW app.routes, so a path-based strip over app.routes silently matches
+    # nothing (it did after the FastAPI/pydantic/scalo sweep) - excluding at the
+    # include is the only reliable point. get_openapi recurses and would
+    # otherwise pull in their JSONResponse stream_item_field.
+    app.include_router(create_health_router(health_manager), include_in_schema=False)
 
     # Custom OpenAPI schema with Bearer auth
     def custom_openapi():
         if app.openapi_schema:
             return app.openapi_schema
-        # hyperi_pylib health router uses `-> JSONResponse` with
-        # `from __future__ import annotations`, which breaks Pydantic OpenAPI
-        # generation (unresolved ForwardRef). Strip response models for
-        # /health/* only while building the schema (see openapi-spec/generate.py).
-        saved_health: list[tuple[APIRoute, object, object]] = []
-        for route in app.routes:
-            if isinstance(route, APIRoute) and route.path.startswith("/health/"):
-                saved_health.append((route, route.response_model, route.response_field))
-                route.response_model = None
-                route.response_field = None
-        try:
-            schema = get_openapi(
-                title=app.title,
-                version=app.version,
-                description=app.description,
-                routes=app.routes,
-            )
-        finally:
-            for route, response_model, response_field in saved_health:
-                route.response_model = response_model
-                route.response_field = response_field
+        schema = get_openapi(
+            title=app.title,
+            version=app.version,
+            description=app.description,
+            routes=app.routes,
+        )
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {
                 "type": "http",
@@ -258,7 +338,7 @@ def create_app(
         app.openapi_schema = schema
         return schema
 
-    app.openapi = custom_openapi  # type: ignore[method-assign]
+    app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     return app
 

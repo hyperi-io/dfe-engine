@@ -26,7 +26,7 @@ import re
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 if TYPE_CHECKING:
     from dfe_engine.auth.groups import GroupStore

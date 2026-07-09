@@ -8,54 +8,68 @@ requires-python = ">=3.12"
 readme = "README.md"
 
 dependencies = [
-    # hyperi-pylib for logging and common utilities
-    "hyperi-pylib[expression,http]>=2.28.5",
+    # scalo (Apache-2.0 rename/continuation of hyperi-pylib) for logging + common utils
+    # >=2.29.5: scalo.crypto CryptoProfile posture + TLS escape valves (SCALO_TLS_*)
+    "scalo[expression,http]>=2.29.5",
     # Data processing
-    "pandas>=3.0.1",
-    "numpy>=2.4.2",
+    "pandas>=3.0.3",
+    "numpy>=2.5.0",
     # Database connections
-    "clickhouse-connect>=0.15.0",
+    "clickhouse-connect>=1.4.1",
     # Configuration and parsing
     "ruamel-yaml>=0.19.1",
-    "pydantic>=2.12.5",
+    "pydantic>=2.13.4",
     # AWS
-    "boto3>=1.42.60",
+    "boto3>=1.43.38",
     # Scheduling
-    "apscheduler>=3.11.2",
-    "croniter>=6.0.0",
+    "croniter>=6.2.2",
     # HTTP clients
     "httpx>=0.28.1",
-    "requests>=2.33.0",
+    "requests>=2.34.2",
     "urllib3>=2.7.0",
     # Templating
     "Jinja2>=3.1.6",
     # Sigma rules
-    "pysigma>=1.2.0",
+    "pysigma>=1.4.0",
     # Utilities
     "python-dateutil>=2.9.0",
-    "tabulate>=0.9.0",
+    "tabulate>=0.10.0",
     "pyparsing>=3.3.2",
-    "platformdirs>=4.9.2",
+    "platformdirs>=4.10.0",
     "psutil>=7.2.2",
+    # Git (deploy-repo gitops bridge) -- same lib pylib uses internally
+    "dulwich>=1.2.7",
     # Authentication
     "bcrypt>=5.0.0",
+    # OIDC relying-party (external IdP termination) + SCIM identity schema
+    "authlib>=1.7.2",
+    # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
+    "itsdangerous>=2.2.0",
+    "scim2-models>=0.6.12",
     # Alerting / notifications
-    "apprise>=1.9.7",
+    "apprise>=1.11.0",
     # API server
-    "fastapi>=0.135.1",
-    "python-multipart>=0.0.28",
-    "uvicorn[standard]>=0.41.0",
-    "PyJWT[crypto]>=2.12.0",
-    "sse-starlette>=3.3.2",
+    "fastapi>=0.138.2",
+    "python-multipart>=0.0.32",
+    "starlette>=1.3.1",
+    "cryptography>=49.0.0",
+    "uvicorn[standard]>=0.49.0",
+    "PyJWT[crypto]>=2.13.0",
+    "sse-starlette>=3.4.5",
     # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
     # CVE-2025-69872 (unsafe pickle, CVSS 9.8): no upstream fix — maintainer unresponsive
     # since Aug 2023, community PR #359 unreviewed. The irony: a security tool's dependency
     # chain introduces a critical CVE. Accepted risk — dfe-engine never imports diskcache
     # directly, cache dir has 0700 perms, and K8s pods provide filesystem isolation.
     "diskcache>=5.6.3",
-    "msal>=1.32.0",
-    "google-auth>=2.38.0",
-    "google-api-python-client>=2.170.0",
+    "msal>=1.37.0",
+    "google-auth>=2.55.1",
+    "google-api-python-client>=2.198.0",
+    # Optional lazy runtime integrations (NOT locked here, imported on demand so a
+    # default install still runs; the code degrades with a clear error when absent):
+    #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
+    #   - logreducer: sampler 'smart'/'anomaly' modes (add + SHA-pin once it hits
+    #     public PyPI; until then the sampler falls back with a clean message)
 ]
 
 [project.urls]
@@ -76,20 +90,19 @@ exclude = [
 
 [dependency-groups]
 dev = [
-    "pytest>=9.0.2",
-    "pytest-cov>=7.0.0",
-    "pytest-asyncio>=1.3.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "pytest-asyncio>=1.4.0",
     "pytest-benchmark>=5.2.3",
     "pytest-mock>=3.15.1",
     "pytest-xdist>=3.8.0",
-    "coverage>=7.13.4",
+    "coverage>=7.14.3",
     "defusedxml>=0.7.1",
-    "moto[s3]>=5.1.21",
-    "werkzeug>=3.1.6",
-    "ruff>=0.15.4",
-    "Faker>=40.5.1",
-    "types-requests>=2.32.4",
-    "psycopg[binary]>=3.3.3",
+    "moto[s3]>=5.2.2",
+    "werkzeug>=3.1.8",
+    "ruff>=0.15.20",
+    "Faker>=40.27.0",
+    "types-requests>=2.33.0",
     "python-dotenv>=1.2.2",
 ]
 
@@ -99,13 +112,25 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration'"
+addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+filterwarnings = [
+    # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2; the
+    # httpx2 migration is a separate follow-up (test-infra only; prod unaffected).
+    "ignore:Using .httpx. with .starlette.testclient",
+    # pytest-benchmark can't run under xdist and the suite always runs -n 4, so
+    # benchmarks are intentionally disabled here (run them with -p no:xdist).
+    "ignore:Benchmarks are automatically disabled because xdist plugin is active",
+    # Deliberate signal: {customer_filters} only handles 0/1 surrounding spaces;
+    # the test documents that known limitation on purpose.
+    "ignore:LIMITATION DETECTED",
+]
 markers = [
     "unit: Unit tests (no external dependencies)",
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
+    "live: Full-stack e2e against a REAL deployed DFE (needs DFE_E2E_* env; skipped otherwise)",
     "slow: Slow running tests",
     "smoke: Startup smoke tests (mandatory, every push)",
     "requires_schemas: Tests that need the dfe-schemas submodule checked out",
@@ -178,6 +203,7 @@ convention = "google"
 
 [project.scripts]
 dfe-api = "dfe_engine.api:run_dev_server"
+dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
 
 [project.entry-points."dfe_engine.services"]
 receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"

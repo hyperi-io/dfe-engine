@@ -9,7 +9,7 @@
 """SOC2 audit logging via structured log events.
 
 Each function emits a single structured log event. Events flow through the
-OTel pipeline automatically: hyperi_pylib.logger → structured JSON →
+OTel pipeline automatically: scalo.logger → structured JSON →
 OTel Collector → ClickHouse → HyperDX.
 
 No custom ClickHouse tables are needed — the log events are the audit trail.
@@ -21,7 +21,7 @@ Event naming convention: ``auth.<domain>.<outcome>``
 
 from __future__ import annotations
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 
 def audit_login_success(

@@ -62,15 +62,15 @@ class TestCreate:
         assert len(long_token) >= 32
         assert all(c in "0123456789abcdef" for c in long_token)
 
-    def test_hash_stored_with_sha256_prefix(self, store: APIKeyStore) -> None:
+    def test_hash_stored_with_sha384_prefix(self, store: APIKeyStore) -> None:
         key_meta, _full_key = store.create("ci-pipeline")
-        assert key_meta.key_hash.startswith("sha256:")
+        assert key_meta.key_hash.startswith("sha384:")
 
     def test_hash_matches_long_token(self, store: APIKeyStore) -> None:
         key_meta, full_key = store.create("ci-pipeline")
         long_token = full_key.split("_", maxsplit=3)[3]
-        expected_hash = hashlib.sha256(long_token.encode()).hexdigest()
-        stored_hash = key_meta.key_hash.removeprefix("sha256:")
+        expected_hash = hashlib.sha384(long_token.encode()).hexdigest()
+        stored_hash = key_meta.key_hash.removeprefix("sha384:")
         assert stored_hash == expected_hash
 
     def test_key_written_to_disk(self, store: APIKeyStore) -> None:
@@ -161,7 +161,7 @@ class TestList:
     def test_list_metadata_has_hash(self, store: APIKeyStore) -> None:
         store.create("ci-pipeline")
         keys = store.list()
-        assert keys[0].key_hash.startswith("sha256:")
+        assert keys[0].key_hash.startswith("sha384:")
 
     def test_list_does_not_expose_full_keys(self, store: APIKeyStore) -> None:
         _meta, full_key = store.create("ci-pipeline")

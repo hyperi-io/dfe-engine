@@ -20,7 +20,9 @@ from dfe_engine.deployment.registry import DeploymentConfigRegistry
 from dfe_engine.helm.environment import EnvironmentConfig, ExternalComponent
 from dfe_engine.helm.models import (
     CompilationResult,
-    HelmKedaConfig,
+    HelmDeployMeta,
+    HelmImage,
+    HelmKeda,
     HelmKedaTrigger,
     HelmServiceValues,
 )
@@ -179,8 +181,8 @@ class HelmValuesCompiler:
 
         resources = deploy_data.get("resources") or {}
         pod = deploy_data.get("pod", {})
-        k8s_service = deploy_data.get("service", {})
-        hpa = deploy_data.get("hpa", {})
+        # service config + hpa are left to the chart (its defaults stand; KEDA
+        # replaces HPA). The engine overlay only carries the dials it owns.
         extra_env = deploy_data.get("extra_env", {})
 
         # 2. KEDA wiring
@@ -206,22 +208,31 @@ class HelmValuesCompiler:
         if config_secret and config_secret.get("name"):
             secret_refs["config-secrets"] = config_secret["name"]
 
-        # 5. Compose
-        values = HelmServiceValues(
-            image=image,
-            image_tag=image_tag,
-            replicas=deploy.replicas,
+        # 6. Node placement: map the deploy config's pod nodeSelector/tolerations
+        # to the chart's nodeScheduling key (dfe-common.scheduling reads it).
+        node_scheduling: dict[str, Any] = {}
+        if pod.get("nodeSelector"):
+            node_scheduling["nodeSelector"] = pod["nodeSelector"]
+        if pod.get("tolerations"):
+            node_scheduling["tolerations"] = pod["tolerations"]
+
+        # 7. Compose -- chart-shaped overlay. image.repository carries the full
+        # repo (deploy.image); the chart's dfe-common.image uses it directly.
+        return HelmServiceValues(
+            deploy=HelmDeployMeta(service=f"dfe-{service}", instance=instance),
+            image=HelmImage(
+                repository=image,
+                tag=image_tag,
+                pullPolicy=pod.get("imagePullPolicy", "IfNotPresent"),
+            ),
+            replicaCount=deploy.replicas,
             resources=resources,
-            pod=pod,
-            k8s_service=k8s_service,
             keda=keda,
-            hpa=hpa,
+            nodeScheduling=node_scheduling,
             config=config,
             secret_refs=secret_refs,
             extra_env=extra_env,
         )
-
-        return values
 
     def compile_external_component(self, component: ExternalComponent) -> dict[str, dict[str, Any]]:
         """Compile Helm values for an external (Mode 2) component.
@@ -296,7 +307,7 @@ class HelmValuesCompiler:
             from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
             from dfe_engine.source.type_registry import TypeRegistry
 
-            builder = SchemaBuilderV2(type_registry=TypeRegistry())
+            builder = SchemaBuilderV2(registry=TypeRegistry())
             for source in self._source.get_all_sources(enabled_only=True):
                 try:
                     result = builder.build(source)
@@ -409,57 +420,55 @@ class HelmValuesCompiler:
     # Internal helpers
     # -------------------------------------------------------------------------
 
-    def _compile_keda(self, keda_config) -> HelmKedaConfig:
-        """Resolve abstract KEDA config to concrete Helm KEDA config."""
+    def _compile_keda(self, keda_config) -> HelmKeda:
+        """Resolve abstract KEDA config to the chart's ``keda`` shape.
+
+        Emits the scaling BOUNDS (enabled/min/max/cooldown/polling) always. It
+        leaves ``triggers`` as None UNLESS the deploy config explicitly configures
+        triggers -- so by default the chart's own trigger (the gated
+        ScalingPressure metrics-api trigger) stands. DFE scales on that gated
+        signal, not raw CG lag (see project_keda_scaling_signal); Helm replaces
+        lists, so emitting an empty/override list here would wipe the chart default.
+        """
         if not keda_config.enabled:
-            return HelmKedaConfig(enabled=False)
+            return HelmKeda(enabled=False)
 
         triggers: list[HelmKedaTrigger] = []
 
-        # Kafka trigger
         if keda_config.kafka_trigger:
             kt = keda_config.kafka_trigger
-            bootstrap_csv = ",".join(self._env.kafka.bootstrap_servers)
             metadata = {
-                "bootstrapServers": bootstrap_csv,
+                "bootstrapServers": ",".join(self._env.kafka.bootstrap_servers),
                 "consumerGroup": kt.consumer_group,
                 "lagThreshold": str(kt.lag_threshold),
             }
             if kt.topic:
                 metadata["topic"] = kt.topic
-
             auth_ref = kt.authentication_ref or self._env.kafka.authentication_ref
             triggers.append(
                 HelmKedaTrigger(
                     type="kafka",
                     metadata=metadata,
-                    authentication_ref=auth_ref,
+                    authenticationRef={"name": auth_ref} if auth_ref else None,
                 )
             )
 
-        # CPU trigger
         if keda_config.cpu_trigger:
             ct = keda_config.cpu_trigger
             triggers.append(
                 HelmKedaTrigger(
                     type="cpu",
-                    metadata={
-                        "type": ct.metric_type,
-                        "value": str(ct.value),
-                    },
+                    metadata={"type": ct.metric_type, "value": str(ct.value)},
                 )
             )
 
-        # Prometheus/OTEL metrics trigger
         if keda_config.prometheus_trigger:
             pt = keda_config.prometheus_trigger
             server = pt.server_address
             if not server and self._env.otel.enabled:
-                # Default to OTEL Collector's Prometheus endpoint
-                host = self._env.otel.collector_endpoint.split("://", 1)[-1]
-                host = host.rsplit(":", 1)[0]
+                host = self._env.otel.collector_endpoint.split("://", 1)[-1].rsplit(":", 1)[0]
                 server = f"http://{host}:{self._env.otel.prometheus_port}"
-            metadata: dict[str, str] = {
+            metadata = {
                 "serverAddress": server,
                 "query": pt.query,
                 "threshold": str(pt.threshold),
@@ -468,31 +477,26 @@ class HelmValuesCompiler:
                 metadata["activationThreshold"] = str(pt.activation_threshold)
             if pt.metric_name:
                 metadata["metricName"] = pt.metric_name
-            triggers.append(
-                HelmKedaTrigger(
-                    type="prometheus",
-                    metadata=metadata,
-                )
-            )
+            triggers.append(HelmKedaTrigger(type="prometheus", metadata=metadata))
 
-        # Generic extra triggers (any KEDA scaler type)
         for gt in getattr(keda_config, "extra_triggers", []):
             triggers.append(
                 HelmKedaTrigger(
                     type=gt.type,
                     metadata=dict(gt.metadata),
-                    authentication_ref=gt.authentication_ref,
+                    authenticationRef={"name": gt.authentication_ref}
+                    if gt.authentication_ref
+                    else None,
                 )
             )
 
-        return HelmKedaConfig(
+        return HelmKeda(
             enabled=True,
-            min_replicas=keda_config.min_replicas,
-            max_replicas=keda_config.max_replicas,
-            polling_interval=keda_config.polling_interval,
-            cooldown_period=keda_config.cooldown_period,
-            fallback_replicas=keda_config.fallback_replicas,
-            triggers=triggers,
+            minReplicaCount=keda_config.min_replicas,
+            maxReplicaCount=keda_config.max_replicas,
+            pollingInterval=keda_config.polling_interval,
+            cooldownPeriod=keda_config.cooldown_period,
+            triggers=triggers or None,
         )
 
     def _compile_service_config(self, service: str, instance: str) -> dict[str, Any]:

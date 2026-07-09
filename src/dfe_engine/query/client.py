@@ -52,7 +52,7 @@ class QueryClient:
     def http_client(self):
         """Lazy-load HTTP client."""
         if self._http_client is None:
-            from hyperi_pylib.http import HttpClient
+            from scalo.http import HttpClient
 
             self._http_client = HttpClient(
                 base_url=self.base_url,

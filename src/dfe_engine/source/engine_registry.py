@@ -1,9 +1,13 @@
 """Engine Registry — canonical set of permitted ClickHouse table engines.
 
 Restricts the table engine a source may use to a predefined, validated set,
-mirroring how TypeRegistry restricts column primitives. Engines are emitted
-bare (``ENGINE = Name()``), so only parameterless MergeTree-family engines
-belong in the registry.
+mirroring how TypeRegistry restricts column primitives. The registry lists the
+MergeTree-family VARIANTS (MergeTree, ReplacingMergeTree, SummingMergeTree, ...);
+validation gates the variant, so a parameterised form like
+``ReplacingMergeTree(version_col)`` is permitted - the variant must be in the set,
+the params inside the parens are the caller's. The Replicated/Shared prefix is NOT
+listed: it is added at DDL time by the engine resolver from the topology, never
+declared in config.
 
 Both the Source model (SourceSchema.engine) and the DDL generation path
 (DDLGenerator) validate through this single registry, so the permitted set
@@ -61,13 +65,22 @@ class EngineRegistry:
     # -----------------------------------------------------------------
 
     def validate(self, engine: str) -> None:
-        """Validate that an engine is in the permitted set.
+        """Validate an engine's VARIANT against the permitted set.
+
+        Accepts a parameterised form: the family variant (the token before the
+        first ``(``) is what must be in the registry, so ``ReplacingMergeTree(ver)``
+        validates on its variant ``ReplacingMergeTree``. The params inside the
+        parens (a version column, summing columns, ...) are the caller's - the
+        registry gates the family, not the arguments.
 
         Raises:
-            InvalidEngineError: Engine not in the registry.
+            InvalidEngineError: The variant is not in the registry.
         """
-        if engine not in self._engines:
-            raise InvalidEngineError(f"Invalid engine {engine!r}. Valid: {', '.join(self.engines)}")
+        variant = engine.split("(", 1)[0].strip()
+        if variant not in self._engines:
+            raise InvalidEngineError(
+                f"Invalid engine {engine!r}. Valid variants: {', '.join(self.engines)}"
+            )
 
     # -----------------------------------------------------------------
     # Introspection

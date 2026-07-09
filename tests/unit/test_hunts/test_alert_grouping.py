@@ -294,7 +294,7 @@ class TestAlertStateManager:
         assert "CREATE TABLE IF NOT EXISTS dfe_audit.alert_state" in ddl
         assert "hunt_name" in ddl
         assert "rule_name" in ddl
-        assert "customer_name" in ddl
+        assert "_org_id" in ddl
         assert "last_fired_at" in ddl
         assert "fire_count" in ddl
         assert "ReplacingMergeTree" in ddl
@@ -378,7 +378,7 @@ class TestAlertStateManager:
         mgr = AlertStateManager()
         ddl = mgr.get_ddl()
         assert "group_key" in ddl
-        assert "customer_name, group_key)" in ddl  # ORDER BY includes group_key
+        assert "_org_id, group_key)" in ddl  # ORDER BY includes group_key
 
     def test_check_cooldown_with_group_key(self):
         """Different groups have independent cooldown state."""

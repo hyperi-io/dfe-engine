@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from ..yaml_utils import yaml_load
 

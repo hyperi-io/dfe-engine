@@ -17,7 +17,7 @@ import os
 import shutil
 from pathlib import Path
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.settings import DFESettings
 

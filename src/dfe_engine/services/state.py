@@ -10,9 +10,9 @@ import re
 from typing import Any
 
 import httpx
-from hyperi_pylib.http import AsyncHttpClient
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel
+from scalo.http import AsyncHttpClient
+from scalo.logger import logger
 
 
 class HealthStatus(BaseModel):

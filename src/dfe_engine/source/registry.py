@@ -28,8 +28,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from hyperi_pylib.config import DirectoryConfigStore
-from hyperi_pylib.logger import logger
+from scalo.config import DirectoryConfigStore
+from scalo.logger import logger
 
 from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
 from dfe_engine.source.models import (

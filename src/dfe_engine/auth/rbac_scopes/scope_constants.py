@@ -87,11 +87,20 @@ query_scopes = {
     "query_execute": "query:execute",
 }
 
+repository_scopes = {
+    "repository_read": "repository:read",
+    "repository_write": "repository:write",
+}
+
 role_scopes = {
     "role_read": "role:read",
     "role_write": "role:write",
     "role_delete": "role:delete",
     "role_scopes": "role:scopes",
+}
+
+sampler_scopes = {
+    "sampler_read": "sampler:read",
 }
 
 rules_scopes = {

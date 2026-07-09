@@ -60,6 +60,9 @@ config:
     port: 9000
     username: default
     database: dfe
+    # -- Data database for hunt coordination + schedule tables (effective_data_database).
+    # Empty -> falls back to `database`. Set when data lives in a separate db.
+    data_database: ""
     secure: true
     verify: false
   api:
@@ -86,6 +89,12 @@ clickhouse:
   secretKeys:
     password: clickhouse-password
   password: ""
+
+# -- Deployment posture. "production" (default, secure) makes the engine REJECT
+# the placeholder jwt.secret when auth is enabled - it will refuse to start.
+# Set to "dev" (or development/local/test) for local/tyre-kicker deploys that
+# run on the placeholder secret. Maps to DFE_ENV.
+env: "production"
 
 # -- JWT signing secret
 jwt:
@@ -127,12 +136,58 @@ configVolume:
   storageClass: ""
   accessMode: ReadWriteOnce
 
-# -- Standard HPA
+# -- Standard HPA (for the API-server Deployment)
 autoscaling:
   enabled: false
   minReplicas: 1
   maxReplicas: 4
   targetCPUUtilizationPercentage: 80
+
+# -- Pull-based hunt runner (dfe-hunt-runner): a KEDA-scaled background worker on the
+# SAME image, coordinating entirely through ClickHouse. ON for docker/single/scale
+# tiers, OFF for slim (see docs deployment tiers). See docs/HUNT-RUNNER-SCALING.md.
+huntRunner:
+  enabled: false
+  # -- Replicas when KEDA is OFF (KEDA owns the count when on).
+  replicaCount: 1
+  # -- `dfe-hunt-runner run` flags:
+  poll: 15          # seconds between ticks
+  cap: 8            # global cap on concurrent hunt runs (protects ClickHouse)
+  reloadEvery: 20   # reload hunt specs (+ rebuild the runner) every N ticks
+  # -- Drain grace for an in-flight hunt query on SIGTERM.
+  terminationGracePeriodSeconds: 60
+  # -- Optional DFE_HUNTS_DIR override (else derived from the config dir).
+  huntsDir: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  # -- KEDA scale-to-zero on the deterministic-due backlog. NOTE: KEDA has NO native
+  # ClickHouse scaler, so this uses the MySQL scaler against CH's mysql_port (the
+  # query is still ClickHouse SQL). ClickHouse must have mysql_port enabled.
+  keda:
+    enabled: true
+    minReplicaCount: 0
+    maxReplicaCount: 8   # keep == cap (the runner's own global CH concurrency cap)
+    pollingInterval: 30
+    cooldownPeriod: 120
+    mysqlPort: 9004      # ClickHouse MySQL-compatible port
+    queryValue: 1        # hunts-per-worker; desiredReplicas = ceil(due / queryValue)
+  # -- Argo CD PostSync hook that materialises hunt_schedule on a config change.
+  materialiseHook:
+    enabled: true
+    backoffLimit: 3
+    ttlSecondsAfterFinished: 600
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
 
 nodeSelector: {}
 tolerations: []

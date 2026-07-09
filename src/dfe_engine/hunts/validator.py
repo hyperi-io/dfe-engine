@@ -1,8 +1,8 @@
 import os
 from typing import Any
 
-from hyperi_pylib.logger import logger
 from jinja2 import Environment, TemplateSyntaxError
+from scalo.logger import logger
 
 from ..yaml_utils import YAMLError, yaml_dump_string, yaml_load_string
 

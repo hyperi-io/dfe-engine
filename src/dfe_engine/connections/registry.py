@@ -22,7 +22,7 @@ from __future__ import annotations
 import os
 from typing import Any
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.auth.models import AuthContext
 from dfe_engine.connections.config import ConnectionConfig

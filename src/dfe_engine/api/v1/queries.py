@@ -20,8 +20,8 @@ import time
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from hyperi_pylib.logger import logger
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict

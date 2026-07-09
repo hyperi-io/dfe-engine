@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.hunts.checkpoint import HuntCheckpointManager

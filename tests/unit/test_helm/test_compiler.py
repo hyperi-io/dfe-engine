@@ -9,7 +9,22 @@ from dfe_engine.helm.environment import (
     KafkaEnvironment,
     OTelEnvironment,
 )
-from dfe_engine.helm.models import CompilationResult, HelmServiceValues
+from dfe_engine.helm.models import (
+    CompilationResult,
+    HelmDeployMeta,
+    HelmImage,
+    HelmServiceValues,
+)
+
+
+def _sv(service="receiver", instance="production", **kw) -> HelmServiceValues:
+    """Build a chart-shaped HelmServiceValues with the required deploy meta."""
+    kw.setdefault("image", HelmImage(repository="harbor.hyperi.io/dfe/dfe-receiver", tag="1.2.0"))
+    return HelmServiceValues(
+        deploy=HelmDeployMeta(service=f"dfe-{service}", instance=instance), **kw
+    )
+
+
 from dfe_engine.yaml_utils import yaml_load
 
 # ---------------------------------------------------------------------------
@@ -168,7 +183,7 @@ class TestKedaWiring:
         compiler._env = environment
         keda = compiler._compile_keda(KedaConfig(enabled=False))
         assert not keda.enabled
-        assert keda.triggers == []
+        assert keda.triggers is None
 
     def test_kafka_trigger_wiring(self, environment):
         from dfe_engine.deployment.models.common import KedaConfig, KedaTriggerKafka
@@ -195,7 +210,7 @@ class TestKedaWiring:
         assert trigger.metadata["bootstrapServers"] == "kafka-1.test:9092,kafka-2.test:9092"
         assert trigger.metadata["consumerGroup"] == "dfe-receiver"
         assert trigger.metadata["lagThreshold"] == "100"
-        assert trigger.authentication_ref == "kafka-auth"
+        assert trigger.authenticationRef == {"name": "kafka-auth"}
 
 
 # ---------------------------------------------------------------------------
@@ -209,12 +224,7 @@ class TestWriteAll:
         compiler._env = environment
 
         result = CompilationResult(
-            helm_values={
-                "receiver-production": HelmServiceValues(
-                    image="harbor.hyperi.io/dfe/dfe-receiver",
-                    image_tag="1.2.0",
-                ),
-            }
+            helm_values={"receiver-production": _sv()},
         )
 
         output_dir = tmp_path / "helm-values"
@@ -224,10 +234,10 @@ class TestWriteAll:
         assert written[0].name == "receiver-production-values.yaml"
         assert written[0].exists()
 
-        # Verify YAML content
+        # Verify YAML content -- chart-shaped image block.
         data = yaml_load(written[0])
-        assert data["image"] == "harbor.hyperi.io/dfe/dfe-receiver"
-        assert data["image_tag"] == "1.2.0"
+        assert data["image"]["repository"] == "harbor.hyperi.io/dfe/dfe-receiver"
+        assert data["image"]["tag"] == "1.2.0"
 
     def test_deterministic_output(self, tmp_path, environment):
         compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
@@ -235,13 +245,9 @@ class TestWriteAll:
 
         result = CompilationResult(
             helm_values={
-                "receiver-production": HelmServiceValues(
-                    image="test:latest",
-                    config={"server": {"bind": "0.0.0.0:8080"}},
-                ),
-                "loader-production": HelmServiceValues(
-                    image="test:latest",
-                    config={"kafka": {"brokers": ["k:9092"]}},
+                "receiver-production": _sv(config={"server": {"bind": "0.0.0.0:8080"}}),
+                "loader-production": _sv(
+                    service="loader", config={"kafka": {"brokers": ["k:9092"]}}
                 ),
             }
         )
@@ -460,10 +466,7 @@ class TestMergeOverrides:
         compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
         compiler._env = env
 
-        values = HelmServiceValues(
-            image="test:latest",
-            extra_env={"EXISTING": "value"},
-        )
+        values = _sv(extra_env={"EXISTING": "value"})
         merged = compiler.merge_overrides(values, {"extra_env": {"NEW": "added"}})
         assert merged.extra_env["EXISTING"] == "value"
         assert merged.extra_env["NEW"] == "added"
@@ -477,10 +480,10 @@ class TestMergeOverrides:
         compiler = HelmValuesCompiler.__new__(HelmValuesCompiler)
         compiler._env = env
 
-        values = HelmServiceValues(image="test:latest", replicas=2)
-        merged = compiler.merge_overrides(values, {"replicas": 5})
-        assert merged.replicas == 5
-        assert merged.image == "test:latest"
+        values = _sv(replicaCount=2)
+        merged = compiler.merge_overrides(values, {"replicaCount": 5})
+        assert merged.replicaCount == 5
+        assert merged.image.repository == "harbor.hyperi.io/dfe/dfe-receiver"
 
 
 # ---------------------------------------------------------------------------
@@ -498,7 +501,7 @@ class TestArgoAppGeneration:
         assert environment.argo.enabled is False
 
         result = CompilationResult(
-            helm_values={"receiver-production": HelmServiceValues(image="test:latest")},
+            helm_values={"receiver-production": _sv()},
         )
         # No argo_applications should be present by default
         assert result.argo_applications == []

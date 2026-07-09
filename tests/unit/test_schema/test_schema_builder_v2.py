@@ -75,7 +75,7 @@ def _make_source(
     additional_fields=None,
     header_type="timeseries",
     ttl_days=90,
-    engine="MergeTree",
+    engine="",  # empty = inherit the builder's default_engine (default MergeTree)
     sigma_mappings=None,
     mapping_standards=None,
 ) -> Source:
@@ -202,13 +202,39 @@ class TestBuild:
         assert "user_name" not in names
 
     def test_build_engine_config(self, registry, schemas_dir):
+        # A per-source engine pin selects any permitted MergeTree-family VARIANT
+        # (not just plain MergeTree). Replicated/Shared is NOT declared here - the
+        # topology adds it at DDL time - so the bare variant is what renders under
+        # the default single topology.
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
             meta_schema="meta.yaml",
-            engine="SharedMergeTree",
+            engine="ReplacingMergeTree",
         )
         result = builder.build(source)
-        assert "SharedMergeTree" in result.create_table_ddl
+        assert "ENGINE = ReplacingMergeTree()" in result.create_table_ddl
+
+    def test_build_engine_parameterised(self, registry, schemas_dir):
+        # A parameterised variant keeps its params through the resolver (no
+        # double-parens, no dropped arg).
+        builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
+        source = _make_source(
+            meta_schema="meta.yaml",
+            engine="ReplacingMergeTree(_timestamp_load)",
+        )
+        result = builder.build(source)
+        assert "ENGINE = ReplacingMergeTree(_timestamp_load)" in result.create_table_ddl
+
+    def test_build_engine_deployment_default(self, registry, schemas_dir):
+        # An empty source engine inherits the deployment default_engine.
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            default_engine="AggregatingMergeTree",
+        )
+        source = _make_source(meta_schema="meta.yaml")  # engine left empty
+        result = builder.build(source)
+        assert "ENGINE = AggregatingMergeTree()" in result.create_table_ddl
 
     def test_build_ttl_config(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)

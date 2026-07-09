@@ -11,6 +11,7 @@ POST   /api/v1/rules/validate     → Validate SQL/CEL without creating
 from __future__ import annotations
 
 import re
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
@@ -50,7 +51,7 @@ class RuleCreateRequest(_RuleWriteFields):
 
     name: str = Field(description="Rule file name (YAML stem); must be unique")
 
-    source_type: str = Field(
+    source_type: Literal["raw", "hyperdx"] = Field(
         default="raw",
         description="'raw' (plain SQL) or 'hyperdx' (HyperDX saved search format)",
     )

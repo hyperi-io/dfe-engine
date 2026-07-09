@@ -11,12 +11,14 @@ roles:
       - "hunt:*"
       - "query:*"
       - "source:*"
+      - "sampler:read"
       - "fieldmap:*"
       - "alert:*"
       - "rule:*"
       - "schema:read"
       - "schema:write"
       - "transforms:*"
+      - "org:read"
   data_analyst_viewer:
     description: "Same scope as data_analyst, read-only"
     resource_type: core
@@ -25,6 +27,7 @@ roles:
       - "query:read"
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "fieldmap:read"
       - "alert:read"
       - "rule:read"
@@ -36,9 +39,11 @@ roles:
     permissions:
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "dashboard:read"
+      - "org:read"
   infra_admin:
-    description: "Service configs, deployments, helm, Argo CD"
+    description: "Service configs, deployments, helm, Argo CD, orgs, groups"
     resource_type: core
     permissions:
       - "config:*"
@@ -47,6 +52,9 @@ roles:
       - "helm:*"
       - "deployment:*"
       - "argo:*"
+      - "org:*"
+      - "group:*"
+      - "repository:*"
   infra_viewer:
     description: "Infrastructure read-only"
     resource_type: core
@@ -60,11 +68,13 @@ roles:
       - "argo:projects:get"
       - "service-surface:read"
       - "service:read"
+      - "org:read"
   customer_viewer:
     description: "Org-restricted data viewer"
     resource_type: core
     permissions:
       - "query:execute"
       - "source:read"
+      - "sampler:read"
       - "dashboard:read"
     scoped: true

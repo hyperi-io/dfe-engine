@@ -24,6 +24,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import builtins
 import json
 import uuid
 from datetime import UTC, date, datetime
@@ -182,7 +183,7 @@ class TaskManager:
         task = self._tasks.get(task_id)
         return task.to_info() if task else None
 
-    def list(self, kind: str | None = None) -> list[TaskInfo]:
+    def list(self, kind: str | None = None) -> builtins.list[TaskInfo]:
         """List all tasks, optionally filtered by kind."""
         tasks = self._tasks.values()
         if kind:

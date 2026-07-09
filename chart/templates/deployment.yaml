@@ -100,6 +100,9 @@ spec:
                 secretKeyRef:
                   name: {{ include "dfe-engine.jwtSecretName" . }}
                   key: {{ .Values.jwt.secretKeys.secret }}
+            # Deployment posture - "production" rejects the placeholder jwt secret
+            - name: DFE_ENV
+              value: {{ .Values.env | quote }}
             # Auth
             - name: DFE_AUTH_ENABLED
               value: {{ .Values.config.auth.enabled | quote }}

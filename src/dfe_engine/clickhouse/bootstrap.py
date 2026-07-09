@@ -13,7 +13,7 @@ Runs once at startup. The database name comes from ``clickhouse.effective_data_d
 
 from __future__ import annotations
 
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.ddl_writer import DDLFileWriter

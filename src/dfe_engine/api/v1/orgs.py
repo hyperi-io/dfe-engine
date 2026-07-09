@@ -20,12 +20,18 @@ Read endpoints require org:read.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-from hyperi_pylib.logger import logger
-from pydantic import BaseModel, Field
+from typing import TYPE_CHECKING
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+from scalo.logger import logger
+
+from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
+from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
+
+if TYPE_CHECKING:
+    from dfe_engine.orgs.models import Org
 
 router = APIRouter(prefix="/orgs", tags=["Organisations"])
 
@@ -40,24 +46,12 @@ class CreateOrgRequest(BaseModel):
         default_factory=list,
         description="Tenant IDs for ClickHouse row-level security",
     )
-    dedicated_database: bool = Field(
-        default=False,
-        description="Whether to provision a dedicated ClickHouse database",
-    )
 
 
 class UpdateOrgRequest(BaseModel):
     display_name: str | None = Field(None, description="Human-readable label")
     org_ids: list[str] | None = Field(None, description="Tenant IDs")
     enabled: bool | None = Field(None, description="Enable or disable the org")
-    dedicated_database: bool | None = Field(
-        None,
-        description="Enable or disable a dedicated ClickHouse database",
-    )
-    confirm_merge: bool = Field(
-        default=False,
-        description="Required when disabling dedicated_database — confirms data migration is handled",
-    )
 
 
 class OrgResponse(BaseModel):
@@ -65,7 +59,6 @@ class OrgResponse(BaseModel):
     display_name: str
     org_ids: list[str]
     enabled: bool
-    dedicated_database: bool
     created_at: str
     updated_at: str
 
@@ -105,7 +98,6 @@ async def create_org(
         body.name,
         org_ids=body.org_ids,
         display_name=body.display_name,
-        dedicated_database=body.dedicated_database,
         admin_id=user.user_id,
     )
 
@@ -115,32 +107,43 @@ async def create_org(
 @router.get(
     "",
     response_model=list[OrgResponse],
-    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def list_orgs(
     user: CurrentUser,
     request: Request,
 ):
-    """List all organisations."""
+    """List organisations visible to the caller.
+
+    System-scope org:read holders see every org; org-scope holders see
+    only the orgs their grants cover.
+    """
     from dfe_engine.orgs.registry import OrgRegistry
 
     registry: OrgRegistry = request.app.state.org_registry
-    return [_org_response(o) for o in registry.list()]
+    if is_action_allowed(request, user, scopes_dict["org_read"]):
+        return [_org_response(o) for o in registry.list()]
+    return [
+        _org_response(o)
+        for o in registry.list()
+        if is_action_allowed(
+            request, user, scopes_dict["org_read"], scope=Scope(type="org", id=o.name)
+        )
+    ]
 
 
 @router.get(
     "/{name}",
     response_model=OrgResponse,
-    dependencies=[Depends(require_action(scopes_dict["org_read"]))],
 )
 async def get_org(
     name: str,
     user: CurrentUser,
     request: Request,
 ):
-    """Get a single organisation by name."""
+    """Get a single organisation by name (org:read at that org's scope)."""
     from dfe_engine.orgs.registry import OrgRegistry
 
+    check_action(request, user, scopes_dict["org_read"], scope=Scope(type="org", id=name))
     registry: OrgRegistry = request.app.state.org_registry
     org = registry.get(name)
     if org is None:
@@ -173,28 +176,7 @@ async def update_org(
             detail={"code": "not_found", "message": f"Org '{name}' not found"},
         )
 
-    # Handle dedicated_database toggle via lifecycle manager
-    if (
-        body.dedicated_database is not None
-        and body.dedicated_database != existing.dedicated_database
-    ):
-        from dfe_engine.orgs.lifecycle import OrgLifecycleManager
-
-        lifecycle: OrgLifecycleManager = request.app.state.org_lifecycle
-        try:
-            await lifecycle.toggle_dedicated_db(
-                name,
-                enabled=body.dedicated_database,
-                confirm_merge=body.confirm_merge,
-                admin_id=user.user_id,
-            )
-        except ValueError as exc:
-            raise HTTPException(
-                status_code=400,
-                detail={"code": "confirmation_required", "message": str(exc)},
-            ) from exc
-
-    # Apply remaining field updates
+    # Apply field updates
     update_fields: dict[str, object] = {}
     if body.display_name is not None:
         update_fields["display_name"] = body.display_name
@@ -245,16 +227,15 @@ async def delete_org(
 # -- Helpers -----------------------------------------------------------------
 
 
-def _org_response(org: object) -> OrgResponse:
+def _org_response(org: Org) -> OrgResponse:
     """Build an OrgResponse from an Org model."""
     return OrgResponse(
-        name=org.name,  # type: ignore[attr-defined]
-        display_name=org.display_name,  # type: ignore[attr-defined]
-        org_ids=org.org_ids,  # type: ignore[attr-defined]
-        enabled=org.enabled,  # type: ignore[attr-defined]
-        dedicated_database=org.dedicated_database,  # type: ignore[attr-defined]
-        created_at=org.created_at,  # type: ignore[attr-defined]
-        updated_at=org.updated_at,  # type: ignore[attr-defined]
+        name=org.name,
+        display_name=org.display_name,
+        org_ids=org.org_ids,
+        enabled=org.enabled,
+        created_at=org.created_at,
+        updated_at=org.updated_at,
     )
 
 

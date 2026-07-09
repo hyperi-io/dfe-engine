@@ -31,18 +31,19 @@ Triggers use CEL expressions evaluated against {result_count, ...row_fields}:
 
 from __future__ import annotations
 
+import builtins
 from pathlib import Path
 from typing import Any
 
 import apprise
-from hyperi_pylib.expression import (
+from pydantic import BaseModel, Field, field_validator
+from scalo.expression import (
     evaluate_condition,
 )
-from hyperi_pylib.expression import (
+from scalo.expression import (
     validate as validate_expression,
 )
-from hyperi_pylib.logger import logger
-from pydantic import BaseModel, Field, field_validator
+from scalo.logger import logger
 
 # ── Destination Registry ──────────────────────────────────────────
 
@@ -87,7 +88,7 @@ class AlertDestinationRegistry:
             dir_path = Path(directory)
             dir_path.mkdir(parents=True, exist_ok=True)
             try:
-                from hyperi_pylib.config import DirectoryConfigStore
+                from scalo.config import DirectoryConfigStore
 
                 self._store = DirectoryConfigStore(
                     directory=str(dir_path),
@@ -152,8 +153,12 @@ class AlertDestinationRegistry:
             return False
         return self._memory.pop(name, None) is not None
 
-    def list(self) -> list[AlertDestination]:
-        """List all registered destinations."""
+    def list(self) -> builtins.list[AlertDestination]:
+        """List all registered destinations.
+
+        Return annotation is ``builtins.list`` because this method named ``list``
+        shadows the builtin for the type checker's annotation resolution.
+        """
         if self._store is not None:
             results = []
             for table_name in self._store.list_tables():
@@ -164,7 +169,7 @@ class AlertDestinationRegistry:
             return results
         return list(self._memory.values())
 
-    def resolve_many(self, names: list[str]) -> list[str]:
+    def resolve_many(self, names: builtins.list[str]) -> builtins.list[str]:
         """Resolve a list of destination names to Apprise URLs.
 
         Skips unknown or disabled destinations with a warning.
@@ -368,7 +373,7 @@ class AlertDispatcher:
                 logger.info(f"Alert sent: {title}")
             else:
                 logger.warning(f"Alert dispatch failed: {title}")
-            return result
+            return bool(result)
         except Exception as e:
             logger.error(f"Alert dispatch error: {e}")
             return False

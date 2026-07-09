@@ -5,7 +5,7 @@ import uuid
 
 import pytest
 import yaml
-from hyperi_pylib.logger import logger
+from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.settings import get_settings, reset_settings
