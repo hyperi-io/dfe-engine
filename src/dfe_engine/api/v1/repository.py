@@ -297,7 +297,11 @@ async def patch_preferences(
 # ── Objects (generic) ────────────────────────────────────────
 
 
-@router.get("/objects/{scope}/{scope_id}/{namespace}", response_model=list[ObjectEntry], openapi_extra=CLI_HIDDEN)
+@router.get(
+    "/objects/{scope}/{scope_id}/{namespace}",
+    response_model=list[ObjectEntry],
+    openapi_extra=CLI_HIDDEN,
+)
 async def list_objects(
     scope: str,
     scope_id: str,
@@ -339,7 +343,11 @@ async def get_object(
     )
 
 
-@router.put("/objects/{scope}/{scope_id}/{namespace}/{key}", response_model=ObjectMetadata, openapi_extra=CLI_HIDDEN)
+@router.put(
+    "/objects/{scope}/{scope_id}/{namespace}/{key}",
+    response_model=ObjectMetadata,
+    openapi_extra=CLI_HIDDEN,
+)
 async def put_object(
     scope: str,
     scope_id: str,
@@ -388,7 +396,9 @@ async def put_object(
     return ObjectMetadata(**meta)
 
 
-@router.delete("/objects/{scope}/{scope_id}/{namespace}/{key}", status_code=204, openapi_extra=CLI_HIDDEN)
+@router.delete(
+    "/objects/{scope}/{scope_id}/{namespace}/{key}", status_code=204, openapi_extra=CLI_HIDDEN
+)
 async def delete_object(
     scope: str,
     scope_id: str,
