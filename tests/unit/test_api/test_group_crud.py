@@ -71,6 +71,57 @@ class TestCreateGroup:
         assert resp.status_code == 422
 
 
+class TestGroupRoleEscalation:
+    """A group:write caller must not grant a group a role it does not itself
+    hold (else it could self-escalate by joining the group). role:write, or
+    already holding the role, is required."""
+
+    def test_create_cannot_assign_unheld_role(self, client, operator_headers):
+        # operator has group:write (infra_admin) but not role:write, and does
+        # not hold `admin` - it must not mint a group carrying admin.
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "escalate-attempt", "roles": ["admin"]},
+            headers=operator_headers,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["code"] == "forbidden"
+
+    def test_create_can_assign_held_role(self, client, operator_headers):
+        # A role the caller DOES hold (infra_admin) is allowed.
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "held-role-ok", "roles": ["infra_admin"]},
+            headers=operator_headers,
+        )
+        assert resp.status_code == 201
+
+    def test_admin_can_assign_any_role(self, client, admin_headers):
+        # admin holds role:write (via "*") - no restriction.
+        resp = client.post(
+            "/api/v1/auth/groups",
+            json={"name": "admin-assigns-admin", "roles": ["admin"]},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+
+    def test_update_cannot_escalate_roles(self, client, admin_headers, operator_headers):
+        # admin makes a plain group operator can manage...
+        client.post(
+            "/api/v1/auth/groups",
+            json={"name": "upd-escalate", "roles": ["infra_admin"]},
+            headers=admin_headers,
+        )
+        # ...operator (no role:write, no admin) cannot PUT admin onto it.
+        resp = client.put(
+            "/api/v1/auth/groups/upd-escalate",
+            json={"roles": ["admin"]},
+            headers=operator_headers,
+        )
+        assert resp.status_code == 403
+        assert resp.json()["code"] == "forbidden"
+
+
 class TestListGroups:
     """GET /api/v1/auth/groups"""
 

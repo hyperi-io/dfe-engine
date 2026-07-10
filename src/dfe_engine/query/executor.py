@@ -17,6 +17,7 @@ Security enforcement:
 
 from __future__ import annotations
 
+import re
 import time
 import uuid
 from typing import Any
@@ -30,6 +31,11 @@ from dfe_engine.query.models import (
     ViewDefinition,
 )
 from dfe_engine.query.result import QueryResult
+
+# order_by is interpolated into ORDER BY / WHERE (ClickHouse cannot bind an
+# identifier as a server-side parameter), so it MUST be a bare column identifier
+# - never attacker-controlled SQL. Everything else is bound (see module docstring).
+_SAFE_ORDER_BY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
 
 class ViewExecutionError(Exception):
@@ -184,6 +190,8 @@ class ViewExecutor:
         offset: int,
         options: QueryOptions,
     ) -> str:
+        if options.order_by and not _SAFE_ORDER_BY.match(options.order_by):
+            raise ViewExecutionError(f"invalid order_by identifier: {options.order_by!r}")
         param_parts = []
         for p in view_def.parameters:
             param_parts.append(f"{p.name}={{{p.name}:{p.clickhouse_type}}}")

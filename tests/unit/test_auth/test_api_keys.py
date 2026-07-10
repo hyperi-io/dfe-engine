@@ -36,6 +36,13 @@ class TestCreate:
         assert isinstance(key_meta, APIKey)
         assert isinstance(full_key, str)
 
+    def test_create_rejects_unsafe_name(self, store: APIKeyStore) -> None:
+        # Name becomes the {name}.yaml filename stem - reject traversal /
+        # separators / a trailing newline.
+        for bad in ("../evil", "a/b", "..", ".hidden", "with space", "bad\n", ""):
+            with pytest.raises(ValueError, match="Invalid API key name"):
+                store.create(bad)
+
     def test_full_key_has_correct_prefix(self, store: APIKeyStore) -> None:
         _meta, full_key = store.create("ci-pipeline")
         assert full_key.startswith("dfe_ak_")

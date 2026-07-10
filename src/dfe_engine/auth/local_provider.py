@@ -74,6 +74,13 @@ class LocalAuthProvider:
         if not account.enabled:
             raise AuthenticationError("Account disabled")
 
+        # External (IdP-owned / JIT-provisioned) identities never authenticate via
+        # the local password path - they hold no usable local credential and log in
+        # only through the trusted OIDC header path. Without this, an external
+        # account's placeholder password could be replayed against local login.
+        if account.external:
+            raise AuthenticationError("Invalid username or password")
+
         if not self._accounts.verify_password(username, password):
             raise AuthenticationError("Invalid username or password")
 

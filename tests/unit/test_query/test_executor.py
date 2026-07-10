@@ -317,3 +317,22 @@ class TestViewExecutorListing:
         executor = ViewExecutor(restricted_client=MagicMock(), catalog=catalog, database="testdb")
         view = executor.get_view("analytics/events")
         assert view.label == "analytics/events"
+
+
+class TestViewExecutorOrderByInjection:
+    """order_by is interpolated into ORDER BY/WHERE (CH cannot bind an identifier),
+    so it MUST be a bare column identifier - a security regression guard."""
+
+    def test_order_by_injection_rejected(self):
+        catalog = MagicMock(spec=ViewCatalog)
+        executor = ViewExecutor(restricted_client=MagicMock(), catalog=catalog, database="testdb")
+        options = QueryOptions(order_by="ts) UNION SELECT * FROM secrets --", after_key="k")
+        with pytest.raises(ViewExecutionError):
+            executor._build_sql(_make_view_def(), {"org_id": "t"}, 10, 0, options)
+
+    def test_order_by_valid_identifier_allowed(self):
+        catalog = MagicMock(spec=ViewCatalog)
+        executor = ViewExecutor(restricted_client=MagicMock(), catalog=catalog, database="testdb")
+        options = QueryOptions(order_by="event_ts", after_key="k", order_dir="asc")
+        sql = executor._build_sql(_make_view_def(), {"org_id": "t"}, 10, 0, options)
+        assert "ORDER BY event_ts asc" in sql
