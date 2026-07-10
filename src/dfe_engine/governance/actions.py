@@ -54,17 +54,18 @@ class ActionStore:
     def get(self, name: str) -> ActionDef:
         return ActionDef.model_validate(self._crud.get(_ACTION_CLASS, name))
 
-    def save(self, action: ActionDef, actor: str) -> PublishResult:
+    def save(self, action: ActionDef, actor: str, branch: str = "") -> PublishResult:
         return self._crud.put(
             _ACTION_CLASS,
             action.name,
             action.model_dump(),
             actor,
             message=f"action({action.name}): define by {actor}",
+            branch=branch,
         )
 
-    def delete(self, name: str, actor: str) -> PublishResult:
-        return self._crud.delete(_ACTION_CLASS, name, actor)
+    def delete(self, name: str, actor: str, branch: str = "") -> PublishResult:
+        return self._crud.delete(_ACTION_CLASS, name, actor, branch=branch)
 
     def invoke(
         self,
@@ -74,6 +75,7 @@ class ActionStore:
         policy: PolicyStore | None = None,
         dry_run: bool = False,
         override: bool = False,
+        branch: str = "",
     ) -> InvokeResult:
         """Apply all of an action's changes atomically (or preview with dry_run)."""
         action = self.get(name)
@@ -115,7 +117,9 @@ class ActionStore:
             return InvokeResult(dry_run=True, changed=False, commit_sha=None, diff=diff)
 
         items = [(cls, nm, doc) for (cls, nm), doc in docs.items()]
-        res = self._crud.put_many(items, actor, f"action({action.name}): invoke by {actor}")
+        res = self._crud.put_many(
+            items, actor, f"action({action.name}): invoke by {actor}", branch=branch
+        )
         return InvokeResult(
             dry_run=False, changed=res.changed, commit_sha=res.commit_sha, diff=diff
         )

@@ -716,6 +716,8 @@ class GitopsSettings(BaseModel):
     - DFE_GITOPS_USERNAME / DFE_GITOPS_TOKEN -> HTTPS push auth
     - DFE_GITOPS_AUTHOR_NAME / DFE_GITOPS_AUTHOR_EMAIL -> commit identity
     - DFE_GITOPS_MODE -> gitops.mode
+    - DFE_GITOPS_FORGE_PROVIDER -> gitops.forge_provider (review-PR seam)
+    - DFE_GITOPS_FORGE_API_BASE -> gitops.forge_api_base
     """
 
     enabled: bool = Field(default=False, description="Enable gitops publishing")
@@ -734,6 +736,21 @@ class GitopsSettings(BaseModel):
             "is the explicit override that permits gitops auto-merge in a "
             "production DFE_ENV; 'team' (default) refuses auto-merge outside "
             "dev postures."
+        ),
+    )
+    forge_provider: str = Field(
+        default="",
+        description=(
+            "Git forge that hosts the deploy repo, for opening review PRs when a "
+            "production+team write may not commit straight to main: "
+            "forgejo|gitea|github|gitlab. Empty = infer from repo_url host."
+        ),
+    )
+    forge_api_base: str = Field(
+        default="",
+        description=(
+            "Override for the forge REST API base URL (e.g. a self-hosted "
+            "Forgejo/GitHub Enterprise). Empty = derive from repo_url."
         ),
     )
 
@@ -1260,6 +1277,10 @@ def _get_env_overrides() -> dict:
         overrides["gitops"]["author_email"] = val
     if val := _get_env("DFE_GITOPS_MODE"):
         overrides["gitops"]["mode"] = val.strip().lower()
+    if val := _get_env("DFE_GITOPS_FORGE_PROVIDER"):
+        overrides["gitops"]["forge_provider"] = val.strip().lower()
+    if val := _get_env("DFE_GITOPS_FORGE_API_BASE"):
+        overrides["gitops"]["forge_api_base"] = val
 
     # API settings
     if val := _get_env("DFE_API_HOST"):

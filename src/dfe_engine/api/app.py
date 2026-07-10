@@ -87,6 +87,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
         gitcrud = None
     app.state.gitcrud = gitcrud
+    # Forge client for opening review PRs when a production+team write may not
+    # commit straight to main (gitcrud/routing.py). None -> that posture refuses.
+    try:
+        from dfe_engine.gitcrud.forge import build_forge
+
+        app.state.forge = build_forge(settings.gitops) if gitcrud is not None else None
+    except Exception as exc:  # never let forge setup break app startup
+        logger.warning("gitops review-PR forge unavailable", error=str(exc))
+        app.state.forge = None
     if gitcrud is not None:
         from dfe_engine.gitcrud.auto_merge import resolve_state, startup_banner
 

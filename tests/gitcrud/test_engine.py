@@ -18,6 +18,7 @@ from dfe_engine.gitcrud import (
     ResourceNotFoundError,
     flatten,
 )
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError
 from dfe_engine.gitops.repo import GitopsRepo
 
 
@@ -47,6 +48,21 @@ def test_flatten_produces_dot_paths():
     assert flat["deploy.service"] == "receiver"
     assert flat["topics[0]"] == "a"
     assert flat["topics[1]"] == "b"
+
+
+@pytest.mark.parametrize("bad", ["../escape", "..", "a/b", "with\nnewline", "a..b"])
+def test_write_rejects_unsafe_name(crud, bad):
+    # defence in depth: an unsafe resource name must be refused at the engine
+    # chokepoint (_rel) before it reaches the file path OR the commit subject.
+    with pytest.raises(CommitPolicyError):
+        crud.put("helmvars", bad, {"a": 1}, actor="alice")
+    # nothing was written to the tree
+    assert crud.list("helmvars") == []
+
+
+def test_get_rejects_unsafe_name(crud):
+    with pytest.raises(CommitPolicyError):
+        crud.get("helmvars", "../../etc/passwd")
 
 
 def test_put_then_get_round_trips_and_commits(crud):

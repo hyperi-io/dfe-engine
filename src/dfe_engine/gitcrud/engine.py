@@ -22,6 +22,7 @@ from typing import Any
 from dfe_engine.gitops.repo import GitopsRepo, PublishResult
 from dfe_engine.yaml_utils import yaml_dump_string, yaml_load
 
+from .commit_policy import validate_name
 from .registry import ResourceClass, ResourceClassRegistry, default_registry
 
 _MISSING = object()
@@ -147,6 +148,9 @@ class GitCrud:
         return self._registry
 
     def _rel(self, cls: ResourceClass, name: str) -> str:
+        # Single chokepoint for every read/write path: the name must be safe to
+        # splice into a file path AND a commit subject (see validate_name).
+        validate_name(name)
         return f"{cls.directory}/{name}{cls.suffix}"
 
     def _file(self, cls: ResourceClass, name: str) -> Path:
@@ -199,29 +203,38 @@ class GitCrud:
         actor: str,
         message: str | None = None,
         base_revision: str | None = None,
+        branch: str = "",
     ) -> PublishResult:
-        """Write a whole doc and commit. If base_revision is given, enforce it."""
+        """Write a whole doc and commit. If base_revision is given, enforce it.
+
+        ``branch`` (non-empty) routes the commit to a review branch instead of the
+        tracked branch -- the PR path the routing layer uses for production+team.
+        """
         self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         msg = message or f"{cls.name}({name}): update by {actor}"
-        return self._repo.publish({self._rel(cls, name): yaml_dump_string(doc)}, msg)
+        return self._repo.publish(
+            {self._rel(cls, name): yaml_dump_string(doc)}, msg, branch=branch or None
+        )
 
     def put_many(
         self,
         items: builtins.list[tuple[str, str, dict]],
         actor: str,
         message: str,
+        branch: str = "",
     ) -> PublishResult:
         """Write several resources in ONE commit (atomic actions).
 
         items: list of (cls_name, name, doc). All land in a single commit so a
-        defined action that touches N resources is one atomic change.
+        defined action that touches N resources is one atomic change. ``branch``
+        routes them to a review branch (PR mode) instead of the tracked branch.
         """
         artifacts: dict[str, str] = {}
         for cls_name, name, doc in items:
             cls = self._cls(cls_name)
             artifacts[self._rel(cls, name)] = yaml_dump_string(doc)
-        return self._repo.publish(artifacts, message)
+        return self._repo.publish(artifacts, message, branch=branch or None)
 
     def set_key(
         self,
@@ -232,6 +245,7 @@ class GitCrud:
         actor: str,
         message: str | None = None,
         base_revision: str | None = None,
+        branch: str = "",
     ) -> PublishResult:
         """Set a single dot-path (creating intermediates) and commit."""
         self._guard_revision(cls_name, name, base_revision)
@@ -239,7 +253,7 @@ class GitCrud:
         doc = self.get(cls_name, name) if self._file(cls, name).is_file() else {}
         _set_path(doc, dotpath, value)
         msg = message or f"{cls.name}({name}): set {dotpath} by {actor}"
-        return self.put(cls_name, name, doc, actor, msg)
+        return self.put(cls_name, name, doc, actor, msg, branch=branch)
 
     def delete_key(
         self,
@@ -248,13 +262,14 @@ class GitCrud:
         dotpath: str,
         actor: str,
         message: str | None = None,
+        branch: str = "",
     ) -> PublishResult:
         """Remove a single dot-path (revert to default) and commit."""
         cls = self._cls(cls_name)
         doc = self.get(cls_name, name)
         _del_path(doc, dotpath)
         msg = message or f"{cls.name}({name}): delete {dotpath} by {actor}"
-        return self.put(cls_name, name, doc, actor, msg)
+        return self.put(cls_name, name, doc, actor, msg, branch=branch)
 
     def delete(
         self,
@@ -262,10 +277,11 @@ class GitCrud:
         name: str,
         actor: str,
         message: str | None = None,
+        branch: str = "",
     ) -> PublishResult:
         """Delete a whole resource and commit."""
         cls = self._cls(cls_name)
         if not self._file(cls, name).is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
         msg = message or f"{cls.name}({name}): delete by {actor}"
-        return self._repo.publish({}, msg, deletions=[self._rel(cls, name)])
+        return self._repo.publish({}, msg, deletions=[self._rel(cls, name)], branch=branch or None)
