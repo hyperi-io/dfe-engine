@@ -137,6 +137,11 @@ class GitCrud:
         return self._repo.path
 
     @property
+    def repo(self):
+        """The underlying GitopsRepo - break-glass raw publish/revert path."""
+        return self._repo
+
+    @property
     def registry(self) -> ResourceClassRegistry:
         """Public: the resource-class registry (read-only introspection)."""
         return self._registry

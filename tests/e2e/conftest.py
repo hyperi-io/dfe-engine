@@ -6,7 +6,7 @@ unless the relevant DFE_E2E_* env vars point at a live deployment, so they never
 break unit/CI runs. No mocks (per MOCKS-POLICY): every assertion hits a real
 endpoint.
 
-Configure via env (typically `dfe-api`-side of a `single`/`standard` deployment):
+Configure via env (typically `dfe-engine`-side of a `single`/`standard` deployment):
   DFE_E2E_RECEIVER_URL     https base of the receiver ingest endpoint
   DFE_E2E_RECEIVER_TOKEN   bearer token for the receiver (optional)
   DFE_E2E_CH_HOST/PORT     ClickHouse HTTP endpoint (default port 8123)

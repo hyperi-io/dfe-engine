@@ -11,7 +11,7 @@ Pull a small, inspectable slice of a source's events from ClickHouse (landed
 ``_json``) or Kafka (a topic), in one of four modes: ``recent`` (fast tail),
 ``random`` (uniform), ``smart`` (logreducer representative sample - the default)
 and ``anomaly`` (logreducer outliers). One service (``Sampler``) backs both the
-API router and the ``dfe-api sample`` CLI. Consumers: the CLI, the UI (charts),
+API router and the ``dfe sample`` CLI. Consumers: the CLI, the UI (charts),
 downstream processing APIs, and the AI plug-in.
 """
 

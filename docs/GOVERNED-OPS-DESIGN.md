@@ -21,7 +21,7 @@ whole point, and it is the acceptance test for every piece below.
 
 ```mermaid
 graph TD
-    CLI["CLI - dfe-api governed"]
+    CLI["CLI - dfe local governed"]
     HelmRouter["Tier-1 router - api/v1/helm"]
     GovRouter["Tier-2 router - api/v1/governance"]
     ConfigRouter["Config router - api/v1/config"]
@@ -277,7 +277,7 @@ disjoint claims, lease reclaim, and incremental resume with no duplicate rows.
 - **Alerting** -- a scaffold only, deferred by design. A rule model (threshold over a
   window, severity to a channel) and a pluggable dispatcher. The real senders and the
   library choice wait until we reach that phase.
-- **CLI** -- `dfe-api governed helm ...` and `action invoke` wrap the same services
+- **CLI** -- `dfe local governed helm ...` and `action invoke` wrap the same services
   the API uses, for CI and break-glass. A CLI is a thin window over the API, not a
   second way of doing things.
 

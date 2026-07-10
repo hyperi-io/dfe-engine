@@ -32,7 +32,7 @@ class TestContractWellFormed:
     def test_contract_instantiates(self) -> None:
         contract = engine_deployment_contract()
         assert contract.app_name == "dfe-engine"
-        assert contract.binary_name == "dfe-api"
+        assert contract.binary_name == "dfe-engine"
         assert contract.metrics_port == 8000
         assert contract.env_prefix == "DFE"
         assert contract.config_mount_path == "/etc/dfe/config"
@@ -91,7 +91,7 @@ class TestArtefactGeneration:
         contract = engine_deployment_contract()
         manifest = json.loads(generate_container_manifest(contract))
         assert manifest["app_name"] == "dfe-engine"
-        assert manifest["binary_name"] == "dfe-api"
+        assert manifest["binary_name"] == "dfe-engine"
         assert manifest["expose_ports"] == [contract.metrics_port]
         assert manifest["healthcheck"]["path"] == contract.health.liveness_path
         assert manifest["entrypoint"] == [contract.binary()]

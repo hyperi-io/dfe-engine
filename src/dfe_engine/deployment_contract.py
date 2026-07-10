@@ -13,7 +13,7 @@ pylib's Python-native generators consume that contract to emit:
 - ``argocd-application.yaml`` -- ArgoCD Application CR pointing at the chart
 
 The :func:`engine_deployment_contract` factory is the single source of truth.
-``DfeApiApp.deployment_contract()`` returns it so ``dfe-api generate-artefacts``
+``DfeEngineApp.deployment_contract()`` returns it so ``dfe-engine generate-artefacts``
 emits the artefacts, and pylib's ``validate_dockerfile`` / ``validate_helm_values``
 drift checks (see ``tests/unit/test_deployment/test_contract.py``) keep the
 committed ``Dockerfile`` and ``chart/`` aligned with it.
@@ -47,7 +47,7 @@ def engine_deployment_contract() -> DeploymentContract:
     """
     return DeploymentContract(
         app_name="dfe-engine",
-        binary_name="dfe-api",
+        binary_name="dfe-engine",
         description="DFE Engine -- REST API and config control plane for the Data Fusion Engine",
         metrics_port=8000,
         health=HealthContract(

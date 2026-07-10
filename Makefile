@@ -28,4 +28,4 @@ dev:
 	set -a; . ./.env; set +a; \
 	: "$${DFE_CONFIG_DIR:=./config}"; export DFE_CONFIG_DIR; \
 	: "$${DFE_SCHEMAS_DIR:=./schemas}"; export DFE_SCHEMAS_DIR; \
-	uv run dfe-api run
+	uv run dfe-engine run

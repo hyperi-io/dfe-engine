@@ -7,7 +7,7 @@ Usage::
 
 Or via CLI::
 
-    dfe-api
+    dfe-engine
 """
 
 from __future__ import annotations

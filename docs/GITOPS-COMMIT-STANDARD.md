@@ -126,7 +126,7 @@ Implemented in the gitcrud engine (see [[governed-ops-api]] Phase 1):
 - Pre-commit validators: ASCII-only, subject <= 50, type in the allowed set, image/
   chart refs pinned (reject `latest`/floating), no controller-owned fields.
 - Signing + `sourceIntegrity` config emitted for Argo.
-- A CI lint (`dfe-api gitops lint`) asserts any deploy-repo history conforms, so
+- A CI lint (`dfe local gitops lint`) asserts any deploy-repo history conforms, so
   hand commits (survivability) are checked too.
 
 ## References
