@@ -216,8 +216,14 @@ convention = "google"
 
 
 [project.scripts]
-dfe = "dfe_engine.cli.auto.main:main"
+# Order matters: hyperi-ci's generate-artefacts build step invokes the FIRST
+# entry here (deployment/stage.py _resolve_python_entry_point) as `<script>
+# generate-artefacts`. That MUST be the scalo daemon `dfe-engine`, which carries
+# deployment_contract()/generate-artefacts. The auto-CLI `dfe` (OpenAPI-generated)
+# has no such subcommand, so listing it first breaks the release Build. Keep the
+# daemon first.
 dfe-engine = "dfe_engine.api:run_dev_server"
+dfe = "dfe_engine.cli.auto.main:main"
 dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
 
 [project.entry-points."dfe_engine.services"]
