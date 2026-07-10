@@ -113,3 +113,33 @@ class TestOidcAuthentication:
         data = resp.json()
         assert "admin" in data["roles"]
         assert "data_viewer" in data["roles"]
+
+    def test_oidc_headers_ignored_when_proxy_untrusted(self, api_settings):
+        """Fail closed: with trust_proxy_auth_headers off, X-Oidc-* are NOT
+        trusted (they are client-spoofable) - the request is unauthenticated.
+
+        Regression guard for the header-spoofing auth bypass: a caller reaching
+        the pod directly (bypassing Envoy) must not authenticate as an admin by
+        setting X-Oidc-Subject / X-Oidc-Groups.
+        """
+        from dfe_engine.api.app import create_app
+        from dfe_engine.api.deps import _registries
+
+        untrusted = api_settings.model_copy(
+            update={
+                "auth": api_settings.auth.model_copy(update={"trust_proxy_auth_headers": False})
+            }
+        )
+        application = create_app(settings=untrusted)
+        try:
+            with TestClient(application, raise_server_exceptions=False) as c:
+                resp = c.get(
+                    "/api/v1/auth/me",
+                    headers={
+                        "X-Oidc-Subject": "attacker@evil.example",
+                        "X-Oidc-Groups": "dfe-admins",
+                    },
+                )
+                assert resp.status_code == 401
+        finally:
+            _registries.clear()

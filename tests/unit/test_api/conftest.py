@@ -52,6 +52,9 @@ def api_settings(tmp_path: Path) -> DFESettings:
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(auth_dir),
+            # Simulate the Envoy-fronted production deployment: trust the
+            # X-Oidc-* identity headers (auth Path 1). Production default is off.
+            trust_proxy_auth_headers=True,
         ),
         secrets=SecretsSettings(provider="file", path=str(secrets_dir)),
         api=APISettings(
