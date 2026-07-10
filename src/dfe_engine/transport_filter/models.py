@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 class FilterAction(str, Enum):
     """Disposition action when a filter matches.
 
-    Matches `hyperi_rustlib::transport::filter::FilterAction`.
+    Matches `scalo::transport::filter::FilterAction`.
     """
 
     DROP = "drop"
@@ -35,7 +35,7 @@ class FilterAction(str, Enum):
 class FilterRule(BaseModel):
     """A single filter rule — CEL expression + disposition action.
 
-    Matches `hyperi_rustlib::transport::filter::FilterRule`.
+    Matches `scalo::transport::filter::FilterRule`.
 
     Filters use CEL syntax regardless of execution tier. The rustlib engine
     classifies expressions at config load time and selects the optimal
@@ -65,7 +65,7 @@ class TransportFilterTierConfig(BaseModel):
     is always enabled. Tier 2 (standard CEL) and Tier 3 (complex CEL with
     regex/iteration/time) require explicit opt-in.
 
-    Matches `hyperi_rustlib::transport::filter::TransportFilterTierConfig`.
+    Matches `scalo::transport::filter::TransportFilterTierConfig`.
     """
 
     allow_cel_filters_in: bool = Field(

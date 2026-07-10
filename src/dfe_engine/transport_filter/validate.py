@@ -9,7 +9,7 @@
 """Validate filter rules against tier gate configuration.
 
 Mirrors the validation logic in
-``hyperi_rustlib::transport::filter::TransportFilterEngine::new()`` —
+``scalo::transport::filter::TransportFilterEngine::new()`` —
 called by the control plane before filter configs reach rustlib, so
 operators get immediate feedback in the UI/CLI.
 """

@@ -19,7 +19,7 @@ Generic CEL handling used by:
   predicate inside hunts/sigma, validate before deploying
 
 The classifier mirrors the Rust implementation in
-``hyperi_rustlib::transport::filter::classify`` byte-for-byte. This means
+``scalo::transport::filter::classify`` byte-for-byte. This means
 the UI validates with the same rules the runtime engine enforces — no
 divergence between "looks valid in UI" and "rejected at startup".
 
