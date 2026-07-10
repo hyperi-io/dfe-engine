@@ -105,6 +105,32 @@ def _response(group: Group) -> GroupResponse:
     )
 
 
+def _check_role_assignment(request: Request, user, roles: list[str], scope: Scope) -> None:
+    """Guard against privilege escalation via group roles.
+
+    A caller may put a role on a group only if they hold role-management
+    permission (role:write) at the group's scope, or already hold that role
+    themselves. Without this, a group:write holder could grant a group -- and
+    thereby themselves, by joining it -- a role they do not have (e.g. admin).
+    """
+    if not roles:
+        return
+    if is_action_allowed(request, user, scopes_dict["role_write"], scope=scope):
+        return
+    held = set(user.roles)
+    escalated = sorted(r for r in roles if r not in held)
+    if escalated:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "forbidden",
+                "message": (
+                    f"Cannot assign role(s) you do not hold: {escalated}; requires role:write"
+                ),
+            },
+        )
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -129,6 +155,7 @@ async def create_group(
 
     target = Group(name=body.name, scope=body.scope)
     check_action(request, user, scopes_dict["group_write"], scope=_scope_of(target))
+    _check_role_assignment(request, user, body.roles, _scope_of(target))
 
     org = target.scope_org
     org_registry = getattr(request.app.state, "org_registry", None)
@@ -221,6 +248,8 @@ async def update_group(
             detail={"code": "not_found", "message": f"Group '{name}' not found"},
         )
     check_action(request, user, scopes_dict["group_write"], scope=_scope_of(existing))
+    if body.roles is not None:
+        _check_role_assignment(request, user, body.roles, _scope_of(existing))
     update_fields: dict[str, object] = {}
     if body.roles is not None:
         update_fields["roles"] = body.roles

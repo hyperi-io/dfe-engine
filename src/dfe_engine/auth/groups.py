@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
@@ -16,6 +17,10 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
+
+# Group name becomes the filename stem ({name}.yaml) - reject path traversal.
+# \Z (not $) anchors the true end of string so no trailing newline slips through.
+_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
 
 
 def validate_group_scope(scope: str) -> str:
@@ -120,6 +125,8 @@ class GroupStore:
             ValueError: If a group with this name already exists, or the
                 scope is not ``system`` / ``org:<name>``.
         """
+        if not _VALID_NAME.match(name):
+            raise ValueError(f"Invalid group name: {name!r}")
         if self._path(name).exists():
             raise ValueError(f"Group '{name}' already exists")
         member_list: list[str] = []

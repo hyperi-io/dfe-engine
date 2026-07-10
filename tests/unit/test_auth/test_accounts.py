@@ -61,6 +61,14 @@ class TestCreate:
         with pytest.raises(ValueError, match="alice"):
             store.create("alice", "other-password")
 
+    def test_create_rejects_unsafe_name(self, store):
+        # Username becomes the {username}.yaml filename stem - path traversal /
+        # separators / a trailing newline must be rejected so an account cannot
+        # be written outside the store dir or with a malformed name.
+        for bad in ("../evil", "a/b", "..", ".hidden", "with space", "bad\n", ""):
+            with pytest.raises(ValueError, match="Invalid account name"):
+                store.create(bad, "password123")
+
     def test_create_sets_timestamps(self, store):
         account = store.create("alice", "password123")
         assert account.created_at != ""
