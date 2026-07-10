@@ -89,3 +89,45 @@ class TestExceptionHandlers:
             assert resp.status_code == 200, f"{path} returned {resp.status_code}"
             data = resp.json()
             assert "status" in data
+
+
+class TestServiceUnavailable:
+    """scalo ServiceUnavailable (CH resilience budget exhausted) -> 503, never 500."""
+
+    @staticmethod
+    def _app():
+        from fastapi import FastAPI
+        from scalo.resilience import ServiceUnavailable
+
+        from dfe_engine.api.errors import install_exception_handlers
+
+        app = FastAPI()
+        install_exception_handlers(app)
+
+        @app.get("/dead")
+        def _dead():
+            raise ServiceUnavailable("ClickHouse unreachable after 60s (3 attempts)")
+
+        @app.get("/waking")
+        def _waking():
+            raise ServiceUnavailable("ClickHouse unreachable after 300s", waking=True)
+
+        return app
+
+    def test_budget_exhausted_maps_to_503(self):
+        c = TestClient(self._app(), raise_server_exceptions=False)
+        resp = c.get("/dead")
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["code"] == "service_unavailable"
+        assert data["context"]["waking"] is False
+        assert "message" in data
+
+    def test_waking_says_warming_up(self):
+        c = TestClient(self._app(), raise_server_exceptions=False)
+        resp = c.get("/waking")
+        assert resp.status_code == 503
+        data = resp.json()
+        assert data["code"] == "service_unavailable"
+        assert data["context"]["waking"] is True
+        assert "warming up" in data["message"].lower()

@@ -151,6 +151,31 @@ class ClickHouseCloudSettings(BaseModel):
         return bool(self.api_key_id and self.api_key_secret)
 
 
+class ClickHouseResilienceSettings(BaseModel):
+    """Reconnect-and-retry back-off + budget for the CH data-plane connection.
+
+    Feeds scalo's :class:`~scalo.resilience.ResilienceConfig` (config-cascade - an
+    operator widens the budget for a slow cold start without a code change, never a
+    hardcoded call-site value). A CONNECTION outage backs off AND rebuilds the
+    pooled client; a rate-limit (202) backs off WITHOUT reconnecting; a genuine
+    query error surfaces immediately. Field names mirror ``ResilienceConfig`` so it
+    is passed straight through. Off (``enabled=false``) restores the pre-resilience
+    behaviour - every op runs once and raises on the first failure.
+    """
+
+    enabled: bool = Field(default=True, description="Master switch for CH reconnect-and-retry.")
+    wait_initial: float = Field(default=0.5, description="First back-off, seconds.")
+    wait_max: float = Field(default=10.0, description="Per-attempt back-off cap, seconds.")
+    wait_multiplier: float = Field(default=2.0, description="Exponential back-off factor.")
+    budget_seconds: float = Field(
+        default=60.0, description="Backstop budget for a transient CH outage, seconds."
+    )
+    waking_budget_seconds: float = Field(
+        default=300.0,
+        description="Extended budget once a CH Cloud auto-wake is in flight, seconds.",
+    )
+
+
 class ClickHouseSettings(BaseModel):
     """ClickHouse connection settings."""
 
@@ -209,6 +234,7 @@ class ClickHouseSettings(BaseModel):
     # (e.g. "ReplacingMergeTree(version)").
     default_engine: str = Field(default="MergeTree")
     cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
+    resilience: ClickHouseResilienceSettings = Field(default_factory=ClickHouseResilienceSettings)
 
     @property
     def effective_data_database(self) -> str:
