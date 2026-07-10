@@ -19,10 +19,16 @@ recovered from stored metadata.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/api-keys", tags=["API Keys"])
@@ -91,18 +97,22 @@ async def create_api_key(
 
 @router.get(
     "",
-    response_model=list[APIKeyResponse],
+    response_model=PaginatedResponse[APIKeyResponse],
     dependencies=[Depends(require_action(scopes_dict["api_key_read"]))],
 )
 async def list_api_keys(
     user: CurrentUser,
     request: Request,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in key name/description"),
+    sort_by: str | None = Query(None, description="Sort field (name, created_at)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List all API keys (admin only). No key hashes or full keys returned."""
+    """List API keys (admin only), paginated. No key hashes or full keys returned."""
     from dfe_engine.auth.api_keys import APIKeyStore
 
     store: APIKeyStore = request.app.state.api_key_store
-    return [
+    rows = [
         APIKeyResponse(
             name=k.name,
             short_token=k.short_token,
@@ -110,9 +120,13 @@ async def list_api_keys(
             groups=k.groups,
             description=k.description,
             created_at=k.created_at,
-        )
+        ).model_dump()
         for k in store.list()
     ]
+    rows = apply_search(rows, search, ["name", "description"])
+    rows = apply_sort(rows, sort_by, sort_order)
+    summaries = [APIKeyResponse.model_validate(row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.delete(

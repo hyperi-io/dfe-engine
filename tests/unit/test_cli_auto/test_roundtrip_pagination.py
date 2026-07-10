@@ -4,18 +4,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
-# The engine list endpoints on main do not yet honour server-side limit/offset
-# (engine-upgrade's "pagination on 9 list endpoints" is a route-refinement my
-# auto-CLI port did not bring). The CLI paginator + its knobs are exercised by
-# test_paginate_units + test_pagination_auto_follow_all_pages; these two round-trips
-# flip to pass once the endpoints paginate - auto-CLI route-refinement follow-up.
-_PAGINATION_XFAIL = pytest.mark.xfail(
-    reason="engine list endpoints do not yet honour server-side limit/page-size",
-    strict=False,
-)
-
 
 def _create_org(harness, name: str) -> None:
     result = harness.invoke(["orgs", "create", "--name", name])
@@ -53,7 +41,6 @@ def test_delete_requires_quiet_noninteractive(harness):
     assert "todelete" not in [row["name"] for row in json.loads(after.output)]
 
 
-@_PAGINATION_XFAIL
 def test_pagination_limit(harness):
     harness.seed_admin()
     for i in range(5):
@@ -63,7 +50,6 @@ def test_pagination_limit(harness):
     assert len(json.loads(limited.output)) == 2
 
 
-@_PAGINATION_XFAIL
 def test_pagination_no_paginate_single_page(harness):
     harness.seed_admin()
     for i in range(5):

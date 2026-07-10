@@ -227,24 +227,40 @@
       }
     },
     "/api/v1/auth/accounts": {
-      "get": {
+      "post": {
         "tags": [
           "Accounts"
         ],
-        "summary": "List Accounts",
-        "description": "List all accounts (admin only). No password hashes returned.",
-        "operationId": "list_accounts_api_v1_auth_accounts_get",
+        "summary": "Create Account",
+        "description": "Create a new local user account (admin only).",
+        "operationId": "create_account_api_v1_auth_accounts_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAccountRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/AccountResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Accounts Api V1 Auth Accounts Get"
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -256,30 +272,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Accounts"
         ],
-        "summary": "Create Account",
-        "description": "Create a new local user account (admin only).",
-        "operationId": "create_account_api_v1_auth_accounts_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAccountRequest"
-              }
+        "summary": "List Accounts",
+        "description": "List accounts (admin only), paginated. No password hashes returned.",
+        "operationId": "list_accounts_api_v1_auth_accounts_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in username",
+              "title": "Search"
+            },
+            "description": "Search in username"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (username, created_at, updated_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (username, created_at, updated_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_AccountResponse_"
                 }
               }
             }
@@ -502,24 +579,40 @@
       }
     },
     "/api/v1/auth/groups": {
-      "get": {
+      "post": {
         "tags": [
           "Groups"
         ],
-        "summary": "List Groups",
-        "description": "List groups visible to the caller (own memberships + scope grants).",
-        "operationId": "list_groups_api_v1_auth_groups_get",
+        "summary": "Create Group",
+        "description": "Create a new RBAC group at a scope.",
+        "operationId": "create_group_api_v1_auth_groups_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateGroupRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/GroupResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Groups Api V1 Auth Groups Get"
+                  "$ref": "#/components/schemas/GroupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -531,30 +624,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Groups"
         ],
-        "summary": "Create Group",
-        "description": "Create a new RBAC group at a scope.",
-        "operationId": "create_group_api_v1_auth_groups_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateGroupRequest"
-              }
+        "summary": "List Groups",
+        "description": "List groups visible to the caller (own memberships + scope grants), paginated.",
+        "operationId": "list_groups_api_v1_auth_groups_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in group name/description",
+              "title": "Search"
+            },
+            "description": "Search in group name/description"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, scope)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, scope)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/GroupResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_GroupResponse_"
                 }
               }
             }
@@ -836,24 +990,40 @@
       }
     },
     "/api/v1/auth/api-keys": {
-      "get": {
+      "post": {
         "tags": [
           "API Keys"
         ],
-        "summary": "List Api Keys",
-        "description": "List all API keys (admin only). No key hashes or full keys returned.",
-        "operationId": "list_api_keys_api_v1_auth_api_keys_get",
+        "summary": "Create Api Key",
+        "description": "Create a new API key (admin only). Returns the full key exactly once.",
+        "operationId": "create_api_key_api_v1_auth_api_keys_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateAPIKeyRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/APIKeyResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Api Keys Api V1 Auth Api Keys Get"
+                  "$ref": "#/components/schemas/APIKeyCreatedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -865,30 +1035,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "API Keys"
         ],
-        "summary": "Create Api Key",
-        "description": "Create a new API key (admin only). Returns the full key exactly once.",
-        "operationId": "create_api_key_api_v1_auth_api_keys_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateAPIKeyRequest"
-              }
+        "summary": "List Api Keys",
+        "description": "List API keys (admin only), paginated. No key hashes or full keys returned.",
+        "operationId": "list_api_keys_api_v1_auth_api_keys_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in key name/description",
+              "title": "Search"
+            },
+            "description": "Search in key name/description"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, created_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, created_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/APIKeyCreatedResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_APIKeyResponse_"
                 }
               }
             }
@@ -1337,24 +1568,40 @@
       }
     },
     "/api/v1/auth/oidc-providers": {
-      "get": {
+      "post": {
         "tags": [
           "OIDC Providers"
         ],
-        "summary": "List Providers",
-        "description": "List all OIDC providers (admin only).",
-        "operationId": "list_providers_api_v1_auth_oidc_providers_get",
+        "summary": "Create Provider",
+        "description": "Create a new OIDC provider configuration (admin only).",
+        "operationId": "create_provider_api_v1_auth_oidc_providers_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProviderRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/ProviderResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Providers Api V1 Auth Oidc Providers Get"
+                  "$ref": "#/components/schemas/ProviderResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1366,30 +1613,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "OIDC Providers"
         ],
-        "summary": "Create Provider",
-        "description": "Create a new OIDC provider configuration (admin only).",
-        "operationId": "create_provider_api_v1_auth_oidc_providers_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateProviderRequest"
-              }
+        "summary": "List Providers",
+        "description": "List OIDC providers (admin only), paginated.",
+        "operationId": "list_providers_api_v1_auth_oidc_providers_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in provider name/display name",
+              "title": "Search"
+            },
+            "description": "Search in provider name/display name"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, type, created_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, type, created_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ProviderResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_ProviderResponse_"
                 }
               }
             }
@@ -1659,24 +1967,40 @@
       }
     },
     "/api/v1/orgs": {
-      "get": {
+      "post": {
         "tags": [
           "Organisations"
         ],
-        "summary": "List Orgs",
-        "description": "List organisations visible to the caller.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
-        "operationId": "list_orgs_api_v1_orgs_get",
+        "summary": "Create Org",
+        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
+        "operationId": "create_org_api_v1_orgs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOrgRequest"
+              }
+            }
+          }
+        },
         "responses": {
-          "200": {
+          "201": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "items": {
-                    "$ref": "#/components/schemas/OrgResponse"
-                  },
-                  "type": "array",
-                  "title": "Response List Orgs Api V1 Orgs Get"
+                  "$ref": "#/components/schemas/OrgResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1688,30 +2012,91 @@
           }
         ]
       },
-      "post": {
+      "get": {
         "tags": [
           "Organisations"
         ],
-        "summary": "Create Org",
-        "description": "Create a new customer organisation (admin only).\n\nIf HyperDX integration is enabled, the lifecycle manager handles\nteam creation as part of org provisioning.  Failure is non-fatal.",
-        "operationId": "create_org_api_v1_orgs_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/CreateOrgRequest"
-              }
+        "summary": "List Orgs",
+        "description": "List organisations visible to the caller, paginated.\n\nSystem-scope org:read holders see every org; org-scope holders see\nonly the orgs their grants cover.",
+        "operationId": "list_orgs_api_v1_orgs_get",
+        "parameters": [
+          {
+            "name": "search",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search in org name/display name",
+              "title": "Search"
+            },
+            "description": "Search in org name/display name"
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Sort field (name, display_name, updated_at)",
+              "title": "Sort By"
+            },
+            "description": "Sort field (name, display_name, updated_at)"
+          },
+          {
+            "name": "sort_order",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Sort order: asc/desc",
+              "default": "asc",
+              "title": "Sort Order"
+            },
+            "description": "Sort order: asc/desc"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
             }
           },
-          "required": true
-        },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
         "responses": {
-          "201": {
+          "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/OrgResponse"
+                  "$ref": "#/components/schemas/PaginatedResponse_OrgResponse_"
                 }
               }
             }
@@ -9439,6 +9824,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -9504,6 +9892,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -9574,6 +9965,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -9647,6 +10041,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -9737,6 +10134,9 @@
             }
           }
         },
+        "x-cli": {
+          "enabled": false
+        },
         "security": [
           {
             "BearerAuth": []
@@ -9802,6 +10202,9 @@
               }
             }
           }
+        },
+        "x-cli": {
+          "enabled": false
         },
         "security": [
           {
@@ -13307,6 +13710,138 @@
         ],
         "title": "OrphanedGroupInfo"
       },
+      "PaginatedResponse_APIKeyResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/APIKeyResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[APIKeyResponse]"
+      },
+      "PaginatedResponse_AccountResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AccountResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[AccountResponse]"
+      },
       "PaginatedResponse_AlertDestinationSummary_": {
         "properties": {
           "items": {
@@ -13505,6 +14040,72 @@
         ],
         "title": "PaginatedResponse[FieldMapSummary]"
       },
+      "PaginatedResponse_GroupResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GroupResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[GroupResponse]"
+      },
       "PaginatedResponse_HuntSummary_": {
         "properties": {
           "items": {
@@ -13570,6 +14171,138 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[HuntSummary]"
+      },
+      "PaginatedResponse_OrgResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OrgResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[OrgResponse]"
+      },
+      "PaginatedResponse_ProviderResponse_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ProviderResponse"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[ProviderResponse]"
       },
       "PaginatedResponse_RoleResponse_": {
         "properties": {

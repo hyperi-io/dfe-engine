@@ -52,7 +52,7 @@ class TestOrgApiWithLifecycle:
             assert field in data, f"Missing field: {field}"
 
     def test_list_orgs_returns_created(self, client, admin_headers):
-        """GET /api/v1/orgs returns the created orgs as a plain array."""
+        """GET /api/v1/orgs returns the created orgs in a paginated envelope."""
         client.post(
             "/api/v1/orgs",
             json={"name": "list-test", "org_ids": ["lt"]},
@@ -60,10 +60,10 @@ class TestOrgApiWithLifecycle:
         )
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        orgs = resp.json()
-        # The list endpoint returns a plain array (not paginated)
-        assert isinstance(orgs, list)
-        names = [o["name"] for o in orgs]
+        body = resp.json()
+        # The list endpoint returns a PaginatedResponse envelope.
+        assert isinstance(body["items"], list)
+        names = [o["name"] for o in body["items"]]
         assert "list-test" in names
 
     def test_get_org_by_name(self, client, admin_headers):

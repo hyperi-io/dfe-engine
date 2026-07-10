@@ -133,7 +133,7 @@ class TestOrgLifecycleE2E:
         )
         resp = e2e_client.get("/api/v1/orgs", headers=headers)
         assert resp.status_code == 200
-        names = [o["name"] for o in resp.json()]
+        names = [o["name"] for o in resp.json()["items"]]
         assert "list-org-a" in names
         assert "list-org-b" in names
 

@@ -32,6 +32,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from scalo.logger import logger
 
+from dfe_engine.api.cli_exposure import CLI_HIDDEN
 from dfe_engine.api.deps import (
     ClickHouseClient,
     CurrentUser,
@@ -237,7 +238,7 @@ def _precondition_failed(current_etag: str | None) -> JSONResponse:
 # ── Preferences (dfe-ui fast path) ───────────────────────────
 
 
-@router.get("/preferences", response_model=PreferencesResponse)
+@router.get("/preferences", response_model=PreferencesResponse, openapi_extra=CLI_HIDDEN)
 async def get_preferences(
     user: CurrentUser,
     ch_client: ClickHouseClient,
@@ -248,7 +249,7 @@ async def get_preferences(
     return _effective_preferences(store, user)
 
 
-@router.patch("/preferences", response_model=PreferencesResponse)
+@router.patch("/preferences", response_model=PreferencesResponse, openapi_extra=CLI_HIDDEN)
 async def patch_preferences(
     user: CurrentUser,
     ch_client: ClickHouseClient,
@@ -296,7 +297,11 @@ async def patch_preferences(
 # ── Objects (generic) ────────────────────────────────────────
 
 
-@router.get("/objects/{scope}/{scope_id}/{namespace}", response_model=list[ObjectEntry])
+@router.get(
+    "/objects/{scope}/{scope_id}/{namespace}",
+    response_model=list[ObjectEntry],
+    openapi_extra=CLI_HIDDEN,
+)
 async def list_objects(
     scope: str,
     scope_id: str,
@@ -313,7 +318,7 @@ async def list_objects(
     return store.list(scope, stored_id, namespace)
 
 
-@router.get("/objects/{scope}/{scope_id}/{namespace}/{key}")
+@router.get("/objects/{scope}/{scope_id}/{namespace}/{key}", openapi_extra=CLI_HIDDEN)
 async def get_object(
     scope: str,
     scope_id: str,
@@ -338,7 +343,11 @@ async def get_object(
     )
 
 
-@router.put("/objects/{scope}/{scope_id}/{namespace}/{key}", response_model=ObjectMetadata)
+@router.put(
+    "/objects/{scope}/{scope_id}/{namespace}/{key}",
+    response_model=ObjectMetadata,
+    openapi_extra=CLI_HIDDEN,
+)
 async def put_object(
     scope: str,
     scope_id: str,
@@ -387,7 +396,11 @@ async def put_object(
     return ObjectMetadata(**meta)
 
 
-@router.delete("/objects/{scope}/{scope_id}/{namespace}/{key}", status_code=204)
+@router.delete(
+    "/objects/{scope}/{scope_id}/{namespace}/{key}",
+    status_code=204,
+    openapi_extra=CLI_HIDDEN,
+)
 async def delete_object(
     scope: str,
     scope_id: str,

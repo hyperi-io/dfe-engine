@@ -83,14 +83,14 @@ class TestListProviders:
     def test_list_empty(self, client, admin_headers):
         resp = client.get("/api/v1/auth/oidc-providers", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        assert resp.json()["items"] == []
 
     def test_list_after_create(self, client, admin_headers):
         _create_provider(client, admin_headers, name="prov-a")
         _create_provider(client, admin_headers, name="prov-b")
         resp = client.get("/api/v1/auth/oidc-providers", headers=admin_headers)
         assert resp.status_code == 200
-        names = [p["name"] for p in resp.json()]
+        names = [p["name"] for p in resp.json()["items"]]
         assert "prov-a" in names
         assert "prov-b" in names
 

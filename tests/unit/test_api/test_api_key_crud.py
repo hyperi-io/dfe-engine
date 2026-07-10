@@ -76,7 +76,7 @@ class TestListAPIKeys:
         )
         resp = client.get("/api/v1/auth/api-keys", headers=admin_headers)
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         assert isinstance(data, list)
         assert any(k["name"] == "list-key" for k in data)
         # No sensitive data leaked
@@ -106,7 +106,7 @@ class TestRevokeAPIKey:
 
         # Confirm it's gone from the list
         list_resp = client.get("/api/v1/auth/api-keys", headers=admin_headers)
-        names = [k["name"] for k in list_resp.json()]
+        names = [k["name"] for k in list_resp.json()["items"]]
         assert "revoke-key" not in names
 
     def test_revoke_nonexistent_returns_404(self, client, admin_headers):
