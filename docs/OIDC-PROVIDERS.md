@@ -220,11 +220,11 @@ for one provider. Same flow as periodic, just on demand.
 
 ```
 Stage 1 (Day 0): Provider attached with mode=manual
-    → Admin creates group files: dfe-api groups create "abc123-guid" --roles data_analyst
+    → Admin creates group files: dfe groups create "abc123-guid" --roles data_analyst
     → Auth works immediately with raw GUIDs from X-Oidc-Groups
 
 Stage 2 (Day N): Cloud ops grants API access, admin updates mode to "api"
-    → dfe-api oidc-providers update entra-corp --mode api
+    → dfe oidc-providers update entra-corp --mode api
     → Sync runs: fetches group names, creates named group files
     → GUID-based group files still work (not deleted)
     → Admin migrates: assigns roles to named groups, removes GUID groups
@@ -253,7 +253,7 @@ GET    /api/v1/auth/oidc-providers/{name}/test  # Test connectivity (admin)
         {"name": "engineering@customer.com", "source_provider": "google-workspace", "roles": ["data_analyst"], "members": 3},
         {"name": "soc-team@customer.com", "source_provider": "google-workspace", "roles": [], "members": 0}
     ],
-    "message": "Provider detached. 2 groups were auto-created by this provider and still exist. Delete them manually with dfe-api groups delete <name> if no longer needed."
+    "message": "Provider detached. 2 groups were auto-created by this provider and still exist. Delete them manually with dfe groups delete <name> if no longer needed."
 }
 ```
 
@@ -262,24 +262,24 @@ GET    /api/v1/auth/oidc-providers/{name}/test  # Test connectivity (admin)
 ## 7. CLI Commands
 
 ```bash
-dfe-api oidc-providers create my-google --type google
+dfe oidc-providers create my-google --type google
   # Creates config file, prompts for required fields or reads from flags
 
-dfe-api oidc-providers list
+dfe oidc-providers list
   # Table: name, type, enabled, mode, last_sync_at, status
 
-dfe-api oidc-providers show my-google
+dfe oidc-providers show my-google
   # Full config (secrets redacted)
 
-dfe-api oidc-providers test my-google
+dfe oidc-providers test my-google
   # Tests connectivity, prints result
 
-dfe-api oidc-providers sync my-google
+dfe oidc-providers sync my-google
   # Force sync, prints groups found/created/updated
 
-dfe-api oidc-providers update my-google --mode api --sync-interval 1800
+dfe oidc-providers update my-google --mode api --sync-interval 1800
 
-dfe-api oidc-providers delete my-google
+dfe oidc-providers delete my-google
   # Warns about orphaned groups, confirms
 ```
 
