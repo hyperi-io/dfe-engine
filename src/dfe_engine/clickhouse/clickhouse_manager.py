@@ -10,17 +10,40 @@
 ClickHouse connection management using clickhouse-connect.
 
 Uses the official ClickHouse Inc. driver with built-in HTTP connection pooling.
+
+Every data-plane op runs through scalo's
+:class:`~scalo.resilience.ReconnectingResilience`, which the manager binds to
+ClickHouse: a CONNECTION outage (transport error or a CH connection code) backs
+off AND rebuilds the pooled client between attempts; a RATE_LIMITED (202) error
+backs off WITHOUT reconnecting (the connection is fine, the server is busy); a
+genuine query error (syntax / memory / access / exec-timeout) surfaces
+immediately un-retried. When ``clickhouse.cloud.autowake`` is on, a connection
+outage additionally fires the CH Cloud resume hook (START a stopped/idle
+service) and extends the budget to the cold-start window. The CH error
+classifiers live in :mod:`dfe_engine.clickhouse.errors`; the generic engine lives
+in scalo (promoted from dfe in scalo 2.29.6). Budget exhaustion raises scalo's
+:class:`~scalo.resilience.ServiceUnavailable`, which the API maps to 503.
 """
 
+from __future__ import annotations
+
+from collections.abc import Callable
 from threading import Lock
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, TypeVar
 
 import clickhouse_connect
 from clickhouse_connect.driver import Client, httputil
 from scalo.crypto import tls_parts
 from scalo.logger import logger
+from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUnavailable
 
 from ..settings import get_settings
+from .errors import is_connection_error, is_retryable_error
+
+if TYPE_CHECKING:
+    from ..settings import DFESettings
+
+T = TypeVar("T")
 
 
 class ClickHouseClientWrapper:
@@ -32,12 +55,19 @@ class ClickHouseClientWrapper:
     - query() for SELECT statements that return data
 
     This wrapper provides execute() that auto-routes to the appropriate method.
+
+    Every op runs through the manager's resilience layer
+    (:meth:`ClickHouseManager.run_resilient`), so a transient CH outage reconnects
+    and recovers transparently; the ``_client`` property always resolves the LIVE
+    pooled client, so an op re-run after a reconnect uses the rebuilt one and
+    external admin paths (RBAC reconcile, the sampler unwrap) that reach for the
+    raw driver client still work.
     """
 
-    def __init__(self, client: Client):
-        self._client = client
+    def __init__(self, manager: ClickHouseManager):
+        self._manager = manager
 
-    def __enter__(self) -> "ClickHouseClientWrapper":
+    def __enter__(self) -> ClickHouseClientWrapper:
         # The ClickHouseManager singleton owns the underlying client's lifecycle;
         # `with get_clickhouse_client() as ch` is scoping sugar only, so __exit__
         # must NOT close the shared client out from under other callers.
@@ -46,17 +76,30 @@ class ClickHouseClientWrapper:
     def __exit__(self, *exc: object) -> bool:
         return False
 
+    @property
+    def _client(self) -> Client:
+        """The LIVE clickhouse-connect client (lazily built; rebuilt after a
+        reconnect).
+
+        A property, not a stored reference, so (a) an op re-run inside the
+        resilience loop after ``reconnect`` picks up the freshly rebuilt pooled
+        client, and (b) the admin paths that reach for the raw driver client
+        (``.get_clickhouse_client()._client`` for the RBAC reconcile; the sampler's
+        ``_raw_client`` unwrap) keep resolving.
+        """
+        return self._manager._live_client()
+
     def query(self, query: str, *args, **kwargs):
         """Raw SELECT -> the clickhouse-connect QueryResult (``.column_names`` /
         ``.result_rows``). Use when the caller needs the result object;
         ``execute()`` yields only result_rows and ``query_rows()`` returns
         ``(columns, rows)``.
         """
-        return self._client.query(query, *args, **kwargs)
+        return self._manager.run_resilient(lambda: self._client.query(query, *args, **kwargs))
 
     def command(self, statement: str, *args, **kwargs):
         """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
-        return self._client.command(statement, *args, **kwargs)
+        return self._manager.run_resilient(lambda: self._client.command(statement, *args, **kwargs))
 
     def query_rows(self, query: str, *args, **kwargs):
         """Run a SELECT and return ``(column_names, result_rows)``.
@@ -66,8 +109,12 @@ class ClickHouseClientWrapper:
         assemble row dicts. Use this when the caller needs to map values back to
         their columns (e.g. sampling whole rows).
         """
-        result = self._client.query(query, *args, **kwargs)
-        return list(result.column_names), result.result_rows
+
+        def op():
+            result = self._client.query(query, *args, **kwargs)
+            return list(result.column_names), result.result_rows
+
+        return self._manager.run_resilient(op)
 
     def execute(self, query: str, *args, **kwargs):
         """
@@ -80,7 +127,10 @@ class ClickHouseClientWrapper:
         query = query.strip().rstrip(";").strip()
 
         # Check if this is a multi-statement query
-        # Simple heuristic: if there's a semicolon not inside quotes, split
+        # Simple heuristic: if there's a semicolon not inside quotes, split.
+        # Each statement is its OWN resilient unit (via _execute_single), so a
+        # reconnect mid-batch re-runs only the failing statement, never the ones
+        # already applied.
         if ";" in query:
             # Split and execute each statement
             statements = [s.strip() for s in query.split(";") if s.strip()]
@@ -92,17 +142,20 @@ class ClickHouseClientWrapper:
         return self._execute_single(query, *args, **kwargs)
 
     def _execute_single(self, query: str, *args, **kwargs):
-        """Execute a single query statement."""
+        """Execute a single query statement through the resilience layer."""
         query_upper = query.strip().upper()
 
         # DESCRIBE, DESC, EXISTS, EXPLAIN, SHOW return data - use query()
         if query_upper.startswith(("DESCRIBE", "DESC", "EXISTS", "EXPLAIN", "SHOW")):
-            return self._client.query(query, *args, **kwargs).result_rows
+            return self._manager.run_resilient(
+                lambda: self._client.query(query, *args, **kwargs).result_rows
+            )
 
         # INSERT with data - use insert() method
         # clickhouse-driver style: execute("INSERT INTO table (cols) VALUES", [(data, ...)])
         if query_upper.startswith("INSERT") and args and isinstance(args[0], (list, tuple)):
-            return self._handle_insert_with_data(query, args[0])
+            data = args[0]
+            return self._manager.run_resilient(lambda: self._handle_insert_with_data(query, data))
 
         # DDL/DML commands that don't return data go to command()
         if query_upper.startswith(
@@ -128,10 +181,12 @@ class ClickHouseClientWrapper:
                 "KILL",
             )
         ):
-            return self._client.command(query, *args, **kwargs)
+            return self._manager.run_resilient(lambda: self._client.command(query, *args, **kwargs))
 
         # SELECT queries return data
-        return self._client.query(query, *args, **kwargs).result_rows
+        return self._manager.run_resilient(
+            lambda: self._client.query(query, *args, **kwargs).result_rows
+        )
 
     def _handle_insert_with_data(self, query: str, data: list):
         """Handle INSERT statements with data using clickhouse-connect's insert() method.
@@ -163,17 +218,41 @@ class ClickHouseManager:
 
     Uses built-in HTTP connection pooling via urllib3.
     Pool configuration is managed via settings.clickhouse.connections_max.
+
+    Owns the scalo :class:`~scalo.resilience.ReconnectingResilience` that every
+    data-plane op runs through (see :meth:`run_resilient`): it injects the CH
+    error classifiers, the reconnect (rebuild the pooled client) and - when
+    ``clickhouse.cloud.autowake`` is on - the CH Cloud resume hook.
     """
 
     _instance = None  # Singleton instance
 
-    def __init__(self, target_config_data: dict | None = None):
+    def __init__(
+        self,
+        target_config_data: dict | None = None,
+        *,
+        settings: DFESettings | None = None,
+        sleep: Callable[[float], None] | None = None,
+        now: Callable[[], float] | None = None,
+        cloud_service: Any | None = None,
+    ):
         self.lock = Lock()
         self.target_config_data = target_config_data or {}
-        settings = get_settings()
-        self.connections_max = settings.clickhouse.connections_max
+        self._settings = settings or get_settings()
+        self.connections_max = self._settings.clickhouse.connections_max
         self._client: Client | None = None
         self._pool_manager = None
+        # Reconnect-and-retry engine (scalo), built lazily on first op so the
+        # classifiers + config are read once the settings are in place.
+        self._resilience: ReconnectingResilience | None = None
+        # Injectable clock -> the resilience layer (tests pass fakes so they never
+        # really sleep and never race a wall clock).
+        self._sleep = sleep
+        self._now = now
+        # Injectable CH Cloud lifecycle seam for the autowake resume hook. Tests
+        # inject a DOUBLE so no paid Cloud instance is ever touched; production
+        # builds one from the clickhouse.cloud control-plane settings.
+        self._cloud_service = cloud_service
 
     @classmethod
     def get_instance(cls, target_config_data: dict | None = None):
@@ -189,20 +268,100 @@ class ClickHouseManager:
             cls._instance = None
 
     def get_clickhouse_client(self) -> ClickHouseClientWrapper:
-        """Get a ClickHouse client with connection pooling.
+        """Get a ClickHouse client wrapper with connection pooling + resilience.
 
-        Returns a wrapper that provides backward-compatible execute() method.
+        Returns a wrapper whose ops run through the resilience layer; the client
+        itself is built lazily on first use (so an INITIAL connect to a stopped CH
+        Cloud service is covered by the same reconnect/auto-wake path as a
+        mid-session drop). Returns a wrapper that provides the backward-compatible
+        execute() method.
+        """
+        return ClickHouseClientWrapper(self)
+
+    def run_resilient(self, op: Callable[[], T]) -> T:
+        """Run *op* through the reconnect-and-retry engine.
+
+        A transient CH outage backs off and recovers on the next success (a
+        connection outage also rebuilds the pooled client + may auto-wake); a
+        genuine query error surfaces immediately; budget exhaustion raises
+        :class:`~scalo.resilience.ServiceUnavailable` (API -> 503).
+        """
+        return self._get_resilience().run(op)
+
+    def _live_client(self) -> Client:
+        """Return the live pooled client, building it if absent (or after a reconnect)."""
+        if self._client is None:
+            self._initialize_client()
+        if self._client is None:  # _initialize_client sets it or raises
+            raise RuntimeError("ClickHouse client failed to initialise")
+        return self._client
+
+    def _reconnect(self) -> None:
+        """Resilience reconnect hook: tear the pooled client down so the next op
+        rebuilds a fresh one against the recovered (or newly-woken) server."""
+        self._cleanup()
+
+    def _get_resilience(self) -> ReconnectingResilience:
+        """Build (once) the CH-bound reconnect-and-retry engine from settings.
+
+        Injects the CH error classifiers (connection vs rate-limit vs genuine
+        query error), the reconnect, and - only when ``clickhouse.cloud.autowake``
+        is on - the Cloud resume hook. Config is the ``clickhouse.resilience``
+        block (config-cascade), passed straight into scalo's ``ResilienceConfig``.
+        """
+        if self._resilience is None:
+            ch = self._settings.clickhouse
+            config = ResilienceConfig(**ch.resilience.model_dump())
+            clock: dict[str, Any] = {}
+            if self._sleep is not None:
+                clock["sleep"] = self._sleep
+            if self._now is not None:
+                clock["now"] = self._now
+            self._resilience = ReconnectingResilience(
+                config,
+                name="ClickHouse",
+                is_transient=is_retryable_error,
+                is_reconnectable=is_connection_error,
+                reconnect=self._reconnect,
+                on_connect_failure=self._autowake_resume if ch.cloud.autowake else None,
+                unavailable_exc=ServiceUnavailable,
+                **clock,
+            )
+        return self._resilience
+
+    def _autowake_resume(self) -> bool:
+        """on_connect_failure hook (wired ONLY when clickhouse.cloud.autowake is on).
+
+        A CH connection outage may be a stopped/idle CH Cloud service, so START it
+        (billable) and report a wake so the resilience budget extends to the
+        cold-start window; the reconnect loop then recovers the INSTANT the woken
+        service accepts connections. Returns False (a plain transient outage) when
+        the service is already running/starting or the wake could not be initiated
+        - never lets a lifecycle error escape into the retry loop.
         """
         try:
-            if self._client is None:
-                self._initialize_client()
-            if self._client is None:  # _initialize_client sets it or raises
-                raise RuntimeError("ClickHouse client failed to initialise")
-            return ClickHouseClientWrapper(self._client)
+            service = self._cloud_service_for_autowake()
+            status = service.status()
+            if status.is_running or status.state == "starting":
+                return False
+            service.start()  # idempotent + billable
+            logger.info("CH Cloud autowake: resume issued, extending resilience budget")
+            return True
+        except Exception as exc:
+            logger.warning("CH Cloud autowake resume failed", error=str(exc))
+            return False
 
-        except Exception as e:
-            logger.error(f"An unexpected error occurred during client acquisition: {e}")
-            raise
+    def _cloud_service_for_autowake(self):
+        """The CH Cloud lifecycle driver for the autowake hook.
+
+        Tests inject a double via the constructor's ``cloud_service`` so no paid
+        instance is touched; production builds one from the control-plane settings.
+        """
+        if self._cloud_service is not None:
+            return self._cloud_service
+        from .cloud import CloudService
+
+        return CloudService(self._settings.clickhouse.cloud)
 
     def _initialize_client(self):
         """Initialize the ClickHouse client with connection pooling."""

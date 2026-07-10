@@ -24,8 +24,9 @@ error - a retry is futile and wastes the budget. Branch on ``code``, never on
 message strings. Code 517 (ON CLUSTER replica-metadata lag) is retried only on the
 DDL/migration path, not here.
 
-Folds the old ``clickhouse_errors_mapping`` (its ClickHouseErrorHandler was used
-only by resilience.py).
+Superseded and folded in the old ``clickhouse_errors_mapping`` (now removed): its
+coarse code->message table only ever served the resilience retry decision, which
+this taxonomy now owns.
 """
 
 from __future__ import annotations
@@ -172,8 +173,9 @@ def classify(exc: BaseException) -> ErrorCategory:
 def is_retryable_error(exc: BaseException) -> bool:
     """True when a backoff retry may help - CONNECTION or RATE_LIMITED only.
 
-    Excludes 241/159/160 + query-logic errors (a retry is futile). This is what
-    :class:`~dfe_engine.clickhouse.resilience.ChResilience` keys off.
+    Excludes 241/159/160 + query-logic errors (a retry is futile). This is the
+    ``is_transient`` classifier the ClickHouse manager injects into scalo's
+    :class:`~scalo.resilience.ReconnectingResilience`.
     """
     return classify(exc) in _RETRYABLE_CATEGORIES
 
