@@ -6,8 +6,9 @@ GET /api/v1/system/settings    → Redacted settings summary
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -72,6 +73,102 @@ async def get_settings(user: CurrentUser, settings: Settings):
         api_host=settings.api.host,
         api_port=settings.api.port,
         api_cors_origins=settings.api.cors_origins,
+    )
+
+
+# ── ClickHouse Cloud lifecycle (control plane) ───────────────
+
+
+class CloudServiceStateResponse(BaseModel):
+    """CH Cloud service control-plane state (see docs/CLICKHOUSE-CLOUD.md)."""
+
+    configured: bool = Field(description="Whether the CH Cloud control-plane key is set.")
+    id: str = Field(default="", description="CH Cloud service id.")
+    name: str = Field(default="", description="CH Cloud service name.")
+    state: str = Field(
+        default="", description="running / stopped / idle / starting / stopping / ..."
+    )
+    is_running: bool = Field(default=False, description="True when the service is running.")
+
+
+def _cloud_state(settings) -> CloudServiceStateResponse:
+    from dfe_engine.clickhouse.cloud import CloudService, CloudServiceError
+
+    cloud = settings.clickhouse.cloud
+    if not cloud.configured:
+        return CloudServiceStateResponse(configured=False)
+    try:
+        st = CloudService(cloud).status()
+    except CloudServiceError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
+        ) from exc
+    return CloudServiceStateResponse(
+        configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
+    )
+
+
+@router.get(
+    "/clickhouse-cloud",
+    response_model=CloudServiceStateResponse,
+    dependencies=[Depends(require_action(scopes_dict["system_read"]))],
+)
+def clickhouse_cloud_status(user: CurrentUser, settings: Settings):
+    """CH Cloud service control-plane status (read-only)."""
+    return _cloud_state(settings)
+
+
+@router.post(
+    "/clickhouse-cloud/start",
+    response_model=CloudServiceStateResponse,
+    dependencies=[Depends(require_action(scopes_dict["clickhouse_cloud_manage"]))],
+)
+def clickhouse_cloud_start(user: CurrentUser, settings: Settings):
+    """Start (wake) the CH Cloud service. BILLABLE + admin-gated + audited."""
+    from dfe_engine.clickhouse.cloud import CloudService, CloudServiceError
+
+    cloud = settings.clickhouse.cloud
+    if not cloud.configured:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "ClickHouse Cloud is not configured"},
+        )
+    logger.info("CH Cloud start requested via API", actor=getattr(user, "username", "?"))
+    try:
+        st = CloudService(cloud).start()
+    except CloudServiceError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
+        ) from exc
+    return CloudServiceStateResponse(
+        configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
+    )
+
+
+@router.post(
+    "/clickhouse-cloud/stop",
+    response_model=CloudServiceStateResponse,
+    dependencies=[Depends(require_action(scopes_dict["clickhouse_cloud_manage"]))],
+)
+def clickhouse_cloud_stop(user: CurrentUser, settings: Settings):
+    """Stop the CH Cloud service (saves cost). Admin-gated + audited."""
+    from dfe_engine.clickhouse.cloud import CloudService, CloudServiceError
+
+    cloud = settings.clickhouse.cloud
+    if not cloud.configured:
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_configured", "message": "ClickHouse Cloud is not configured"},
+        )
+    logger.info("CH Cloud stop requested via API", actor=getattr(user, "username", "?"))
+    try:
+        st = CloudService(cloud).stop()
+    except CloudServiceError as exc:
+        raise HTTPException(
+            status_code=502, detail={"code": "cloud_error", "message": str(exc)}
+        ) from exc
+    return CloudServiceStateResponse(
+        configured=True, id=st.id, name=st.name, state=st.state, is_running=st.is_running
     )
 
 

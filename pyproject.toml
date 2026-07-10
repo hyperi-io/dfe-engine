@@ -10,7 +10,8 @@ readme = "README.md"
 dependencies = [
     # scalo (Apache-2.0 rename/continuation of hyperi-pylib) for logging + common utils
     # >=2.29.5: scalo.crypto CryptoProfile posture + TLS escape valves (SCALO_TLS_*)
-    "scalo[expression,http]>=2.29.5",
+    # >=2.29.6: scalo.resilience ReconnectingResilience (+ OutageState/ResilienceConfig/ServiceUnavailable)
+    "scalo[expression,http]>=2.29.6",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

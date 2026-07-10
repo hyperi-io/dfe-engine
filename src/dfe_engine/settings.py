@@ -30,6 +30,15 @@ ClickHouse:
 - DFE_CLICKHOUSE_CONNECTIONS_MIN -> clickhouse.connections_min
 - DFE_CLICKHOUSE_CONNECTIONS_MAX -> clickhouse.connections_max
 
+ClickHouse Cloud (control plane; opt-in, billable):
+- DFE_CLICKHOUSE_CLOUD_API_KEY_ID -> clickhouse.cloud.api_key_id
+- DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET -> clickhouse.cloud.api_key_secret
+- DFE_CLICKHOUSE_CLOUD_API_BASE -> clickhouse.cloud.api_base
+- DFE_CLICKHOUSE_CLOUD_ORGANIZATION_ID -> clickhouse.cloud.organization_id
+- DFE_CLICKHOUSE_CLOUD_SERVICE_ID -> clickhouse.cloud.service_id
+- DFE_CLICKHOUSE_CLOUD_SERVICE (or _SERVICE_NAME) -> clickhouse.cloud.service_name
+- DFE_CLICKHOUSE_CLOUD_AUTOWAKE -> clickhouse.cloud.autowake (true/false)
+
 Hunts:
 - DFE_HUNT_LOG_PATH -> hunts.log_path
 - DFE_HUNTS_DIR -> hunts.hunt_dir
@@ -101,6 +110,47 @@ def _get_env(primary: str, *fallbacks: str) -> str | None:
     return None
 
 
+class ClickHouseCloudSettings(BaseModel):
+    """ClickHouse Cloud service-lifecycle config (CONTROL PLANE; opt-in).
+
+    Separate from the SQL connection (the regular ``clickhouse.*`` block pointed
+    at a ``*.clickhouse.cloud`` host). This block is the CONTROL-PLANE management
+    API (``api.clickhouse.cloud``) used to see / start / stop the service - a
+    BILLABLE lever, off by default. The api key needs only service read +
+    state-management (a SERVICE-SCOPED key, NOT an org-admin key); see
+    docs/CLICKHOUSE-CLOUD.md.
+    """
+
+    api_key_id: str = Field(default="", description="CH Cloud mgmt API key id (control plane).")
+    api_key_secret: str = Field(
+        default="", description="CH Cloud mgmt API key secret (control plane)."
+    )
+    api_base: str = Field(
+        default="https://api.clickhouse.cloud/v1", description="CH Cloud management API base URL."
+    )
+    organization_id: str = Field(
+        default="", description="CH Cloud org id (empty = auto-discover the first org for the key)."
+    )
+    service_id: str = Field(
+        default="", description="CH Cloud service UUID (takes precedence over service_name)."
+    )
+    service_name: str = Field(
+        default="dfe", description="CH Cloud service name to select when service_id is empty."
+    )
+    autowake: bool = Field(
+        default=False,
+        description=(
+            "Opt-in: on a CH connect failure, if the Cloud service is stopped/idle, START it "
+            "(billable). OFF by default; requires the api key + a non-prod posture."
+        ),
+    )
+
+    @property
+    def configured(self) -> bool:
+        """True when the control-plane creds are present (lifecycle usable)."""
+        return bool(self.api_key_id and self.api_key_secret)
+
+
 class ClickHouseSettings(BaseModel):
     """ClickHouse connection settings."""
 
@@ -158,6 +208,7 @@ class ClickHouseSettings(BaseModel):
     # variant the engine registry permits; may be parameterised
     # (e.g. "ReplacingMergeTree(version)").
     default_engine: str = Field(default="MergeTree")
+    cloud: ClickHouseCloudSettings = Field(default_factory=ClickHouseCloudSettings)
 
     @property
     def effective_data_database(self) -> str:
@@ -904,6 +955,25 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["connections_max"] = int(val)
     if val := _get_env("DFE_CLICKHOUSE_TOPOLOGY"):
         overrides["clickhouse"]["topology"] = val
+
+    # ClickHouse Cloud lifecycle (control-plane mgmt API; opt-in, billable).
+    ch_cloud: dict = {}
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_ID"):
+        ch_cloud["api_key_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_KEY_SECRET"):
+        ch_cloud["api_key_secret"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_API_BASE"):
+        ch_cloud["api_base"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_ORGANIZATION_ID"):
+        ch_cloud["organization_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE_ID"):
+        ch_cloud["service_id"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_SERVICE", "DFE_CLICKHOUSE_CLOUD_SERVICE_NAME"):
+        ch_cloud["service_name"] = val
+    if val := _get_env("DFE_CLICKHOUSE_CLOUD_AUTOWAKE"):
+        ch_cloud["autowake"] = val.lower() in ("true", "1", "yes")
+    if ch_cloud:
+        overrides["clickhouse"]["cloud"] = ch_cloud
 
     # Hunts settings
     if val := _get_env("DFE_HUNT_LOG_PATH", "HUNT_LOG_PATH"):

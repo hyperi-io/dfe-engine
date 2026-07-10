@@ -4941,6 +4941,87 @@
         ]
       }
     },
+    "/api/v1/system/clickhouse-cloud": {
+      "get": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Status",
+        "description": "CH Cloud service control-plane status (read-only).",
+        "operationId": "clickhouse_cloud_status_api_v1_system_clickhouse_cloud_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clickhouse-cloud/start": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Start",
+        "description": "Start (wake) the CH Cloud service. BILLABLE + admin-gated + audited.",
+        "operationId": "clickhouse_cloud_start_api_v1_system_clickhouse_cloud_start_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/system/clickhouse-cloud/stop": {
+      "post": {
+        "tags": [
+          "System"
+        ],
+        "summary": "Clickhouse Cloud Stop",
+        "description": "Stop the CH Cloud service (saves cost). Admin-gated + audited.",
+        "operationId": "clickhouse_cloud_stop_api_v1_system_clickhouse_cloud_stop_post",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CloudServiceStateResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/transforms/compile": {
       "post": {
         "tags": [
@@ -10458,6 +10539,45 @@
         },
         "type": "object",
         "title": "ClientConfig"
+      },
+      "CloudServiceStateResponse": {
+        "properties": {
+          "configured": {
+            "type": "boolean",
+            "title": "Configured",
+            "description": "Whether the CH Cloud control-plane key is set."
+          },
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "CH Cloud service id.",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "CH Cloud service name.",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "running / stopped / idle / starting / stopping / ...",
+            "default": ""
+          },
+          "is_running": {
+            "type": "boolean",
+            "title": "Is Running",
+            "description": "True when the service is running.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "configured"
+        ],
+        "title": "CloudServiceStateResponse",
+        "description": "CH Cloud service control-plane state (see docs/CLICKHOUSE-CLOUD.md)."
       },
       "ColumnInfo": {
         "properties": {
