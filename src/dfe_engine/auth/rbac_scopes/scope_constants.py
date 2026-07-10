@@ -39,6 +39,11 @@ cel_scopes = {
     "cel_check": "cel:check",
 }
 
+# ClickHouse Cloud service lifecycle (control plane; start/stop is billable).
+clickhouse_cloud_scopes = {
+    "clickhouse_cloud_manage": "clickhouse_cloud:manage",
+}
+
 # Not used in API but required for UI & HyperDX
 dashboard_scopes = {"dashboard_read": "dashboard:read"}
 
