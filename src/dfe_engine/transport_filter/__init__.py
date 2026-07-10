@@ -8,7 +8,7 @@
 
 """Transport filter configuration helpers.
 
-Mirrors the `hyperi_rustlib::transport::filter` module — provides Pydantic
+Mirrors the `scalo::transport::filter` module — provides Pydantic
 models, CEL syntax classifier, and validation for transport-level message
 filters. Used by the control plane to validate filter configs before they
 reach rustlib at service startup.
