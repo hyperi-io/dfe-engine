@@ -72,6 +72,23 @@ the clean single-host wiring of Scenario 2. A green hybrid run tells you the
 code path works. It does not tell you the product deploys. Keep them for
 speed, not for sign-off.
 
+## Iteration model - current vs intended
+
+How a fix is driven from code to a verified deploy. This is a workflow, not the
+acceptance itself - the two scenarios above hold either way.
+
+**Current - patch-loop on main.** While main control is held centrally, a fix
+lands straight on main, is built and published to the container registry
+(GHCR), then deployed to the dfe-k8s carve-out (and to standalone docker) and
+verified. Find a bug, patch main again, rebuild, redeploy. It is a fast stopgap
+for a focused hardening cycle, and it serialises everyone on main by design.
+
+**Intended - branch previews (not yet proven).** The dfe CLI deploys a branch
+to its own preview environment, so a change is verified in isolation before it
+reaches main and normal PR review resumes. This removes the serialise-on-main
+bottleneck. It is the target direction, not yet worked through, so treat it as
+intended rather than current practice.
+
 ## Related
 
 - `dfe-infra/docs/DEVEX-OPERATIONS.md` - how and where to operate on the
