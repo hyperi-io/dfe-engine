@@ -96,6 +96,7 @@ class ErrorCode:
     CONFLICT = "conflict"
     INVALID_SQL = "invalid_sql"
     INTERNAL_ERROR = "internal_error"
+    SERVICE_UNAVAILABLE = "service_unavailable"
 
 
 # ── Exception handlers ───────────────────────────────────────
@@ -152,6 +153,23 @@ def install_exception_handlers(app: FastAPI) -> None:
     async def authz_error_handler(_request: Request, exc: AuthorizationError):
         body = ErrorResponse(code=ErrorCode.FORBIDDEN, message=str(exc))
         return JSONResponse(status_code=403, content=_error_response_json(body))
+
+    # A backing service (today: ClickHouse) was unreachable after its
+    # reconnect-and-retry budget was exhausted. Retryable -> 503, never a
+    # 500/crash. ``waking`` is True when a CH Cloud auto-wake was in flight, so the
+    # UI can say "warming up" and back off rather than treat it as a hard outage.
+    from scalo.resilience import ServiceUnavailable
+
+    @app.exception_handler(ServiceUnavailable)
+    async def service_unavailable_handler(_request: Request, exc: ServiceUnavailable):
+        waking = bool(getattr(exc, "waking", False))
+        message = "Backing service is warming up, retry shortly" if waking else str(exc)
+        body = ErrorResponse(
+            code=ErrorCode.SERVICE_UNAVAILABLE,
+            message=message,
+            context={"waking": waking},
+        )
+        return JSONResponse(status_code=503, content=_error_response_json(body))
 
     @app.exception_handler(Exception)
     async def unhandled_exception_handler(request: Request, exc: Exception):
