@@ -52,16 +52,24 @@ settings resolution and the Helm chart stable.)
 It is generated from the FastAPI app (`uv run python openapi-spec/generate.py`)
 and committed. Every consumer keys off it, never off a hand-maintained copy:
 
-```mermaid
-flowchart LR
-    app["FastAPI app<br/>(the routes)"] -->|generate.py| spec[("openapi.json<br/>API SSoT")]
-    spec --> cli["dfe CLI<br/>(command tree generated<br/>from the spec at runtime)"]
-    spec --> uitypes["dfe-ui<br/>(openapi-typescript types)"]
-    spec --> ai["dfe-ai<br/>(peer service + MCP tool schemas)"]
-    spec --> mock["contract mock / docs"]
+The spec is the hub; everything radiates out of it. The FastAPI routes feed it,
+and every downstream consumer keys off it - never off a hand-kept copy:
 
-    classDef ssot fill:#fff3cd,stroke:#664d03;
+```mermaid
+flowchart TB
+    routes["FastAPI routes<br/>(the live API definition)"]
+    routes -->|"openapi-spec/generate.py"| spec[("openapi.json<br/>THE API SSoT")]
+
+    spec -->|"command tree at runtime<br/>(x-cli:false opts out)"| cli["dfe CLI"]
+    spec -->|"openapi-typescript<br/>-> @dfe/dfe-engine-types"| ui["dfe-ui"]
+    spec -->|"HTTP client + MCP tool schemas"| ai["dfe-ai peer service"]
+    spec -->|"Prism"| mock["contract mock (dev + CI)"]
+    spec -->|"Swagger UI"| refdocs["API reference docs"]
+
+    classDef ssot fill:#fff3cd,stroke:#664d03,stroke-width:3px;
+    classDef src fill:#e2e3e5,stroke:#41464b;
     class spec ssot;
+    class routes src;
 ```
 
 - The **`dfe` CLI** generates its whole command tree from the spec at runtime -
