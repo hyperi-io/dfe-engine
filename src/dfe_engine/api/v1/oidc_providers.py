@@ -25,10 +25,16 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
@@ -223,16 +229,24 @@ async def create_provider(
 
 @router.get(
     "",
-    response_model=list[ProviderResponse],
+    response_model=PaginatedResponse[ProviderResponse],
     dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
 )
 async def list_providers(
     user: CurrentUser,
     request: Request,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in provider name/display name"),
+    sort_by: str | None = Query(None, description="Sort field (name, type, created_at)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List all OIDC providers (admin only)."""
+    """List OIDC providers (admin only), paginated."""
     registry = _get_registry(request)
-    return [_provider_to_response(name, p) for name, p in registry.list()]
+    rows = [_provider_to_response(name, p).model_dump() for name, p in registry.list()]
+    rows = apply_search(rows, search, ["name", "display_name"])
+    rows = apply_sort(rows, sort_by, sort_order)
+    summaries = [ProviderResponse.model_validate(row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.get(

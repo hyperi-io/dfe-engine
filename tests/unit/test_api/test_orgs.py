@@ -89,7 +89,9 @@ class TestListOrgs:
     def test_list_empty_returns_empty(self, client, admin_headers):
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        assert resp.json() == []
+        body = resp.json()
+        assert body["items"] == []
+        assert body["total"] == 0
 
     def test_list_returns_created_orgs(self, client, admin_headers):
         client.post(
@@ -104,7 +106,7 @@ class TestListOrgs:
         )
         resp = client.get("/api/v1/orgs", headers=admin_headers)
         assert resp.status_code == 200
-        names = {o["name"] for o in resp.json()}
+        names = {o["name"] for o in resp.json()["items"]}
         assert names == {"acme", "beta"}
 
     def test_list_viewer_can_read(self, client, admin_headers, viewer_headers):
@@ -115,7 +117,7 @@ class TestListOrgs:
         )
         resp = client.get("/api/v1/orgs", headers=viewer_headers)
         assert resp.status_code == 200
-        assert len(resp.json()) == 1
+        assert len(resp.json()["items"]) == 1
 
 
 # ---------------------------------------------------------------------------

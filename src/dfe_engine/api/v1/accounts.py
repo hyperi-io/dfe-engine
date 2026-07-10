@@ -21,10 +21,16 @@ Password hashes are NEVER returned in any response.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
@@ -100,27 +106,35 @@ async def create_account(
 
 @router.get(
     "",
-    response_model=list[AccountResponse],
+    response_model=PaginatedResponse[AccountResponse],
     dependencies=[Depends(require_action(scopes_dict["account_read"]))],
 )
 async def list_accounts(
     user: CurrentUser,
     request: Request,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in username"),
+    sort_by: str | None = Query(None, description="Sort field (username, created_at, updated_at)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List all accounts (admin only). No password hashes returned."""
+    """List accounts (admin only), paginated. No password hashes returned."""
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
-    return [
+    rows = [
         AccountResponse(
             username=a.username,
             enabled=a.enabled,
             groups=a.groups,
             created_at=a.created_at,
             updated_at=a.updated_at,
-        )
+        ).model_dump()
         for a in store.list()
     ]
+    rows = apply_search(rows, search, ["username"])
+    rows = apply_sort(rows, sort_by, sort_order)
+    summaries = [AccountResponse.model_validate(row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.get(

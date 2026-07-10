@@ -77,7 +77,7 @@ class TestListGroups:
     def test_list_groups(self, client, admin_headers):
         resp = client.get("/api/v1/auth/groups", headers=admin_headers)
         assert resp.status_code == 200
-        data = resp.json()
+        data = resp.json()["items"]
         assert isinstance(data, list)
         # Bootstrap creates dfe-admins at minimum
         names = [g["name"] for g in data]
@@ -88,7 +88,7 @@ class TestListGroups:
         # is a member of (viewer belongs to dfe-viewers only).
         resp = client.get("/api/v1/auth/groups", headers=viewer_headers)
         assert resp.status_code == 200
-        assert [g["name"] for g in resp.json()] == ["dfe-viewers"]
+        assert [g["name"] for g in resp.json()["items"]] == ["dfe-viewers"]
 
 
 class TestGetGroup:

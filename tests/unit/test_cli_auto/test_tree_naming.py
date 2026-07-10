@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import click
-import pytest
 
 from dfe_engine.cli.auto.naming import derive_group_and_verb
 from dfe_engine.cli.auto.spec import iter_operations, load_live_spec
@@ -15,13 +14,6 @@ def test_orgs_group_has_crud_commands(harness):
     assert set(orgs.commands) >= {"list", "describe", "create", "update", "delete"}
 
 
-@pytest.mark.xfail(
-    reason="route-level x-cli:false markers not yet ported to main (the repository "
-    "UI-prefs endpoints should opt out of the CLI). The cli_enabled mechanism is "
-    "covered by test_spec_units; this end-to-end assertion flips to pass once the "
-    "x-cli route markers land - auto-CLI route-refinement follow-up.",
-    strict=False,
-)
 def test_hidden_operation_absent(harness):
     # /api/v1/repository/* is x-cli hidden - no `repository` group at all.
     assert "repository" not in harness.root.commands

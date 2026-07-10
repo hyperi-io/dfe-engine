@@ -26,10 +26,16 @@ org-local groups are never listed outside their org.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed
+from dfe_engine.api.pagination import (
+    PaginatedResponse,
+    PaginationParams,
+    apply_search,
+    apply_sort,
+)
 from dfe_engine.auth import Scope
 from dfe_engine.auth.groups import Group, validate_group_scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
@@ -154,16 +160,25 @@ async def create_group(
     return _response(group)
 
 
-@router.get("", response_model=list[GroupResponse])
+@router.get("", response_model=PaginatedResponse[GroupResponse])
 async def list_groups(
     user: CurrentUser,
     request: Request,
+    pagination: PaginationParams = Depends(),
+    search: str | None = Query(None, description="Search in group name/description"),
+    sort_by: str | None = Query(None, description="Sort field (name, scope)"),
+    sort_order: str = Query("asc", description="Sort order: asc/desc"),
 ):
-    """List groups visible to the caller (own memberships + scope grants)."""
+    """List groups visible to the caller (own memberships + scope grants), paginated."""
     from dfe_engine.auth.groups import GroupStore
 
     store: GroupStore = request.app.state.group_store
-    return [_response(g) for g in store.list() if _visible(request, user, g)]
+    visible = [g for g in store.list() if _visible(request, user, g)]
+    rows = [_response(g).model_dump() for g in visible]
+    rows = apply_search(rows, search, ["name", "description"])
+    rows = apply_sort(rows, sort_by, sort_order)
+    summaries = [GroupResponse.model_validate(row) for row in rows]
+    return PaginatedResponse.from_list(summaries, pagination.page, pagination.per_page)
 
 
 @router.get("/{name}", response_model=GroupResponse)
