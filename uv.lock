@@ -690,7 +690,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http"], specifier = ">=2.29.5" },
+    { name = "scalo", extras = ["expression", "http"], specifier = ">=2.29.6" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -2067,7 +2067,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.29.5"
+version = "2.29.6"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2085,9 +2085,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/86/08/81ffc89d0b9f14701a1cccd4a3036d247f5444cfc034d1fa83850e18f130/scalo-2.29.5.tar.gz", hash = "sha256:d94955dc600bc74594450b0d0ab76f5ff68aaeb0904461f1a442d563f60558e1", size = 280452, upload-time = "2026-07-09T10:26:47.942Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/16/16/23bab9cb8f506557f7bf0cd8d28971e93b44bd11a639047eba58aa9a5896/scalo-2.29.6.tar.gz", hash = "sha256:49bc95b2413b27f16c190a6a2fc7f8aa811c13e96bbaea03177f856a9f105cff", size = 283295, upload-time = "2026-07-10T05:13:13.616Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e4/79/6a651272c1cdb08371a87913e55ca80940d9ec5bc412953489b326bdb064/scalo-2.29.5-py3-none-any.whl", hash = "sha256:0e0bdc6863e166bd1ffa8e3ef2f14e9607287caee98e5e774b1595f3277d0b74", size = 348209, upload-time = "2026-07-09T10:26:46.721Z" },
+    { url = "https://files.pythonhosted.org/packages/0e/58/ec21d4bc5d38b4071191d40a188e2e58f108a5319f027554e888a790e421/scalo-2.29.6-py3-none-any.whl", hash = "sha256:13e53e227f33d90420d168c3bb8fd7e1b8815d43aa361401902a9f5ffa2ea6d3", size = 351645, upload-time = "2026-07-10T05:13:12.166Z" },
 ]
 
 [package.optional-dependencies]
