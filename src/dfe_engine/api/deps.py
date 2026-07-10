@@ -3,7 +3,8 @@
 Registry singletons are initialized in the lifespan handler and resolved
 per-request via ``Depends()``.  Authentication checks four paths in order:
 
-1. OIDC headers (X-Oidc-Subject) — production, Envoy Gateway fronted
+1. OIDC headers (X-Oidc-Subject) — Envoy Gateway fronted; trusted ONLY
+   when auth.trust_proxy_auth_headers is set (else ignored, fail closed)
 2. API key (X-API-Key) — machine-to-machine
 3. JWT Bearer — standalone/Docker users
 4. Auth disabled — dev/test default, root context
@@ -459,7 +460,8 @@ def require_local_account_enabled(request: Request, user_id: str) -> None:
 async def get_current_user(request: Request) -> AuthContext:
     """Authenticate the request via one of four paths (checked in order).
 
-    1. OIDC headers (X-Oidc-Subject) — set by Envoy Gateway
+    1. OIDC headers (X-Oidc-Subject) — set by Envoy Gateway, trusted only
+       when auth.trust_proxy_auth_headers is set (else ignored, fail closed)
     2. API key (X-API-Key) — machine-to-machine
     3. JWT Bearer token — standalone/Docker users
     4. Auth disabled — dev/test root context
@@ -473,8 +475,13 @@ async def get_current_user(request: Request) -> AuthContext:
     user_agent = request.headers.get("User-Agent")
 
     # ── Path 1: OIDC headers (Envoy Gateway) ────────────────────
+    # SECURITY: X-Oidc-* are trusted ONLY when the deployment declares it runs
+    # behind a trusted proxy that authenticates the user and injects them
+    # (auth.trust_proxy_auth_headers). Unfronted, these headers are
+    # client-spoofable -> auth bypass + privilege escalation, so when the gate
+    # is off we ignore them (fail closed) and fall through to API-key / JWT.
     oidc_subject = request.headers.get("X-Oidc-Subject")
-    if oidc_subject:
+    if oidc_subject and settings.auth.trust_proxy_auth_headers:
         group_store: GroupStore = request.app.state.group_store
         oidc_email = request.headers.get("X-Oidc-Email") or None
         raw_groups = request.headers.get("X-Oidc-Groups", "")
