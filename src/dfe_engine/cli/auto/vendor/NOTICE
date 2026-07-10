@@ -1,0 +1,40 @@
+Vendored third-party files (dfe_engine/cli/auto/vendor/)
+========================================================
+
+These files are lifted from upstream open-source projects and retain their
+ORIGINAL Apache-2.0 licence headers and copyright. They do NOT carry the
+dfe-engine BUSL-1.1 header. Any local edits are documented per file below and
+noted at the top of each file.
+
+--------------------------------------------------------------------------
+xform.py
+  Source repo:  botocore  (https://github.com/boto/botocore)
+  Source path:  botocore/__init__.py  (lines ~29-202)
+  Licence:      Apache-2.0
+  Copyright:    (c) Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  Local edits:  Extracted only xform_name(), its three module-level regexes
+                (_first_cap_regex, _end_cap_regex, _special_case_transform) and
+                a trimmed _xform_cache seed (kept the generic acronym cases;
+                dropped the botocore-service-specific entries). Dropped all
+                unrelated module code (logging, initializers, UNSIGNED, etc).
+
+--------------------------------------------------------------------------
+table.py
+  Source repo:  aws-cli  (https://github.com/aws/aws-cli)
+  Source path:  awscli/table.py
+  Licence:      Apache-2.0
+  Copyright:    (c) Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  Local edits:  Replaced `from awscli.utils import is_a_tty` with a local
+                is_a_tty() (stdout.isatty(), guarded). Made `import colorama`
+                optional (guarded to None; ColorizedStyler is only selected when
+                colorama is importable). Stored self._terminal_width when a
+                width is passed to MultiTable (fixes a latent AttributeError in
+                the original _determine_conversion_needed path).
+
+--------------------------------------------------------------------------
+text.py
+  Source repo:  aws-cli  (https://github.com/aws/aws-cli)
+  Source path:  awscli/text.py
+  Licence:      Apache-2.0
+  Copyright:    (c) Amazon.com, Inc. or its affiliates. All Rights Reserved.
+  Local edits:  None. Copied verbatim (no awscli internal imports).

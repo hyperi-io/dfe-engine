@@ -65,6 +65,10 @@ dependencies = [
     "msal>=1.37.0",
     "google-auth>=2.55.1",
     "google-api-python-client>=2.198.0",
+    # dfe CLI: click is the command framework, jmespath backs the --query
+    # projection (promoted from transitive to direct deps for the auto-CLI).
+    "click>=8.4.2",
+    "jmespath>=1.1.0",
     # Optional lazy runtime integrations (NOT locked here, imported on demand so a
     # default install still runs; the code degrades with a clear error when absent):
     #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
@@ -202,7 +206,8 @@ convention = "google"
 
 
 [project.scripts]
-dfe-api = "dfe_engine.api:run_dev_server"
+dfe = "dfe_engine.cli.auto.main:main"
+dfe-engine = "dfe_engine.api:run_dev_server"
 dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
 
 [project.entry-points."dfe_engine.services"]

@@ -20,14 +20,14 @@ bundled-installer machinery under `backends/`/`exe/`/`macpkg/`/`docker/`, and th
 
 ## What exists today (do not confuse the two)
 
-- **`dfe-api`** - the SERVER entry point (`pyproject [project.scripts]` -> uvicorn).
-  It also carries a server-side, break-glass CLI (`dfe-api governed ...`,
+- **`dfe-engine`** - the SERVER entry point (`pyproject [project.scripts]` -> uvicorn).
+  It also carries a server-side, break-glass CLI (`dfe local governed ...`,
   `cli/governed_ops.py`) that calls the SAME GitCrud/services the API routers call -
   the standing "CLI is a wrapper over the API" rule. It runs WHERE the engine libs
   and the gitops repo live (CI, or on the engine host when the API is down).
 - **`dfe`** - does not exist yet. This document designs it: the remote HTTP client.
 
-Keep them distinct binaries. `dfe` talks to an engine over HTTP; `dfe-api` IS the
+Keep them distinct binaries. `dfe` talks to an engine over HTTP; `dfe-engine` IS the
 engine (and its in-process break-glass path). Everything below is `dfe`.
 
 ## 1. Distribution and install (like AWS CLI v2, NOT pip)
@@ -130,7 +130,7 @@ ships the equivalent: `openapi-spec/openapi.json` (74 operations, 23 routers). T
   operations appear when the CLI is regenerated/updated.
 
 Implementation: a small generator reads `openapi.json` and emits a Click/Typer tree
-(the repo already uses Typer for `dfe-api governed`). The HTTP layer MUST be pylib's
+(the repo already uses Typer for `dfe local governed`). The HTTP layer MUST be pylib's
 `HttpClient`/`AsyncHttpClient` (pylib policy - never raw httpx). Auth, retries,
 pagination, and output live in the shared client core; the generated tree is thin.
 

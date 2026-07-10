@@ -16,7 +16,7 @@ Create `Makefile` at the project root:
 
 # Start the API server (hot-reload via uvicorn --reload)
 serve:
-	dfe-api run
+	dfe-engine run
 
 # Start Prism mock server (for dfe-ui dev — no running Python needed)
 mock:
@@ -25,7 +25,7 @@ mock:
 # Full dev environment: mock in background, API in foreground
 dev:
 	docker compose -f docker-compose.dev.yaml up -d
-	dfe-api run
+	dfe-engine run
 
 # Run test suite
 test:
