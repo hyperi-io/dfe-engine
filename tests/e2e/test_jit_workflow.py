@@ -152,7 +152,7 @@ class TestJitWorkflow:
 
         resp = jit_client.get("/api/v1/auth/accounts", headers=admin_headers)
         assert resp.status_code == 200
-        usernames = [a["username"] for a in resp.json()]
+        usernames = [a["username"] for a in resp.json()["items"]]
         assert "visible-corp-com" in usernames
 
     def test_external_flag_on_shadow_account(self, jit_client):
