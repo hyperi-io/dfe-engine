@@ -10,7 +10,14 @@ from dfe_engine.governance import PolicyStore
 
 
 def _wire_gitcrud(app, tmp_path):
-    """Attach a real local-repo GitCrud to the running app (gitops off by default)."""
+    """Attach a real local-repo GitCrud to the running app (gitops off by default).
+
+    These exercise CRUD / RBAC / concurrency / protected-var mechanics, which are
+    posture-independent, so run them under a dev posture where direct-commit is the
+    sanctioned path. Production+team now routes governed writes to a review PR -
+    that enforcement has its own tests in test_auto_merge_api.py.
+    """
+    app.state.settings.env = "dev"
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     gc = GitCrud(repo, default_registry())
     app.state.gitcrud = gc

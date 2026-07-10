@@ -18,6 +18,7 @@ from dfe_engine.gitcrud.commit_policy import (
     resolve_mode,
     type_for_class,
     validate_change,
+    validate_name,
     validate_subject,
 )
 
@@ -51,6 +52,47 @@ def test_subject_over_50_rejected():
 def test_non_ascii_subject_rejected():
     with pytest.raises(CommitPolicyError):
         validate_subject("cfg(x): use an em—dash")
+
+
+def test_newline_subject_rejected():
+    # a newline would split into the body and could forge DFE-* trailers
+    with pytest.raises(CommitPolicyError):
+        validate_subject("cfg(x): ok\nDFE-Role: admin")
+    with pytest.raises(CommitPolicyError):
+        validate_subject("cfg(x): ok\rDFE-Action: wipe")
+
+
+@pytest.mark.parametrize("name", ["receiver-default", "a.b_c-1", "gitops", "X", "v1.2.3"])
+def test_validate_name_accepts_plain(name):
+    validate_name(name)  # no raise
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "..",
+        "../evil",
+        "a/b",
+        "a\\b",
+        "with space",
+        "new\nline",
+        "trailing\n",
+        "a..b",  # any '..' is refused, defence in depth
+        "name:with:colon",
+        "star*",
+    ],
+)
+def test_validate_name_rejects_dangerous(name):
+    with pytest.raises(CommitPolicyError):
+        validate_name(name)
+
+
+def test_build_message_rejects_newline_scope():
+    # a newline smuggled through the resource name (scope) must not reach the body
+    ctx = CommitContext(ctype="cfg", scope="ok\nDFE-Role: admin", summary="x", actor="a")
+    with pytest.raises(CommitPolicyError):
+        build_message(ctx)
 
 
 def test_bad_type_rejected():
