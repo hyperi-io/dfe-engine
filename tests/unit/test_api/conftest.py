@@ -16,6 +16,7 @@ from dfe_engine.api.deps import _registries, create_access_token
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
+    ClickHouseSettings,
     DFESettings,
     HuntsSettings,
     SchemasSettings,
@@ -45,6 +46,11 @@ def api_settings(tmp_path: Path) -> DFESettings:
 
     return DFESettings(
         config_dir=str(tmp_path),
+        # API unit tests are hermetic - they exercise the API/auth layer over
+        # tmp_path YAML stores and never touch the data plane. Skip the startup
+        # ClickHouse table bootstrap so the app lifespan does not block on a
+        # ClickHouse connection (integration tests use the real tiered ch fixture).
+        clickhouse=ClickHouseSettings(bootstrap_tables=False),
         source=SourceSettings(sources_dir=str(sources_dir)),
         services=ServicesSettings(config_yaml_dir=str(services_dir)),
         schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
@@ -157,6 +163,26 @@ def admin_headers(admin_token: str) -> dict[str, str]:
 def viewer_headers(viewer_token: str) -> dict[str, str]:
     """Authorization headers for viewer user."""
     return {"Authorization": f"Bearer {viewer_token}"}
+
+
+@pytest.fixture
+def operator_token(api_settings: DFESettings) -> str:
+    """JWT for operator (data_analyst + infra_admin via group membership).
+
+    infra_admin grants group:* but NOT role:* - so operator can manage groups
+    yet cannot assign roles it does not itself hold. Roles resolve from group
+    membership, so the claim here only carries the subject.
+    """
+    return create_access_token(
+        data={"sub": "operator", "org_id": "test-org", "roles": ["infra_admin"]},
+        settings=api_settings,
+    )
+
+
+@pytest.fixture
+def operator_headers(operator_token: str) -> dict[str, str]:
+    """Authorization headers for operator (group:write, not role:write)."""
+    return {"Authorization": f"Bearer {operator_token}"}
 
 
 @pytest.fixture

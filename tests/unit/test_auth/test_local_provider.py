@@ -220,3 +220,27 @@ class TestIntegration:
         # data_analyst cannot write config
         auth_viewer = provider.authenticate("viewer", "viewer-secret")
         assert not authorize(auth_viewer, "config:write", enabled=True).allowed
+
+
+class TestExternalAccountRejection:
+    """External (IdP-owned / JIT) identities must never authenticate via local
+    login, and an empty / placeholder password must never match."""
+
+    def test_external_account_rejected_from_local_login(
+        self, stores: tuple[AccountStore, GroupStore]
+    ):
+        account_store, group_store = stores
+        # A JIT/OIDC shadow account: no usable password, marked external.
+        account_store.create("sso-user", "", groups=["dfe-admins"])
+        account_store.update("sso-user", external=True)
+        provider = LocalAuthProvider(account_store, group_store)
+        with pytest.raises(AuthenticationError, match="Invalid username or password"):
+            provider.authenticate("sso-user", "")
+
+    def test_empty_password_never_authenticates(self, stores: tuple[AccountStore, GroupStore]):
+        account_store, group_store = stores
+        account_store.create("nopass", "", groups=["dfe-viewers"])
+        provider = LocalAuthProvider(account_store, group_store)
+        with pytest.raises(AuthenticationError):
+            provider.authenticate("nopass", "")
+        assert account_store.verify_password("nopass", "") is False

@@ -46,8 +46,9 @@ class TestEnsureAccount:
         assert account is not None
         assert account.external is True
         assert account.source_provider == "entra"
-        # Shadow accounts have a bcrypt hash of "" — not a real credential
-        assert account.password_hash.startswith("$2b$")
+        # Shadow accounts carry an unusable-password sentinel (not a bcrypt hash),
+        # so an external identity can never authenticate via local login.
+        assert not account.password_hash.startswith("$2")
         assert account.last_login_at != ""
 
     def test_subsequent_login_updates_timestamp(self, stores):

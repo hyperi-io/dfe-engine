@@ -47,6 +47,14 @@ class TestGroupStoreCreate:
         with pytest.raises(ValueError, match="admins"):
             store.create("admins", roles=["viewer"])
 
+    def test_create_rejects_unsafe_name(self, tmp_path):
+        # Group name becomes the {name}.yaml filename stem - reject traversal /
+        # separators / a trailing newline.
+        store = GroupStore(tmp_path / "groups")
+        for bad in ("../evil", "a/b", "..", ".hidden", "with space", "bad\n", ""):
+            with pytest.raises(ValueError, match="Invalid group name"):
+                store.create(bad, roles=["admin"])
+
     def test_create_creates_dir_if_not_exists(self, tmp_path):
         groups_dir = tmp_path / "new" / "groups"
         assert not groups_dir.exists()

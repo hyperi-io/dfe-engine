@@ -26,6 +26,7 @@ Usage::
 
 from __future__ import annotations
 
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -38,6 +39,16 @@ from dfe_engine.yaml_utils import yaml_dump, yaml_load
 # Generated once at import time; cost=4 is intentionally low (we just need
 # a valid hash to pass to checkpw so it doesn't short-circuit).
 _DUMMY_HASH: bytes = bcrypt.hashpw(b"dummy-timing-protection", bcrypt.gensalt(rounds=4))
+
+# Account name becomes the filename stem ({name}.yaml), so it must be a safe
+# stem - reject path traversal / separators. \Z (not $) anchors the true end of
+# string so a trailing newline cannot slip into the filename.
+_VALID_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}\Z")
+
+# Stored for accounts with NO usable local password (external / IdP-owned /
+# JIT-provisioned). Not a valid bcrypt hash ($2...), so verify_password never
+# matches - an external identity can only authenticate via its IdP, never local login.
+_UNUSABLE_PASSWORD_HASH = "!"
 
 
 class Account(BaseModel):
@@ -92,6 +103,8 @@ class AccountStore:
         Raises:
             ValueError: If an account with this username already exists.
         """
+        if not _VALID_NAME.match(username):
+            raise ValueError(f"Invalid account name: {username!r}")
         path = self._path(username)
         if path.exists():
             raise ValueError(f"Account already exists: {username}")
@@ -99,7 +112,7 @@ class AccountStore:
         now = _now()
         account = Account(
             username=username,
-            password_hash=_hash_password(password),
+            password_hash=_hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
             enabled=True,
             groups=groups or [],
             created_at=now,
@@ -228,6 +241,13 @@ class AccountStore:
             return False
 
         account = self._read(path)
+        # An empty password never authenticates, and an account carrying the
+        # unusable-password sentinel (external / IdP-owned / JIT) has no valid
+        # bcrypt hash - reject both, timing-safely. Prevents an empty or
+        # placeholder password from ever matching a stored account.
+        if not password or not account.password_hash.startswith("$2"):
+            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            return False
         return bcrypt.checkpw(
             password.encode("utf-8"),
             account.password_hash.encode("utf-8"),
