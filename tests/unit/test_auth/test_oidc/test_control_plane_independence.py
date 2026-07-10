@@ -60,6 +60,9 @@ def auth_settings(tmp_path: Path) -> DFESettings:
         auth=AuthSettings(
             enabled=True,
             auth_dir=str(auth_dir),
+            # These tests exercise the OIDC header path (Path 1), i.e. the
+            # Envoy-fronted deployment, so trust the injected X-Oidc-* headers.
+            trust_proxy_auth_headers=True,
         ),
         api=APISettings(
             jwt_secret="independence-test-secret-hmac-32-bytes",

@@ -642,6 +642,16 @@ class AuthSettings(BaseModel):
         default="",
         description="Auth config directory (accounts, groups, api-keys)",
     )
+    trust_proxy_auth_headers: bool = Field(
+        default=False,
+        description=(
+            "Trust X-Oidc-* identity headers (auth Path 1). Enable ONLY when a "
+            "trusted proxy (e.g. Envoy Gateway) authenticates the user and "
+            "injects these headers AND the engine is reachable only via that "
+            "proxy. Default off = fail closed: standalone/unfronted deployments "
+            "ignore these client-spoofable headers."
+        ),
+    )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
 
@@ -1164,6 +1174,8 @@ def _get_env_overrides() -> dict:
         overrides["auth"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_AUTH_DIR"):
         overrides["auth"]["auth_dir"] = val
+    if val := _get_env("DFE_AUTH_TRUST_PROXY_AUTH_HEADERS"):
+        overrides["auth"]["trust_proxy_auth_headers"] = val.lower() in ("true", "1", "yes")
 
     # Local auth settings (nested under auth.local)
     if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):

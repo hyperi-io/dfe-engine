@@ -36,7 +36,12 @@ def jit_settings(tmp_path):
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
-        auth=AuthSettings(enabled=True, auth_dir=str(tmp_path / "auth")),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(tmp_path / "auth"),
+            # JIT provisioning runs off the Envoy X-Oidc header path (Path 1).
+            trust_proxy_auth_headers=True,
+        ),
         api=APISettings(jwt_secret="jit-test-secret-key-32-chars-lo!"),
     )
 
