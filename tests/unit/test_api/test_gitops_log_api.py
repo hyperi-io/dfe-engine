@@ -8,6 +8,9 @@ from dfe_engine.governance import PolicyStore
 
 
 def _wire_gitcrud(app, tmp_path):
+    # dev posture: these assert audit-log mechanics over direct commits. Prod+team
+    # would route writes to a review PR (covered in test_auto_merge_api.py).
+    app.state.settings.env = "dev"
     repo = GitopsRepo(local_path=str(tmp_path / "deploy"), push=False)
     gc = GitCrud(repo, default_registry())
     app.state.gitcrud = gc

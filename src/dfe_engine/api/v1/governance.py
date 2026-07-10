@@ -21,15 +21,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
-from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
-from dfe_engine.gitcrud.commit_policy import CommitPolicyError
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
+from dfe_engine.gitcrud.routing import ReviewRequiredError, WriteOutcome, route_write
 from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
@@ -48,6 +48,9 @@ class InvokeResponse(BaseModel):
     changed: bool
     commit_sha: str | None = None
     auto_merged: bool = False
+    # Set when a production+team invoke was routed to a review PR instead of main.
+    review_required: bool = False
+    pr_url: str | None = None
     diff: list[dict[str, Any]]
 
 
@@ -65,25 +68,56 @@ def _actions(request: Request) -> ActionStore:
     return ActionStore(_gitcrud(request))
 
 
-def _warn_auto_merge(
-    request: Request, *, actor: str, resource: str, commit_sha: str | None
-) -> None:
-    """WARN the conversion for a governance-class write, mirroring helm's badge path.
+def _forge(request: Request):
+    """The deploy-repo forge client for opening review PRs (None -> refuse)."""
+    return getattr(request.app.state, "forge", None)
 
-    No response badge here (some of these endpoints are 201/204) - just the loud
-    conversion WARN the spec requires on every mutation that would otherwise have
-    been PR-mode.
+
+def _check_name(name: str) -> None:
+    """400 on a resource name that could traverse the tree or forge a trailer."""
+    try:
+        validate_name(name)
+    except CommitPolicyError as exc:
+        raise HTTPException(
+            status_code=400, detail={"code": "invalid_name", "message": str(exc)}
+        ) from exc
+
+
+def _route_admin_write(
+    request: Request, *, resource: str, actor: str, title: str, body: str, write
+) -> WriteOutcome:
+    """route_write for a governance-class admin CRUD write (201/204 endpoints).
+
+    Direct commit in dev/solo; a production+team write is pushed to a review branch
+    and a PR opened (or 409 ``review_required`` when no forge is configured). The
+    caller surfaces any PR via response headers since these bodies are fixed.
     """
     settings = request.app.state.settings
-    state = resolve_state(_gitcrud(request), environment=settings.env, mode=settings.gitops.mode)
-    apply_auto_merge(
-        state,
-        environment=settings.env,
-        rbac_class="governance",
-        actor=actor,
-        resource=resource,
-        commit_sha=commit_sha,
-    )
+    try:
+        return route_write(
+            gc=_gitcrud(request),
+            forge=_forge(request),
+            environment=settings.env,
+            mode=settings.gitops.mode,
+            rbac_class="governance",
+            resource=resource,
+            actor=actor,
+            title=title,
+            body=body,
+            write=write,
+        )
+    except ReviewRequiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "review_required", "message": str(exc)}
+        ) from exc
+
+
+def _apply_review_headers(response: Response, outcome: WriteOutcome) -> None:
+    """Signal a routed-to-PR admin write on the fixed-body 201/204 responses."""
+    if outcome.review_required:
+        response.headers["X-DFE-Review-Required"] = "true"
+        if outcome.pr_url:
+            response.headers["X-DFE-PR-Url"] = outcome.pr_url
 
 
 @router.get("/actions", dependencies=[Depends(require_action("governance:read"))])
@@ -106,8 +140,14 @@ async def invoke_action(
     request: Request,
     dry_run: bool = Query(default=False),
 ) -> InvokeResponse:
-    """Invoke a defined action - gated on the action's OWN required_action."""
+    """Invoke a defined action - gated on the action's OWN required_action.
+
+    Direct commit in dev/solo; a production+team invoke is routed to a review PR
+    (or 409 ``review_required`` when no forge is configured).
+    """
+    _check_name(name)
     store = _actions(request)
+    settings = request.app.state.settings
     try:
         action = store.get(name)
     except ResourceNotFoundError as exc:
@@ -122,37 +162,60 @@ async def invoke_action(
     override = authorize(
         user, "helmvars:override", role_config=request.app.state.role_config
     ).allowed
+
+    # Validate + build the diff via a dry run first: this surfaces protected-var /
+    # forbidden / policy violations as 403 BEFORE any review-vs-direct routing, so
+    # a bad action never opens a PR (and 403 keeps precedence over 409).
     try:
-        res = store.invoke(name, user.user_id, policy=policy, dry_run=dry_run, override=override)
+        preview = store.invoke(name, user.user_id, policy=policy, dry_run=True, override=override)
     except ProtectedVarError as exc:
         raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
     except ActionForbiddenError as exc:
         raise HTTPException(403, detail={"code": "action_forbidden", "message": str(exc)}) from exc
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
-    if not dry_run:
-        audit_resource_change(user.user_id, "action", name, "invoked", {"commit": res.commit_sha})
 
-    auto_merged = False
-    if not dry_run and res.changed:
-        settings = request.app.state.settings
-        state = resolve_state(
-            _gitcrud(request), environment=settings.env, mode=settings.gitops.mode
+    if dry_run:
+        return InvokeResponse(dry_run=True, changed=False, commit_sha=None, diff=preview.diff)
+
+    def _write(branch: str):
+        return store.invoke(
+            name, user.user_id, policy=policy, dry_run=False, override=override, branch=branch
         )
-        auto_merged = apply_auto_merge(
-            state,
+
+    try:
+        outcome = route_write(
+            gc=_gitcrud(request),
+            forge=_forge(request),
             environment=settings.env,
+            mode=settings.gitops.mode,
             rbac_class="governance",
-            actor=user.user_id,
             resource=f"action/{name}",
-            commit_sha=res.commit_sha,
+            actor=user.user_id,
+            title=f"action({name}): invoke",
+            body=f"Invoke action '{name}' by {user.user_id}. Opened for review "
+            "because production+team may not commit straight to main.",
+            write=_write,
         )
+    except ReviewRequiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "review_required", "message": str(exc)}
+        ) from exc
+    audit_resource_change(
+        user.user_id,
+        "action",
+        name,
+        "invoked",
+        {"commit": outcome.commit_sha, "pr": outcome.pr_url},
+    )
     return InvokeResponse(
-        dry_run=res.dry_run,
-        changed=res.changed,
-        commit_sha=res.commit_sha,
-        auto_merged=auto_merged,
-        diff=res.diff,
+        dry_run=False,
+        changed=outcome.changed,
+        commit_sha=outcome.commit_sha,
+        auto_merged=outcome.auto_merged,
+        review_required=outcome.review_required,
+        pr_url=outcome.pr_url,
+        diff=preview.diff,
     )
 
 
@@ -161,16 +224,25 @@ async def invoke_action(
     status_code=201,
     dependencies=[Depends(require_action("governance:write"))],
 )
-async def create_action(body: ActionDef, user: CurrentUser, request: Request) -> ActionDef:
-    res = _actions(request).save(body, user.user_id)
+async def create_action(
+    body: ActionDef, user: CurrentUser, request: Request, response: Response
+) -> ActionDef:
+    _check_name(body.name)
+
+    def _write(branch: str):
+        return _actions(request).save(body, user.user_id, branch=branch)
+
+    outcome = _route_admin_write(
+        request,
+        resource=f"action/{body.name}",
+        actor=user.user_id,
+        title=f"action({body.name}): define",
+        body=f"Define action '{body.name}' by {user.user_id}. Opened for review "
+        "because production+team may not commit straight to main.",
+        write=_write,
+    )
     audit_resource_change(user.user_id, "action", body.name, "created")
-    if res.changed:
-        _warn_auto_merge(
-            request,
-            actor=user.user_id,
-            resource=f"action/{body.name}",
-            commit_sha=res.commit_sha,
-        )
+    _apply_review_headers(response, outcome)
     return body
 
 
@@ -179,16 +251,28 @@ async def create_action(body: ActionDef, user: CurrentUser, request: Request) ->
     status_code=204,
     dependencies=[Depends(require_action("governance:write"))],
 )
-async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
+async def delete_action(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+    _check_name(name)
+    # Surface 404 before any review routing.
     try:
-        res = _actions(request).delete(name, user.user_id)
+        _actions(request).get(name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+    def _write(branch: str):
+        return _actions(request).delete(name, user.user_id, branch=branch)
+
+    outcome = _route_admin_write(
+        request,
+        resource=f"action/{name}",
+        actor=user.user_id,
+        title=f"action({name}): delete",
+        body=f"Delete action '{name}' by {user.user_id}. Opened for review "
+        "because production+team may not commit straight to main.",
+        write=_write,
+    )
     audit_resource_change(user.user_id, "action", name, "deleted")
-    if res.changed:
-        _warn_auto_merge(
-            request, actor=user.user_id, resource=f"action/{name}", commit_sha=res.commit_sha
-        )
+    _apply_review_headers(response, outcome)
 
 
 @router.post(
@@ -197,18 +281,25 @@ async def delete_action(name: str, user: CurrentUser, request: Request) -> None:
     dependencies=[Depends(require_action("governance:write"))],
 )
 async def create_policy(
-    body: ProtectedPolicy, user: CurrentUser, request: Request
+    body: ProtectedPolicy, user: CurrentUser, request: Request, response: Response
 ) -> ProtectedPolicy:
+    _check_name(body.name)
     gc = _gitcrud(request)
-    res = gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id)
+
+    def _write(branch: str):
+        return gc.put(_POLICY_CLASS, body.name, body.model_dump(), user.user_id, branch=branch)
+
+    outcome = _route_admin_write(
+        request,
+        resource=f"policy/{body.name}",
+        actor=user.user_id,
+        title=f"rbac({body.name}): define protected-var policy",
+        body=f"Define protected-var policy '{body.name}' by {user.user_id}. Opened "
+        "for review because production+team may not commit straight to main.",
+        write=_write,
+    )
     audit_resource_change(user.user_id, "policy", body.name, "created")
-    if res.changed:
-        _warn_auto_merge(
-            request,
-            actor=user.user_id,
-            resource=f"policy/{body.name}",
-            commit_sha=res.commit_sha,
-        )
+    _apply_review_headers(response, outcome)
     return body
 
 
@@ -217,17 +308,29 @@ async def create_policy(
     status_code=204,
     dependencies=[Depends(require_action("governance:write"))],
 )
-async def delete_policy(name: str, user: CurrentUser, request: Request) -> None:
+async def delete_policy(name: str, user: CurrentUser, request: Request, response: Response) -> None:
+    _check_name(name)
     gc = _gitcrud(request)
+    # Surface 404 before any review routing.
     try:
-        res = gc.delete(_POLICY_CLASS, name, user.user_id)
+        gc.get(_POLICY_CLASS, name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+    def _write(branch: str):
+        return gc.delete(_POLICY_CLASS, name, user.user_id, branch=branch)
+
+    outcome = _route_admin_write(
+        request,
+        resource=f"policy/{name}",
+        actor=user.user_id,
+        title=f"rbac({name}): delete protected-var policy",
+        body=f"Delete protected-var policy '{name}' by {user.user_id}. Opened for "
+        "review because production+team may not commit straight to main.",
+        write=_write,
+    )
     audit_resource_change(user.user_id, "policy", name, "deleted")
-    if res.changed:
-        _warn_auto_merge(
-            request, actor=user.user_id, resource=f"policy/{name}", commit_sha=res.commit_sha
-        )
+    _apply_review_headers(response, outcome)
 
 
 @router.post(

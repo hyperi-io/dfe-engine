@@ -1,8 +1,17 @@
-"""GET/PUT /api/v1/gitops/auto-merge - the UI's auto-merge contract."""
+"""GET/PUT /api/v1/gitops/auto-merge - the UI's auto-merge contract.
+
+Also covers the production+team WRITE-GATE enforcement: with auto-merge refused,
+a governed write must NOT land on main - it is routed to a review PR, or refused
+(409) when no forge is configured (Finding 5).
+"""
 
 from __future__ import annotations
 
+from dulwich import porcelain
+from dulwich.repo import Repo
+
 from dfe_engine.gitcrud import GitCrud, default_registry
+from dfe_engine.gitcrud.forge import PullRequest
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
 
@@ -13,6 +22,46 @@ def _wire_gitcrud(app, tmp_path):
     app.state.gitcrud = gc
     app.state.policy_store = PolicyStore(gc)
     return gc
+
+
+class _RecordingForge:
+    """ForgeProvider seam double: records the PR the endpoint opens."""
+
+    def __init__(self, url: str = "http://forge/pr/9") -> None:
+        self.calls: list[dict] = []
+        self._url = url
+
+    def open_pull_request(self, *, head, base, title, body) -> PullRequest:
+        self.calls.append({"head": head, "base": base, "title": title, "body": body})
+        return PullRequest(number=9, url=self._url, branch=head)
+
+
+def _seed_bare(tmp_path):
+    """A bare remote seeded with main - a stand-in deploy repo (real git)."""
+    bare = tmp_path / "remote.git"
+    porcelain.init(str(bare), bare=True)
+    seed = tmp_path / "seed"
+    porcelain.init(str(seed))
+    (seed / "README.md").write_text("seed\n")
+    porcelain.add(str(seed), paths=[str(seed / "README.md")])
+    porcelain.commit(str(seed), message=b"seed", author=b"t <t@t>", committer=b"t <t@t>")
+    porcelain.branch_create(str(seed), "main")
+    porcelain.push(str(seed), str(bare), b"refs/heads/main:refs/heads/main")
+    return bare
+
+
+def _wire_gitcrud_remote(app, tmp_path, forge):
+    """Wire a push-enabled GitCrud over a real bare remote, plus a forge."""
+    bare = _seed_bare(tmp_path)
+    repo = GitopsRepo(
+        local_path=str(tmp_path / "work"), repo_url=str(bare), push=True, branch="main"
+    )
+    repo.ensure()
+    gc = GitCrud(repo, default_registry())
+    app.state.gitcrud = gc
+    app.state.policy_store = PolicyStore(gc)
+    app.state.forge = forge
+    return gc, bare
 
 
 class TestAutoMergeApi:
@@ -102,15 +151,20 @@ class TestAutoMergedBadge:
         assert resp.status_code == 200, resp.text
         assert resp.json()["auto_merged"] is True
 
-    def test_helm_write_not_badged_when_off(self, client, app, admin_headers, tmp_path):
-        _wire_gitcrud(app, tmp_path)
+    def test_prod_team_write_refused_without_forge(self, client, app, admin_headers, tmp_path):
+        # Finding 5: default posture is production+team (auto-merge refused). With
+        # no forge configured the write may NOT hit main -> 409, nothing committed.
+        gc = _wire_gitcrud(app, tmp_path)  # push=False, no forge on app.state
         resp = client.put(
             "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
             json={"value": 10},
             headers=admin_headers,
         )
-        assert resp.status_code == 200, resp.text
-        assert resp.json()["auto_merged"] is False
+        assert resp.status_code == 409, resp.text
+        assert resp.json()["code"] == "review_required"
+        # the deploy repo was never written
+        assert gc.list("helmvars") == []
+        assert gc.head_revision() is None
 
     def test_noop_write_not_badged_or_warned(self, client, app, admin_headers, tmp_path):
         # auto-merge effective-ON: a repeat write with the SAME value is a no-op
@@ -177,3 +231,82 @@ class TestAutoMergedBadge:
             "/api/v1/governance/admin/actions", json=action, headers=admin_headers
         )
         assert created.status_code == 201, created.text
+
+
+class TestProdTeamPrRouting:
+    """Production+team: the write is routed to a real review PR, not to main."""
+
+    def _remote_main(self, bare) -> str:
+        with Repo(str(bare)) as r:
+            return r.refs[b"refs/heads/main"].decode()
+
+    def _remote_refs(self, bare) -> list[str]:
+        with Repo(str(bare)) as r:
+            return sorted(k.decode() for k in r.refs.allkeys())
+
+    def test_helm_write_opens_pr_and_leaves_main(self, client, app, admin_headers, tmp_path):
+        forge = _RecordingForge(url="http://forge/pr/42")
+        gc, bare = _wire_gitcrud_remote(app, tmp_path, forge)
+        main_before = self._remote_main(bare)
+
+        resp = client.put(
+            "/api/v1/helm/files/receiver-default/vars/keda.maxReplicas",
+            json={"value": 10},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["review_required"] is True
+        assert body["pr_url"] == "http://forge/pr/42"
+        assert body["auto_merged"] is False
+
+        # forge asked to open one PR from the pushed branch onto main
+        assert len(forge.calls) == 1
+        branch = forge.calls[0]["head"]
+        assert forge.calls[0]["base"] == "main"
+        assert branch.startswith("dfe/helmvars/")
+
+        # main untouched; the review branch really landed on the remote
+        assert self._remote_main(bare) == main_before
+        assert f"refs/heads/{branch}" in self._remote_refs(bare)
+
+    def test_admin_create_action_opens_pr_with_header(self, client, app, admin_headers, tmp_path):
+        forge = _RecordingForge(url="http://forge/pr/7")
+        gc, bare = _wire_gitcrud_remote(app, tmp_path, forge)
+        action = {
+            "name": "scale-receiver",
+            "description": "scale receiver",
+            "required_action": "action:invoke:scale-receiver",
+            "changes": [
+                {
+                    "cls": "helmvars",
+                    "name": "receiver-default",
+                    "path": "keda.maxReplicas",
+                    "value": 12,
+                }
+            ],
+        }
+        # defining the action is a governance-class write -> routed to a PR; the
+        # 201 body is unchanged but the review PR is signalled via response headers
+        created = client.post(
+            "/api/v1/governance/admin/actions", json=action, headers=admin_headers
+        )
+        assert created.status_code == 201, created.text
+        assert created.headers.get("X-DFE-Review-Required") == "true"
+        assert created.headers.get("X-DFE-PR-Url") == "http://forge/pr/7"
+        assert len(forge.calls) == 1
+        # the action def is not on main yet (it is in a PR), so a later invoke 404s
+        assert gc.list("actions") == []
+
+
+class TestNameValidationApi:
+    def test_bad_resource_name_rejected(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        # 'a..b' is a valid URL segment but carries '..' -> refused at the router
+        resp = client.put(
+            "/api/v1/helm/files/a..b/vars/keda.maxReplicas",
+            json={"value": 1},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_name"

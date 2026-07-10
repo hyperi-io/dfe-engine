@@ -14,6 +14,7 @@ trailers). See docs/GITOPS-COMMIT-STANDARD.md.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 
 from dfe_engine.settings import is_dev_posture
@@ -32,9 +33,28 @@ _CLASS_TYPE = {
 
 _SUBJECT_MAX = 50
 
+# A resource name is BOTH a file-path component (values/<name>.yaml) and a commit
+# subject input (scope). Keep it boring: letters/digits/dot/underscore/dash only.
+# ``fullmatch`` (not ``match``) anchors the whole string, so a trailing newline is
+# rejected -- ``$`` would otherwise match just before it and let a name smuggle a
+# ``DFE-Role:``/``DFE-Action:`` trailer line into the commit body.
+_NAME_RE = re.compile(r"[A-Za-z0-9._-]+")
+
 
 class CommitPolicyError(ValueError):
     """Raised when a commit message or change violates the standard."""
+
+
+def validate_name(name: str) -> None:
+    """Reject a resource name that could traverse the tree or inject a trailer.
+
+    Defence in depth for the gitcrud write path: a ``/`` would escape the class
+    ``values/`` directory, ``..`` would climb out of it, and a newline could forge
+    ``DFE-Role``/``DFE-Action`` audit trailers in the commit message. Anything
+    outside ``[A-Za-z0-9._-]`` -- or containing ``..`` -- is refused.
+    """
+    if not name or ".." in name or not _NAME_RE.fullmatch(name):
+        raise CommitPolicyError(f"invalid resource name: {name!r}")
 
 
 def type_for_class(rbac_class: str) -> str:
@@ -86,9 +106,13 @@ def build_message(ctx: CommitContext) -> str:
 
 
 def validate_subject(subject: str) -> None:
-    """ASCII-only, <=50 chars, an allowed type prefix."""
+    """ASCII-only, single-line, <=50 chars, an allowed type prefix."""
     if not _is_ascii(subject):
         raise CommitPolicyError(f"non-ASCII subject: {subject!r}")
+    # A newline in the subject would split into the commit body and could forge
+    # DFE-* audit trailers -- reject CR/LF outright.
+    if "\n" in subject or "\r" in subject:
+        raise CommitPolicyError(f"newline in subject: {subject!r}")
     if len(subject) > _SUBJECT_MAX:
         raise CommitPolicyError(f"subject > {_SUBJECT_MAX} chars: {subject!r}")
     ctype = subject.split("(", 1)[0].split(":", 1)[0]
