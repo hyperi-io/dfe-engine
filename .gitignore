@@ -107,6 +107,11 @@ Thumbs.db
 
 # them alone if already present.
 docs/superpowers/
+# Local planning docs (planning skill): local by default, NEVER committed.
+# Only docs/plans/shared/ is committable (explicit opt-in). Use `/*` (not a bare
+# dir) so git still descends into shared/ for the negation to re-include it.
+docs/plans/*
+!docs/plans/shared/
 .mcp.json
 .ai-version
 

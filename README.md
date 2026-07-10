@@ -1,6 +1,27 @@
 # DFE Engine
 
-Core library for Data Fusion Engine - shared business logic for CLI, control plane, and other consumers.
+Core library and API for the Data Fusion Engine - shared business logic for the
+CLI, the API server, and other consumers.
+
+## A product suite, not an internal tool
+
+DFE is a product suite that any organisation deploys to run its own data-fusion
+engine. Our own hosted instance is just ONE deployment, not "the product". Every
+core DFE repo (engine, infra, schemas, ui, hyperdx, and the Rust data-plane apps)
+is public by design.
+
+What that means for the code here:
+
+- **Keep it generic.** No environment-specific names, hostnames, cluster IDs,
+  credentials, or private-infra assumptions belong in this repo.
+- **Code to the seam, not to a deployment.** Configuration is injected; the
+  engine codes to an interface (secrets backend, object store, cluster topology),
+  never to a specific provider or to our infrastructure.
+- **Test WITH a deployment, never FOR one.** Integration tests run against a real
+  backing service, but the code must never assume that service is ours.
+
+Anything specific to a particular deployment - our fleet, a customer's cluster -
+lives in that deployment's own private config, never in this repo.
 
 ## Installation
 

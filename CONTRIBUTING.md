@@ -146,6 +146,27 @@ anniversary of its release.
 - [ ] Tests pass (if applicable)
 - [ ] Documentation is updated (if applicable)
 
+## Testing your branch in a full stack (branch previews)
+
+> Status: in development. This section describes the intended contributor
+> workflow; the tooling is being built (see dfe-infra
+> `docs/plans/2026-07-08-branch-preview-cycle.md`).
+
+DFE is a product suite of several repos (engine, infra, schemas, ui, hyperdx, the
+Rust data-plane apps). To test a change that spans more than one repo, or to
+eyeball a running stack, you deploy a **preview**: a full DFE stack built from the
+branches you nominate.
+
+- **Local by default.** A preview runs on a local `k3d`/`helm` cluster on your own
+  machine - no cloud account and no access to anyone's infrastructure required. An
+  external contributor can build and run a preview entirely on a laptop.
+- **One manifest describes it.** A preview is a `DeployContext` (see the schema in
+  the plan above): which branch/ref of each repo, a footprint profile, and where
+  it lands. The same object drives a local preview and a production install.
+- **Deploy tooling lives in dfe-infra** (the deploy layer). An org that operates a
+  shared cluster can point the same tooling at it instead of local `k3d`; that
+  configuration is that org's own private concern, never committed here.
+
 ## CI/CD Workflow
 
 When your pull request is merged to `main`:
