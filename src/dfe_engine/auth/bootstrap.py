@@ -97,7 +97,7 @@ def bootstrap_auth(
         if default_admin_password == _DEFAULT_PASSWORD:
             logger.warning(
                 "Admin account seeded with default password '%s'"
-                " — change in production (set DFE_ADMIN_PASSWORD)",
+                " — change in production (set DFE_AUTH_LOCAL_ADMIN_PASSWORD)",
                 _DEFAULT_PASSWORD,
             )
 
