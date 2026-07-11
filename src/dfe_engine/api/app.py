@@ -59,7 +59,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             auth_dir_str = str(Path("config") / "auth")
 
     auth_dir = Path(auth_dir_str)
-    default_admin_pw = os.environ.get("DFE_ADMIN_PASSWORD", "changeme")
+    # Prefer the documented DFE_AUTH_LOCAL_ADMIN_PASSWORD (settings.auth.local),
+    # then the legacy DFE_ADMIN_PASSWORD env, then the default. Without the first
+    # source the documented + chart-used var was silently ignored, leaving the
+    # admin on the well-known 'changeme' even when an operator set it.
+    default_admin_pw = (
+        settings.auth.local.admin_password or os.environ.get("DFE_ADMIN_PASSWORD") or "changeme"
+    )
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
         auth_dir, default_admin_password=default_admin_pw
     )
