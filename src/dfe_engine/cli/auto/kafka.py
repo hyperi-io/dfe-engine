@@ -126,8 +126,8 @@ def client_config_cmd(
     username = username if username is not None else ks.sasl_username
     password = password if password is not None else ks.sasl_password
 
-    Connection, emit_properties, emit_kcat, emit_kafbat = _emitters()
-    conn = Connection(
+    conn_cls, emit_properties, emit_kcat, emit_kafbat = _emitters()
+    conn = conn_cls(
         bootstrap_servers=bootstrap,
         username=username or "",
         password=password or "",
