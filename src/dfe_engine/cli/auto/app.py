@@ -25,6 +25,7 @@ import click
 from .authcmds import attach_builtins
 from .build import GlobalOptions, HelpGroup, build_command_tree
 from .config import Store
+from .kafka import attach_kafka
 from .local import attach_local
 from .spec import iter_operations, load_live_spec
 
@@ -120,6 +121,9 @@ def build_root(
     # `dfe local` - break-glass direct gitops CRUD for when the daemon is dead.
     # Mounted alongside the generated tree; it speaks to the local clone, not HTTP.
     attach_local(root)
+    # `dfe kafka` - emit client config for a provider (kcat / confluent / librdkafka),
+    # so a CLI "just works" against the DFE brokers. Local; no HTTP to the engine.
+    attach_kafka(root)
 
     if obj is not None:
         # Stash the injected object as the group's default context object.

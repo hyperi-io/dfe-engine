@@ -60,8 +60,20 @@ Artifactory:
 - DFE_TEMPLATES_VERSION -> artifactory.templates_version
 
 Kafka:
+- DFE_KAFKA_PROVIDER -> kafka.provider (DERIVES security_protocol + sasl_mechanism
+  per the credential contract; deploys set this, never the mechanism)
 - DFE_KAFKA_BOOTSTRAP_SERVERS (legacy: KAFKA_BOOTSTRAP_SERVERS) -> kafka.bootstrap_servers
 - DFE_KAFKA_SECURITY_PROTOCOL (legacy: KAFKA_SECURITY_PROTOCOL) -> kafka.security_protocol
+
+Redpanda Cloud lifecycle (control plane; opt-in, WS-C dfe-engine#99):
+- DFE_REDPANDA_API_KEY -> kafka.redpanda_cloud.client_id (OAuth2 client id)
+- DFE_REDPANDA_API_SECRET -> kafka.redpanda_cloud.client_secret (OAuth2 client secret)
+- DFE_REDPANDA_CLOUD_AUTH_URL -> kafka.redpanda_cloud.auth_url
+- DFE_REDPANDA_CLOUD_AUDIENCE -> kafka.redpanda_cloud.audience
+- DFE_REDPANDA_CLOUD_API_BASE -> kafka.redpanda_cloud.api_base
+- DFE_REDPANDA_CLOUD_RESOURCE_GROUP -> kafka.redpanda_cloud.resource_group
+- DFE_REDPANDA_CLOUD_CLUSTER_NAME -> kafka.redpanda_cloud.cluster_name
+- DFE_REDPANDA_CLOUD_KAFKA_USER -> kafka.redpanda_cloud.kafka_user
 
 Schemas:
 - DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas submodule root)
@@ -341,24 +353,87 @@ class ArtifactorySettings(BaseModel):
     templates_version: str = Field(default="latest")
 
 
+class RedpandaCloudSettings(BaseModel):
+    """Redpanda Cloud Serverless control-plane config (opt-in; WS-C dfe-engine#99).
+
+    Separate from the SASL data-plane connection (``kafka.bootstrap_servers`` +
+    ``kafka.sasl_*``, populated by ``dfe kafka lifecycle up`` once the cluster
+    exists). This block is the CONTROL-PLANE OAuth2 client (``auth.prd.cloud.
+    redpanda.com`` + ``api.redpanda.com``) used to create/delete the cluster and
+    mint/revoke the SCRAM-512 data-plane user - the first (proven) provider behind
+    ``dfe_engine.kafka.cloud.base.ManagedKafkaProvider``. See
+    docs/MANAGED-KAFKA-LIFECYCLE.md.
+    """
+
+    client_id: str = Field(default="", description="OAuth2 service-account client id.")
+    client_secret: str = Field(default="", description="OAuth2 service-account client secret.")
+    auth_url: str = Field(
+        default="https://auth.prd.cloud.redpanda.com/oauth/token",
+        description="OAuth2 client-credentials token endpoint.",
+    )
+    audience: str = Field(
+        default="cloudv2-production.redpanda.cloud", description="OAuth2 token audience."
+    )
+    api_base: str = Field(default="https://api.redpanda.com", description="Control-plane API base.")
+    resource_group: str = Field(
+        default="dfe", description="Resource group name (created if absent, find-or-create)."
+    )
+    cluster_name: str = Field(
+        default="dfe-kafka", description="Serverless cluster name (find-or-create, idempotent)."
+    )
+    kafka_user: str = Field(
+        default="dfe-engine", description="SCRAM-512 data-plane username minted on `up`."
+    )
+
+    @property
+    def configured(self) -> bool:
+        """True when the control-plane creds are present (lifecycle usable)."""
+        return bool(self.client_id and self.client_secret)
+
+
 class KafkaSettings(BaseModel):
     """Kafka connection settings.
 
     SASL fields are only needed where the engine itself talks to the brokers -
     today that is the sampler's Kafka consumer (recent-tail + logreducer
-    KafkaSource). DFE-owned brokers run SASL/SCRAM-SHA-512, so leave the
-    mechanism empty for a PLAINTEXT dev broker and set it (with username +
-    password) for a real cluster.
+    KafkaSource). Per the credential contract (dfe-engine#98) the mechanism is
+    DERIVED from ``provider``, never hand-set: set ``provider`` (+ username +
+    password) for a real cluster; leave it ``plaintext`` for a local dev broker
+    with no auth. See ``dfe_engine.kafka.contract``. An empty provider keeps any
+    hand-set protocol/mechanism (transition) but the security floor still applies.
     """
 
+    provider: str = Field(
+        default="",
+        description=(
+            "Kafka provider; DERIVES security_protocol + sasl_mechanism per the "
+            "contract (strimzi/redpanda/msk/redpanda-cloud -> SCRAM-SHA-512; "
+            "confluent-cloud -> PLAIN; plaintext -> no auth; msk_iam -> quarantined "
+            "IAM path). Never hand-set the mechanism."
+        ),
+    )
     bootstrap_servers: str = Field(default="localhost:9092")
     security_protocol: str = Field(default="PLAINTEXT")
     sasl_mechanism: str = Field(
         default="",
-        description="librdkafka sasl.mechanism (e.g. SCRAM-SHA-512); empty = no SASL",
+        description="DERIVED from provider (contract); do not hand-set.",
     )
     sasl_username: str = Field(default="", description="SASL username")
     sasl_password: str = Field(default="", description="SASL password")
+    redpanda_cloud: RedpandaCloudSettings = Field(default_factory=RedpandaCloudSettings)
+
+    @model_validator(mode="after")
+    def _derive_from_provider(self) -> "KafkaSettings":
+        """Derive protocol + mechanism from provider, then enforce the contract."""
+        from dfe_engine.kafka.contract import derive, validate
+
+        if self.provider:
+            self.security_protocol, self.sasl_mechanism = derive(self.provider)
+        validate(
+            security_protocol=self.security_protocol,
+            sasl_mechanism=self.sasl_mechanism,
+        )
+        return self
 
 
 class StorageSettings(BaseModel):
@@ -1095,6 +1170,11 @@ def _get_env_overrides() -> dict:
         overrides["artifactory"]["templates_version"] = val
 
     # Kafka settings (DFE_ prefix with legacy fallbacks)
+    # DFE_KAFKA_PROVIDER DERIVES protocol + mechanism (contract dfe-engine#98);
+    # deploys set it, not the mechanism. security_protocol/sasl_mechanism below
+    # are the transition/manual path (empty provider) - see KafkaSettings.
+    if val := _get_env("DFE_KAFKA_PROVIDER"):
+        overrides["kafka"]["provider"] = val
     if val := _get_env("DFE_KAFKA_BOOTSTRAP_SERVERS", "KAFKA_BOOTSTRAP_SERVERS"):
         overrides["kafka"]["bootstrap_servers"] = val
     if val := _get_env("DFE_KAFKA_SECURITY_PROTOCOL", "KAFKA_SECURITY_PROTOCOL"):
@@ -1105,6 +1185,30 @@ def _get_env_overrides() -> dict:
         overrides["kafka"]["sasl_username"] = val
     if val := _get_env("DFE_KAFKA_SASL_PASSWORD", "KAFKA_SASL_PASSWORD"):
         overrides["kafka"]["sasl_password"] = val
+
+    # Redpanda Cloud lifecycle (control-plane OAuth2 client; opt-in, WS-C
+    # dfe-engine#99). DFE_REDPANDA_API_KEY/_SECRET are the pre-existing names this
+    # repo's .env already uses for the OAuth2 client id/secret - kept as the
+    # primary names rather than inventing a DFE_REDPANDA_CLOUD_CLIENT_* pair.
+    redpanda_cloud: dict = {}
+    if val := _get_env("DFE_REDPANDA_API_KEY", "DFE_REDPANDA_CLOUD_CLIENT_ID"):
+        redpanda_cloud["client_id"] = val
+    if val := _get_env("DFE_REDPANDA_API_SECRET", "DFE_REDPANDA_CLOUD_CLIENT_SECRET"):
+        redpanda_cloud["client_secret"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_AUTH_URL"):
+        redpanda_cloud["auth_url"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_AUDIENCE"):
+        redpanda_cloud["audience"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_API_BASE"):
+        redpanda_cloud["api_base"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_RESOURCE_GROUP"):
+        redpanda_cloud["resource_group"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_CLUSTER_NAME"):
+        redpanda_cloud["cluster_name"] = val
+    if val := _get_env("DFE_REDPANDA_CLOUD_KAFKA_USER"):
+        redpanda_cloud["kafka_user"] = val
+    if redpanda_cloud:
+        overrides["kafka"]["redpanda_cloud"] = redpanda_cloud
 
     # Storage settings (for on-prem/Rancher deployments)
     if val := _get_env("DFE_STORAGE_TYPE"):
