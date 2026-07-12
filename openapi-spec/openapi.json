@@ -8756,7 +8756,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Set Var",
-        "description": "Set a helm var (-> gitops commit). 409 on stale If-Match; 403 if protected.",
+        "description": "Set a helm var. Direct commit in dev/solo; routed to a review PR (or 409\n'review_required') in production+team. 409 on stale If-Match; 403 if protected.",
         "operationId": "set_var_api_v1_helm_files__name__vars__path__put",
         "parameters": [
           {
@@ -8837,7 +8837,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Delete Var",
-        "description": "Revert a helm var to its chart default (remove the override).",
+        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team).",
         "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
         "parameters": [
           {
@@ -8971,7 +8971,7 @@
           "Governed Ops: Actions"
         ],
         "summary": "Invoke Action",
-        "description": "Invoke a defined action - gated on the action's OWN required_action.",
+        "description": "Invoke a defined action - gated on the action's OWN required_action.\n\nDirect commit in dev/solo; a production+team invoke is routed to a review PR\n(or 409 ``review_required`` when no forge is configured).",
         "operationId": "invoke_action_api_v1_governance_actions__name__invoke_post",
         "parameters": [
           {
@@ -12777,6 +12777,22 @@
             "type": "boolean",
             "title": "Auto Merged",
             "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
           },
           "diff": {
             "items": {
@@ -19020,6 +19036,22 @@
             "type": "boolean",
             "title": "Auto Merged",
             "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
           }
         },
         "type": "object",
