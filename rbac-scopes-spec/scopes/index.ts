@@ -31,6 +31,10 @@ const cel_scopes = {
   cel_check: "cel:check",
 } as const;
 
+const clickhouse_cloud_scopes = {
+  clickhouse_cloud_manage: "clickhouse_cloud:manage",
+} as const;
+
 const dashboard_scopes = {
   dashboard_read: "dashboard:read",
 } as const;
@@ -80,11 +84,20 @@ const query_scopes = {
   query_execute: "query:execute",
 } as const;
 
+const repository_scopes = {
+  repository_read: "repository:read",
+  repository_write: "repository:write",
+} as const;
+
 const role_scopes = {
   role_read: "role:read",
   role_write: "role:write",
   role_delete: "role:delete",
   role_scopes: "role:scopes",
+} as const;
+
+const sampler_scopes = {
+  sampler_read: "sampler:read",
 } as const;
 
 const rules_scopes = {
@@ -144,6 +157,7 @@ export const scopes = {
   ...alerts_scopes,
   ...api_keys_scopes,
   ...cel_scopes,
+  ...clickhouse_cloud_scopes,
   ...dashboard_scopes,
   ...deployment_scopes,
   ...discovery_scopes,
@@ -153,7 +167,9 @@ export const scopes = {
   ...org_scopes,
   ...pipeline_scopes,
   ...query_scopes,
+  ...repository_scopes,
   ...role_scopes,
+  ...sampler_scopes,
   ...rules_scopes,
   ...schemas_scopes,
   ...service_surfaces_scopes,
