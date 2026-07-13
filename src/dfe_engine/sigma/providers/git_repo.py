@@ -86,6 +86,9 @@ class GitRepoProvider(SigmaProvider):
                     provider=self.name,
                     branch=branch,
                 )
+            # Re-scrub every sync: a prior clone that failed after writing .git/config
+            # but before its own scrub would otherwise leave the token on disk.
+            self._scrub_credentials(url)
             return
         local.parent.mkdir(parents=True, exist_ok=True)
         logger.info("sigma git provider: cloning", provider=self.name, url=url, branch=branch)
