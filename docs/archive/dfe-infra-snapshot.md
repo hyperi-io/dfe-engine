@@ -1,11 +1,11 @@
-# DFE Infrastructure (dfe-infra) — Research Summary
+# DFE Infrastructure (dfe-infra) - research summary (ARCHIVED)
 
-> **WARNING: THIS DOCUMENT WILL CHANGE**
->
-> dfe-infra is being ported from DFE 2.1 (AWS-only dfe-core) to DFE 2.2
-> (multi-cloud). Treat everything below as a snapshot — component versions,
-> architecture decisions, and Helm chart structures are actively evolving.
-> Last synced from `/projects/dfe-infra` on 2026-03-31.
+> **ARCHIVED SNAPSHOT.** Last synced from `/projects/dfe-infra` on
+> 2026-03-31; component versions and structures have moved on. Kept for
+> the 2.1 -> 2.2 decision trail. Current material lives in
+> [deployment/index.md](../deployment/index.md) and the dfe-infra repo's
+> own docs. The KEDA scaling patterns that used to live here moved to
+> [deployment/keda-scaling.md](../deployment/keda-scaling.md).
 
 ## What dfe-infra Is
 
@@ -41,7 +41,7 @@ Identical deployment on ANY K8s. Cloud-agnostic.
 | FerretDB | 1.24.0 | MongoDB wire protocol over PG17 |
 | OTel Collector | 0.114.0 | Telemetry (DaemonSet + Gateway) |
 | HyperDX | 1.7.0 | Observability UI |
-| KEDA | 2.14.0 | Event-driven autoscaling |
+| KEDA | 2.20.1 | Event-driven autoscaling (CPU default; scalo ScalingPressure opt-in via `dfe-keda-shim`) |
 | DFE services | 2.2.0 | engine, UI, Rust pipeline apps |
 
 ### Deployment Flow
@@ -105,18 +105,8 @@ Two-tier OTel Collector:
 - **DaemonSet:** per-node kubelet/container metrics + logs
 - **Gateway:** aggregation, batching, export to ClickHouse + HyperDX
 
-KEDA scaling reads metrics from OTel (Kedify OTEL Scaler) or fallback Prometheus endpoint.
-
-## KEDA Scaling Patterns
-
-| Service | Strategy | Metric |
-|---------|----------|--------|
-| dfe-receiver | Horizontal (1-10) | `dfe_scaling_pressure` |
-| dfe-loader | Horizontal | `dfe_scaling_pressure` |
-| dfe-transform-* | **Scale-to-zero** | Kafka consumer lag (topic-specific) |
-| dfe-archiver | Horizontal | `dfe_scaling_pressure` |
-
-Transform services scale to 0 when idle (5 min cooldown), wake on Kafka topic lag.
+KEDA scaling patterns moved to
+[deployment/keda-scaling.md](../deployment/keda-scaling.md) (current).
 
 ## Cloud Targets
 
@@ -147,7 +137,7 @@ Cluster annotations bridge Terraform outputs → ArgoCD ApplicationSet templates
 | Secrets | Terraform + ESO | ENV vars + mounted secrets |
 | Deployment | Helm chart in wave 5 | Deployed BY dfe-infra |
 | Observability | OTel infrastructure | hyperi-pylib logger auto-emit |
-| Scaling | KEDA ScaledObjects | `dfe_scaling_pressure` metric |
+| Scaling | KEDA ScaledObjects (CPU default) | `dfe-keda-shim` (opt-in pressure/backlog metrics, fail-safe) |
 
 **dfe-engine is deployed BY dfe-infra, not part of it.** dfe-engine manages
 the DFE platform config and API; dfe-infra manages the infrastructure that
@@ -163,7 +153,7 @@ hosts it.
 | Cache | Redis | Valkey |
 | Secrets | AWS SM | OpenBao / cloud SM + ESO |
 | Observability | Prometheus + Grafana | OTel → ClickHouse → HyperDX |
-| KEDA metrics | Prometheus scrape | Direct OTel (Kedify) |
+| KEDA metrics | Prometheus scrape | CPU default; fail-safe `dfe-keda-shim` (opt-in pressure/backlog via OTel CH) |
 | Kafka | AWS MSK | Strimzi (operator, multi-cloud) |
 
 ## dfe-infra Docs Corpus

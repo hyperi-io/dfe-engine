@@ -137,3 +137,18 @@ it.
 - The data-plane repos (receivers, loaders, transforms, fetchers, archiver,
   hunt-runner) are downstream services the control plane configures - not part
   of it.
+
+## Documents in this area
+
+| Doc | Covers |
+|---|---|
+| [governed-ops-design.md](governed-ops-design.md) | GitCrud + governance layer + curated actions |
+| [gitops-commit-standard.md](gitops-commit-standard.md) | machine-commit conventions for gitops repos |
+| [rbac.md](rbac.md) | auth paths, RBAC model, multi-tenant ClickHouse, stores |
+| [oidc-providers.md](oidc-providers.md) | OIDC provider registry design |
+| [oidc-infra-requirements.md](oidc-infra-requirements.md) | what the engine assumes dfe-infra provides for OIDC |
+| [ui-api-guide.md](ui-api-guide.md) | frontend integration guide (endpoint reference) |
+| [type-safety-sync.md](type-safety-sync.md) | OpenAPI + RBAC-scope typegen sync to dfe-ui |
+| [dfe-cli-design.md](dfe-cli-design.md) | the `dfe` client CLI design (AWS CLI v2 model) |
+
+The system map is [../architecture.md](../architecture.md).

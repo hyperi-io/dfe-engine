@@ -1,0 +1,27 @@
+# Data plane
+
+The close-coupled source - ingest - schema - transform path. One source
+definition carries routing, schema binding, and field-map bindings together;
+the receiver, loader, views, hunts, and query API all read the same
+definition, so there is no separate ETL config to drift. The system map is
+[../architecture.md](../architecture.md).
+
+```mermaid
+flowchart LR
+    SRC[source YAML] --> RCV[receiver] --> LDR[loader] --> CH[(ClickHouse)]
+    CH --> VIEWS[standard views] --> HUNTS[hunt runner] & QAPI[query API]
+```
+
+## Documents in this area
+
+| Doc | Covers |
+|---|---|
+| [source.md](source.md) | Source as the top-level data abstraction |
+| [schema.md](schema.md) | schema type system: primitives, attributes, use cases, DDL |
+| [schema-classes.md](schema-classes.md) | engine class reference for the schema system (SchemaLoader, SchemaBuilderV2, DDL generation) |
+| [schema-sync.md](schema-sync.md) | engine<->loader runtime schema contract |
+| [field-mapping.md](field-mapping.md) | standards translation layer (Sigma / ECS / CIM views) |
+| [expressions-cel.md](expressions-cel.md) | CEL profile, classifier tiers, SQL transpile |
+| [query-api.md](query-api.md) | query API surface + [python](query-api-python.md) / [rust](query-api-rust.md) / [typescript](query-api-typescript.md) consumption |
+| [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
+| [hunt-schedule-smoothing.md](hunt-schedule-smoothing.md) | phase-drift load smoothing (incl. the reference derivation) |

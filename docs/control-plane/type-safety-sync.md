@@ -25,7 +25,7 @@ uv run python openapi-spec/generate.py
 
 The script loads the live FastAPI app and writes the OpenAPI 3 schema. That JSON is used for Prism mocks, contract checks, and (in dfe-ui) `openapi-typescript` code generation.
 
-See also [UI-API-GUIDE.md](./UI-API-GUIDE.md) for local mock/typegen workflows.
+See also [UI-API-GUIDE.md](ui-api-guide.md) for local mock/typegen workflows.
 
 ### RBAC scope constants
 
@@ -47,7 +47,7 @@ The generator parses `scope_constants.py` with the AST (no import side effects),
 
 ## CI sync to dfe-ui
 
-Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../.github/workflows/sync-dfe-engine-types.yml)  
+Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../../.github/workflows/sync-dfe-engine-types.yml)  
 **Name:** `Sync dfe-engine-types`
 
 ### Triggers

@@ -11,7 +11,7 @@
 | **Phase 1** | RBAC foundation, account/group/API key CRUD, 4 auth paths, audit | Done |
 | **Phase 2** | ConnectionRegistry, TenantScopedClient, multi-tenant CH | Done |
 | **Phase 3** | OrgRegistry, HyperDX team/connection sync | Done |
-| **Phase 4** | Schema-less service discovery, service surfaces | Not started |
+| **Phase 4** | Schema-less service discovery, service surfaces | In progress - service surfaces shipped (`services/surfaces/registry.py`, `/api/v1/service-surfaces`); typed plugin removal pending |
 
 ---
 
@@ -731,7 +731,7 @@ bindings. Unknown argo actions logged as warnings (not errors).
 ## 9. Audit Logging
 
 Every authorisation decision is logged for compliance (SOC 2, GDPR) via
-structured OTel log events (`hyperi_pylib.logger`).
+structured OTel log events (`scalo.logger`).
 
 | Event | Log key | Level |
 |-------|---------|-------|
@@ -864,19 +864,22 @@ graph TD
 
 ---
 
-## 13. Remaining Work (Phase 4)
-
-### Schema-Less Service Discovery
+## 13. Phase 4 status - schema-less service discovery
 
 Adding a new `dfe-transform-elastic` should require zero Python code
-changes. The current typed plugin system (`plugins.py`, `plugins_builtin/`)
-remains in place. Phase 4 replaces it with:
+changes. Shipped so far:
 
 1. **Service surface YAML files** (`config/service-surfaces/{name}.yaml`)
-   describing configurable settings and metrics
-2. **Metrics manifest caching** from rustlib `/metrics/manifest` endpoint
-3. **`/api/v1/service-surfaces/`** API endpoints with RBAC
-4. **Removal of typed plugin system** (`plugins.py`, `plugins_builtin/`)
+   describing configurable settings and metrics - SHIPPED
+   (`services/surfaces/registry.py`)
+2. **`/api/v1/service-surfaces/`** API endpoints with RBAC - SHIPPED
+
+Remaining:
+
+3. **Metrics manifest caching** from the scalo-rs `/metrics/manifest`
+   endpoint
+4. **Removal of the typed plugin system** (`plugins.py`,
+   `plugins_builtin/` - still present, still the live path)
 
 ---
 

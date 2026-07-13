@@ -1,9 +1,9 @@
 # DFE Query API
 
 **Version:** 2.0.0
-**Last Updated:** 2026-01-16
+**Last Updated:** 2026-07-13
 
-A secure, label-based query interface with multi-tenant isolation, RBAC, and Apache Arrow wire format.
+A secure, label-based query interface with multi-tenant isolation, RBAC, and native JSON responses.
 
 ---
 
@@ -15,18 +15,18 @@ The Query API provides a **secure, label-based interface** for querying multiple
 - **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
 - **Parameter validation** - All parameters validated against server-side schemas
-- **Apache Arrow wire format** - Efficient binary serialization
+- **Native JSON responses** - dict rows via clickhouse-connect, no intermediate wire format
 
 ### Supported Datasources
 
 | Datasource | Description | Wire Format |
 |------------|-------------|-------------|
-| `clickhouse` | ClickHouse analytics database | Arrow IPC |
-| `postgres` | PostgreSQL transactional database | Arrow IPC |
-| `prometheus` | Prometheus metrics | Arrow IPC |
-| `s3` | S3 bucket directory listing | Arrow IPC |
-| `minio` | MinIO (S3-compatible) listing | Arrow IPC |
-| `file` | Local filesystem directory listing | Arrow IPC |
+| `clickhouse` | ClickHouse analytics database | JSON |
+| `postgres` | PostgreSQL transactional database | JSON |
+| `prometheus` | Prometheus metrics | JSON |
+| `s3` | S3 bucket directory listing | JSON |
+| `minio` | MinIO (S3-compatible) listing | JSON |
+| `file` | Local filesystem directory listing | JSON |
 
 ---
 
@@ -45,62 +45,42 @@ The Query API provides a **secure, label-based interface** for querying multiple
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant CP as Control Plane
-    participant QR as Query Registry
-    participant V as Validator
+    participant API as dfe-engine API
+    participant CAT as ViewCatalog
+    participant EX as ViewExecutor
     participant DB as ClickHouse
 
-    C->>CP: POST /api/query<br/>query: "hunts/active_threats"<br/>params: {severities: ["critical"]}
-    CP->>CP: Extract JWT (org_id, roles)
-    CP->>QR: Lookup query definition
-    QR-->>V: Query template + schema
-    V->>V: Validate params against schema
-    V->>V: Inject _org_id from JWT
-    V->>V: Check required_roles: [analyst]
-    V->>DB: Execute SQL with injected _org_id
-    DB-->>C: Arrow IPC response
+    C->>API: POST /api/v1/queries/views/hunts/active_threats/execute<br/>params: {severities: ["critical"]}
+    API->>API: AuthN + RBAC scope query:execute
+    API->>CAT: Lookup view definition (TTL-cached, discovered from CH)
+    CAT-->>EX: View + parameter schema
+    EX->>EX: Validate params against the view's parameters
+    EX->>EX: Inject org_id from the auth context (never client-settable)
+    EX->>DB: Execute the parameterized view
+    DB-->>C: JSON response (rows + columns + metadata)
 ```
 
-**Client Request:**
+**Client Request** (the view label lives in the URL path):
 
 ```json
 {
-  "query": "hunts/active_threats",
   "params": {"severities": ["critical", "high"]},
   "options": {"limit": 500}
 }
 ```
 
-**Server-side Query Definition (not visible to client):**
+**Server-side definition:** a ClickHouse parameterized VIEW, deployed
+through the governed DDL path (gitops) and discovered by the engine's
+`ViewCatalog` at runtime - there is no separate YAML query registry in the
+engine. The view's parameter placeholders define the schema the executor
+validates against, and `org_id` is injected from the auth context.
 
-```yaml
-queries:
-  hunts/active_threats:
-    datasource: clickhouse:default
-    store: events
-    sql: |
-      SELECT alert_id, severity, timestamp
-      FROM {{ store }}.alerts
-      WHERE org_id = {{ _org_id }}  -- INJECTED, cannot be overridden
-      AND severity IN {{ severities | sql_array }}
-      LIMIT {{ limit }}
-    parameters:
-      severities:
-        type: array
-        items: string
-        required: true
-    tenant_isolated: true
-    required_roles: [analyst]
-```
+### Access control on the raw path
 
-### Protected Resources
-
-Certain system stores are blocked to prevent access to sensitive metadata:
-
-| Datasource | Protected Stores |
-|------------|------------------|
-| `clickhouse` | `system`, `information_schema`, `INFORMATION_SCHEMA` |
-| `postgres` | `pg_catalog`, `information_schema`, `pg_toast` |
+`POST /api/v1/queries/raw` executes against a registered datasource adapter
+(`clickhouse:...` or `storage:...`). It is governed by the `query:execute`
+RBAC scope plus the grants of the ClickHouse user the engine connects as -
+the CH GRANTs are authoritative for what a deployment exposes.
 
 ---
 
@@ -114,63 +94,68 @@ flowchart TB
         RS["Rust Client"]
     end
 
-    subgraph ControlPlane["dfe-control-plane"]
-        Auth["AuthN (JWT)"]
+    subgraph ControlPlane["dfe-engine API layer"]
+        Auth["AuthN (JWT / OIDC headers / API key)"]
         Audit["AuditLogger"]
         Rate["Rate Limiter"]
-        API["POST /api/query"]
+        API["POST /api/v1/queries/views/{label}/execute<br/>POST /api/v1/queries/raw"]
     end
 
-    subgraph QueryEngine["dfe-engine Query API"]
-        Registry["QueryRegistry<br/>PostgreSQL + YAML fallback<br/>Jinja2 SQL templates"]
-        Validator["ParameterValidator<br/>Type coercion<br/>Auth context injection"]
+    subgraph QueryEngine["dfe-engine query module"]
+        Registry["ViewCatalog<br/>discovered from ClickHouse<br/>TTL-cached"]
+        Validator["ViewExecutor<br/>parameter validation<br/>auth context injection"]
 
         subgraph Adapters["Datasource Adapters"]
             CH["ClickHouse<br/>+ EXPLAIN"]
-            PG["PostgreSQL"]
             Storage["Storage<br/>S3/MinIO/FS"]
         end
 
-        Arrow["Arrow IPC Response<br/>Schema + Metadata"]
+        JSONResp["JSON Response<br/>rows + columns + metadata"]
     end
 
     subgraph Backends["Data Backends"]
         CHServer[("ClickHouse")]
-        PGServer[("PostgreSQL")]
         S3[("S3/MinIO")]
         FS[("Filesystem")]
     end
 
-    Clients -->|"query label + params"| ControlPlane
+    Clients -->|"view label + params"| ControlPlane
     Auth --> API
     Audit --> API
     Rate --> API
-    API -->|"QueryRequest"| Registry
+    API -->|"execute"| Registry
     Registry --> Validator
     Validator --> Adapters
     CH --> CHServer
-    PG --> PGServer
     Storage --> S3
     Storage --> FS
-    Adapters --> Arrow
-    Arrow -->|"Arrow IPC stream"| Clients
+    Adapters --> JSONResp
+    JSONResp -->|"JSON body"| Clients
 ```
 
 ---
 
 ## API Reference
 
-### Execute Query
+All routes live under `/api/v1/queries`:
+
+| Route | Scope | Purpose |
+|---|---|---|
+| `GET /api/v1/queries/views` | `query:read` | list parameterized views (optional `?namespace=`) |
+| `GET /api/v1/queries/views/namespaces` | `query:read` | list view namespaces |
+| `GET /api/v1/queries/views/{label}` | `query:read` | one view definition with parameters |
+| `POST /api/v1/queries/views/{label}/execute` | `query:execute` | execute a parameterized view |
+| `POST /api/v1/queries/raw` | `query:execute` | ad-hoc query against a datasource adapter |
+
+### Execute a view
 
 ```
-POST /api/query
+POST /api/v1/queries/views/analytics/user_activity/execute
 Content-Type: application/json
 Authorization: Bearer <jwt>
-Accept: application/vnd.apache.arrow.stream
 
 Request:
 {
-  "query": "analytics/user_activity",
   "params": {
     "event_types": ["login", "logout"],
     "severities": ["critical", "high"]
@@ -186,28 +171,33 @@ Request:
   }
 }
 
-Response: Arrow IPC stream with metadata headers
-X-DFE-Row-Count: 100
-X-DFE-Query-Duration-Ms: 42
-X-DFE-Query-Label: analytics/user_activity
-X-DFE-Datasource: clickhouse:default
-X-DFE-Truncated: false
-X-DFE-Cached: true
-X-DFE-Has-More: true
-X-DFE-Next-Offset: 100
+Response: JSON body (metadata embedded alongside rows, no custom headers)
+{
+  "rows": [ { "...": "..." } ],
+  "columns": ["event_type", "timestamp"],
+  "row_count": 100,
+  "query_duration_ms": 42,
+  "has_more": true,
+  "next_offset": 100,
+  "request_id": "req_abc123"
+}
 ```
 
-### Query Request Model
+### Request models
 
 ```typescript
-interface QueryRequest {
-  // Query label (namespace/name format)
-  query: string;  // e.g., "analytics/user_activity"
-
-  // Query parameters (validated against schema)
+interface ViewExecuteRequest {
+  // View parameters (validated against the view's parameter schema)
   params?: Record<string, unknown>;
 
   // Execution options
+  options?: QueryOptions;
+}
+
+interface RawQueryRequest {
+  datasource: string;  // e.g. "clickhouse:default"
+  query: string;
+  params?: Record<string, unknown>;
   options?: QueryOptions;
 }
 
@@ -536,18 +526,18 @@ storage/file_list:
 
 ### Listing Result Schema
 
-All storage adapters return a consistent Arrow schema:
+All storage adapters return a consistent JSON schema:
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | string | File/directory name |
 | `path` | string | Full path |
 | `type` | string | "file" or "directory" |
-| `size` | int64 | Size in bytes (0 for directories) |
-| `modified` | timestamp | Last modified time |
-| `etag` | string | ETag (S3 only) |
-| `storage_class` | string | Storage class (S3 only) |
-| `content_type` | string | MIME type |
+| `size` | integer | Size in bytes (0 for directories) |
+| `modified` | string \| null | Last modified time (ISO8601), null for directories |
+| `etag` | string \| null | ETag (S3 only) |
+| `storage_class` | string \| null | Storage class (S3 only) |
+| `content_type` | string \| null | MIME type |
 
 ---
 
@@ -636,111 +626,84 @@ All storage adapters return a consistent Arrow schema:
 
 ## Caching
 
-### Cache Configuration
+Two distinct things, one implemented, one wire-format-only:
 
-Queries can enable caching in their definition:
-
-```yaml
-queries:
-  analytics/summary:
-    cache_ttl_seconds: 300  # 5 minutes
-    cache_namespace: analytics
-```
-
-### Cache Invalidation
-
-```
-POST /api/query/cache/invalidate
-{
-  "query_label": "analytics/summary",  // Optional
-  "org_id": "acme"                     // Optional
-}
-```
-
-### Cache Key Generation
-
-Cache keys are generated deterministically:
-
-```
-qc:{org_id}:{query_label}:{params_hash}
-```
-
-Where `params_hash` is SHA-256 of sorted parameter JSON.
+- **View catalog cache (implemented).** The `ViewCatalog` discovers view
+  definitions from ClickHouse and caches them with a TTL (default 60s,
+  `cache_ttl` on the catalog). A newly deployed view appears within one TTL;
+  there is no invalidation endpoint - expiry is the mechanism.
+- **Result caching (wire format only).** `QueryOptions.cache` and the
+  `cached`/`cache_key` metadata fields exist in the request/response models,
+  but no server-side result cache is implemented - the flag currently has no
+  effect. Treat result caching as a client-side concern until the engine
+  grows one.
 
 ---
 
 ## RBAC Integration
 
-### Query-Level Roles
+Authorisation is scope-based, enforced by `require_action` on every route -
+there is no per-query role list:
 
-```yaml
-queries:
-  system/admin_stats:
-    required_roles: [admin]
-    required_permissions: [system:read]
-    tenant_isolated: false  # Cross-tenant query (requires admin)
-```
-
-### Authorization Flow
+| Scope | Grants |
+|---|---|
+| `query:read` | browse the view catalog (list/get views, namespaces) |
+| `query:execute` | execute views and raw datasource queries |
 
 ```mermaid
 flowchart TD
-    Start["Incoming Request"] --> ExtractJWT["Extract roles from JWT"]
-    ExtractJWT --> CheckRoles{"User has<br/>required_role?"}
-    CheckRoles -->|"No"| Deny403["403 Forbidden"]
-    CheckRoles -->|"Yes"| CheckPerms{"User has<br/>required_permission?"}
-    CheckPerms -->|"No"| Deny403
-    CheckPerms -->|"Yes"| CheckTenant{"tenant_isolated<br/>= false?"}
-    CheckTenant -->|"Yes"| CheckAdmin{"User is admin?"}
-    CheckTenant -->|"No"| Allow["Execute Query"]
-    CheckAdmin -->|"No"| Deny403
-    CheckAdmin -->|"Yes"| Allow
+    Start["Incoming request"] --> AuthN["AuthN (JWT / OIDC headers / API key)"]
+    AuthN --> Scope{"has the route's<br/>RBAC scope?"}
+    Scope -->|"No"| Deny403["403 Forbidden"]
+    Scope -->|"Yes"| Inject["Executor injects org_id<br/>from the auth context"]
+    Inject --> Allow["Execute against ClickHouse"]
 ```
 
-**Steps:**
-
-1. Extract roles/permissions from JWT
-2. Check `required_roles` - user must have at least one
-3. Check `required_permissions` - user must have at least one
-4. If `tenant_isolated: false`, user must be admin
+Tenant isolation is structural, not per-query config: the executor injects
+`org_id` from the authenticated context (never client-settable), and the
+ClickHouse user's GRANTs + row policies bound what any deployment exposes.
 
 ---
 
 ## Wire Format
 
-### Arrow IPC
+### Native JSON
 
-All responses use Apache Arrow IPC streaming format:
+All responses are a single native JSON body:
 
 ```
-Content-Type: application/vnd.apache.arrow.stream
+Content-Type: application/json
 ```
 
 **Benefits:**
-- Zero-copy deserialization
-- Schema embedded in stream
-- Efficient for columnar data
-- Cross-language support
+- No client-side deserialization library required
+- Human-readable, easy to debug (curl, browser devtools)
+- Universal cross-language support
+- Rows arrive as plain dicts/objects, ready to consume
 
 ### Metadata Embedding
 
-Query metadata is embedded in Arrow schema metadata:
+Query metadata is returned as top-level fields alongside `rows` and `columns` in
+the JSON response body - not in headers or a separate schema:
 
-| Key | Description |
-|-----|-------------|
-| `dfe:row_count` | Number of rows |
-| `dfe:query_duration_ms` | Query execution time |
-| `dfe:query_label` | Query label |
-| `dfe:explain:steps` | EXPLAIN steps (JSON) |
-| `dfe:explain:warnings` | Performance warnings |
+| Field | Description |
+|-------|-------------|
+| `row_count` | Number of rows |
+| `query_duration_ms` | Query execution time |
+| `has_more` | Whether more rows are available |
+| `next_offset` | Offset for the next page (if `has_more`) |
+| `request_id` | Request correlation ID |
+
+EXPLAIN steps (when requested) are returned as a nested JSON structure - see
+[EXPLAIN Plans](#explain-plans) above.
 
 ---
 
 ## SDK Documentation
 
-- [Python SDK](./QUERY-API-PYTHON.md) - Python client with pandas integration
-- [TypeScript SDK](./QUERY-API-TYPESCRIPT.md) - TypeScript client with React Query
-- [Rust SDK](./QUERY-API-RUST.md) - Rust client with arrow-rs
+- [Python SDK](query-api-python.md) - Python client with pandas integration
+- [TypeScript SDK](query-api-typescript.md) - TypeScript client with React Query
+- [Rust SDK](query-api-rust.md) - Rust client (native JSON; optional local Arrow conversion for DataFusion/Polars)
 
 ---
 
@@ -761,7 +724,5 @@ Query metadata is embedded in Arrow schema metadata:
 
 ## References
 
-- [Apache Arrow](https://arrow.apache.org/) - Columnar data format
-- [Apache Arrow IPC](https://arrow.apache.org/docs/format/Columnar.html#ipc-streaming-format) - Streaming format
 - [Jinja2](https://jinja.palletsprojects.com/) - Template engine
 - [ClickHouse](https://clickhouse.com/) - Analytics database

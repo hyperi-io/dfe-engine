@@ -1,7 +1,7 @@
 # DFE Query API - Rust SDK
 
 **Version:** 2.0.0
-**Last Updated:** 2026-01-16
+**Last Updated:** 2026-07-13
 
 This document specifies how to consume the DFE Query API from Rust applications.
 
@@ -14,9 +14,14 @@ The Query API provides a **secure, label-based interface** for querying multiple
 - **No raw SQL from clients** - Queries are referenced by label, SQL is defined server-side
 - **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
-- **Apache Arrow wire format** - Zero-copy deserialization via `arrow-rs`
+- **Native JSON wire format** - responses are a single JSON body, deserialized with `serde`
 
-Rust has first-class Arrow support via the `arrow-rs` crate, providing tight integration with the Rust data ecosystem (DataFusion, Polars, etc.).
+The wire format is plain JSON, not Apache Arrow - there is no Arrow IPC stream to
+decode over the wire. If you want Arrow-native columnar processing (DataFusion,
+Polars, `arrow` compute kernels) once the rows are in your process, convert the
+JSON rows to Arrow locally - see [Integration with DataFusion](#integration-with-datafusion)
+and [Integration with Polars](#integration-with-polars) below for that optional,
+client-side pattern.
 
 ---
 
@@ -26,24 +31,22 @@ Rust has first-class Arrow support via the `arrow-rs` crate, providing tight int
 
 | Crate | Version | Purpose |
 |-------|---------|---------|
-| `arrow` | ≥57.0.0 | Arrow IPC deserialization |
-| `arrow-ipc` | ≥57.0.0 | IPC stream reader |
 | `reqwest` | ≥0.12.0 | HTTP client |
 | `tokio` | ≥1.40.0 | Async runtime |
 | `serde` | ≥1.0.0 | JSON serialization |
 | `serde_json` | ≥1.0.0 | JSON parsing |
+| `thiserror` | ≥2.0.0 | Error types |
 | Rust | ≥1.80.0 | MSRV |
+
+Optional, only if you want to convert results to Arrow client-side for
+DataFusion/Polars integration (see below): `arrow`, `arrow-json`, `datafusion`,
+`polars`. Check current versions before adding these - they are not required
+by the core client.
 
 ### Cargo.toml
 
 ```toml
 [dependencies]
-# Arrow (enable IPC feature)
-arrow = { version = "57", features = ["ipc"] }
-arrow-ipc = "57"
-arrow-schema = "57"
-arrow-array = "57"
-
 # HTTP client
 reqwest = { version = "0.12", features = ["json"] }
 
@@ -58,24 +61,12 @@ serde_json = "1.0"
 thiserror = "2.0"
 ```
 
-### Performance Optimization
-
-Add to your `.cargo/config.toml` for optimal Arrow performance:
-
-```toml
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native"]
-
-[target.aarch64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native"]
-```
-
 ---
 
 ## Quick Start
 
 ```rust
-use dfe_query::{QueryClient, QueryResult};
+use dfe_query::QueryClient;
 use serde_json::json;
 
 #[tokio::main]
@@ -92,11 +83,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await?;
 
     println!("Rows: {}", result.num_rows());
-    println!("Columns: {:?}", result.column_names());
+    println!("Columns: {:?}", result.columns());
 
-    // Iterate over batches
-    for batch in result.batches() {
-        println!("Batch with {} rows", batch.num_rows());
+    // Iterate over rows (each row is a JSON object)
+    for row in result.rows() {
+        println!("{:?}", row);
     }
 
     Ok(())
@@ -110,26 +101,24 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 ### Types (`src/types.rs`)
 
 ```rust
-use arrow_schema::{DataType, Field, Schema};
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
-/// Column metadata.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Column {
-    pub name: String,
-    pub data_type: String,
-    pub nullable: bool,
-}
+/// A single result row - a JSON object keyed by column name.
+pub type Row = serde_json::Map<String, serde_json::Value>;
 
-impl From<&Field> for Column {
-    fn from(field: &Field) -> Self {
-        Self {
-            name: field.name().clone(),
-            data_type: format!("{:?}", field.data_type()),
-            nullable: field.is_nullable(),
-        }
-    }
+/// Raw JSON response body returned by the Query API.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QueryResponseBody {
+    pub rows: Vec<Row>,
+    pub columns: Vec<String>,
+    pub row_count: usize,
+    pub query_duration_ms: u64,
+    #[serde(default)]
+    pub has_more: bool,
+    pub next_offset: Option<usize>,
+    pub request_id: Option<String>,
+    #[serde(default)]
+    pub explain: Option<ExplainPlan>,
 }
 
 /// Query execution metadata.
@@ -139,10 +128,14 @@ pub struct QueryMetadata {
     pub query_duration_ms: u64,
     pub query_label: String,
     pub datasource: String,
+    #[serde(default)]
     pub truncated: bool,
+    #[serde(default)]
     pub cached: bool,
     pub explain_duration_ms: Option<u64>,
+    pub request_id: Option<String>,
     // Pagination info
+    #[serde(default)]
     pub has_more: bool,
     pub next_cursor: Option<String>,
     pub next_offset: Option<usize>,
@@ -200,7 +193,7 @@ pub struct QueryRequest {
 }
 
 /// Query options.
-#[derive(Debug, Default, Serialize)]
+#[derive(Debug, Default, Clone, Serialize)]
 pub struct QueryOptions {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<u32>,
@@ -244,9 +237,6 @@ pub enum QueryError {
     #[error("Network error: {0}")]
     Network(#[from] reqwest::Error),
 
-    #[error("Arrow error: {0}")]
-    Arrow(#[from] arrow::error::ArrowError),
-
     #[error("JSON error: {0}")]
     Json(#[from] serde_json::Error),
 
@@ -263,63 +253,55 @@ pub type Result<T> = std::result::Result<T, QueryError>;
 ### Query Result (`src/result.rs`)
 
 ```rust
-use arrow_array::RecordBatch;
-use arrow_schema::SchemaRef;
-use std::sync::Arc;
+use crate::types::{ExplainPlan, QueryMetadata, Row};
 
-use crate::types::{Column, ExplainPlan, QueryMetadata};
-
-/// Query result containing Arrow data and metadata.
-#[derive(Debug)]
+/// Query result containing JSON rows and metadata.
+#[derive(Debug, Clone)]
 pub struct QueryResult {
-    batches: Vec<RecordBatch>,
-    schema: SchemaRef,
+    rows: Vec<Row>,
+    columns: Vec<String>,
     metadata: QueryMetadata,
     explain: Option<ExplainPlan>,
 }
 
 impl QueryResult {
     pub(crate) fn new(
-        batches: Vec<RecordBatch>,
-        schema: SchemaRef,
+        rows: Vec<Row>,
+        columns: Vec<String>,
         metadata: QueryMetadata,
         explain: Option<ExplainPlan>,
     ) -> Self {
         Self {
-            batches,
-            schema,
+            rows,
+            columns,
             metadata,
             explain,
         }
     }
 
-    /// Get the Arrow schema.
-    pub fn schema(&self) -> SchemaRef {
-        Arc::clone(&self.schema)
+    /// Get the result rows (each a JSON object keyed by column name).
+    pub fn rows(&self) -> &[Row] {
+        &self.rows
     }
 
-    /// Get column metadata.
-    pub fn columns(&self) -> Vec<Column> {
-        self.schema
-            .fields()
-            .iter()
-            .map(|f| Column::from(f.as_ref()))
-            .collect()
+    /// Consume the result and return owned rows.
+    pub fn into_rows(self) -> Vec<Row> {
+        self.rows
     }
 
     /// Get column names.
-    pub fn column_names(&self) -> Vec<&str> {
-        self.schema.fields().iter().map(|f| f.name().as_str()).collect()
+    pub fn columns(&self) -> &[String] {
+        &self.columns
     }
 
-    /// Get total row count across all batches.
+    /// Get the number of rows.
     pub fn num_rows(&self) -> usize {
-        self.batches.iter().map(|b| b.num_rows()).sum()
+        self.rows.len()
     }
 
-    /// Get number of columns.
+    /// Get the number of columns.
     pub fn num_columns(&self) -> usize {
-        self.schema.fields().len()
+        self.columns.len()
     }
 
     /// Get query metadata.
@@ -332,33 +314,18 @@ impl QueryResult {
         self.explain.as_ref()
     }
 
-    /// Get record batches.
-    pub fn batches(&self) -> &[RecordBatch] {
-        &self.batches
-    }
-
-    /// Consume result and return batches.
-    pub fn into_batches(self) -> Vec<RecordBatch> {
-        self.batches
-    }
-
-    /// Iterate over batches.
-    pub fn iter(&self) -> impl Iterator<Item = &RecordBatch> {
-        self.batches.iter()
-    }
-
-    /// Convert to a single RecordBatch (concatenates all batches).
-    pub fn to_batch(&self) -> Result<RecordBatch, arrow::error::ArrowError> {
-        arrow::compute::concat_batches(&self.schema, &self.batches)
+    /// Iterate over rows.
+    pub fn iter(&self) -> impl Iterator<Item = &Row> {
+        self.rows.iter()
     }
 }
 
 impl IntoIterator for QueryResult {
-    type Item = RecordBatch;
-    type IntoIter = std::vec::IntoIter<RecordBatch>;
+    type Item = Row;
+    type IntoIter = std::vec::IntoIter<Row>;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.batches.into_iter()
+        self.rows.into_iter()
     }
 }
 ```
@@ -366,14 +333,12 @@ impl IntoIterator for QueryResult {
 ### Client (`src/client.rs`)
 
 ```rust
-use arrow_ipc::reader::StreamReader;
 use reqwest::Client;
-use std::io::Cursor;
 use std::time::Duration;
 
 use crate::error::{QueryError, Result};
 use crate::result::QueryResult;
-use crate::types::{ExplainPlan, QueryMetadata, QueryOptions, QueryRequest};
+use crate::types::{QueryMetadata, QueryOptions, QueryRequest, QueryResponseBody};
 
 /// Query API client.
 #[derive(Clone)]
@@ -444,21 +409,27 @@ impl QueryClient {
             return Err(QueryError::Http { status, body });
         }
 
-        // Parse metadata from headers
-        let metadata = self.parse_metadata(&response, query_label)?;
+        // Response is a single native JSON body - rows, columns and
+        // metadata all arrive together, no separate wire schema to parse.
+        let body: QueryResponseBody = response.json().await?;
 
-        // Read Arrow IPC stream
-        let bytes = response.bytes().await?;
-        let cursor = Cursor::new(bytes);
-        let reader = StreamReader::try_new(cursor, None)?;
+        let explain = body.explain.clone();
+        let metadata = QueryMetadata {
+            row_count: body.row_count,
+            query_duration_ms: body.query_duration_ms,
+            query_label: query_label.to_string(),
+            datasource: "clickhouse".to_string(),
+            truncated: false,
+            cached: false,
+            explain_duration_ms: None,
+            request_id: body.request_id,
+            has_more: body.has_more,
+            next_cursor: None,
+            next_offset: body.next_offset,
+            total_count: None,
+        };
 
-        let schema = reader.schema();
-        let batches: Vec<_> = reader.collect::<std::result::Result<_, _>>()?;
-
-        // Extract EXPLAIN from schema metadata
-        let explain = self.extract_explain(&schema);
-
-        Ok(QueryResult::new(batches, schema, metadata, explain))
+        Ok(QueryResult::new(body.rows, body.columns, metadata, explain))
     }
 
     /// Execute query with EXPLAIN plan.
@@ -476,115 +447,6 @@ impl QueryClient {
 
         self.query_with_options(query_label, params, Some(options)).await
     }
-
-    fn parse_metadata(
-        &self,
-        response: &reqwest::Response,
-        query_label: &str,
-    ) -> Result<QueryMetadata> {
-        let headers = response.headers();
-
-        let row_count = headers
-            .get("X-Row-Count")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let query_duration_ms = headers
-            .get("X-Query-Duration-Ms")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let datasource = headers
-            .get("X-Datasource")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("unknown")
-            .to_string();
-
-        let truncated = headers
-            .get("X-Truncated")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v == "true")
-            .unwrap_or(false);
-
-        let cached = headers
-            .get("X-Cached")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v == "true")
-            .unwrap_or(false);
-
-        let explain_duration_ms = headers
-            .get("X-Explain-Duration-Ms")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok());
-
-        let has_more = headers
-            .get("X-Has-More")
-            .and_then(|v| v.to_str().ok())
-            .map(|v| v == "true")
-            .unwrap_or(false);
-
-        let next_cursor = headers
-            .get("X-Next-Cursor")
-            .and_then(|v| v.to_str().ok())
-            .map(String::from);
-
-        let next_offset = headers
-            .get("X-Next-Offset")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok());
-
-        let total_count = headers
-            .get("X-Total-Count")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.parse().ok());
-
-        Ok(QueryMetadata {
-            row_count,
-            query_duration_ms,
-            query_label: query_label.to_string(),
-            datasource,
-            truncated,
-            cached,
-            explain_duration_ms,
-            has_more,
-            next_cursor,
-            next_offset,
-            total_count,
-        })
-    }
-
-    fn extract_explain(&self, schema: &arrow_schema::SchemaRef) -> Option<ExplainPlan> {
-        let metadata = schema.metadata();
-
-        let steps_json = metadata.get("dfe:explain:steps")?;
-        let data: serde_json::Value = serde_json::from_str(steps_json).ok()?;
-
-        let steps = data
-            .get("steps")
-            .and_then(|s| serde_json::from_value(s.clone()).ok())
-            .unwrap_or_default();
-
-        let warnings = metadata
-            .get("dfe:explain:warnings")
-            .map(|w| w.split(',').map(String::from).collect())
-            .unwrap_or_default();
-
-        let raw_plan = metadata.get("dfe:explain:raw").cloned();
-
-        let total_estimated_cost = metadata
-            .get("dfe:explain:estimated_cost")
-            .and_then(|v| v.parse().ok());
-
-        Some(ExplainPlan {
-            steps,
-            total_estimated_cost,
-            total_estimated_rows: None,
-            warnings,
-            raw_plan,
-        })
-    }
 }
 ```
 
@@ -593,9 +455,8 @@ impl QueryClient {
 ```rust
 //! DFE Query API Client for Rust
 //!
-//! This crate provides a client for the DFE Query API with Apache Arrow
-//! as the wire format. Queries are referenced by label - SQL is defined
-//! server-side.
+//! This crate provides a client for the DFE Query API. The wire format is
+//! native JSON - queries are referenced by label, SQL is defined server-side.
 //!
 //! # Example
 //!
@@ -612,8 +473,8 @@ impl QueryClient {
 //!         .query("analytics/user_activity", Some(json!({ "limit": 100 })))
 //!         .await?;
 //!
-//!     for batch in result.batches() {
-//!         println!("Batch: {} rows", batch.num_rows());
+//!     for row in result.rows() {
+//!         println!("{:?}", row);
 //!     }
 //!
 //!     Ok(())
@@ -629,13 +490,9 @@ pub use client::QueryClient;
 pub use error::{QueryError, Result};
 pub use result::QueryResult;
 pub use types::{
-    Column, ExplainPlan, ExplainStep, ExplainStepType,
-    QueryMetadata, QueryOptions, QueryRequest,
+    ExplainPlan, ExplainStep, ExplainStepType,
+    QueryMetadata, QueryOptions, QueryRequest, Row,
 };
-
-// Re-export Arrow types for convenience
-pub use arrow_array::RecordBatch;
-pub use arrow_schema::{DataType, Field, Schema, SchemaRef};
 ```
 
 ---
@@ -662,10 +519,11 @@ async fn main() -> dfe_query::Result<()> {
         result.metadata().query_duration_ms
     );
 
-    // Access Arrow data
-    for batch in result.batches() {
-        let timestamp_col = batch.column(0);
-        println!("First column has {} values", timestamp_col.len());
+    // Access JSON row data
+    for row in result.rows() {
+        if let Some(ts) = row.get("timestamp") {
+            println!("timestamp = {}", ts);
+        }
     }
 
     Ok(())
@@ -762,7 +620,7 @@ async fn main() -> dfe_query::Result<()> {
 
         // Check warnings
         if !explain.warnings.is_empty() {
-            println!("\n⚠️ Warnings:");
+            println!("\nWarnings:");
             for warning in &explain.warnings {
                 println!("  - {}", warning);
             }
@@ -780,30 +638,43 @@ async fn main() -> dfe_query::Result<()> {
 
 ### Integration with DataFusion
 
+The wire format is JSON, not Arrow, so there is no `RecordBatch` straight off
+the response. If you want DataFusion-style SQL on the result set, convert the
+JSON rows to Arrow locally (this is a client-side choice, not something the
+API provides):
+
 ```rust
-use arrow_array::RecordBatch;
+use arrow_json::ReaderBuilder;
 use datafusion::prelude::*;
 use dfe_query::QueryClient;
+use std::io::Cursor;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let client = QueryClient::new("http://localhost:8000");
 
-    // Fetch data from Query API
-    let result = client
-        .query("analytics/all_events", None)
-        .await?;
+    let result = client.query("analytics/all_events", None).await?;
 
-    // Create DataFusion context
+    // Local JSON -> Arrow conversion (optional; only needed if you want
+    // DataFusion/Arrow-native processing after the fact).
+    let ndjson: String = result
+        .rows()
+        .iter()
+        .map(|row| serde_json::to_string(row).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    let schema = arrow_json::reader::infer_json_schema_from_seekable(
+        &mut Cursor::new(ndjson.as_bytes()),
+        None,
+    )?;
+    let mut reader = ReaderBuilder::new(Arc::new(schema)).build(Cursor::new(ndjson.as_bytes()))?;
+    let batch = reader.next().transpose()?.expect("non-empty result");
+
     let ctx = SessionContext::new();
+    ctx.register_batch("events", batch)?;
 
-    // Register Arrow data as a table
-    let batches: Vec<RecordBatch> = result.into_batches();
-    let schema = batches[0].schema();
-
-    ctx.register_batch("events", batches[0].clone())?;
-
-    // Run SQL on the data locally
     let df = ctx
         .sql("SELECT org_id, COUNT(*) as cnt FROM events GROUP BY org_id")
         .await?;
@@ -816,9 +687,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 ### Integration with Polars
 
+Polars can read newline-delimited JSON directly, so converting the row set is
+a single step:
+
 ```rust
 use dfe_query::{QueryClient, QueryOptions};
 use polars::prelude::*;
+use std::io::Cursor;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -833,13 +708,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .query_with_options("analytics/all_events", None, Some(options))
         .await?;
 
-    // Convert Arrow to Polars DataFrame
-    let batches = result.into_batches();
+    let ndjson: String = result
+        .rows()
+        .iter()
+        .map(|row| serde_json::to_string(row).unwrap())
+        .collect::<Vec<_>>()
+        .join("\n");
 
-    // Polars can read Arrow directly
-    let df = DataFrame::try_from(batches)?;
+    let df = JsonLineReader::new(Cursor::new(ndjson.as_bytes())).finish()?;
 
-    // Use Polars operations
     let grouped = df
         .lazy()
         .group_by([col("org_id")])
@@ -853,7 +730,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### Streaming Large Results
+### Processing Large Results Without Loading Everything
+
+The response is a single JSON body per request - there is no server-side
+streaming of batches. To process a large result set without loading it all
+into memory at once, page through it (see [Pagination](#pagination)) and
+process each page as it arrives:
 
 ```rust
 use dfe_query::{QueryClient, QueryOptions};
@@ -864,25 +746,26 @@ async fn main() -> dfe_query::Result<()> {
     let client = QueryClient::new("http://localhost:8000")
         .timeout(Duration::from_secs(300)); // 5 minute timeout
 
-    let options = QueryOptions {
-        limit: Some(1_000_000),
+    let mut options = QueryOptions {
+        limit: Some(50_000),
         ..Default::default()
     };
 
-    let result = client
-        .query_with_options("analytics/all_events", None, Some(options))
-        .await?;
-
-    // Process batches incrementally
     let mut total_processed = 0;
-    for batch in result.batches() {
-        // Process each batch without loading all into memory
-        process_batch(batch);
-        total_processed += batch.num_rows();
+    loop {
+        let result = client
+            .query_with_options("analytics/all_events", None, Some(options.clone()))
+            .await?;
 
-        if total_processed % 100_000 == 0 {
-            println!("Processed {} rows...", total_processed);
+        for row in result.rows() {
+            process_row(row);
         }
+        total_processed += result.num_rows();
+
+        if !result.metadata().has_more {
+            break;
+        }
+        options.offset = result.metadata().next_offset.map(|o| o as u32);
     }
 
     println!("Total: {} rows", total_processed);
@@ -890,7 +773,7 @@ async fn main() -> dfe_query::Result<()> {
     Ok(())
 }
 
-fn process_batch(batch: &arrow_array::RecordBatch) {
+fn process_row(row: &dfe_query::Row) {
     // Your processing logic here
 }
 ```
@@ -921,8 +804,8 @@ async fn main() {
         Err(QueryError::Network(e)) => {
             eprintln!("Network error: {}", e);
         }
-        Err(QueryError::Arrow(e)) => {
-            eprintln!("Arrow deserialization error: {}", e);
+        Err(QueryError::Json(e)) => {
+            eprintln!("JSON deserialization error: {}", e);
         }
         Err(e) => {
             eprintln!("Error: {}", e);
@@ -1031,7 +914,6 @@ async fn main() -> dfe_query::Result<()> {
 
     // Next pages using last timestamp as after_key
     while result.metadata().has_more && result.num_rows() > 0 {
-        // Get last timestamp from result (implementation depends on schema)
         let last_timestamp = get_last_timestamp(&result);
 
         options.after_key = Some(json!(last_timestamp));
@@ -1045,9 +927,14 @@ async fn main() -> dfe_query::Result<()> {
 }
 
 fn get_last_timestamp(result: &dfe_query::QueryResult) -> String {
-    // Extract last timestamp from Arrow batch
-    // Implementation depends on your schema
-    "2024-01-15T12:00:00Z".to_string()
+    // Extract "timestamp" from the last row
+    result
+        .rows()
+        .last()
+        .and_then(|row| row.get("timestamp"))
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string()
 }
 ```
 
@@ -1080,8 +967,8 @@ async fn main() -> dfe_query::Result<()> {
     println!("Found {} items", result.num_rows());
 
     // Columns: name, path, type, size, modified, etag, storage_class, content_type
-    for batch in result.batches() {
-        // Process file listing
+    for row in result.rows() {
+        println!("{:?}", row);
     }
 
     Ok(())
@@ -1142,18 +1029,18 @@ async fn main() -> dfe_query::Result<()> {
 
 ### Storage Listing Schema
 
-All storage adapters return consistent Arrow schema:
+All storage adapters return a consistent JSON schema:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `name` | `Utf8` | File or directory name |
-| `path` | `Utf8` | Full path within storage |
-| `type` | `Utf8` | `"file"` or `"directory"` |
-| `size` | `Int64` | Size in bytes |
-| `modified` | `Timestamp` | Last modified time (UTC) |
-| `etag` | `Utf8` | Object ETag (S3/MinIO) |
-| `storage_class` | `Utf8` | Storage class |
-| `content_type` | `Utf8` | MIME type |
+| `name` | `string` | File or directory name |
+| `path` | `string` | Full path within storage |
+| `type` | `string` | `"file"` or `"directory"` |
+| `size` | `number` | Size in bytes |
+| `modified` | `string \| null` | Last modified time (ISO8601, UTC) |
+| `etag` | `string \| null` | Object ETag (S3/MinIO) |
+| `storage_class` | `string \| null` | Storage class |
+| `content_type` | `string \| null` | MIME type |
 
 ### Paginating Storage Listings
 
@@ -1201,15 +1088,7 @@ async fn main() -> dfe_query::Result<()> {
 
 ## Performance Tips
 
-### 1. Enable SIMD Optimizations
-
-```toml
-# .cargo/config.toml
-[target.x86_64-unknown-linux-gnu]
-rustflags = ["-C", "target-cpu=native"]
-```
-
-### 2. Use Connection Pooling
+### 1. Use Connection Pooling
 
 ```rust
 use reqwest::Client;
@@ -1224,56 +1103,35 @@ let http_client = Client::builder()
 let client = QueryClient::with_client("http://localhost:8000", http_client);
 ```
 
-### 3. Process Batches Incrementally
+### 2. Process Pages Incrementally
 
 ```rust
-// DON'T: Load everything then process
-let all_batches = result.into_batches();
-let merged = concat_batches(&schema, &all_batches)?;
+// DON'T: Request one huge page and hold everything in memory
+let options = QueryOptions { limit: Some(1_000_000), ..Default::default() };
+let result = client.query_with_options("analytics/all_events", None, Some(options)).await?;
 
-// DO: Process each batch as it comes
-for batch in result.batches() {
-    process(batch);
+// DO: Page through results and process each page as it arrives (see Pagination)
+let mut options = QueryOptions { limit: Some(50_000), ..Default::default() };
+loop {
+    let result = client
+        .query_with_options("analytics/all_events", None, Some(options.clone()))
+        .await?;
+    for row in result.rows() {
+        process(row);
+    }
+    if !result.metadata().has_more {
+        break;
+    }
+    options.offset = result.metadata().next_offset.map(|o| o as u32);
 }
-```
-
-### 4. Use Arrow Compute Kernels
-
-```rust
-use arrow::compute;
-
-let result = client.query("clickhouse:default", sql).await?;
-
-for batch in result.batches() {
-    // Use Arrow's optimized compute kernels
-    let filtered = compute::filter(&batch, &predicate)?;
-    let sorted = compute::sort(&batch, &sort_options)?;
-}
-```
-
----
-
-## Feature Flags
-
-The `arrow` crate provides optional features:
-
-```toml
-[dependencies.arrow]
-version = "57"
-features = [
-    "ipc",           # Required: IPC stream reader
-    "prettyprint",   # Optional: Pretty-print RecordBatch
-    "chrono-tz",     # Optional: Timezone support
-]
 ```
 
 ---
 
 ## References
 
-- [arrow-rs GitHub](https://github.com/apache/arrow-rs) (v57.0.0+)
-- [arrow crate on crates.io](https://crates.io/crates/arrow)
-- [Arrow Rust Documentation](https://docs.rs/arrow/latest/arrow/)
-- [Apache Arrow Rust 57.0.0 Release](https://arrow.apache.org/blog/2025/10/30/arrow-rs-57.0.0/)
-- [DataFusion](https://github.com/apache/datafusion) - SQL query engine on Arrow
-- [Polars](https://github.com/pola-rs/polars) - DataFrame library with Arrow backend
+- [serde_json Documentation](https://docs.rs/serde_json/latest/serde_json/)
+- [reqwest Documentation](https://docs.rs/reqwest/latest/reqwest/)
+- [arrow-json crate](https://docs.rs/arrow-json/latest/arrow_json/) - optional, for local JSON -> Arrow conversion
+- [DataFusion](https://github.com/apache/datafusion) - SQL query engine on Arrow (optional local integration)
+- [Polars](https://github.com/pola-rs/polars) - DataFrame library with native NDJSON reader (optional local integration)

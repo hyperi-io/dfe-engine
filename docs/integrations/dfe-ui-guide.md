@@ -143,5 +143,5 @@ to the UI instead of being polled.
 ## 8. References
 - Next.js runtime env / single image multi-env: https://nextjs.org/docs/app/getting-started/deploying ; https://nemanjamitic.com/blog/2025-12-13-nextjs-runtime-environment-variables/
 - Typed React Query from OpenAPI (Orval / Hey API / openapi-typescript): https://orval.dev/docs/guides/react-query/ ; https://www.saschb2b.com/blog/typesafe-api-codegen-2026
-- Engine API contract for the UI: dfe-engine/docs/UI-API-GUIDE.md
-- Governed Ops model: dfe-engine/docs/ARCHITECTURE.md ("Governed Ops")
+- Engine API contract for the UI: [../control-plane/ui-api-guide.md](../control-plane/ui-api-guide.md)
+- Governed Ops model: [../control-plane/governed-ops-design.md](../control-plane/governed-ops-design.md) and [../architecture.md](../architecture.md)

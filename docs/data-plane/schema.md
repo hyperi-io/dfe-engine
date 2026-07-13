@@ -1,7 +1,10 @@
 # Schema Type System v2
 
-**Status:** Proposed
-**Last Updated:** 2026-02-28
+**Status:** Shipped (`schema_builder_v2.py` is the live path). Since this
+design landed, the schema YAML SSoT moved to the dfe-schemas repo (the
+`schemas/` submodule) - the engine keeps bundled fallback copies under
+`src/dfe_engine/schema/profiles/`. Class-level lookup:
+[schema-classes.md](schema-classes.md).
 
 ---
 
@@ -705,7 +708,7 @@ scratch.
 ## Source-Scoped Entities
 
 Beyond the schema itself, several other entities are scoped to a Source.
-See [SOURCE.md](./SOURCE.md) for the full Source definition.
+See [SOURCE.md](source.md) for the full Source definition.
 
 ### Rules
 

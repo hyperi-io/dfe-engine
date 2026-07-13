@@ -51,51 +51,35 @@ directives. The syntax must match.
 
 ## Synchronisation Strategy
 
-### Single Source of Truth: dfe-engine
+### Single Source of Truth: the dfe-schemas repo
 
-dfe-engine owns the **canonical definitions**:
+The **dfe-schemas repo** owns the canonical schema YAML (this landed after
+the original draft of this doc, which had the engine owning it):
 
-- Common header profile YAML files
-- Type primitive → ClickHouse type mapping
-- Schema CSV format specification
-- Loader directive syntax (documented, not parsed by engine)
+- Common header profile YAML files (`common-header/`)
+- Source meta schemas (`meta/`) and hunt output schemas (`hunts/`)
+- Loader directive syntax examples (documented, not parsed by engine)
 
-dfe-loader is a **consumer** of these definitions. It reads column
-metadata from ClickHouse at runtime (`system.columns`), not from
-config files. The contract is the DDL itself — whatever the engine
-produces, the loader must handle.
-
-### Shared Artefact: Profile YAML
-
-Profile definitions (timeseries, minimal, passthrough) are the most
-critical shared artefact. Strategy:
+The engine owns the **type system** (primitive -> ClickHouse mapping in
+`source/type_registry.yaml`) and the DDL generation. Both dfe-engine and
+dfe-loader consume dfe-schemas as a `schemas/` git submodule, and each
+ships bundled fallback copies (engine:
+`src/dfe_engine/schema/profiles/`) so package installs work without a
+submodule checkout.
 
 ```
-dfe-engine (source of truth)
-  │
-  │  profiles/timeseries.yaml
-  │  profiles/minimal.yaml
-  │  profiles/passthrough.yaml
-  │
-  ├──▶ dfe-engine uses profiles to generate DDL
-  │
-  └──▶ dfe-loader ships the SAME profile YAMLs
-       (copied or git-submodule'd from dfe-engine)
-       used for auto-init default table creation
+dfe-schemas (source of truth)
+  |
+  |  common-header/{timeseries,minimal,passthrough}.yaml
+  |
+  |--> dfe-engine (submodule + bundled fallback) - generates DDL
+  |
+  '--> dfe-loader (submodule + bundled fallback) - auto-init tables
 ```
 
-**Options for sharing:**
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| **Git submodule** | Always in sync, single edit point | Submodule ceremony, two-step update |
-| **Shared package** | Clean dependency, versioned | Extra package to publish |
-| **Copy + CI check** | Simple, no tooling | Can drift, needs CI enforcement |
-| **Monorepo** | Zero sync problem | Not current repo structure |
-
-**Recommended: Git submodule** pointing to a `schemas/` directory in
-dfe-engine. dfe-loader pins to a tag/commit. CI validates that the
-loader's pinned profiles match the engine's current profiles.
+dfe-loader reads column metadata from ClickHouse at runtime
+(`system.columns`), not from config files. The contract is the DDL itself -
+whatever the engine produces, the loader must handle.
 
 ### Runtime Contract: Deployed ClickHouse Schema is the ONLY SSoT
 
@@ -181,7 +165,7 @@ startup and logs a warning if it's behind the current profile version.
 | Loader directive documentation | dfe-engine | Documents what directives are available |
 | Column comment parsing | dfe-loader | `field_mapping.rs` |
 | Schema caching | dfe-loader | TTL-based from `system.columns` |
-| Auto-init DDL | dfe-loader | Uses profile YAMLs (shared from engine) |
+| Auto-init DDL | dfe-loader | Uses profile YAMLs (from dfe-schemas) |
 | Profile migration | dfe-loader | `ProfileDiff` generates ALTER statements |
 | CI compatibility check | Both | Cross-repo CI step |
 
@@ -189,7 +173,7 @@ startup and logs a warning if it's behind the current profile version.
 
 ## Monorepo Path
 
-If/when the repos merge into a monorepo (see [MONOREPO-MIGRATION.md](./MONOREPO-MIGRATION.md)),
+If/when the repos merge into a monorepo (see [MONOREPO-MIGRATION.md](../archive/monorepo-migration.md)),
 the sync problem disappears. Profile YAMLs live in one place, CI runs
 both the Python and Rust tests in a single pipeline, and there's no
 submodule or copy-on-release ceremony.
