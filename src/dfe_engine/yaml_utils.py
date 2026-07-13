@@ -102,13 +102,19 @@ def yaml_dump_string(data: Any) -> str:
     return stream.getvalue()
 
 
-def deep_merge(base: dict, override: dict) -> dict:
+def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> dict:
     """Recursively merge *override* into *base*, mutating *base* in-place.
 
     - dicts: merge recursively
-    - lists: append override items
+    - lists: append override items, OR replace wholesale when ``replace_lists``
     - sets:  union
     - type mismatch or non-container: override wins
+
+    ``replace_lists=True`` gives override-wins list semantics (matching Helm's own
+    list behaviour). Required by any caller that re-merges its OWN prior output --
+    e.g. the gitops publish merge and the sigma local-edit merge -- where the
+    default APPEND duplicates every shared list on every pass, growing unboundedly
+    and making the operation non-idempotent.
     """
     for key, nxt in override.items():
         if key not in base:
@@ -116,9 +122,12 @@ def deep_merge(base: dict, override: dict) -> dict:
             continue
         prev = base[key]
         if isinstance(prev, dict) and isinstance(nxt, dict):
-            deep_merge(prev, nxt)
+            deep_merge(prev, nxt, replace_lists=replace_lists)
         elif isinstance(prev, list) and isinstance(nxt, list):
-            prev.extend(nxt)
+            if replace_lists:
+                base[key] = nxt
+            else:
+                prev.extend(nxt)
         elif isinstance(prev, set) and isinstance(nxt, set):
             prev |= nxt
         else:

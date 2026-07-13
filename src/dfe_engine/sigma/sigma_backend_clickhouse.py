@@ -75,7 +75,12 @@ class SqlBackend(TextQueryBackend):
 
     re_expression: ClassVar[str] = "match(FIELD, 'REGEX')"
     re_escape_char: ClassVar[str] = "\\"
-    re_escape: ClassVar[tuple[str]] = ()
+    # The regex sits inside a single-quoted literal, so the base-class re_expression
+    # path must escape the single quote (with re_escape_escape_char also doubling the
+    # backslash) or a crafted regex breaks out of the literal (F-SIGMA-ESCAPING). An
+    # empty tuple escaped nothing. The overridden field-eq-regex path routes through
+    # _create_match_expression -> _escape_value instead of this loop.
+    re_escape: ClassVar[tuple[str, ...]] = ("'",)
     re_escape_escape_char: bool = True
 
     cidr_wildcard: ClassVar[str] = "*"
@@ -162,8 +167,19 @@ class SqlBackend(TextQueryBackend):
             return False
 
     def _escape_value(self, value: str) -> str:
-        """Escape special characters in values."""
-        return value.replace("'", "''")
+        """Escape a value for a single-quoted ClickHouse string literal.
+
+        Backslash MUST be doubled BEFORE the quote: ClickHouse honours C-style
+        backslash escapes in string literals, so a lone ``\\'`` would otherwise
+        break out of the literal (F-SIGMA-ESCAPING, same class of bug proven live
+        for the row-policy predicate). Wildcards (``*``/``%``) are deliberately
+        left untouched - they are literal-safe and their LIKE semantics are
+        handled separately by _convert_wildcards. Every site that interpolates a
+        value into ``'...'`` routes through here. ``value`` is coerced to ``str``
+        first: some callers pass a ``SigmaString``/regexp object that the old
+        f-string interpolation stringified implicitly.
+        """
+        return str(value).replace("\\", "\\\\").replace("'", "''")
 
     def _get_base_field_and_modifier(self, field_expr: str) -> tuple[str, str | None]:
         """Extract base field and modifier from field expression."""
@@ -173,18 +189,23 @@ class SqlBackend(TextQueryBackend):
         return base_field, modifier
 
     def _create_match_expression(self, field: str, value: str) -> str:
-        """Create regex match expression for field and value."""
-        return f"match({field}, '{value}')"
+        """Create regex match expression for field and value.
+
+        The regex is interpolated into a single-quoted literal, so it MUST be
+        escaped (F-SIGMA-ESCAPING) - every _create_match_expression caller,
+        including the regex condition path, relies on this single choke point.
+        """
+        return f"match({field}, '{self._escape_value(value)}')"
 
     def _create_cidr_expression(self, field: str, cidr: str) -> str:
-        """Create CIDR match expression for field and value."""
-        return f"cidrmatch({field}, '{cidr}')"
+        """Create CIDR match expression for field and value (escaped literal)."""
+        return f"cidrmatch({field}, '{self._escape_value(cidr)}')"
 
     def _create_like_expression(
         self, field: str, value: str, pattern_type: str = "contains"
     ) -> str:
         """Create LIKE expression based on pattern type (startswith, endswith, contains)."""
-        value = value.replace("'", "''")
+        value = self._escape_value(value)
         if pattern_type == "startswith":
             return f"{field} ILIKE '{value}%'"
         elif pattern_type == "endswith":
@@ -230,7 +251,10 @@ class SqlBackend(TextQueryBackend):
             field_meta.get("type") == "text" and field_meta.get("index_type") == "text_search"
         )
         if is_text_search:
-            return f"({field} GLOBAL IN INDEX idx_ngram_bf '{str_value}' AND {field} ILIKE '%{str_value}%')"
+            # Both interpolations sit inside single-quoted literals - escape
+            # (F-SIGMA-ESCAPING). The ILIKE keeps its %...% wildcards (literal-safe).
+            esc = self._escape_value(str_value)
+            return f"({field} GLOBAL IN INDEX idx_ngram_bf '{esc}' AND {field} ILIKE '%{esc}%')"
 
         if field.lower().endswith("targetobject"):
             return self._create_like_expression(field, str_value, "contains")
@@ -333,11 +357,10 @@ class SqlBackend(TextQueryBackend):
         if hasattr(cond.value, "regexp"):
             return self._create_match_expression(field, cond.value.regexp)
 
-        regex = str(cond.value)
-        for c in self.re_escape:
-            regex = regex.replace(c, self.re_escape_char + c)
-
-        return self._create_match_expression(field, regex)
+        # cond.value is already a regex - do NOT regex-escape its meta-chars; only
+        # the SQL-literal escaping applies, and _create_match_expression routes the
+        # value through _escape_value (backslash + quote) for that (F-SIGMA-ESCAPING).
+        return self._create_match_expression(field, str(cond.value))
 
     def convert_condition_field_eq_val_cidr(
         self, cond: ConditionFieldEqualsValueExpression, state: ConversionState

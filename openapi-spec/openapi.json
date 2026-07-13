@@ -1895,7 +1895,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SyncResponse"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__oidc_providers__SyncResponse"
                 }
               }
             }
@@ -8354,35 +8354,35 @@
         ]
       }
     },
-    "/api/v1/sigma/views/{source_name}": {
-      "post": {
+    "/api/v1/sigma/views": {
+      "get": {
         "tags": [
           "sigma"
         ],
-        "summary": "Generate Sigma View",
-        "description": "Generate Sigma view DDL for a source.\n\nReturns the DDL string \u2014 does NOT execute it against ClickHouse.",
-        "operationId": "generate_sigma_view_api_v1_sigma_views__source_name__post",
+        "summary": "List Sigma View Definitions",
+        "description": "List the sources that have a stored Sigma view definition, paginated.",
+        "operationId": "list_sigma_view_definitions_api_v1_sigma_views_get",
         "parameters": [
           {
-            "name": "source_name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Source Name"
-            }
-          },
-          {
-            "name": "database",
+            "name": "page",
             "in": "query",
             "required": false,
             "schema": {
-              "type": "string",
-              "description": "Target database",
-              "default": "default",
-              "title": "Database"
-            },
-            "description": "Target database"
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
           }
         ],
         "responses": {
@@ -8391,7 +8391,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SigmaViewResult"
+                  "$ref": "#/components/schemas/PaginatedResponse_SigmaViewSummary_"
                 }
               }
             }
@@ -8412,15 +8412,13 @@
             "BearerAuth": []
           }
         ]
-      }
-    },
-    "/api/v1/sigma/views": {
+      },
       "post": {
         "tags": [
           "sigma"
         ],
         "summary": "Generate All Sigma Views",
-        "description": "Generate Sigma view DDL for all sources.",
+        "description": "Generate Sigma view DDL for all sources (stored definitions win over field maps).",
         "operationId": "generate_all_sigma_views_api_v1_sigma_views_post",
         "parameters": [
           {
@@ -8481,6 +8479,207 @@
         ]
       }
     },
+    "/api/v1/sigma/views/{source_name}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Sigma View Definition",
+        "description": "Get a source's stored Sigma view definition.",
+        "operationId": "get_sigma_view_definition_api_v1_sigma_views__source_name__get",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigmaViewDefinition"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Put Sigma View Definition",
+        "description": "Create or replace a source's Sigma view definition.",
+        "operationId": "put_sigma_view_definition_api_v1_sigma_views__source_name__put",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SigmaViewWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigmaViewDefinition"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Delete Sigma View Definition",
+        "description": "Delete a source's Sigma view definition.",
+        "operationId": "delete_sigma_view_definition_api_v1_sigma_views__source_name__delete",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Generate Sigma View",
+        "description": "Generate (preview) Sigma view DDL for a source.\n\nA stored view definition drives generation - including its JSON-derived\ncolumns - when one exists; otherwise falls back to the static field maps via\nthe source mapper. Returns the DDL string; does NOT execute it against\nClickHouse.",
+        "operationId": "generate_sigma_view_api_v1_sigma_views__source_name__post",
+        "parameters": [
+          {
+            "name": "source_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Source Name"
+            }
+          },
+          {
+            "name": "database",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Target database",
+              "default": "default",
+              "title": "Database"
+            },
+            "description": "Target database"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SigmaViewResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sigma/logsource": {
       "get": {
         "tags": [
@@ -8503,8 +8702,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource product (e.g. windows, aws)",
               "title": "Product"
-            }
+            },
+            "description": "Sigma logsource product (e.g. windows, aws)"
           },
           {
             "name": "category",
@@ -8519,8 +8720,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource category (e.g. process_creation)",
               "title": "Category"
-            }
+            },
+            "description": "Sigma logsource category (e.g. process_creation)"
           },
           {
             "name": "service",
@@ -8535,8 +8738,10 @@
                   "type": "null"
                 }
               ],
+              "description": "Sigma logsource service (e.g. sysmon, security)",
               "title": "Service"
-            }
+            },
+            "description": "Sigma logsource service (e.g. sysmon, security)"
           }
         ],
         "responses": {
@@ -8553,6 +8758,1160 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/providers": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "List Providers",
+        "description": "List provider configs (the built-in SigmaHQ default is present OOTB).",
+        "operationId": "list_providers_api_v1_sigma_providers_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProviderConfig"
+                  },
+                  "type": "array",
+                  "title": "Response List Providers Api V1 Sigma Providers Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Register Provider",
+        "description": "Register (or overwrite) a provider config.",
+        "operationId": "register_provider_api_v1_sigma_providers_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConfig"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/providers/{name}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Provider",
+        "description": "Get one provider config.",
+        "operationId": "get_provider_api_v1_sigma_providers__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Update Provider",
+        "description": "Update a provider config. The path name wins over the body name.",
+        "operationId": "update_provider_api_v1_sigma_providers__name__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProviderConfig"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Delete Provider",
+        "description": "Delete a stored provider config (a built-in default reverts to its default).",
+        "operationId": "delete_provider_api_v1_sigma_providers__name__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/providers/{name}/enable": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Enable Provider",
+        "description": "Enable a provider (polling budget applies).",
+        "operationId": "enable_provider_api_v1_sigma_providers__name__enable_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/providers/{name}/disable": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Disable Provider",
+        "description": "Disable a provider (blocks scheduled polling; a manual sync is refused).",
+        "operationId": "disable_provider_api_v1_sigma_providers__name__disable_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProviderConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/providers/{name}/sync": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Sync Provider Endpoint",
+        "description": "Trigger a provider sync into the catalogue.\n\nSubmitted to the task manager (a git-repo clone is long-running); blocks up to\n``wait`` seconds for inline completion, else returns ``pending`` - poll via\nGET /sigma/syncs/{task_id}.",
+        "operationId": "sync_provider_endpoint_api_v1_sigma_providers__name__sync_post",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "since",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only import rules modified since (ISO 8601)",
+              "title": "Since"
+            },
+            "description": "Only import rules modified since (ISO 8601)"
+          },
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 120,
+              "minimum": 0,
+              "description": "Seconds to block for inline completion",
+              "default": 10.0,
+              "title": "Wait"
+            },
+            "description": "Seconds to block for inline completion"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__sigma__SyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/syncs/{task_id}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Sync",
+        "description": "Poll a provider-sync task.",
+        "operationId": "get_sync_api_v1_sigma_syncs__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__sigma__SyncResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/catalogue": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "List Catalogue",
+        "description": "Paginated catalogue of stored sigma rules, marked with selection state.",
+        "operationId": "list_catalogue_api_v1_sigma_catalogue_get",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Search id/title (case-insensitive)",
+              "title": "Q"
+            },
+            "description": "Search id/title (case-insensitive)"
+          },
+          {
+            "name": "selected",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by selection state",
+              "title": "Selected"
+            },
+            "description": "Filter by selection state"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_CatalogRuleSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/catalogue/{rule_id}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Catalogue Rule",
+        "description": "Get one stored rule (full content + provenance).",
+        "operationId": "get_catalogue_rule_api_v1_sigma_catalogue__rule_id__get",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogRuleDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Edit Catalogue Rule",
+        "description": "Edit a rule's content. Marks it locally edited so a re-import preserves it.",
+        "operationId": "edit_catalogue_rule_api_v1_sigma_catalogue__rule_id__put",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleEditRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogRuleDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Delete Catalogue Rule",
+        "description": "Remove a rule from the catalogue.",
+        "operationId": "delete_catalogue_rule_api_v1_sigma_catalogue__rule_id__delete",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/catalogue/{rule_id}/adopt": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Adopt Catalogue Rule",
+        "description": "Detach a rule from upstream (pin its content; a re-import records drift only).",
+        "operationId": "adopt_catalogue_rule_api_v1_sigma_catalogue__rule_id__adopt_post",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CatalogRuleDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/selected": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "List Selected",
+        "description": "List the ids of rules selected to implement.",
+        "operationId": "list_selected_api_v1_sigma_selected_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/catalogue/{rule_id}/select": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Select Rule",
+        "description": "Select a catalogued rule to implement.",
+        "operationId": "select_rule_api_v1_sigma_catalogue__rule_id__select_post",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/catalogue/{rule_id}/deselect": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Deselect Rule",
+        "description": "Deselect a rule (idempotent).",
+        "operationId": "deselect_rule_api_v1_sigma_catalogue__rule_id__deselect_post",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SelectionResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/propagate": {
+      "post": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Propagate",
+        "description": "Generate sigma-bound DFE rules + hunts from the current selection.\n\nFor each SELECTED sigma rule, converts its detection to a ClickHouse WHERE over\nthe matching source's ``{source}_sigma`` view and stores a DFE rule (with a\n``sigma_rule_id`` back-reference), then binds it into a per-source hunt. Drifted\nor hand-edited bindings are reported ``skipped_drifted`` unless ``force``.\nSubmitted to the task manager; blocks up to ``wait`` seconds for inline\ncompletion, else returns ``pending`` - poll via GET /sigma/propagations/{id}.",
+        "operationId": "propagate_api_v1_sigma_propagate_post",
+        "parameters": [
+          {
+            "name": "wait",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "number",
+              "maximum": 120,
+              "minimum": 0,
+              "description": "Seconds to block for inline completion",
+              "default": 30.0,
+              "title": "Wait"
+            },
+            "description": "Seconds to block for inline completion"
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PropagateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropagateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/propagations/{task_id}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Propagation",
+        "description": "Poll a propagate task.",
+        "operationId": "get_propagation_api_v1_sigma_propagations__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropagateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/bindings": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "List Bindings",
+        "description": "Paginated list of the generated sigma-bound rules, with live drift state.",
+        "operationId": "list_bindings_api_v1_sigma_bindings_get",
+        "parameters": [
+          {
+            "name": "source",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by source label",
+              "title": "Source"
+            },
+            "description": "Filter by source label"
+          },
+          {
+            "name": "drift",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter by drift state",
+              "title": "Drift"
+            },
+            "description": "Filter by drift state"
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 1,
+              "title": "Page"
+            }
+          },
+          {
+            "name": "per_page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 25,
+              "title": "Per Page"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaginatedResponse_BindingSummary_"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/sigma/bindings/{rule_id}": {
+      "get": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Get Binding",
+        "description": "Get one generated sigma-bound rule (with live drift state).",
+        "operationId": "get_binding_api_v1_sigma_bindings__rule_id__get",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BindingSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "sigma"
+        ],
+        "summary": "Delete Binding",
+        "description": "Delete a generated binding (removes the rule and unlinks it from its hunt).",
+        "operationId": "delete_binding_api_v1_sigma_bindings__rule_id__delete",
+        "parameters": [
+          {
+            "name": "rule_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Rule Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
           },
           "422": {
             "description": "Validation Error",
@@ -10543,6 +11902,16 @@
         ],
         "title": "AlertDestinationSummary"
       },
+      "AuthKind": {
+        "type": "string",
+        "enum": [
+          "none",
+          "api_key",
+          "git_token"
+        ],
+        "title": "AuthKind",
+        "description": "How a provider authenticates. Secrets are held via the scalo.secrets seam."
+      },
       "AutoMergeRequest": {
         "properties": {
           "enabled": {
@@ -10583,6 +11952,67 @@
           "reason"
         ],
         "title": "AutoMergeStatus"
+      },
+      "BindingSummary": {
+        "properties": {
+          "rule_id": {
+            "type": "string",
+            "title": "Rule Id"
+          },
+          "sigma_rule_id": {
+            "type": "string",
+            "title": "Sigma Rule Id"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": ""
+          },
+          "source_table": {
+            "type": "string",
+            "title": "Source Table",
+            "default": ""
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "default": "medium"
+          },
+          "hunts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Hunts"
+          },
+          "hand_edited": {
+            "type": "boolean",
+            "title": "Hand Edited",
+            "default": false
+          },
+          "orphaned": {
+            "type": "boolean",
+            "title": "Orphaned",
+            "default": false
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule_id",
+          "sigma_rule_id"
+        ],
+        "title": "BindingSummary",
+        "description": "A generated sigma-bound rule with its live drift state."
       },
       "Body_elastic_converter_api_v1_schemas_elastic_converter_post": {
         "properties": {
@@ -10730,6 +12160,90 @@
         ],
         "title": "CasbinScopesResponse",
         "description": "Assignable Casbin scopes (paginated) plus picker metadata."
+      },
+      "CatalogRuleDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "rule": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Rule"
+          },
+          "provenance": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Provenance"
+          },
+          "selected": {
+            "type": "boolean",
+            "title": "Selected",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CatalogRuleDetail",
+        "description": "A full stored rule: normalised content + provenance + selection state."
+      },
+      "CatalogRuleSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "default": ""
+          },
+          "origin": {
+            "type": "string",
+            "title": "Origin",
+            "default": ""
+          },
+          "upstream_modified": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upstream Modified"
+          },
+          "local_edited": {
+            "type": "boolean",
+            "title": "Local Edited",
+            "default": false
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "default": false
+          },
+          "selected": {
+            "type": "boolean",
+            "title": "Selected",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "CatalogRuleSummary",
+        "description": "A catalogue row (no detection payload) for the paginated list."
       },
       "CelCheckBatchRequest": {
         "properties": {
@@ -10980,7 +12494,7 @@
           "configured"
         ],
         "title": "CloudServiceStateResponse",
-        "description": "CH Cloud service control-plane state (see docs/CLICKHOUSE-CLOUD.md)."
+        "description": "CH Cloud service control-plane state."
       },
       "ColumnInfo": {
         "properties": {
@@ -13924,6 +15438,138 @@
         ],
         "title": "PaginatedResponse[AlertDestinationSummary]"
       },
+      "PaginatedResponse_BindingSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/BindingSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[BindingSummary]"
+      },
+      "PaginatedResponse_CatalogRuleSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogRuleSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[CatalogRuleSummary]"
+      },
       "PaginatedResponse_DeploymentSummary_": {
         "properties": {
           "items": {
@@ -14518,6 +16164,72 @@
         ],
         "title": "PaginatedResponse[ServiceConfigSummary]"
       },
+      "PaginatedResponse_SigmaViewSummary_": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SigmaViewSummary"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total",
+            "description": "Total matching items across all pages"
+          },
+          "page": {
+            "type": "integer",
+            "title": "Page",
+            "description": "Current page number (1-based)"
+          },
+          "per_page": {
+            "type": "integer",
+            "title": "Per Page",
+            "description": "Items per page"
+          },
+          "total_pages": {
+            "type": "integer",
+            "title": "Total Pages",
+            "readOnly": true
+          },
+          "next_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Page",
+            "readOnly": true
+          },
+          "prev_page": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Page",
+            "readOnly": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "total_pages",
+          "next_page",
+          "prev_page"
+        ],
+        "title": "PaginatedResponse[SigmaViewSummary]"
+      },
       "PaginatedSchemaSummaryResponse": {
         "properties": {
           "items": {
@@ -15061,6 +16773,159 @@
         "title": "PromotedJsonField",
         "description": "A JSON path already materialized as a typed meta-schema column."
       },
+      "PropagateRequest": {
+        "properties": {
+          "force": {
+            "type": "boolean",
+            "title": "Force",
+            "description": "Regenerate even over drifted / hand-edited bindings (else skipped)",
+            "default": false
+          },
+          "create_hunts": {
+            "type": "boolean",
+            "title": "Create Hunts",
+            "description": "Also bind each generated rule into a per-source hunt",
+            "default": true
+          },
+          "hunt_cron": {
+            "type": "string",
+            "title": "Hunt Cron",
+            "description": "Cron for a newly-created per-source hunt",
+            "default": "*/15 * * * *"
+          },
+          "hunt_target_table": {
+            "type": "string",
+            "title": "Hunt Target Table",
+            "description": "global_target_table_name for a new hunt",
+            "default": "hunt_results"
+          },
+          "hunt_customers": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Hunt Customers",
+            "description": "customers for a new hunt (operator adjusts later via PUT /hunts)"
+          }
+        },
+        "type": "object",
+        "title": "PropagateRequest",
+        "description": "Options for a propagate run over the current sigma selection."
+      },
+      "PropagateResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID; poll via GET /sigma/propagations/{task_id}"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PropagationReportModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present once completed"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Present on failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "PropagateResponse",
+        "description": "Submit/poll envelope for a propagate run (submit -> poll, like the sampler)."
+      },
+      "PropagationReportModel": {
+        "properties": {
+          "total_selected": {
+            "type": "integer",
+            "title": "Total Selected",
+            "default": 0
+          },
+          "created": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Created"
+          },
+          "updated": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Updated"
+          },
+          "skipped_drifted": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Skipped Drifted"
+          },
+          "skipped_no_source": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped No Source"
+          },
+          "failed": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Failed"
+          },
+          "hunts_touched": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Hunts Touched"
+          },
+          "stale_bindings": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Stale Bindings",
+            "description": "Bindings left behind by a deselect (still firing until deleted)"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          }
+        },
+        "type": "object",
+        "title": "PropagationReportModel",
+        "description": "Counts + ids from a propagate run."
+      },
       "ProtectedPolicy": {
         "properties": {
           "name": {
@@ -15086,6 +16951,78 @@
         ],
         "title": "ProtectedPolicy",
         "description": "Vars locked to default. Patterns match ``cls:name:path`` via fnmatch.\n\ne.g. ``helmvars:*:replicaCount`` or ``helmvars:receiver-default:config.kafka.*``.\nA protected var can only be changed by a caller holding the override grant."
+      },
+      "ProviderAuth": {
+        "properties": {
+          "kind": {
+            "$ref": "#/components/schemas/AuthKind",
+            "default": "none"
+          },
+          "secret_path": {
+            "type": "string",
+            "title": "Secret Path",
+            "description": "Path in the scalo.secrets seam holding the token/key",
+            "default": ""
+          },
+          "username": {
+            "type": "string",
+            "title": "Username",
+            "description": "Git username for token auth (HTTPS)",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "ProviderAuth",
+        "description": "Auth config for a provider - a secret PATH, resolved via DfeSecrets, never a value."
+      },
+      "ProviderConfig": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Unique provider id (the gitcrud filename key)"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ProviderKind"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "poll_interval_seconds": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Poll Interval Seconds",
+            "description": "Minimum seconds between polls (rate-limit budget)",
+            "default": 3600
+          },
+          "auth": {
+            "$ref": "#/components/schemas/ProviderAuth"
+          },
+          "options": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Options"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "ProviderConfig",
+        "description": "One external sigma provider - the config the operator CRUDs.\n\n`options` is kind-specific: git_repo -> {url, branch, subdir}; valhalla ->\n{base_url, demo}; local_files -> {directory}."
+      },
+      "ProviderKind": {
+        "type": "string",
+        "enum": [
+          "git_repo",
+          "valhalla",
+          "local_files"
+        ],
+        "title": "ProviderKind",
+        "description": "The adapter implementation a provider config selects."
       },
       "ProviderResponse": {
         "properties": {
@@ -15608,6 +17545,32 @@
           "rule"
         ],
         "title": "RuleCreateResponse"
+      },
+      "RuleEditRequest": {
+        "properties": {
+          "rule": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Rule"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          }
+        },
+        "type": "object",
+        "required": [
+          "rule"
+        ],
+        "title": "RuleEditRequest",
+        "description": "Operator edit of a rule's content (marks it locally edited -> survives re-import)."
       },
       "RuleResponse": {
         "properties": {
@@ -16660,6 +18623,20 @@
         "title": "SchemaVersionGet",
         "description": "Schema version payload for GET definition (columns paginated)."
       },
+      "SelectionResponse": {
+        "properties": {
+          "rules": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Rules"
+          }
+        },
+        "type": "object",
+        "title": "SelectionResponse",
+        "description": "The curated selection list (rule ids)."
+      },
       "ServiceConfigDetail": {
         "properties": {
           "service": {
@@ -16862,6 +18839,92 @@
         "title": "SettingsSummary",
         "description": "Redacted settings \u2014 no secrets."
       },
+      "SigmaViewColumn": {
+        "properties": {
+          "sigma_field": {
+            "type": "string",
+            "title": "Sigma Field",
+            "description": "Standard Sigma field name (the view alias)"
+          },
+          "source_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Column",
+            "description": "A real column on the source table"
+          },
+          "json_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Json Path",
+            "description": "A dotted path inside _json (e.g. 'EventID', 'process.command_line')"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type",
+            "description": "Optional ClickHouse type to CAST the value to (e.g. 'String', 'UInt32')"
+          }
+        },
+        "type": "object",
+        "required": [
+          "sigma_field"
+        ],
+        "title": "SigmaViewColumn",
+        "description": "One column exposed by a Sigma source-view.\n\nA column maps a standard ``sigma_field`` (the alias the view exposes) to EITHER\na real table column (``source_column``) OR a dotted path inside the source's\n``_json`` column (``json_path``) - exactly one of the two. ``type`` is an\noptional ClickHouse type the extracted value is CAST to (mainly for a\nJSON-derived column, whose subcolumn is otherwise a ``Dynamic``)."
+      },
+      "SigmaViewDefinition": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name",
+            "description": "The _source label the view is for (the store key)"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human-readable description",
+            "default": ""
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SigmaViewColumn"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "Sigma-aligned column mappings"
+          },
+          "include_source_columns": {
+            "type": "boolean",
+            "title": "Include Source Columns",
+            "description": "Also SELECT * (keep the base table columns in the view)",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name"
+        ],
+        "title": "SigmaViewDefinition",
+        "description": "A CRUD-managed Sigma view definition for one source.\n\nKeyed (in the store) by ``source_name``; the generated view targets table\n``source_name`` and is named ``{source_name}_sigma``. ``include_source_columns``\nappends ``SELECT *`` so the base table columns remain visible alongside the\nSigma-aligned aliases (the legacy view's behaviour)."
+      },
       "SigmaViewResult": {
         "properties": {
           "source_name": {
@@ -16888,6 +18951,62 @@
         ],
         "title": "SigmaViewResult",
         "description": "Generated Sigma view DDL for a source."
+      },
+      "SigmaViewSummary": {
+        "properties": {
+          "source_name": {
+            "type": "string",
+            "title": "Source Name"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "column_count": {
+            "type": "integer",
+            "title": "Column Count",
+            "default": 0
+          },
+          "json_derived_count": {
+            "type": "integer",
+            "title": "Json Derived Count",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_name"
+        ],
+        "title": "SigmaViewSummary",
+        "description": "A row in the stored-view-definition list."
+      },
+      "SigmaViewWriteRequest": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Human-readable description",
+            "default": ""
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/SigmaViewColumn"
+            },
+            "type": "array",
+            "title": "Columns",
+            "description": "Sigma-aligned column mappings"
+          },
+          "include_source_columns": {
+            "type": "boolean",
+            "title": "Include Source Columns",
+            "description": "Also SELECT * (keep the base table columns in the view)",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "SigmaViewWriteRequest",
+        "description": "Create/replace body for a source's Sigma view definition (source_name is the path).\n\nEach column maps a Sigma field to a real source column OR a path inside the\nsource's ``_json`` payload (a JSON-derived column); the ``SigmaViewColumn``\nvalidator enforces exactly one per column."
       },
       "SizeResponse": {
         "properties": {
@@ -17521,6 +19640,30 @@
             "title": "Taxonomy",
             "description": "Built-in mapping set (e.g. 'windows')"
           },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Sigma logsource category this source serves (None = any)"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service",
+            "description": "Sigma logsource service this source serves (None = any)"
+          },
           "custom_mappings": {
             "additionalProperties": {
               "type": "string"
@@ -18142,21 +20285,37 @@
         "title": "SurfaceSummary",
         "description": "Compact summary for list endpoint."
       },
-      "SyncResponse": {
+      "SyncReportModel": {
         "properties": {
-          "created": {
-            "type": "integer",
-            "title": "Created"
-          },
-          "updated": {
-            "type": "integer",
-            "title": "Updated"
+          "source": {
+            "type": "string",
+            "title": "Source"
           },
           "total": {
             "type": "integer",
             "title": "Total"
           },
-          "error": {
+          "added": {
+            "type": "integer",
+            "title": "Added"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "skipped": {
+            "type": "integer",
+            "title": "Skipped"
+          },
+          "merged": {
+            "type": "integer",
+            "title": "Merged"
+          },
+          "committed": {
+            "type": "boolean",
+            "title": "Committed"
+          },
+          "commit_sha": {
             "anyOf": [
               {
                 "type": "string"
@@ -18165,17 +20324,28 @@
                 "type": "null"
               }
             ],
-            "title": "Error"
+            "title": "Commit Sha"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
           }
         },
         "type": "object",
         "required": [
-          "created",
-          "updated",
+          "source",
           "total",
-          "error"
+          "added",
+          "updated",
+          "skipped",
+          "merged",
+          "committed"
         ],
-        "title": "SyncResponse"
+        "title": "SyncReportModel",
+        "description": "Counts from a provider sync into the catalogue."
       },
       "TableInfo": {
         "properties": {
@@ -19245,6 +21415,41 @@
         ],
         "title": "SeedResponse"
       },
+      "dfe_engine__api__v1__oidc_providers__SyncResponse": {
+        "properties": {
+          "created": {
+            "type": "integer",
+            "title": "Created"
+          },
+          "updated": {
+            "type": "integer",
+            "title": "Updated"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "created",
+          "updated",
+          "total",
+          "error"
+        ],
+        "title": "SyncResponse"
+      },
       "dfe_engine__api__v1__oidc_providers__TestResponse": {
         "properties": {
           "success": {
@@ -19378,6 +21583,48 @@
           "valid"
         ],
         "title": "ValidationResult"
+      },
+      "dfe_engine__api__v1__sigma__SyncResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID; poll via GET /sigma/syncs/{task_id}"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus"
+          },
+          "report": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SyncReportModel"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present once completed"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Present on failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "SyncResponse",
+        "description": "Submit/poll envelope for a provider sync (submit -> poll, like the sampler)."
       },
       "dfe_engine__api__v1__sources__SchemaBuildResult": {
         "properties": {

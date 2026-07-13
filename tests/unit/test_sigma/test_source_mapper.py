@@ -297,6 +297,27 @@ class TestGetSourcesForLogsource:
         # disabled_source has windows taxonomy but is disabled
         assert "disabled_source" not in names
 
+    def test_service_narrowing_excludes_wrong_source(self, type_registry):
+        # P2.17: two same-product sources - a sysmon-service rule must bind ONLY
+        # the sysmon source, not the audit source that declares a different service.
+        audit = _make_source(
+            "windows_audit",
+            sigma=SourceSigma(taxonomy="windows", service="audit"),
+        )
+        sysmon = _make_source(
+            "windows_sysmon",
+            sigma=SourceSigma(taxonomy="windows", service="sysmon"),
+        )
+        bare = _make_source("windows_any", sigma=SourceSigma(taxonomy="windows"))
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        m = SigmaSourceMapper(FakeSourceRegistry([audit, sysmon, bare]), registry=type_registry)
+
+        names = {s.source for s in m.get_sources_for_logsource(product="windows", service="sysmon")}
+        assert "windows_sysmon" in names
+        assert "windows_audit" not in names  # wrong service, excluded
+        assert "windows_any" in names  # no declared service -> matches any
+
 
 # ---------------------------------------------------------------------------
 # Tests: FieldMapRegistry integration

@@ -1181,7 +1181,7 @@ def _resolve_promote_meta_schema(
     configured = ver.effective_schema().meta_schema
     if schema_path and configured:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "schema_path_conflict",
                 "message": (
@@ -1193,7 +1193,7 @@ def _resolve_promote_meta_schema(
     rel = configured or schema_path
     if not rel:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "no_meta_schema",
                 "message": (
@@ -1253,7 +1253,7 @@ def _columns_for_meta_version(meta: MetaSchema, version_id: str):
     ver = meta.versions.get(version_id)
     if ver is None:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={
                 "code": "validation_error",
                 "message": f"Meta-schema version {version_id!r} is not defined",
@@ -1291,7 +1291,7 @@ def _ensure_writable_meta_schema_for_promote(
         fork_canonical = canonical_schema_path(existing)
         if schema_registry_path_is_core(fork_canonical, schema_registry):
             raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
                 detail={
                     "code": "core_schema_fork",
                     "message": (
@@ -1323,7 +1323,7 @@ def _ensure_writable_meta_schema_for_promote(
         )
     except (SchemaVersionError, SchemaLoadError) as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
 
@@ -1846,7 +1846,7 @@ async def promote_field(
         )
     except SourceValidationError as exc:
         raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail={"code": "validation_error", "message": str(exc)},
         ) from exc
     audit_resource_change(user.user_id, "source", source_name, "updated")

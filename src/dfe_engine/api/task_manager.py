@@ -70,6 +70,11 @@ class TaskStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+    @property
+    def is_terminal(self) -> bool:
+        """True once the task can no longer change state (settled)."""
+        return self in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED)
+
 
 class TaskInfo(BaseModel):
     """Public view of a task."""
@@ -210,6 +215,26 @@ class TaskManager:
         except TimeoutError:
             pass
         return task.to_info()
+
+    async def await_terminal(self, task_id: str, wait: float) -> TaskInfo | None:
+        """Block until the task is terminal or ``wait`` seconds elapse.
+
+        The submit -> poll convenience the synchronous API paths share (sigma sync,
+        sampler): returns the task's TaskInfo - terminal if it settled within the
+        window, else the latest in-flight snapshot - or None for an unknown id.
+        Waits on the task's own progress SIGNAL, not a poll timer (readiness-signal,
+        not a raced timeout).
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + wait
+        while True:
+            info = self.get(task_id)
+            if info is None or info.status.is_terminal:
+                return info
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                return info
+            await self.wait_for_progress(task_id, timeout=remaining)
 
     def _evict_completed(self) -> None:
         """Remove oldest completed/failed/cancelled tasks beyond max_completed."""
