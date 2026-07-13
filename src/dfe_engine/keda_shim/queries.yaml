@@ -1,0 +1,46 @@
+# Built-in dfe-keda-shim query catalogue. KEDA polls GET /q/<name> (or the
+# /keda/pressure + /keda/hunt-backlog aliases); the shim runs the SQL named here
+# and returns {"value": <int>}. OVERRIDE or EXTEND these via a YAML file at
+# DFE_KEDA_SHIM_QUERY_CONFIG (deep-merged over these defaults) - change a query, or
+# add a new scaling signal, with a config edit and NO rebuild.
+#
+# Per-query keys:
+#   database         otel | data | <literal db>. otel -> DFE_KEDA_SHIM_OTEL_DATABASE
+#                    (HyperDX's otel db); data -> the engine's effective data db.
+#                    The sentinel __DB__ in `sql` is replaced with the resolved,
+#                    validated database identifier.
+#   sql              ClickHouse SQL. `params` + `binds` become CH-native bind
+#                    placeholders ({name:Type}) - safe against injection.
+#   builtin          instead of `sql`: a named in-code SQL provider. hunt_backlog ->
+#                    schedule.due_query, the ONE due-count source of truth (no drift).
+#   params           request query params bound into the SQL (validated identifiers).
+#   binds            fixed CH bind params set from config.
+#   result_field     column index of the scalar in row 0 (default 0).
+#   clamp_min/max    clamp the returned integer into a band.
+#   cold_hold        value on a cold start with NO cached last-good (0 = hold at min -
+#                    a broken metric can only ever hold or scale DOWN, never up).
+#   timeout_seconds  ClickHouse max_execution_time for the query.
+queries:
+  pressure:
+    database: otel
+    sql: >
+      SELECT toUInt32(round(coalesce(avg(Value), 0)))
+      FROM __DB__.otel_metrics_gauge
+      WHERE MetricName = 'dfe_scaling_pressure'
+        AND ServiceName = {service:String}
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+    params: [service]
+    binds:
+      window_seconds: 60
+    result_field: 0
+    clamp_min: 0
+    clamp_max: 100
+    cold_hold: 0
+    timeout_seconds: 5
+  backlog:
+    database: data
+    builtin: hunt_backlog
+    result_field: 0
+    clamp_min: 0
+    cold_hold: 0
+    timeout_seconds: 5

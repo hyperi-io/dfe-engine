@@ -80,7 +80,7 @@ async def get_settings(user: CurrentUser, settings: Settings):
 
 
 class CloudServiceStateResponse(BaseModel):
-    """CH Cloud service control-plane state (see docs/CLICKHOUSE-CLOUD.md)."""
+    """CH Cloud service control-plane state."""
 
     configured: bool = Field(description="Whether the CH Cloud control-plane key is set.")
     id: str = Field(default="", description="CH Cloud service id.")

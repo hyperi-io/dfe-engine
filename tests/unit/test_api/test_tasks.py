@@ -65,6 +65,7 @@ class TestHuntsRouter:
             "display_name": "Alpha Windows Hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
+            "global_source_table_name": "logs_nxlog",
             "customers": ["org_a"],
             "rules": ["alpha_rule"],
         }
@@ -73,6 +74,7 @@ class TestHuntsRouter:
             "display_name": "Beta Linux Hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
+            "global_source_table_name": "logs_nxlog",
             "customers": ["org_b"],
             "rules": ["beta_rule"],
         }
@@ -136,6 +138,7 @@ class TestHuntsRouter:
             "display_name": "API Test Hunt Updated",
             "cron": "*/5 * * * *",
             "global_target_table_name": "logs_alerts",
+            "global_source_table_name": "logs_nxlog",
             "customers": ["test-org"],
             "rules": ["other_rule"],
         }
@@ -158,6 +161,7 @@ class TestHuntsRouter:
             "name": "dup_hunt",
             "cron": "* * * * *",
             "global_target_table_name": "t",
+            "global_source_table_name": "s",
             "customers": ["c"],
             "rules": ["r"],
         }
@@ -171,6 +175,7 @@ class TestHuntsRouter:
             "name": "MyHunt",
             "cron": "* * * * *",
             "global_target_table_name": "t",
+            "global_source_table_name": "s",
             "customers": ["c"],
             "rules": ["r"],
         }
@@ -185,6 +190,7 @@ class TestHuntsRouter:
             "name": "api_test_hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
+            "global_source_table_name": "logs_nxlog",
             "customers": ["c"],
             "rules": ["r"],
         }

@@ -199,6 +199,7 @@ class TestRulesUpdateAndDelete:
             "name": "rule_guard_hunt",
             "cron": "* * * * *",
             "global_target_table_name": "logs_alerts",
+            "global_source_table_name": "logs_nxlog",
             "customers": ["org_a"],
             "rules": [rule_name],
         }

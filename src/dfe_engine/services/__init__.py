@@ -1,7 +1,7 @@
-"""DFE Service configuration and state management.
+"""DFE Service configuration management.
 
-Provides centralized configuration management and runtime state querying
-for DFE Rust services via a plugin-based architecture.
+Provides centralized configuration management for DFE Rust services via a
+plugin-based architecture.
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
@@ -16,7 +16,7 @@ Plugin system:
 - External packages can register additional services
 
 Usage:
-    from dfe_engine.services import ServiceConfigRegistry, ServiceStateClient
+    from dfe_engine.services import ServiceConfigRegistry
     from dfe_engine.services.plugins import get_plugin, valid_services
     from dfe_engine.services.models import ReceiverConfig, LoaderConfig, ArchiverConfig
 
@@ -26,10 +26,6 @@ Usage:
     )
     config = registry.get_config("receiver", "production")
     registry.save_config("loader", LoaderConfig(...), instance="staging")
-
-    # Runtime state
-    client = ServiceStateClient("receiver", "http://receiver:8080")
-    status = await client.status()
 
     # Plugin system
     all_services = valid_services()  # dynamic set from all registered plugins
@@ -55,11 +51,6 @@ from dfe_engine.services.registry import (
     ServiceConfigError,
     ServiceConfigRegistry,
 )
-from dfe_engine.services.state import (
-    HealthStatus,
-    ServiceStateClient,
-    ServiceStatus,
-)
 from dfe_engine.services.templates import generate_template
 from dfe_engine.services.validators import ValidationResult, validate_config
 
@@ -74,10 +65,6 @@ __all__ = [
     "ConfigNotFoundError",
     "ServiceConfigError",
     "ServiceConfigRegistry",
-    # State
-    "HealthStatus",
-    "ServiceStateClient",
-    "ServiceStatus",
     # Models
     "ArchiverConfig",
     "LoaderConfig",

@@ -1,5 +1,9 @@
 """Hunt alert grouping + cooldown — read-time aggregation for alerts.
 
+DEFERRED (unwired): part of the alerting track (auto-memory project_alerting), NOT
+dead code. AlertStateManager + build_grouping_query have no caller today; they drop in
+when the alerting build lands. Retained deliberately.
+
 All matched rows are written to the results table at full fidelity.
 Grouping happens at READ TIME when building alerts — a post-INSERT
 aggregation query groups by configurable fields and produces one alert

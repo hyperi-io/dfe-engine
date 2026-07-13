@@ -31,7 +31,7 @@ CANONICAL_TABLE = {
 
 
 class TestDerive:
-    @pytest.mark.parametrize("provider,expected", list(CANONICAL_TABLE.items()))
+    @pytest.mark.parametrize(("provider", "expected"), list(CANONICAL_TABLE.items()))
     def test_table(self, provider, expected):
         assert derive(provider) == expected
 
@@ -62,7 +62,7 @@ class TestValidate:
         validate(security_protocol="SASL_SSL", sasl_mechanism="PLAIN")
 
     def test_sasl_ssl_needs_a_mechanism(self):
-        with pytest.raises(KafkaContractError, match="requires a sasl.mechanism"):
+        with pytest.raises(KafkaContractError, match=r"requires a sasl\.mechanism"):
             validate(security_protocol="SASL_SSL", sasl_mechanism="")
 
     def test_plaintext_dev_ok(self):

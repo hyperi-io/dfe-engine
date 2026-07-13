@@ -478,7 +478,7 @@ class DDLGenerator:
         allow_nullable_key on -- or fail the whole table -- the engine drops
         the offending column from the key and warns. To keep a column in the
         ORDER BY, mark it 'not_null' (or give it a DEFAULT, which also forces
-        non-null). See docs/SCHEMA.md "Nullability Defaults".
+        non-null). See docs/data-plane/schema.md "Nullability Defaults".
         """
         ordered = [col for col in columns if col.order is not None]
         ordered.sort(key=lambda c: c.order)

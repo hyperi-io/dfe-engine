@@ -10,7 +10,7 @@ Order of operations:
 4. Clamp to 0–100
 
 Condition expressions use **CEL (Common Expression Language)** via
-``scalo.expression``. See ``docs/EXPRESSIONS-CEL.md`` for the
+``scalo.expression``. See ``docs/data-plane/expressions-cel.md`` for the
 DFE expression profile.
 
 Hunt YAML format::

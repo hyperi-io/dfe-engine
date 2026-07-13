@@ -5,7 +5,7 @@ Usage::
     from dfe_engine.api import create_app
     app = create_app()
 
-Or via the daemon entry point (uses scalo DfeApp framework)::
+Or via the daemon entry point (uses scalo ServiceApp framework)::
 
     dfe-engine run          # start the API server
     dfe-engine version      # show version
@@ -23,7 +23,7 @@ from dfe_engine.api.app import create_app
 
 
 class _DfeEngineApp:
-    """Entry point adapter using scalo DfeApp framework."""
+    """Entry point adapter using scalo ServiceApp framework."""
 
     name = "dfe-engine"
     # env_prefix stays DFE_API: the API sub-config env vars (DFE_API_HOST,
@@ -32,9 +32,9 @@ class _DfeEngineApp:
     env_prefix = "DFE_API"
 
     def _make_app(self):
-        from scalo.cli import DfeApp, VersionInfo
+        from scalo.cli import ServiceApp, VersionInfo
 
-        class DfeEngineApp(DfeApp):
+        class DfeEngineApp(ServiceApp):
             name = "dfe-engine"
             env_prefix = "DFE_API"
 
@@ -86,7 +86,7 @@ class _DfeEngineApp:
 def run_dev_server() -> None:
     """Entry point for the ``dfe-engine`` console script.
 
-    Delegates to scalo DfeApp CLI framework which provides:
+    Delegates to scalo ServiceApp CLI framework which provides:
     ``run``, ``version``, and ``config-check`` subcommands plus
     common flags (--config, --log-level, --verbose, --quiet).
     """

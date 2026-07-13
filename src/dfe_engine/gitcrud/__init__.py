@@ -8,8 +8,8 @@
 """Governed Ops: one generic git-native CRUD engine for every YAML resource class.
 
 Every CRUD resource in DFE is YAML in git, so a single engine handles them all the
-same way and RBAC is bound once at the class level. See docs/ARCHITECTURE.md
-("Governed Ops") and docs/GITOPS-COMMIT-STANDARD.md.
+same way and RBAC is bound once at the class level. See docs/architecture.md
+("Governed Ops") and docs/control-plane/gitops-commit-standard.md.
 """
 
 from .engine import (

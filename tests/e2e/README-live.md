@@ -23,7 +23,7 @@ endpoint.
 
 ## Assumed deployment
 
-A `single` or `standard` k8s tier (see docs/ARCHITECTURE.md "Deployment tiers"):
+A `single` or `standard` k8s tier (see docs/architecture.md "Deployment tiers"):
 dfe-engine, dfe-ui, the receiver, ClickHouse, HyperDX, and a reachable deploy
 repo. Tests 1-2 exercise the data plane; 3-4 exercise the control plane (engine
 git write -> deploy repo, which Argo then applies).

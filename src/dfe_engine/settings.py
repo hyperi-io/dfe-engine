@@ -129,8 +129,7 @@ class ClickHouseCloudSettings(BaseModel):
     at a ``*.clickhouse.cloud`` host). This block is the CONTROL-PLANE management
     API (``api.clickhouse.cloud``) used to see / start / stop the service - a
     BILLABLE lever, off by default. The api key needs only service read +
-    state-management (a SERVICE-SCOPED key, NOT an org-admin key); see
-    docs/CLICKHOUSE-CLOUD.md.
+    state-management (a SERVICE-SCOPED key, NOT an org-admin key).
     """
 
     api_key_id: str = Field(default="", description="CH Cloud mgmt API key id (control plane).")
@@ -362,7 +361,7 @@ class RedpandaCloudSettings(BaseModel):
     redpanda.com`` + ``api.redpanda.com``) used to create/delete the cluster and
     mint/revoke the SCRAM-512 data-plane user - the first (proven) provider behind
     ``dfe_engine.kafka.cloud.base.ManagedKafkaProvider``. See
-    docs/MANAGED-KAFKA-LIFECYCLE.md.
+    docs/deployment/managed-kafka-lifecycle.md.
     """
 
     client_id: str = Field(default="", description="OAuth2 service-account client id.")
@@ -568,6 +567,39 @@ class SamplerSettings(BaseModel):
     )
 
 
+class KedaShimSettings(BaseModel):
+    """dfe-keda-shim settings - the KEDA metrics-api -> ClickHouse query adapter.
+
+    The shim answers KEDA's ``metrics-api`` polls by running a config-defined
+    ClickHouse query and returning ONE integer, with a last-good fail-safe cache: on
+    any metric failure it returns the cached value so KEDA sees no change and scaling
+    FREEZES at current (a broken metric can never run replicas up and blow the bill).
+    Queries live in a YAML catalogue (built-in ``keda_shim/queries.yaml`` + an
+    optional mounted override), so a HyperDX schema rename or a new scaling signal is
+    a CONFIG edit, never a shim rebuild.
+
+    Environment variables (DFE_KEDA_SHIM_ prefix):
+    - DFE_KEDA_SHIM_HOST -> keda_shim.host
+    - DFE_KEDA_SHIM_PORT -> keda_shim.port
+    - DFE_KEDA_SHIM_QUERY_CONFIG -> keda_shim.query_config (override catalogue path)
+    - DFE_KEDA_SHIM_OTEL_DATABASE -> keda_shim.otel_database (HyperDX otel CH db)
+    """
+
+    host: str = Field(default="0.0.0.0", description="Shim HTTP bind address")  # noqa: S104
+    port: int = Field(default=8080, ge=1, description="Shim HTTP port KEDA polls")
+    query_config: str = Field(
+        default="",
+        description=(
+            "Path to a YAML query catalogue that OVERRIDES/extends the built-in "
+            "defaults (deep-merged). Empty = built-in pressure + backlog only."
+        ),
+    )
+    otel_database: str = Field(
+        default="dfe",
+        description="ClickHouse database holding HyperDX's otel_metrics_gauge (pressure source)",
+    )
+
+
 class RepositorySettings(BaseModel):
     """Repository (scope-aligned small-object store) settings.
 
@@ -655,30 +687,18 @@ class FieldMapSettings(BaseModel):
 
 
 class ServicesSettings(BaseModel):
-    """Endpoints for managed DFE services.
-
-    Used by ServiceStateClient to query health and metrics from running services.
+    """Endpoints for managed DFE services (the transform-wasm compile/test proxy +
+    the Rust-services YAML config replica dir). The per-service health/metrics URLs
+    were dropped with services/state.py -- runtime state is the surfaces registry now.
 
     Environment variables:
-    - DFE_SERVICES_RECEIVER_URL -> services.receiver_url
-    - DFE_SERVICES_RECEIVER_METRICS_URL -> services.receiver_metrics_url
-    - DFE_SERVICES_LOADER_URL -> services.loader_url
-    - DFE_SERVICES_ARCHIVER_METRICS_URL -> services.archiver_metrics_url
-    - DFE_SERVICES_TRANSFORM_VECTOR_URL -> services.transform_vector_url
     - DFE_SERVICES_TRANSFORM_WASM_URL -> services.transform_wasm_url
-    - DFE_SERVICES_FETCHER_URL -> services.fetcher_url
-    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     - DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL -> services.transform_wasm_compiler_url
+    - DFE_SERVICES_CONFIG_YAML_DIR -> services.config_yaml_dir
     """
 
-    receiver_url: str = Field(default="http://localhost:8080")
-    receiver_metrics_url: str = Field(default="http://localhost:9090")
-    loader_url: str = Field(default="http://localhost:9090")
-    archiver_metrics_url: str = Field(default="http://localhost:9090")
-    transform_vector_url: str = Field(default="http://localhost:8080")
     transform_wasm_url: str = Field(default="http://localhost:8080")
     transform_wasm_compiler_url: str = Field(default="http://localhost:8090")
-    fetcher_url: str = Field(default="http://localhost:8080")
     config_yaml_dir: str = Field(
         default="", description="YAML config replica directory for Rust services"
     )
@@ -937,7 +957,7 @@ class SecretsSettings(BaseModel):
     keys). ``provider`` selects the scalo.secrets backend and NEVER a hardcoded
     product: 'file'/'ansible_vault' for dfe-docker (a local encrypted file, no extra
     service), 'openbao' on k8s (external-first), 'aws'/'gcp'/'azure' for cloud
-    (deferred). See docs/BACKING-SERVICES.md.
+    (deferred). See docs/deployment/backing-services.md.
 
     Environment variables (DFE_SECRETS_ prefix):
     - DFE_SECRETS_PROVIDER -> secrets.provider (file|ansible_vault|openbao|aws|gcp|azure)
@@ -969,6 +989,7 @@ class DFESettings(BaseModel):
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
     sampler: SamplerSettings = Field(default_factory=SamplerSettings)
+    keda_shim: KedaShimSettings = Field(default_factory=KedaShimSettings)
     schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)
     fieldmap: FieldMapSettings = Field(default_factory=FieldMapSettings)
@@ -1027,6 +1048,7 @@ def _get_env_overrides() -> dict:
         "query": {},
         "query_views": {},
         "sampler": {},
+        "keda_shim": {},
         "schemas": {},
         "source": {},
         "fieldmap": {},
@@ -1260,6 +1282,16 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_SAMPLER_MAX_EXECUTION_TIME"):
         overrides["sampler"]["max_execution_time"] = int(val)
 
+    # KEDA shim settings (the metrics-api -> ClickHouse query adapter)
+    if val := _get_env("DFE_KEDA_SHIM_HOST"):
+        overrides["keda_shim"]["host"] = val
+    if val := _get_env("DFE_KEDA_SHIM_PORT"):
+        overrides["keda_shim"]["port"] = int(val)
+    if val := _get_env("DFE_KEDA_SHIM_QUERY_CONFIG"):
+        overrides["keda_shim"]["query_config"] = val
+    if val := _get_env("DFE_KEDA_SHIM_OTEL_DATABASE"):
+        overrides["keda_shim"]["otel_database"] = val
+
     # Schemas settings (dfe-schemas submodule)
     if val := _get_env("DFE_SCHEMAS_DIR"):
         overrides["schemas"]["schemas_dir"] = val
@@ -1279,22 +1311,10 @@ def _get_env_overrides() -> dict:
         overrides["fieldmap"]["fieldmaps_dir"] = val
 
     # Services settings
-    if val := _get_env("DFE_SERVICES_RECEIVER_URL"):
-        overrides["services"]["receiver_url"] = val
-    if val := _get_env("DFE_SERVICES_RECEIVER_METRICS_URL"):
-        overrides["services"]["receiver_metrics_url"] = val
-    if val := _get_env("DFE_SERVICES_LOADER_URL"):
-        overrides["services"]["loader_url"] = val
-    if val := _get_env("DFE_SERVICES_ARCHIVER_METRICS_URL"):
-        overrides["services"]["archiver_metrics_url"] = val
-    if val := _get_env("DFE_SERVICES_TRANSFORM_VECTOR_URL"):
-        overrides["services"]["transform_vector_url"] = val
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_URL"):
         overrides["services"]["transform_wasm_url"] = val
     if val := _get_env("DFE_SERVICES_TRANSFORM_WASM_COMPILER_URL"):
         overrides["services"]["transform_wasm_compiler_url"] = val
-    if val := _get_env("DFE_SERVICES_FETCHER_URL"):
-        overrides["services"]["fetcher_url"] = val
     if val := _get_env("DFE_SERVICES_CONFIG_YAML_DIR"):
         overrides["services"]["config_yaml_dir"] = val
 

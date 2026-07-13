@@ -14,7 +14,7 @@ fill the env). This module is the WRITE seam for secrets the engine generates
 ``ansible_vault`` for dfe-docker (a local file, no extra service), ``openbao`` on
 k8s (external-first), ``aws`` / ``gcp`` / ``azure`` for cloud (deferred).
 
-The engine never imports a backend SDK - scalo owns that (see BACKING-SERVICES.md).
+The engine never imports a backend SDK - scalo owns that (see docs/deployment/backing-services.md).
 """
 
 from __future__ import annotations

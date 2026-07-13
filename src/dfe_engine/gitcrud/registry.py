@@ -8,7 +8,7 @@
 """Registry mapping a class name to its ResourceClass descriptor.
 
 The default registry seeds the DFE Governed Ops resource classes. Directories are the
-deploy-repo layout from docs/ARCHITECTURE.md; they are config, not hardcoded
+deploy-repo layout from docs/architecture.md; they are config, not hardcoded
 behaviour, so a deployment can override them.
 """
 
@@ -54,7 +54,7 @@ class ResourceClassRegistry:
 
 
 def default_registry() -> ResourceClassRegistry:
-    """DFE Governed Ops resource types for the DEPLOY repo (see docs/ARCHITECTURE.md).
+    """DFE Governed Ops resource types for the DEPLOY repo (see docs/architecture.md).
 
     Typed entries sharing RBAC class prefixes. Scope here is the deploy repo:
     `helmvars` (overlays) + the `governance` class (rbac + actions + policies).

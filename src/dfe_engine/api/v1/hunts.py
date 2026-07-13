@@ -22,12 +22,14 @@ import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from jinja2 import Environment
 from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.api.deps import (
     CurrentUser,
     HuntConfigReg,
     OptionalAlertDestRegistry,
+    Settings,
     require_action,
 )
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -39,6 +41,7 @@ from dfe_engine.hunts.hunt_config_registry import (
     default_display_name,
     resolve_display_name,
 )
+from dfe_engine.hunts.validator import HuntValidator
 
 _HUNT_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_-]+$")
 
@@ -60,6 +63,35 @@ def _rules_from_stored(rules: Any) -> list[dict[str, Any]]:
 
 def _rules_to_yaml(rule_names: list[str]) -> list[dict[str, str]]:
     return [{"rule_name": name} for name in rule_names]
+
+
+def _validate_hunt_config(config: dict[str, Any], settings: Any) -> None:
+    """Run the deep HuntValidator on an API create/update hunt config (422 on error).
+
+    Pydantic only checks the request SHAPE; this closes the gap where API CRUD skipped
+    rule-file-existence + Jinja2 rule-syntax + structural (source/customer) validation.
+    Rule lookup uses the CONSUMED rules dir (hunts.rules_dir). checkpoint_timestamp_field
+    is API-optional so it falls back to the setting then a default. source_registry is
+    None (source-ref checks only warn), so an unknown source ref is not blocked here.
+    """
+    checkpoint_field = (
+        config.get("checkpoint_timestamp_field")
+        or settings.hunts.checkpoint_timestamp_field
+        or "timestamp"
+    )
+    try:
+        HuntValidator.validate_hunt_configuration(
+            config,
+            Environment(),  # parses the Jinja2 rule templates (SQL, not HTML)
+            settings.hunts.rules_dir,
+            checkpoint_field,
+            source_registry=None,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "validation_error", "message": str(exc)},
+        ) from exc
 
 
 router = APIRouter(prefix="/hunts", tags=["hunts"])
@@ -310,6 +342,7 @@ async def create_hunt(
     body: HuntCreateRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
+    settings: Settings,
 ) -> HuntDetailResponse:
     """Create a new hunt configuration YAML."""
     if registry.name_exists(body.name):
@@ -318,6 +351,7 @@ async def create_hunt(
             detail={"code": "conflict", "message": f"Hunt '{body.name}' already exists"},
         )
     config = body.to_config_dict(hunt_name=body.name)
+    _validate_hunt_config(config, settings)
     registry.save(
         body.name,
         config,
@@ -359,6 +393,7 @@ async def update_hunt(
     body: HuntWriteRequest,
     user: CurrentUser,
     registry: HuntConfigReg,
+    settings: Settings,
 ) -> HuntDetailResponse:
     """Replace an existing hunt configuration."""
     try:
@@ -370,6 +405,7 @@ async def update_hunt(
         ) from None
 
     config = body.to_config_dict(hunt_name=name)
+    _validate_hunt_config(config, settings)
     registry.save(
         name,
         config,

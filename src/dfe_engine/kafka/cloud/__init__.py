@@ -9,7 +9,7 @@
 """Managed-Kafka cluster lifecycle - one ``up``/``down``/``status`` seam per
 provider behind :class:`~dfe_engine.kafka.cloud.base.ManagedKafkaProvider`.
 
-See ``docs/MANAGED-KAFKA-LIFECYCLE.md`` for the design rationale (always-on
+See ``docs/deployment/managed-kafka-lifecycle.md`` for the design rationale (always-on
 cost problem; ``down`` = DELETE not pause; teardown-to-empty). Redpanda Cloud
 Serverless is the first (proven) provider, promoted from the
 ``.tmp/redpanda_lifecycle.py`` scratch driver.

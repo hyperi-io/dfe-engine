@@ -10,7 +10,7 @@
 A ResourceClass says WHERE a class of YAML resources lives (repo-relative
 directory + file suffix) and the RBAC action prefix that governs it. The generic
 engine handles every class uniformly, and authz is bound once at the class level -
-never per file or per field (see docs/ARCHITECTURE.md, "Governed Ops").
+never per file or per field (see docs/architecture.md, "Governed Ops").
 """
 
 from __future__ import annotations

@@ -24,7 +24,7 @@ P, boundary = now // I * I, fire = boundary + P, and the hunt is due iff
 That EXACT parity with the worker's own skip conditions (runner.tick) is what makes
 scale-to-zero safe: KEDA wakes a worker precisely when a worker would find work, and
 scales to zero precisely when a worker would idle. There is no timer to race - KEDA
-gates on the real backlog signal. See docs/HUNT-RUNNER-SCALING.md.
+gates on the real backlog signal. See docs/data-plane/hunt-runner-scaling.md.
 """
 
 from __future__ import annotations

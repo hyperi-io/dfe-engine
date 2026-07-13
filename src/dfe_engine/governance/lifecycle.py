@@ -12,7 +12,7 @@ Each service declares a TIER: managed-app (operator-grantable), managed-backing
 cascade deps: the cluster, DNS, ClickHouse, the secrets manager, Argo). The API
 writes a ``state`` value (running | paused | stopped) to the deploy repo via
 GitCrud and Argo reconciles - nothing is applied live, the engine only flips a
-config dial (see docs/BACKING-SERVICES.md and the engine<->infra boundary).
+config dial (see docs/deployment/backing-services.md and the engine<->infra boundary).
 
 State semantics:
   running - deployed; KEDA scales min..max.

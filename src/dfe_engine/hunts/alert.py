@@ -228,6 +228,14 @@ class AlertTrigger(BaseModel):
         return v
 
 
+# --- DEFERRED (unwired) below: the dispatch half of alerting ---
+# AlertConfig / AlertDispatcher / build_alert_config have no src caller today (the
+# registry half above -- AlertDestination / AlertDestinationRegistry / AlertTrigger --
+# IS live via the API + alerts router). Part of the alerting track (auto-memory
+# project_alerting); NOT dead code. It converges with the alerting/ package's Dispatcher
+# when the alerting build lands (ONE dispatch seam chosen then). Retained deliberately.
+
+
 class AlertConfig(BaseModel):
     """Alert configuration for a hunt or globally."""
 

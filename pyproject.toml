@@ -109,6 +109,7 @@ dev = [
     "Faker>=40.27.0",
     "types-requests>=2.33.0",
     "python-dotenv>=1.2.2",
+    "pytest-timeout>=2.4.0",
 ]
 
 [tool.pytest.ini_options]
@@ -120,6 +121,17 @@ python_files = "test_*.py"
 addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
+# Permanent hang guard (pytest-timeout): fail ANY test running longer than
+# `timeout` seconds and dump every thread's stack, so a wedged test (blocked
+# socket / gRPC / ClickHouse connect, OTLP exporter shutdown-block) fails fast
+# with a traceback instead of stalling the run to the CI job wall-clock. The
+# `thread` method is REQUIRED here: the block can sit in a worker thread (the
+# anyio lifespan-startup thread, an OTLP export thread) that the `signal`
+# method (main-thread SIGALRM only, and unusable under `-n` xdist) cannot
+# interrupt. 300s clears the slowest legit path (integration docker CH pull
+# ~240s on first image fetch) yet still catches a real hang.
+timeout = 300
+timeout_method = "thread"
 filterwarnings = [
     # starlette 1.x deprecates httpx-0.x under TestClient and points at httpx2; the
     # httpx2 migration is a separate follow-up (test-infra only; prod unaffected).
@@ -225,6 +237,7 @@ convention = "google"
 dfe-engine = "dfe_engine.api:run_dev_server"
 dfe = "dfe_engine.cli.auto.main:main"
 dfe-hunt-runner = "dfe_engine.hunt_runner.cli:main"
+dfe-keda-shim = "dfe_engine.keda_shim.cli:main"
 
 [project.entry-points."dfe_engine.services"]
 receiver = "dfe_engine.services.plugins_builtin.receiver:plugin"

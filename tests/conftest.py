@@ -35,6 +35,22 @@ from pathlib import Path
 import pytest
 from scalo.logger import logger
 
+# --------------------------------------------------------------------------
+# Test-session guard 1/2: never start a live OTLP metrics/trace/log exporter.
+# There is no OTLP collector at localhost:4317 in CI (or most dev machines); a
+# live PeriodicExportingMetricReader/OTLPMetricExporter would retry on every
+# export and block on shutdown ("Can't shutdown multiple times"), hanging the
+# run. scalo>=2.29.7 already defaults the endpoint off, but pin it hard here so
+# a stray OTEL_EXPORTER_OTLP_ENDPOINT / metrics config can never turn it back on
+# under test. setdefault so an explicit override still wins if a test needs one.
+for _otel_key, _otel_val in (
+    ("OTEL_SDK_DISABLED", "true"),
+    ("OTEL_METRICS_EXPORTER", "none"),
+    ("OTEL_TRACES_EXPORTER", "none"),
+    ("OTEL_LOGS_EXPORTER", "none"),
+):
+    os.environ.setdefault(_otel_key, _otel_val)
+
 # Load .env file if present (before any other imports that might use settings)
 try:
     from dotenv import load_dotenv
@@ -52,6 +68,57 @@ try:
 
     reset_settings()
 except ImportError:
+    pass
+
+# --------------------------------------------------------------------------
+# Test-session guard: CH connections must FAIL FAST, never block the run.
+#
+# A hermetic unit/api test has no ClickHouse. When an endpoint (or the app
+# lifespan) opens a CH connection, scalo's ReconnectingResilience retries a
+# refused connection for the FULL budget - 60s per op, up to 300s while a
+# CH-Cloud wake is in flight (settings.clickhouse.resilience). A handful of
+# such ops stalled the suite for 30-70+ min and timed out CI. The connection
+# REFUSED itself is instant (~2ms); it is the 60s retry budget that hangs.
+#
+# Shrink the DEFAULT resilience budget to ~50ms for the test session, so a
+# CH-down op still raises ServiceUnavailable (-> API 503, semantics preserved)
+# but in milliseconds, not minutes. This reaches BOTH direct-constructed test
+# settings (which bypass the env cascade) and load_settings(). The CH resilience
+# UNIT tests pass their budgets EXPLICITLY, so this default change never touches
+# them; integration tests hit a READY CH (first attempt succeeds, no retry), so
+# the budget is irrelevant there too.
+try:
+    from dfe_engine.settings import ClickHouseResilienceSettings
+
+    for _ch_field, _ch_val in (
+        ("budget_seconds", 0.05),
+        ("waking_budget_seconds", 0.05),
+        ("wait_initial", 0.01),
+        ("wait_max", 0.02),
+    ):
+        ClickHouseResilienceSettings.model_fields[_ch_field].default = _ch_val
+    ClickHouseResilienceSettings.model_rebuild(force=True)
+except Exception:  # never let a settings refactor break test collection
+    pass
+
+# --------------------------------------------------------------------------
+# Test-session guard: HTTP calls must FAIL FAST, never wait the retry budget.
+#
+# scalo's HttpClient / AsyncHttpClient (used by the HyperDX client, OIDC IdP
+# adapters, the gitops forge, storage + query backends, service health probes,
+# the CH-Cloud + Redpanda-Cloud control planes, and the auto-CLI) retry with
+# Stamina - 3 attempts with exponential backoff by default. Against an
+# unreachable dependency that is up to ~90s of real sleeping per call. Stamina's
+# own test mode disables the backoff AND caps attempts at 1, so a would-be
+# outbound call fails in ~0s (single attempt) instead of waiting the budget.
+# Unit tests already stub their outbound calls; this is the backstop so a test
+# that forgets can never wait-forever on HTTP. scalo tests the retry engine
+# itself, so nothing here needs the real backoff.
+try:
+    import stamina
+
+    stamina.set_testing(True, attempts=1)
+except ImportError:  # stamina ships with scalo[http]; skip if absent
     pass
 
 # Test statistics tracking
@@ -227,6 +294,41 @@ def pytest_runtest_logreport(report):
             test_stats["test_files"][test_file]["skipped"] += 1
 
         test_stats["test_files"][test_file]["total"] += 1
+
+
+@pytest.fixture(autouse=True)
+def _no_clickhouse_bootstrap_hang(request):
+    """Test-session guard 2/2: stop the app lifespan blocking on ClickHouse.
+
+    ``create_app()``'s lifespan runs ``bootstrap_clickhouse()``, which opens a
+    REAL ClickHouse connection (default ``localhost:9000``) and, when CH is
+    unreachable, retries for the full resilience budget (60s, up to 300s while a
+    CH-Cloud wake is in flight) on EACH bootstrap DDL. A hermetic unit/api test
+    that spins a ``TestClient`` blocks in ``__enter__`` (lifespan startup) for
+    that whole budget - a handful of such tests stalled the suite for 30-70+ min
+    and timed out CI (arc-runner, no collector, no CH at :9000).
+
+    The api conftest already disables it via
+    ``ClickHouseSettings(bootstrap_tables=False)``; this is the session-wide
+    backstop for any app fixture that forgets (test_alerts, test_services,
+    test_deployments, test_fieldmaps, ... build their own settings). Integration
+    / e2e / live tests keep the REAL bootstrap - they run against a real CH
+    fixture and must exercise the true startup path.
+    """
+    if any(request.node.get_closest_marker(m) for m in ("integration", "e2e", "live")):
+        yield
+        return
+
+    import dfe_engine.clickhouse.bootstrap as _chb
+
+    original = _chb.bootstrap_clickhouse
+    # lifespan does `from ...bootstrap import bootstrap_clickhouse` at call time,
+    # so patching the module attribute is picked up when the app starts up.
+    _chb.bootstrap_clickhouse = lambda *a, **k: None
+    try:
+        yield
+    finally:
+        _chb.bootstrap_clickhouse = original
 
 
 @pytest.fixture(scope="session")
