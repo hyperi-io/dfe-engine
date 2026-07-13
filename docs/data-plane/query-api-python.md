@@ -1,7 +1,7 @@
 # DFE Query API - Python SDK
 
 **Version:** 2.0.0
-**Last Updated:** 2026-01-16
+**Last Updated:** 2026-07-13
 
 This document specifies how to consume the DFE Query API from Python applications.
 
@@ -15,7 +15,7 @@ The Query API provides a **secure, label-based interface** for querying multiple
 - **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
 - **Parameter validation** - All parameters validated against server-side schemas
-- **Apache Arrow wire format** - Zero-copy data transfer
+- **Native JSON responses** - dict rows via clickhouse-connect, no Arrow/pyarrow dependency
 
 ---
 
@@ -25,7 +25,6 @@ The Query API provides a **secure, label-based interface** for querying multiple
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `pyarrow` | ≥22.0.0 | Arrow IPC deserialization |
 | `httpx` | ≥0.27.0 | HTTP client (for HTTP mode) |
 | `pandas` | ≥2.2.0 | DataFrame conversion (optional) |
 | Python | ≥3.12 | Runtime |
@@ -37,7 +36,7 @@ The Query API provides a **secure, label-based interface** for querying multiple
 pip install dfe-engine>=2.0.0
 
 # If consuming API externally
-pip install pyarrow>=22.0.0 httpx>=0.27.0
+pip install httpx>=0.27.0
 ```
 
 ---
@@ -46,7 +45,7 @@ pip install pyarrow>=22.0.0 httpx>=0.27.0
 
 ### Direct Mode (In-Process)
 
-Use when the Query API is in the same process (e.g., dfe-control-plane services):
+Use when the Query API is in the same process (e.g. inside the dfe-engine API server):
 
 ```python
 from dfe_engine.query import QueryClient
@@ -62,7 +61,7 @@ result = client.query(
 )
 
 # Access results
-print(f"Rows: {result.table.num_rows}")
+print(f"Rows: {result.num_rows}")
 df = result.to_pandas()
 df.groupby("event_type").count()
 ```
@@ -192,19 +191,17 @@ result = client.query(
 | `store` | `str` | Target store (only if query allows) |
 | `cache` | `bool` | Allow cached results (default: `True`) |
 
-#### `query_df(query_label, params?, **kwargs) -> pd.DataFrame`
-
-Execute query and return pandas DataFrame (zero-copy from Arrow).
+To get a pandas DataFrame directly, call `.to_pandas()` on the `QueryResult`:
 
 ```python
-df = client.query_df(
+result = client.query(
     "analytics/user_activity",
     params={"event_types": ["login"]},
 )
+df = result.to_pandas()
 
 # DataFrame operations
 df.groupby("event_type").agg({"count": "sum"})
-df.to_parquet("output.parquet")
 ```
 
 #### `query_with_explain(query_label, params?, *, parallel?, **kwargs) -> QueryResult`
@@ -219,7 +216,7 @@ result = client.query_with_explain(
 )
 
 # Access results
-print(f"Rows: {result.table.num_rows}")
+print(f"Rows: {result.num_rows}")
 print(f"Duration: {result.metadata.query_duration_ms}ms")
 
 # Access EXPLAIN plan
@@ -234,19 +231,24 @@ for warning in result.explain.warnings:
 df = result.to_pandas()
 ```
 
-#### `query_batches(query_label, params?, batch_size?, **kwargs) -> Iterator[pa.RecordBatch]`
-
-Stream large results in batches (memory efficient).
+To process a large result set without loading everything into memory at
+once, page through it with `limit`/`offset` (or cursor/keyset options - see
+[Pagination](#pagination)) and process each page as it arrives:
 
 ```python
-# Process large result without loading all into memory
-for batch in client.query_batches(
-    "analytics/all_events",
-    params={"date": "2024-01-15"},
-    batch_size=10_000,
-):
-    df_batch = batch.to_pandas()
-    process(df_batch)
+# Process a large result set one page at a time
+offset = 0
+while True:
+    result = client.query(
+        "analytics/all_events",
+        params={"date": "2024-01-15"},
+        limit=10_000,
+        offset=offset,
+    )
+    process(result.to_pandas())
+    if not result.metadata.has_more:
+        break
+    offset = result.metadata.next_offset
 ```
 
 ---
@@ -259,7 +261,10 @@ Returned by `query()` and `query_with_explain()`.
 
 | Property | Type | Description |
 |----------|------|-------------|
-| `table` | `pa.Table` | Arrow Table with results |
+| `rows` | `list[dict[str, Any]]` | Result rows (native clickhouse-connect dicts) |
+| `columns` | `list[str]` | Column names |
+| `num_rows` | `int` | Number of rows |
+| `num_columns` | `int` | Number of columns |
 | `metadata` | `QueryMetadata` | Execution metadata |
 | `explain` | `ExplainPlan \| None` | Query execution plan (if requested) |
 
@@ -285,10 +290,6 @@ Returned by `query()` and `query_with_explain()`.
 ```python
 result = client.query("analytics/user_activity")
 
-# Arrow formats
-table = result.to_arrow()           # PyArrow Table
-ipc_bytes = result.to_arrow_ipc()   # Arrow IPC bytes
-
 # Pandas
 df = result.to_pandas()
 
@@ -300,14 +301,13 @@ cols = result.to_pydict()           # Dict of lists
 json_str = result.to_json()
 csv_str = result.to_csv()
 
-# File export
-result.to_parquet("output.parquet")
-
 # Iteration
-for batch in result.iter_batches(batch_size=5000):
-    process(batch)
-
 for row in result.iter_rows():
+    process(row)
+
+# QueryResult itself is iterable/sized
+print(len(result))
+for row in result:
     process(row)
 ```
 
@@ -488,18 +488,18 @@ for _, row in df.iterrows():
 
 ### Storage Listing Schema
 
-All storage adapters return consistent Arrow schema:
+All storage adapters return a consistent JSON schema:
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | `string` | File or directory name |
 | `path` | `string` | Full path within storage |
 | `type` | `string` | `"file"` or `"directory"` |
-| `size` | `int64` | Size in bytes (0 for directories) |
-| `modified` | `timestamp[us, tz=UTC]` | Last modified time |
-| `etag` | `string` | Object ETag (S3/MinIO) |
-| `storage_class` | `string` | Storage class (S3/MinIO) |
-| `content_type` | `string` | MIME type |
+| `size` | `integer` | Size in bytes (0 for directories) |
+| `modified` | `datetime \| None` | Last modified time, `None` for directories |
+| `etag` | `string \| None` | Object ETag (S3/MinIO) |
+| `storage_class` | `string \| None` | Storage class (S3/MinIO) |
+| `content_type` | `string \| None` | MIME type |
 
 ### Storage Pagination
 
@@ -622,37 +622,21 @@ result = client.query(
 result = client.query("analytics/user_activity")  # Scans all data
 ```
 
-### 3. Stream Large Results
+### 3. Page Through Large Results
 
 ```python
 # BAD: Load everything into memory
 result = client.query("analytics/all_events", limit=1_000_000)
 df = result.to_pandas()  # Memory spike
 
-# GOOD: Stream in batches
-for batch in client.query_batches(
-    "analytics/all_events",
-    batch_size=50_000,
-):
-    process_batch(batch.to_pandas())
-```
-
-### 4. Use Arrow Native Operations
-
-```python
-# GOOD: Stay in Arrow for computations
-import pyarrow.compute as pc
-
-result = client.query("analytics/user_activity")
-
-# Filter in Arrow (fast)
-filtered = result.table.filter(pc.field("level") == "ERROR")
-
-# Aggregate in Arrow
-counts = pc.value_counts(result.table["level"])
-
-# Only convert to pandas when needed
-df = filtered.to_pandas()
+# GOOD: Page through results and process incrementally
+offset = 0
+while True:
+    result = client.query("analytics/all_events", limit=50_000, offset=offset)
+    process_batch(result.to_pandas())
+    if not result.metadata.has_more:
+        break
+    offset = result.metadata.next_offset
 ```
 
 ---
@@ -725,7 +709,7 @@ def query(
 
     # Display as rich table
     rich_table = Table()
-    for col in result.table.column_names:
+    for col in result.columns:
         rich_table.add_column(col)
     for row in result.to_pylist()[:limit]:
         rich_table.add_row(*[str(v) for v in row.values()])
@@ -736,6 +720,5 @@ def query(
 
 ## References
 
-- [Apache Arrow Python Documentation](https://arrow.apache.org/docs/python/index.html)
-- [PyArrow on PyPI](https://pypi.org/project/pyarrow/) (v22.0.0)
-- [Query Gateway API Specification](./QUERY-API.md)
+- [pandas Documentation](https://pandas.pydata.org/docs/)
+- [Query Gateway API Specification](query-api.md)

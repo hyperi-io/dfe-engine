@@ -1,6 +1,6 @@
 <!--
   Project:   dfe-engine
-  File:      docs/DFE-CLI-DESIGN.md
+  File:      docs/control-plane/dfe-cli-design.md
   Purpose:   Design for the `dfe` client CLI, modelled on the AWS CLI v2
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
@@ -25,7 +25,8 @@ bundled-installer machinery under `backends/`/`exe/`/`macpkg/`/`docker/`, and th
   `cli/governed_ops.py`) that calls the SAME GitCrud/services the API routers call -
   the standing "CLI is a wrapper over the API" rule. It runs WHERE the engine libs
   and the gitops repo live (CI, or on the engine host when the API is down).
-- **`dfe`** - does not exist yet. This document designs it: the remote HTTP client.
+- **`dfe`** - the remote HTTP client this document designed. It now ships
+  from this repo (`cli/auto/`, click-based, generated from the OpenAPI spec).
 
 Keep them distinct binaries. `dfe` talks to an engine over HTTP; `dfe-engine` IS the
 engine (and its in-process break-glass path). Everything below is `dfe`.
@@ -45,7 +46,7 @@ AWS CLI v2 deliberately does not install via pip - it ships a self-contained bun
   - Container: `ghcr.io/hyperi-io/dfe` (for CI - `docker run ... hyperi-io/dfe ...`).
   - `.pkg` (macOS) / `.msi` (Windows) later, as AWS v2 does (`macpkg/`).
 - **Supply chain:** artifacts SHA-pinned and signed; the install script verifies the
-  digest (matches the repo's pinning standard, docs/SUPPLY-CHAIN-PINNING.md).
+  digest (matches the repo's pinning standard, docs/deployment/supply-chain-pinning.md).
 - **Versioning:** `dfe --version` reports the CLI version AND the negotiated API
   version. The CLI is installed independently of the engine but declares a
   compatible API range; on mismatch it warns (older CLI vs newer engine is fine
@@ -129,9 +130,9 @@ ships the equivalent: `openapi-spec/openapi.json` (74 operations, 23 routers). T
   An older CLI against a newer engine still works for the operations it knows; new
   operations appear when the CLI is regenerated/updated.
 
-Implementation: a small generator reads `openapi.json` and emits a Click/Typer tree
-(the repo already uses Typer for `dfe local governed`). The HTTP layer MUST be pylib's
-`HttpClient`/`AsyncHttpClient` (pylib policy - never raw httpx). Auth, retries,
+Implementation: a small generator reads `openapi.json` and emits a click tree
+(`cli/auto/build.py`). The HTTP layer MUST be scalo's
+`HttpClient`/`AsyncHttpClient` (library policy - never raw httpx). Auth, retries,
 pagination, and output live in the shared client core; the generated tree is thin.
 
 ## 5. Global options (mirror the AWS CLI)
@@ -181,9 +182,9 @@ AWS has no analogue for:
 
 ## 9. Build/rollout sketch (phased)
 
-1. **Client core** - config/profile loader, the auth chain + `dfe login`, the pylib
+1. **Client core** - config/profile loader, the auth chain + `dfe login`, the scalo
    HTTP client, output formatters (json/yaml/table/text + JMESPath), pagination.
-2. **Generator** - `openapi.json` -> Typer tree; wire a first vertical slice
+2. **Generator** - `openapi.json` -> click tree; wire a first vertical slice
    (`dfe hunts`, `dfe helmvars`, `dfe deployments`) end to end.
 3. **Governed-ops verbs** - `--message`/`--dry-run`/`--if-match`, the versioned
    lifecycle verbs, the 409 3-way renderer.

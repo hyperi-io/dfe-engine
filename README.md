@@ -1,7 +1,9 @@
 # DFE Engine
 
-Core library and API for the Data Fusion Engine - shared business logic for the
-CLI, the API server, and other consumers.
+The config control plane of the Data Fusion Engine (DFE) product suite - a
+Python library plus FastAPI server that turns operator intent into governed
+git commits (YAML config, Helm overlay values, ClickHouse DDL) which Argo CD
+reconciles into the cluster.
 
 ## A product suite, not an internal tool
 
@@ -23,203 +25,60 @@ What that means for the code here:
 Anything specific to a particular deployment - our fleet, a customer's cluster -
 lives in that deployment's own private config, never in this repo.
 
-## Installation
+## Quick start
 
 ```bash
-uv pip install dfe-engine
-```
-
-Or from source:
-
-```bash
-git clone https://github.com/hypersec-io/dfe-engine.git
+git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
-uv pip install -e ".[dev]"
+git submodule update --init   # config -> dfe-devex, schemas -> dfe-schemas
+uv sync
 ```
 
-## Quick Start
-
-```python
-from dfe_engine.settings import get_settings
-from dfe_engine.schema import schema_builder
-
-# Load configuration from environment
-settings = get_settings()
-
-# Access ClickHouse settings
-print(f"ClickHouse: {settings.clickhouse.host}:{settings.clickhouse.port}")
-```
-
-## Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    Consuming Applications                        │
-├────────────────────────────┬────────────────────────────────────┤
-│       dfe-cli              │        dfe-control-plane           │
-│   (Click CLI wrapper)      │     (Control Plane Service)        │
-└─────────────┬──────────────┴──────────────┬─────────────────────┘
-              │                             │
-              └──────────────┬──────────────┘
-                             ▼
-              ┌─────────────────────────────┐
-              │         dfe-engine          │  ← THIS REPO
-              │   (Shared Library Package)  │
-              └──────────────┬──────────────┘
-                             │
-                             ▼
-              ┌─────────────────────────────┐
-              │          hyperi-pylib             │
-              │   (Common Utilities)        │
-              └─────────────────────────────┘
-```
-
-### Modules
-
-| Module | Purpose |
-|--------|---------|
-| `clickhouse/` | ClickHouse connection management |
-| `config/` | Configuration loading and target management |
-| `schema/` | Schema creation, versioning, deployment to ClickHouse |
-| `pipeline/` | Vector pipeline generation |
-| `sigma/` | Sigma rule conversion to ClickHouse SQL |
-| `hunts/` | Hunt scheduling and execution |
-| `watcher_converter/` | Elastic Watcher to Hunt conversion |
-| `opensearch/` | OpenSearch integration and templates |
-
-## Development
-
-### Prerequisites
-
-- Python 3.12+
-- [UV](https://docs.astral.sh/uv/) package manager
-- Docker (for local databases)
-
-### Setup
+Run the API server (health at `/health/live` on port 8000):
 
 ```bash
-# Clone the repository
-git clone https://github.com/hypersec-io/dfe-engine.git
-cd dfe-engine
-
-# Create virtual environment and install dependencies
-uv venv
-uv pip install -e ".[dev]"
+uv run dfe-engine
 ```
 
-### Local Databases
-
-The project includes Docker Compose configuration for local ClickHouse and PostgreSQL:
+Run the unit tests (no backing services needed):
 
 ```bash
-# Start both databases
-docker compose --profile test up -d
-
-# Verify they're running
-docker ps
-
-# Check health
-docker inspect -f '{{.State.Health.Status}}' dfe-clickhouse
-docker inspect -f '{{.State.Health.Status}}' dfe-postgres
+uv run pytest tests/unit -q
 ```
 
-#### Profiles
+Entry points (`pyproject.toml [project.scripts]`): `dfe-engine` (the API
+server daemon), `dfe` (the remote client CLI, generated from the OpenAPI
+spec), plus the runtime helpers `dfe-hunt-runner` and `dfe-keda-shim`.
 
-| Profile | Services | Use Case |
-|---------|----------|----------|
-| `test` | ClickHouse + PostgreSQL | Running tests |
-| `clickhouse` | ClickHouse only | Schema development |
-| `postgres` | PostgreSQL only | Hunt checkpoint development |
-| `all` | All services | Full local environment |
+## What it does
 
-#### Customizing Versions
+The engine is BOTH a pip-installable library and the API server. Every
+operational change - sources, schemas, hunts, deployment dials, access
+control - is a versioned YAML change in a git repo, made through one
+governed path, then reconciled to the cluster by Argo CD. The engine never
+deploys backing services and never touches the cluster directly.
 
-```bash
-# Use specific database versions
-export DFE_CLICKHOUSE_VERSION=24.8
-export DFE_POSTGRES_VERSION=16
-docker compose --profile test up -d
-```
+Full system map, invariants, and the docs tree:
+[docs/architecture.md](docs/architecture.md).
 
-#### Data Persistence
-
-Data is stored in Docker volumes. To reset:
-
-```bash
-docker compose down -v
-```
-
-### Running Tests
-
-```bash
-# All tests (parallel execution)
-uv run pytest tests/ -v
-
-# Unit tests only (no Docker required)
-uv run pytest tests/unit_tests/ -v
-
-# Specific test file
-uv run pytest tests/unit_tests/test_schemas/test_schema_plan.py -v
-
-# With coverage
-uv run pytest tests/ -v --cov=src/dfe_engine --cov-report=term
-```
-
-### Using External Databases
-
-To use external databases instead of Docker:
-
-```bash
-export DFE_CLICKHOUSE_HOST=your-clickhouse-server.example.com
-export DFE_POSTGRES_HOST=your-postgres-server.example.com
-```
-
-When these are set to non-localhost values, Docker containers are not started.
+| Area | Code | Docs |
+|------|------|------|
+| API + auth + RBAC | `src/dfe_engine/api/`, `auth/` | [control-plane/](docs/control-plane/index.md) |
+| Governed gitops CRUD | `gitcrud/`, `gitops/`, `governance/`, `helm/` | [control-plane/governed-ops-design.md](docs/control-plane/governed-ops-design.md) |
+| Sources, schemas, DDL | `source/`, `schema/`, `fieldmap/`, `cel/`, `sigma/` | [data-plane/](docs/data-plane/index.md) |
+| Query API | `query/` | [data-plane/query-api.md](docs/data-plane/query-api.md) |
+| Hunts | `hunts/`, `hunt_runner/`, `keda_shim/` | [data-plane/hunt-runner-scaling.md](docs/data-plane/hunt-runner-scaling.md) |
+| Deployment seam | `deployment/`, `deployment_contract.py`, `chart/` | [deployment/](docs/deployment/index.md) |
 
 ## Configuration
 
-All configuration uses environment variables with the `DFE_` prefix.
-
-### ClickHouse
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DFE_CLICKHOUSE_HOST` | `localhost` | Server host |
-| `DFE_CLICKHOUSE_PORT` | `8123` | HTTP port |
-| `DFE_CLICKHOUSE_NATIVE_PORT` | `9000` | Native protocol port |
-| `DFE_CLICKHOUSE_USERNAME` | `default` | Username |
-| `DFE_CLICKHOUSE_PASSWORD` | `` | Password |
-| `DFE_CLICKHOUSE_DATABASE` | `default` | Default database |
-| `DFE_CLICKHOUSE_SECURE` | `false` | Use HTTPS |
-| `DFE_CLICKHOUSE_VERIFY` | `false` | Verify SSL certificates |
-
-### PostgreSQL
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DFE_POSTGRES_HOST` | `localhost` | Server host |
-| `DFE_POSTGRES_PORT` | `5432` | Port |
-| `DFE_POSTGRES_USER` | `postgres` | Username |
-| `DFE_POSTGRES_PASSWORD` | `postgres` | Password |
-| `DFE_POSTGRES_DATABASE` | `dfe_engine` | Database name |
-
-### Kafka
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DFE_KAFKA_BOOTSTRAP_SERVERS` | `localhost:9092` | Bootstrap servers |
-| `DFE_KAFKA_SECURITY_PROTOCOL` | `PLAINTEXT` | Security protocol |
-
-### Config and Schema Directories
-
-These point the engine at the shared config tree (`dfe-devex`) and the schematree (`dfe-schemas`). Both ship inside the Docker image and both are overridable at runtime.
+All configuration is environment variables with the `DFE_` prefix
+(`src/dfe_engine/settings.py` is the reference). The two directory roots:
 
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
 | `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config submodule root. Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
 | `DFE_SCHEMAS_DIR` | `/app/schemas` | `./schemas` | Schema submodule root (`dfe-schemas`). |
-
-How resolution works:
 
 - The Docker image bakes the `config/` and `schemas/` submodule trees in at
   `/app/config` and `/app/schemas`, and the Dockerfile sets `DFE_CONFIG_DIR`
@@ -234,49 +93,27 @@ How resolution works:
 - The variable names are exact and `DFE_`-prefixed. A bare `CONFIG_DIR` or
   `SCHEMAS_DIR` (no prefix) is not read.
 
-## Code Standards
+Backing-service connection settings (ClickHouse, Kafka) follow the same
+`DFE_` pattern - see `settings.py` for the full set and defaults.
 
-### Logging
+## Code standards
 
-Use hyperi-pylib logger everywhere:
+- Logging: `from scalo.logger import logger` - never stdlib `logging`.
+- HTTP: `scalo.http` `HttpClient`/`AsyncHttpClient` - never raw httpx.
+- YAML: `dfe_engine.yaml_utils` (ruamel, YAML 1.2).
+- Settings: `from dfe_engine.settings import get_settings`.
 
-```python
-from hyperi_pylib.logger import logger
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the dev workflow, commit format,
+and DCO.
 
-logger.info("Processing started")
-logger.error(f"Failed: {e}")
-```
+## Related repos
 
-### Configuration
-
-Use the settings module:
-
-```python
-from dfe_engine.settings import get_settings
-
-settings = get_settings()
-host = settings.clickhouse.host
-```
-
-### YAML Operations
-
-Use yaml_utils:
-
-```python
-from dfe_engine.yaml_utils import yaml_load, yaml_dump
-
-data = yaml_load(Path("config.yaml"))
-yaml_dump(data, Path("output.yaml"))
-```
-
-## Related Projects
-
-- [dfe-cli](https://github.com/hypersec-io/dfe-cli) - CLI wrapper
-- [dfe-control-plane](https://github.com/hypersec-io/dfe-control-plane) - Control plane service
-- [hyperi-pylib](https://github.com/hypersec-io/hyperi-pylib) - Common utilities
+- [dfe-infra](https://github.com/hyperi-io/dfe-infra) - charts, ApplicationSets, bootstrap (the deployment vehicle)
+- [dfe-ui](https://github.com/hyperi-io/dfe-ui) - web UI (consumes this API)
+- [dfe-schemas](https://github.com/hyperi-io/dfe-schemas) - schema + DDL SSoT (the `schemas/` submodule)
+- [dfe-hyperdx](https://github.com/hyperi-io/dfe-hyperdx) - extended HyperDX fork (explore UI + telemetry sink)
+- [scalo-py](https://github.com/hyperi-io/scalo-py) - shared Python library (`scalo` on PyPI)
 
 ## License
 
-Copyright (c) 2025 HyperI. All rights reserved.
-
-This is proprietary software. See [LICENSE](LICENSE) for details.
+Licensed under BUSL-1.1 - see [LICENSE](LICENSE).

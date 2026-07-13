@@ -2,7 +2,7 @@
 
 **Status:** Design (Phase 1.5)
 **Depends on:** Phase 1 RBAC foundation (accounts, groups, roles, 4 auth paths)
-**Infra requirements:** [docs/OIDC-INFRA-REQUIREMENTS.md](OIDC-INFRA-REQUIREMENTS.md)
+**Infra requirements:** [oidc-infra-requirements.md](oidc-infra-requirements.md)
 
 ---
 
@@ -36,7 +36,7 @@ If dfe-engine is down:
 - Only group sync and provider CRUD stop
 
 **dfe-engine never generates Envoy Gateway SecurityPolicy CRDs.**
-That's dfe-infra's job. See [OIDC-INFRA-REQUIREMENTS.md](OIDC-INFRA-REQUIREMENTS.md).
+That's dfe-infra's job. See [OIDC-INFRA-REQUIREMENTS.md](oidc-infra-requirements.md).
 
 ### Component Boundary
 
@@ -295,13 +295,13 @@ dfe oidc-providers delete my-google
 | `google-api-python-client` | >=2.170.0 | Admin SDK Directory API | Google adapter |
 | `msal` | >=1.32.0 | Entra client credentials OAuth2 | Entra adapter |
 
-Okta adapter uses `AsyncHttpClient` from pylib (no new dep).
+Okta adapter uses `AsyncHttpClient` from scalo (no new dep).
 Generic adapter has no external dependencies.
 
 ### Existing dependencies used
 
-- `hyperi_pylib.http.AsyncHttpClient` — all HTTP calls to IdP APIs
-- `hyperi_pylib.logger` — structured logging
+- `scalo.http.AsyncHttpClient` - all HTTP calls to IdP APIs
+- `scalo.logger` - structured logging
 - `dfe_engine.auth.groups.GroupStore` — group file CRUD
 - `dfe_engine.yaml_utils` — YAML load/dump
 
@@ -343,7 +343,7 @@ Added to `AuthSettings`: `oidc: OIDCSettings = Field(default_factory=OIDCSetting
 | Sync flow | Group file creation/update with source_provider tag |
 | Detach cleanup | Orphaned group detection and warning |
 | API endpoints | Full CRUD via TestClient |
-| CLI commands | Smoke test via Typer test runner |
+| CLI commands | Smoke test via the click test runner |
 
 ### Control Plane Independence Tests (CRITICAL)
 
@@ -435,4 +435,4 @@ These run when sandbox credentials are available (via env vars in CI or local `.
 - Token validation/verification (Envoy handles this)
 - Session management or logout flow (future)
 - Multi-provider routing (one SecurityPolicy per HTTPRoute, dfe-infra manages)
-- SCIM provisioning (future — if needed for user lifecycle)
+- SCIM provisioning - SHIPPED since this design (`api/v1/scim.py`)

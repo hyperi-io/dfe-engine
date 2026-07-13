@@ -1,7 +1,7 @@
 # DFE Query API - TypeScript SDK
 
 **Version:** 2.0.0
-**Last Updated:** 2026-01-16
+**Last Updated:** 2026-07-13
 
 This document specifies how to consume the DFE Query API from TypeScript/JavaScript applications.
 
@@ -15,7 +15,7 @@ The Query API provides a **secure, label-based interface** for querying multiple
 - **Mandatory tenant isolation** - `_org_id` injected from JWT, cannot be overridden
 - **Role-based access control** - Queries can require specific roles/permissions
 - **Parameter validation** - All parameters validated against server-side schemas
-- **Apache Arrow wire format** - Efficient binary serialization
+- **Native JSON wire format** - plain `fetch`/JSON, no binary deserialization library required
 
 ---
 
@@ -25,7 +25,6 @@ The Query API provides a **secure, label-based interface** for querying multiple
 
 | Package | Version | Purpose |
 |---------|---------|---------|
-| `apache-arrow` | ≥18.0.0 | Arrow IPC deserialization |
 | `@tanstack/react-query` | ≥5.0.0 | Data fetching hooks (optional) |
 | `@effect/schema` | ≥0.75.0 | Runtime type validation (optional) |
 | TypeScript | ≥5.3 | Type definitions |
@@ -34,20 +33,11 @@ The Query API provides a **secure, label-based interface** for querying multiple
 ### Installation
 
 ```bash
-# Core dependency (required)
-npm install apache-arrow@^18.0.0
-
 # Optional: React Query integration
 npm install @tanstack/react-query@^5.0.0
 
 # Optional: Effect Schema integration
 npm install @effect/schema@^0.75.0
-```
-
-For minimal bundle size, use the ESModules package:
-
-```bash
-npm install @apache-arrow/esnext-esm@^18.0.0
 ```
 
 ---
@@ -57,7 +47,7 @@ npm install @apache-arrow/esnext-esm@^18.0.0
 ### Basic Usage
 
 ```typescript
-import { QueryClient, QueryResult } from '@hypersec/query-client';
+import { QueryClient, QueryResult } from '@hyperi/query-client';
 
 const client = new QueryClient({ baseUrl: 'http://localhost:8000' });
 
@@ -68,7 +58,7 @@ const result = await client.query('analytics/user_activity', {
 });
 
 console.log(`Rows: ${result.rowCount}`);
-console.log(`Columns: ${result.columns.map(c => c.name)}`);
+console.log(`Columns: ${result.columns}`);
 
 // Access rows as typed objects
 result.rows.forEach(row => {
@@ -79,7 +69,7 @@ result.rows.forEach(row => {
 ### With React Query
 
 ```typescript
-import { useQuery } from '@hypersec/query-client/react';
+import { useQuery } from '@hyperi/query-client/react';
 
 function ThreatDashboard() {
   const { data, isLoading, error } = useQuery('hunts/active_threats', {
@@ -94,13 +84,13 @@ function ThreatDashboard() {
     <table>
       <thead>
         <tr>
-          {data.columns.map(col => <th key={col.name}>{col.name}</th>)}
+          {data.columns.map(col => <th key={col}>{col}</th>)}
         </tr>
       </thead>
       <tbody>
         {data.rows.map((row, i) => (
           <tr key={i}>
-            {data.columns.map(col => <td key={col.name}>{row[col.name]}</td>)}
+            {data.columns.map(col => <td key={col}>{row[col]}</td>)}
           </tr>
         ))}
       </tbody>
@@ -200,13 +190,9 @@ interface QueryOptions {
 ```typescript
 interface QueryResult<T = Record<string, unknown>> {
   // Data access
-  rows: T[];                          // Typed row objects
+  rows: T[];                          // Typed row objects (plain JSON)
   rowCount: number;                   // Number of rows
-  columns: Column[];                  // Column metadata
-
-  // Arrow access
-  table: arrow.Table;                 // Raw Arrow Table
-  batches: arrow.RecordBatch[];       // Arrow RecordBatches
+  columns: string[];                  // Column names
 
   // Metadata
   metadata: QueryMetadata;
@@ -214,7 +200,6 @@ interface QueryResult<T = Record<string, unknown>> {
   // Export methods
   toJSON(): string;
   toCSV(): string;
-  toArrowIPC(): Uint8Array;
 }
 
 interface QueryMetadata {
@@ -230,12 +215,6 @@ interface QueryMetadata {
   nextCursor?: string;                // Cursor for next page
   nextOffset?: number;                // Offset for next page
   totalCount?: number;                // Total rows (if available)
-}
-
-interface Column {
-  name: string;
-  type: arrow.DataType;
-  nullable: boolean;
 }
 ```
 
@@ -270,7 +249,7 @@ await client.query('system/table_stats');
 ```typescript
 // providers.tsx
 import { QueryClientProvider } from '@tanstack/react-query';
-import { createQueryClient } from '@hypersec/query-client/react';
+import { createQueryClient } from '@hyperi/query-client/react';
 
 const queryClient = createQueryClient({
   baseUrl: process.env.NEXT_PUBLIC_API_URL!,
@@ -288,7 +267,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
 ### useQuery Hook
 
 ```typescript
-import { useQuery } from '@hypersec/query-client/react';
+import { useQuery } from '@hyperi/query-client/react';
 
 function ActivityTable() {
   const { data, isLoading, error, refetch } = useQuery(
@@ -320,7 +299,7 @@ function ActivityTable() {
 ### useSuspenseQuery
 
 ```typescript
-import { useSuspenseQuery } from '@hypersec/query-client/react';
+import { useSuspenseQuery } from '@hyperi/query-client/react';
 
 function ThreatList() {
   // This will suspend until data is ready
@@ -344,7 +323,7 @@ function App() {
 ### useInfiniteQuery
 
 ```typescript
-import { useInfiniteQuery } from '@hypersec/query-client/react';
+import { useInfiniteQuery } from '@hyperi/query-client/react';
 
 function InfiniteEventList() {
   const {
@@ -383,7 +362,7 @@ function InfiniteEventList() {
 
 ```typescript
 import { Schema as S } from '@effect/schema';
-import { query } from '@hypersec/query-client';
+import { query } from '@hyperi/query-client';
 
 // Define row schema
 const ThreatAlert = S.Struct({
@@ -412,7 +391,7 @@ result.rows.forEach(alert => {
 
 ```typescript
 import { Effect, pipe } from 'effect';
-import { queryEffect } from '@hypersec/query-client/effect';
+import { queryEffect } from '@hyperi/query-client/effect';
 
 const program = pipe(
   queryEffect('hunts/active_threats', {
@@ -443,7 +422,7 @@ import {
   AuthorizationError,
   QueryTimeoutError,
   NetworkError,
-} from '@hypersec/query-client';
+} from '@hyperi/query-client';
 
 try {
   const result = await client.query('hunts/active_threats', {
@@ -600,7 +579,7 @@ while (result.metadata.hasMore && result.rows.length > 0) {
 ### React Query Infinite Pagination
 
 ```typescript
-import { useInfiniteQuery } from '@hypersec/query-client/react';
+import { useInfiniteQuery } from '@hyperi/query-client/react';
 
 function InfiniteEventList() {
   const {
@@ -690,18 +669,18 @@ result.rows.forEach(item => {
 
 ### Storage Listing Schema
 
-All storage adapters return consistent Arrow schema:
+All storage adapters return a consistent JSON schema:
 
 | Column | Type | Description |
 |--------|------|-------------|
 | `name` | `string` | File or directory name |
 | `path` | `string` | Full path within storage |
 | `type` | `string` | `"file"` or `"directory"` |
-| `size` | `int64` | Size in bytes (0 for directories) |
-| `modified` | `timestamp` | Last modified time (UTC) |
-| `etag` | `string` | Object ETag (S3/MinIO) |
-| `storageClass` | `string` | Storage class (S3/MinIO) |
-| `contentType` | `string` | MIME type |
+| `size` | `number` | Size in bytes (0 for directories) |
+| `modified` | `string \| null` | Last modified time (ISO8601), null for directories |
+| `etag` | `string \| null` | Object ETag (S3/MinIO) |
+| `storageClass` | `string \| null` | Storage class (S3/MinIO) |
+| `contentType` | `string \| null` | MIME type |
 
 ### Storage Pagination with Cursor
 
@@ -767,7 +746,7 @@ while (true) {
 ### 3. Streaming Large Results
 
 ```typescript
-import { queryStream } from '@hypersec/query-client';
+import { queryStream } from '@hyperi/query-client';
 
 // Stream results in batches
 for await (const batch of queryStream('analytics/all_events', {
@@ -795,37 +774,16 @@ const result = await client.query('hunts/active_threats', {
 
 ```typescript
 // Import only what you need
-import { query } from '@hypersec/query-client/core';
-import { useQuery } from '@hypersec/query-client/react';
+import { query } from '@hyperi/query-client/core';
+import { useQuery } from '@hyperi/query-client/react';
 
 // Avoid default import which includes everything
-// import QueryClient from '@hypersec/query-client';
-```
-
-### Arrow ESM Package
-
-```bash
-# Smaller bundle with ESM
-npm install @apache-arrow/esnext-esm@^18.0.0
-```
-
-```typescript
-// Configure bundler to resolve Arrow ESM
-// vite.config.ts
-export default {
-  resolve: {
-    alias: {
-      'apache-arrow': '@apache-arrow/esnext-esm',
-    },
-  },
-};
+// import QueryClient from '@hyperi/query-client';
 ```
 
 ---
 
 ## References
 
-- [Apache Arrow JavaScript Documentation](https://arrow.apache.org/docs/js/)
-- [Apache Arrow JS on npm](https://www.npmjs.com/package/apache-arrow)
 - [TanStack React Query](https://tanstack.com/query/latest)
-- [Query Gateway API Specification](./QUERY-API.md)
+- [Query Gateway API Specification](query-api.md)

@@ -1,6 +1,6 @@
 <!--
 Project:   dfe-engine
-File:      docs/MANAGED-KAFKA-LIFECYCLE.md
+File:      docs/deployment/managed-kafka-lifecycle.md
 Purpose:   The always-on managed-Kafka cost problem (Confluent Cloud, MSK,
            Redpanda Cloud) and DFE's lifecycle response (WS-C / dfe-engine#99).
 Language:  Markdown

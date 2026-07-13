@@ -39,9 +39,9 @@ DFE adopts **CEL (Common Expression Language)** as the unified expression langua
 
 | Component | Before | After |
 |-----------|--------|-------|
-| Hunt scoring `when` conditions | Hand-rolled regex parser in `scoring.py` | CEL via `hyperi_pylib.expression` |
+| Hunt scoring `when` conditions | Hand-rolled regex parser in `scoring.py` | CEL via `scalo.expression` |
 | Alert trigger evaluation | Hardcoded operator dict in `alert.py` | CEL conditions |
-| dfe-loader transform conditions | Custom `if(condition, ...)` parser | CEL via `hyperi_rustlib::expression` |
+| dfe-loader transform conditions | Custom `if(condition, ...)` parser | CEL via `scalo::expression` (scalo-rs) |
 | Routing rules (future) | Not yet implemented | CEL from day one |
 
 ## What CEL Does NOT Replace
@@ -185,7 +185,7 @@ This enables expressions written once in YAML to work both as in-memory evaluati
 └─────────┬───────────────────┬───────────────┘
           │                   │
     ┌─────▼──────┐    ┌──────▼──────┐
-    │ hyperi-pylib│    │hyperi-rustlib│
+    │  scalo-py   │    │  scalo-rs    │
     │ expression/ │    │ expression/  │
     │             │    │              │
     │ wraps:      │    │ wraps:       │

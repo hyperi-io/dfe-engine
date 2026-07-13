@@ -1,7 +1,6 @@
-# Source — The Top-Level Data Abstraction
+# Source - The Top-Level Data Abstraction
 
-**Status:** Proposed
-**Last Updated:** 2026-02-28
+**Status:** Shipped (`SourceRegistry` + the Source model are the live path).
 
 ---
 
@@ -54,7 +53,7 @@ A Source **contains** all source-scoped components:
 | Component | Required | Purpose |
 |-----------|----------|---------|
 | **identity** | Yes | `_source` label, display name, match rule |
-| **schema** | Yes | ClickHouse table definition (starts as common header only). See [SCHEMA.md](./SCHEMA.md) |
+| **schema** | Yes | ClickHouse table definition (starts as common header only). See [SCHEMA.md](schema.md) |
 | **fetcher** | No | SaaS API pull (CrowdStrike, M365, Okta, etc.) |
 | **transform** | No | Enrichment/normalisation stage (vector or wasm) |
 | **rules** | No | SQL detection queries against this source's table |
@@ -345,7 +344,7 @@ standalone schema config.
 
 ### Schema Metadata
 
-Schema definitions are YAML. See [SCHEMA.md](./SCHEMA.md) for the full
+Schema definitions are YAML. See [SCHEMA.md](schema.md) for the full
 type system, primitive-to-ClickHouse mapping, and use case definitions.
 
 ```yaml
@@ -462,11 +461,14 @@ transform, what to fetch) lives in the Source.
   transform source entries, fetcher source entries
 - Sources become the primary entity for the API and UI
 
-### dfe-control-plane (future repo)
+### API and CLI surface (shipped in this repo)
+
+The control-plane surface landed IN the engine (the separate
+dfe-control-plane repo was retired before it existed):
 
 - REST API and CLI expose Sources as the primary entity
 - Source CRUD endpoints replace per-service config editing for routing
-- UI navigates by Source — not by service
+- UI navigates by Source - not by service
 
 ---
 
@@ -622,7 +624,7 @@ sigma:
 ```
 
 Converted Sigma rules become DFE Rules tied to the source, querying the
-`{source}_sigma` view. See [SCHEMA.md](./SCHEMA.md) for details.
+`{source}_sigma` view. See [SCHEMA.md](schema.md) for details.
 
 ---
 
@@ -638,7 +640,7 @@ Elastic Template JSON → Converter → Source schema YAML → Source definition
 
 The converter maps Elastic types to primitives, Elastic analyzers to
 use_cases, and preserves the field hierarchy as flat columns. See
-[SCHEMA.md](./SCHEMA.md) for the type mapping table.
+[SCHEMA.md](schema.md) for the type mapping table.
 
 This is tied to a Source — when creating a source from an Elastic data
 stream, the converter bootstraps the schema so the user doesn't start from

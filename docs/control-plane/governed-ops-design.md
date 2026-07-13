@@ -3,9 +3,9 @@
 
 How DFE is operated, and how detection runs. Two subsystems, one idea: the GitOps
 repo is the source of truth and the authority, and dfe-engine is a governed window
-onto it. Companion to [ARCHITECTURE.md](ARCHITECTURE.md), the
-[commit standard](GITOPS-COMMIT-STANDARD.md), and the
-[observability standard](OBSERVABILITY-STANDARD.md).
+onto it. Companion to [architecture.md](../architecture.md), the
+[commit standard](gitops-commit-standard.md), and the
+[observability standard](../deployment/observability-standard.md).
 
 ## The one idea
 
@@ -72,7 +72,7 @@ earn their keep:
   write may require it, and a stale one raises `ConcurrencyConflictError` carrying
   the current doc -- so two editors never silently clobber each other.
 
-`commit_policy.py` enforces the [commit standard](GITOPS-COMMIT-STANDARD.md) in
+`commit_policy.py` enforces the [commit standard](gitops-commit-standard.md) in
 code: it builds every message and its audit trailers (callers cannot hand-write
 them), rejects `latest`/unpinned image refs and controller-owned fields like
 `replicaCount`, and resolves direct-commit vs PR from the environment and class.

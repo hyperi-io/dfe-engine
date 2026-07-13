@@ -241,7 +241,7 @@ oidc:
   #       DFE_OIDC_GOOGLE_CLIENT_ID: client-id
   #       DFE_OIDC_GOOGLE_CLIENT_SECRET: client-secret
   #       DFE_GOOGLE_SA_JSON: service-account-json
-  #   - name: entra-hypersec
+  #   - name: entra-example-org
   #     secretName: dfe-oidc-entra
   #     envMappings:
   #       DFE_OIDC_ENTRA_CLIENT_ID: client-id
@@ -298,8 +298,8 @@ All OIDC providers need a callback URL: `https://{dfe_domain}/oauth2/callback`
 
 | Deployment | Callback URL |
 |-----------|-------------|
-| DevEx | `https://dfe.devex.hyperi.io/oauth2/callback` |
-| AWS | `https://dfe.{customer}.example.com/oauth2/callback` |
+| Vendor test cluster | `https://dfe.{vendor-test-domain}/oauth2/callback` |
+| Cloud (EKS/GKE/AKS) | `https://dfe.{customer-domain}/oauth2/callback` |
 | On-prem | `https://dfe.{customer-domain}/oauth2/callback` |
 
 ---

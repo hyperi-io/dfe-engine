@@ -1,6 +1,6 @@
 <!--
   Project:   dfe-engine
-  File:      docs/HUNT-SCHEDULE-SMOOTHING.md
+  File:      docs/data-plane/hunt-schedule-smoothing.md
   Purpose:   Adaptive load-smoothing for rate (loop-query) hunts on ClickHouse
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
@@ -14,10 +14,44 @@ and drifting *when* (not how often) it fires so the aggregate curves flatten ove
 time. This is a closed-loop **remediation** approach, not admission control: we do
 not gate or defer firing - we nudge phases and let the fleet settle.
 
+> **Status: BETA (opt-in, experimental).** Like some of the beta dfe-receiver transports,
+> the adaptive smoothing loop is AVAILABLE but opt-in and still settling: `smoothing.enabled`
+> defaults OFF, the actuator (the phase offset materialised into `hunt_schedule`) and the
+> cost tagging ship today, and the closed loop is turned on deliberately per deployment.
+> Treat its knobs and behaviour as subject to change until it graduates out of beta.
+
+## The picture (intuition first)
+
+The whole job is one shape change. On the left, a fleet of recurring hunts that all fire
+at the top of their period, so their cost pulses STACK into a few tall peaks on the shared
+ClickHouse, with idle troughs between. On the right, after the loop drifts each hunt's
+phase (WHEN it fires, never how often), the same total work SPREADS into the troughs and
+the aggregate curve FLATTENS. Same coverage, same freshness - just no synchronised pile-ups.
+
+```
+Aggregate ClickHouse pressure P(b) across one hyperperiod H   (b = one Delta-second bucket)
+
+  BEFORE - all fire on the period boundary          AFTER - phases drifted apart
+
+  P |   #                                           P |
+    |   #                                             |    x   x   x   x   x
+    |   #          #                                  |  x # x # x # x # x # x
+    |   #          #          #                       |  # # # # # # # # # # #
+    | x # x      x # x      x # x                     |  # # # # # # # # # # #
+    +------------------------------> b                +------------------------------> b
+      peak/mean ~ 4  (spiky: risks the                  peak/mean ~ 1.2  (flat: headroom
+      memory cliff)                                     under the memory cap)
+```
+
+The one number that tracks this is `dfe_hunt_smoothing_flatness` = peak/mean, falling
+toward 1.0 as the curve flattens; the objective J (in the maths section) is just the
+formal handle on "make this flat". If you read one section, read this one - the maths
+only proves the drift provably lowers those peaks and settles.
+
 ## Scope
 
 - **In scope: rate hunts (loop-queries)** - the "run every N minutes/hours"
-  detections (see [HUNT-RUNNER-SCALING.md](HUNT-RUNNER-SCALING.md), `mode: rate`).
+  detections (see [HUNT-RUNNER-SCALING.md](hunt-runner-scaling.md), `mode: rate`).
   These get phase-offset spreading and the adaptive smoothing below.
 - **Out of scope: anchored hunts and monster one-offs.** The deliberately-spiky
   `mode: anchored` runs (e.g. a new TI checked against 270 days of history at a
@@ -46,6 +80,22 @@ So the smoother optimises a weighted composite of both, but memory still gets ex
 protection: its failure is a cliff (a spike fails *many* co-running queries at once),
 not a slope (CPU just slows), so memory is a hard constraint backed by CH's per-query
 `max_memory_usage` guard (below).
+
+Visually the two failure modes could not be more different - which is why memory is the
+hard constraint and CPU is only weighted:
+
+```
+  CPU  (soft slope: it just slows)          MEMORY  (hard cliff: sheds many at once)
+
+  p95 latency                               query success
+    |             _.-'                          |--------------.
+    |         _.-'                              |              |
+    |     _.-'                                  |              |
+    |_.-'                                       |              '--------  code 241
+    +------------------> load                   +------------------> load
+    degrades gently, recoverable               fine ... fine ... then a spike fails
+                                               the co-runners allocating right then
+```
 
 ## The mechanism (remediation loop, non-destructive)
 
@@ -185,7 +235,7 @@ The two compose - proactive shaping plus reactive guard - and the CH tag is the 
 A control loop you cannot see is one you cannot trust. Every input the smoother
 decides on, every change it makes, and everything it gives up on is emitted as a
 scalo metric through the standard OTel seam (see
-[OBSERVABILITY-STANDARD.md](OBSERVABILITY-STANDARD.md); default sink HyperDX). Three
+[OBSERVABILITY-STANDARD.md](../deployment/observability-standard.md); default sink HyperDX). Three
 buckets:
 
 **1. What it is running** (runner/daemon operational state):

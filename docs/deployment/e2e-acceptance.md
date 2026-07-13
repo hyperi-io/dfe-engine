@@ -93,5 +93,5 @@ intended rather than current practice.
 
 - `dfe-infra/docs/DEVEX-OPERATIONS.md` - how and where to operate on the
   devex carve-out (secret-free; points to the private hyperi-infra SSoT).
-- `docs/DFE-INFRA.md` - the dfe-infra architecture (two-layer, Argo).
+- [index.md](index.md) - the deployment seam (layers, tiers, Argo model).
 - dfe-docker - the standalone-docker distribution this scenario informs.

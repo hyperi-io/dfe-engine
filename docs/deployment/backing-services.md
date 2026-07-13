@@ -1,6 +1,6 @@
 <!--
   Project:   dfe-engine
-  File:      docs/BACKING-SERVICES.md
+  File:      docs/deployment/backing-services.md
   Purpose:   DFE backing services - every backend swaps at a seam
   License:   BUSL-1.1
   Copyright: (c) 2026 HYPERI PTY LIMITED
