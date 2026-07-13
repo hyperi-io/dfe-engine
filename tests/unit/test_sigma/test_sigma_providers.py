@@ -77,7 +77,7 @@ def _make_git_repo(path, files: dict[str, str]) -> str:
     return porcelain.active_branch(str(path)).decode()
 
 
-# ── Normalisation ───────────────────────────────────────────
+# -- Normalisation -------------------------------------------
 
 
 def test_parse_sigma_yaml_normalises_a_rule():
@@ -118,7 +118,7 @@ def test_parse_sigma_dicts_valhalla_shape():
     assert docs[0].origin == "provider:valhalla"
 
 
-# ── LocalFilesProvider ──────────────────────────────────────
+# -- LocalFilesProvider --------------------------------------
 
 
 async def test_local_files_provider_scans_dir(tmp_path):
@@ -158,7 +158,7 @@ async def test_local_files_provider_missing_dir_is_empty(tmp_path):
     assert await provider.fetch() == []
 
 
-# ── GitRepoProvider (real local dulwich repo) ───────────────
+# -- GitRepoProvider (real local dulwich repo) ---------------
 
 
 async def test_git_repo_provider_clones_and_scans(tmp_path):
@@ -205,7 +205,7 @@ async def test_git_repo_provider_refresh_picks_up_new_commit(tmp_path):
     assert {doc.id for doc in second} == {_UUID_A, _UUID_B}
 
 
-# ── ValhallaProvider (HTTP seam faked - no live network) ─────
+# -- ValhallaProvider (HTTP seam faked - no live network) -----
 
 
 class _FakeValhalla(ValhallaProvider):

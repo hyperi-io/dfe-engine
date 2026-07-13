@@ -38,7 +38,7 @@ def _view_body(**overrides) -> dict:
     return body
 
 
-# ── Gate / auth ─────────────────────────────────────────────
+# -- Gate / auth ---------------------------------------------
 
 
 def test_views_requires_auth(client):
@@ -59,7 +59,7 @@ def test_viewer_cannot_write_view(client, app, viewer_headers, tmp_path):
     assert delete.status_code == 403
 
 
-# ── CRUD round trip ─────────────────────────────────────────
+# -- CRUD round trip -----------------------------------------
 
 
 def test_crud_roundtrip(client, app, admin_headers, tmp_path):
@@ -107,7 +107,7 @@ def test_put_rejects_invalid_column_422(client, app, admin_headers, tmp_path):
     assert resp.status_code == 422
 
 
-# ── Generate DDL from the stored definition (Task B end-to-end) ──
+# -- Generate DDL from the stored definition (Task B end-to-end) --
 
 
 def test_generate_ddl_from_stored_definition(client, app, admin_headers, tmp_path):

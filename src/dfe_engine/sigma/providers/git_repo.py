@@ -140,8 +140,25 @@ class GitRepoProvider(SigmaProvider):
         self.last_warnings = warnings
         return docs
 
+    def _scrub_error(self, message: str, bare_url: str) -> str:
+        """Strip the embedded git credential from an error before it surfaces.
+
+        The fetch/clone URL carries ``username:token@`` (``_authed_url``); a dulwich
+        failure can echo it into the exception message, which flows to the sync task
+        result + logs. Redact the secret and rewrite the authed URL to the bare one.
+        """
+        secret = self._secret()
+        if secret:
+            message = message.replace(secret, "[REDACTED]")
+        return message.replace(self._authed_url(bare_url), bare_url)
+
     def _fetch_sync(self, since: datetime | None) -> list[SigmaRuleDoc]:
-        self._clone_or_refresh()
+        url = str(self.config.options.get("url", "")).strip()
+        try:
+            self._clone_or_refresh()
+        except Exception as exc:
+            # Never let a dulwich error leak the authed remote URL to the caller/logs.
+            raise RuntimeError(self._scrub_error(str(exc), url)) from None
         return self._scan(since)
 
     async def fetch(self, since: datetime | None = None) -> list[SigmaRuleDoc]:

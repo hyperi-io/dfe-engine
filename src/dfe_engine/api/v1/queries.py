@@ -245,3 +245,54 @@ async def execute_raw_query(
         row_count=len(rows),
         query_duration_ms=duration_ms,
     )
+
+
+# -- Query cost leaderboard (query_log_archive) -------------
+
+
+class CostLeaderboardRow(BaseModel):
+    """One cost consumer in the leaderboard (grouped by attribution id)."""
+
+    id: str = Field(description="Attribution id (the hunt id for feature='hunts')")
+    feature: str
+    tenant_id: str = ""
+    queries: int = Field(description="Number of queries")
+    read_rows: int
+    read_bytes: int
+    duration_ms: int
+    peak_memory: int
+
+
+@router.get(
+    "/cost-leaderboard",
+    response_model=list[CostLeaderboardRow],
+    dependencies=[Depends(require_action(scopes_dict["query_read"]))],
+)
+async def query_cost_leaderboard(
+    user: CurrentUser,
+    feature: str = Query("hunts", description="Attribution feature to rank (e.g. 'hunts')"),
+    days: int = Query(7, ge=1, le=365, description="Lookback window in days"),
+    limit: int = Query(50, ge=1, le=500, description="Max rows"),
+) -> list[CostLeaderboardRow]:
+    """Top query-cost consumers from ``dfe_audit.query_log_archive``, heaviest first.
+
+    Groups by the attribution id (the hunt id for feature='hunts') and returns the
+    query count + summed read rows/bytes + duration + peak memory. Reads the MV the
+    CH wrapper's log_comment attribution feeds - returns [] until it has data.
+    """
+    from dfe_engine.clickhouse import query_log_archive
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+    from dfe_engine.settings import get_clickhouse_config, get_settings
+
+    try:
+        wrapper = ClickHouseManager.get_instance(
+            get_clickhouse_config(settings=get_settings())
+        ).get_clickhouse_client()
+        rows = query_log_archive.cost_leaderboard(wrapper, feature=feature, days=days, limit=limit)
+    except Exception as exc:
+        logger.error("cost leaderboard query failed", error=str(exc))
+        raise HTTPException(
+            status_code=503,
+            detail={"code": "not_available", "message": f"cost leaderboard unavailable: {exc}"},
+        )
+    return [CostLeaderboardRow(**row) for row in rows]

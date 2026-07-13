@@ -6127,6 +6127,89 @@
         ]
       }
     },
+    "/api/v1/queries/cost-leaderboard": {
+      "get": {
+        "tags": [
+          "queries"
+        ],
+        "summary": "Query Cost Leaderboard",
+        "description": "Top query-cost consumers from ``dfe_audit.query_log_archive``, heaviest first.\n\nGroups by the attribution id (the hunt id for feature='hunts') and returns the\nquery count + summed read rows/bytes + duration + peak memory. Reads the MV the\nCH wrapper's log_comment attribution feeds - returns [] until it has data.",
+        "operationId": "query_cost_leaderboard_api_v1_queries_cost_leaderboard_get",
+        "parameters": [
+          {
+            "name": "feature",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Attribution feature to rank (e.g. 'hunts')",
+              "default": "hunts",
+              "title": "Feature"
+            },
+            "description": "Attribution feature to rank (e.g. 'hunts')"
+          },
+          {
+            "name": "days",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 365,
+              "minimum": 1,
+              "description": "Lookback window in days",
+              "default": 7,
+              "title": "Days"
+            },
+            "description": "Lookback window in days"
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "description": "Max rows",
+              "default": 50,
+              "title": "Limit"
+            },
+            "description": "Max rows"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/CostLeaderboardRow"
+                  },
+                  "title": "Response Query Cost Leaderboard Api V1 Queries Cost Leaderboard Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/sources/{source}/sample": {
       "post": {
         "tags": [
@@ -12000,6 +12083,16 @@
             "title": "Orphaned",
             "default": false
           },
+          "selected": {
+            "type": "boolean",
+            "title": "Selected",
+            "default": true
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
+          },
           "drift": {
             "type": "boolean",
             "title": "Drift",
@@ -12673,6 +12766,57 @@
         },
         "type": "object",
         "title": "CostEstimate"
+      },
+      "CostLeaderboardRow": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Attribution id (the hunt id for feature='hunts')"
+          },
+          "feature": {
+            "type": "string",
+            "title": "Feature"
+          },
+          "tenant_id": {
+            "type": "string",
+            "title": "Tenant Id",
+            "default": ""
+          },
+          "queries": {
+            "type": "integer",
+            "title": "Queries",
+            "description": "Number of queries"
+          },
+          "read_rows": {
+            "type": "integer",
+            "title": "Read Rows"
+          },
+          "read_bytes": {
+            "type": "integer",
+            "title": "Read Bytes"
+          },
+          "duration_ms": {
+            "type": "integer",
+            "title": "Duration Ms"
+          },
+          "peak_memory": {
+            "type": "integer",
+            "title": "Peak Memory"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "feature",
+          "queries",
+          "read_rows",
+          "read_bytes",
+          "duration_ms",
+          "peak_memory"
+        ],
+        "title": "CostLeaderboardRow",
+        "description": "One cost consumer in the leaderboard (grouped by attribution id)."
       },
       "CreateAPIKeyRequest": {
         "properties": {
@@ -13467,7 +13611,7 @@
           "column_name"
         ],
         "title": "FieldMapping",
-        "description": "A single Sigma field \u2192 column mapping."
+        "description": "A single Sigma field -> column mapping."
       },
       "FilterTier": {
         "type": "string",

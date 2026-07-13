@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from dfe_engine.clickhouse.attribution import DfeQueryTags
+
 from .ch_coordinator import ChCoordinator
 from .checkpoint import predicate, window
 from .models import HuntSpec
@@ -29,15 +31,17 @@ WINDOW_TOKEN = "{window}"
 def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
     """Per-query ClickHouse settings that attribute (and optionally class) a hunt run.
 
-    ``log_comment`` tags the row in ``system.query_log`` so cost (read rows/bytes,
-    memory, wall time) attributes back to the hunt - always set, always safe.
-    ``workload`` puts the query in a CH WORKLOAD for server-side fair-share, but is
-    only set when a workload name is CONFIGURED: setting an UNDEFINED workload errors
-    on the server, and the "hunts" workload is not provisioned until the smoothing
-    backstop lands (docs/data-plane/hunt-schedule-smoothing.md), so it defaults OFF. Pure, so it
-    is unit-testable; the real attribution is verified in the live-CH Phase A test.
+    ``log_comment`` is a JSON :class:`DfeQueryTags` payload (feature=hunts, id=the
+    hunt) so ``system.query_log`` -> the ``query_log_archive`` MV KEEPS the row (the
+    MV drops non-JSON log_comments) and the cost leaderboard attributes cost back to
+    the hunt. ``workload`` puts the query in a CH WORKLOAD for server-side
+    fair-share, but is only set when a workload name is CONFIGURED: setting an
+    UNDEFINED workload errors on the server, and the "hunts" workload is not
+    provisioned until the smoothing backstop lands
+    (docs/data-plane/hunt-schedule-smoothing.md), so it defaults OFF. Pure, so it is
+    unit-testable; the real attribution is verified in the live-CH Phase A test.
     """
-    settings = {"log_comment": f"hunt:{hunt_id}"}
+    settings = {"log_comment": DfeQueryTags(feature="hunts", kind="hunt", id=hunt_id).to_json()}
     if workload:
         settings["workload"] = workload
     return settings

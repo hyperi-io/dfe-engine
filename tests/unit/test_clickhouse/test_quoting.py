@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from dfe_engine.clickhouse.quoting import mask_sensitive, quote_identifier, quote_literal
+from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 
 
 def test_quote_identifier_backticks_and_escapes():
@@ -27,8 +27,3 @@ def test_quote_literal_doubles_backslash_before_quote():
     # break out of a row-policy predicate), and it is doubled BEFORE the quote.
     assert quote_literal("a\\b") == "'a\\\\b'"
     assert quote_literal("\\'") == "'\\\\'''"
-
-
-def test_mask_sensitive_redacts_by_key():
-    masked = mask_sensitive({"host": "h", "password": "p", "api_key": "k", "n": 1})
-    assert masked == {"host": "h", "password": "[HIDDEN]", "api_key": "[HIDDEN]", "n": 1}

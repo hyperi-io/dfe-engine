@@ -104,7 +104,7 @@ def _propagator(env) -> SigmaPropagator:
     )
 
 
-# ── Conversion helpers ──────────────────────────────────────
+# -- Conversion helpers --------------------------------------
 
 
 def test_convert_uses_sigma_field_names_verbatim():
@@ -141,7 +141,7 @@ def test_sigma_level_maps_informational_to_low():
     assert sigma_level({}) == "medium"
 
 
-# ── Task A: rule generation over the {source}_sigma view ────
+# -- Task A: rule generation over the {source}_sigma view ----
 
 
 def test_propagate_creates_binding_over_sigma_view(env):
@@ -249,7 +249,7 @@ def test_propagate_records_failed_for_unconvertible_rule(env):
     assert report.failed[0]["sigma_rule_id"] == _ID
 
 
-# ── Task A: drift is honoured ───────────────────────────────
+# -- Task A: drift is honoured -------------------------------
 
 
 def test_propagate_skips_drifted_sigma_rule_not_clobbering(env):
@@ -319,7 +319,7 @@ def test_clean_repropagate_is_idempotent_content(env):
     assert env.rules.get(rid).created_at == created_at
 
 
-# ── Task B: rule -> hunt binding ────────────────────────────
+# -- Task B: rule -> hunt binding ----------------------------
 
 
 def test_propagate_creates_per_source_hunt_including_binding(env):
@@ -369,7 +369,7 @@ def test_propagate_without_hunts_flag_creates_no_hunt(env):
     assert env.hunts.list_hunts() == []
 
 
-# ── Bindings CRUD ───────────────────────────────────────────
+# -- Bindings CRUD -------------------------------------------
 
 
 def test_list_bindings_reports_live_drift(env):

@@ -29,7 +29,11 @@ from typing import Any
 from dfe_engine.schema.engine_resolver import EngineResolver, EngineSpec, ResolvedEngine
 from dfe_engine.settings import get_settings
 
-from .names import DFE_AUDIT, QUERY_LOG_ARCHIVE
+# The only fixed engine-owned identifiers this module needs (the audit db + the
+# archive table). The wider engine hardcodes its db/table names at each call site;
+# a repo-wide identifier SSoT is a separate deliberate task, not this salvage.
+DFE_AUDIT = "dfe_audit"
+QUERY_LOG_ARCHIVE = "query_log_archive"
 
 _ARCHIVE_MV = f"{QUERY_LOG_ARCHIVE}_mv"
 _DEFAULT_TTL_DAYS = 30
@@ -110,11 +114,12 @@ def ensure(wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = D
 
     ``wrapper`` is a :class:`ClickHouseClientWrapper`. The engine is resolved via
     the SAME topology config-override the data tables use
-    (``settings.clickhouse.topology``: single -> MergeTree, replicated ->
-    Replicated + ON CLUSTER) - NOT by independently sensing the live cluster - so
-    the archive is created with the same engine form as everything else and never
-    lands ON CLUSTER when the deployment is configured single. Safe to call every
-    startup.
+    (``settings.clickhouse.topology``: single -> ``MergeTree()``, replicated ->
+    ``ReplicatedMergeTree``) - NOT by independently sensing the live cluster. Like
+    the data-table static DDL path (schema_ddl), this override-only resolve does NOT
+    emit ``ON CLUSTER`` (that needs live sensing), so on a genuinely clustered
+    Atomic-db deployment the archive table + MV are created on the connected node
+    only - identical to every other engine-owned table. Safe to call every startup.
 
     ``system.query_log`` is created LAZILY - the server only materialises it on the
     first log flush - so on a freshly-started server the MV's source table does not
