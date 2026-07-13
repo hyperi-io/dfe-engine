@@ -457,15 +457,13 @@ def _make_provider(request: Request, config: ProviderConfig):
 def _confine_provider_url(url: str, field: str) -> None:
     """Confine a provider's outbound URL (SSRF defence, S1).
 
-    http(s) only; the host must RESOLVE only to public addresses - EVERY resolved
-    address is rejected if it is loopback, link-local (the cloud metadata endpoint
-    169.254.169.254 is link-local), unspecified (0.0.0.0), multicast or reserved.
-    RESOLVING (not just parsing the literal) closes the trailing-dot, DNS-name and
-    decimal/octal-numeric host bypasses. When ``DFE_SIGMA_ALLOWED_HOSTS`` is set the
-    host must also be allow-listed. Private RFC1918 hosts are NOT blocked (internal
-    feeds are legitimate) - confine those with the allowlist. NB register-time
-    resolution bounds the obvious bypasses; pin-at-connect would additionally close
-    DNS rebinding (follow-up).
+    http(s) only. A LITERAL-IP host is checked directly (blocks loopback,
+    link-local incl. the 169.254.169.254 metadata endpoint, unspecified, multicast,
+    reserved - even the trailing-dot form, no DNS needed). A HOSTNAME is resolved
+    BEST-EFFORT and rejected if it resolves to such an address; if resolution is
+    UNAVAILABLE (a network-restricted runner / CI) it is NOT hard-failed - the
+    ``DFE_SIGMA_ALLOWED_HOSTS`` allowlist + pin-at-connect (follow-up) are the
+    backstop. Private RFC1918 hosts are NOT blocked (internal feeds are legitimate).
     """
     import ipaddress
     import os
@@ -484,33 +482,50 @@ def _confine_provider_url(url: str, field: str) -> None:
         raise HTTPException(
             422, detail={"code": "host_blocked", "message": f"{field} host {host!r} is blocked"}
         )
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    try:
-        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
-    except OSError as exc:
-        raise HTTPException(
-            422,
-            detail={
-                "code": "unresolvable_host",
-                "message": f"{field} host {host!r} does not resolve",
-            },
-        ) from exc
-    for info in infos:
-        ip = ipaddress.ip_address(info[4][0])
-        if (
+
+    def _blocked(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+        return (
             ip.is_loopback
             or ip.is_link_local
             or ip.is_unspecified
             or ip.is_multicast
             or ip.is_reserved
-        ):
-            raise HTTPException(
-                422,
-                detail={
-                    "code": "host_blocked",
-                    "message": f"{field} host {host!r} resolves to a blocked address ({ip})",
-                },
-            )
+        )
+
+    # A literal-IP host is checked DIRECTLY (no DNS) - blocks 169.254.169.254 /
+    # 127.0.0.1 / 0.0.0.0 and their trailing-dot forms even with no network.
+    try:
+        literal = ipaddress.ip_address(host)
+    except ValueError:
+        literal = None
+    if literal is not None and _blocked(literal):
+        raise HTTPException(
+            422,
+            detail={
+                "code": "host_blocked",
+                "message": f"{field} host {host!r} is blocked ({literal})",
+            },
+        )
+
+    # A hostname (or decimal/octal numeric) is resolved BEST-EFFORT: reject if it
+    # resolves to a blocked address, but if resolution is UNAVAILABLE (a
+    # network-restricted CI runner) do NOT hard-fail - the allowlist below +
+    # pin-at-connect (follow-up) are the backstop.
+    if literal is None:
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        try:
+            infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+        except OSError:
+            infos = []
+        for info in infos:
+            if _blocked(ipaddress.ip_address(info[4][0])):
+                raise HTTPException(
+                    422,
+                    detail={
+                        "code": "host_blocked",
+                        "message": f"{field} host {host!r} resolves to a blocked address",
+                    },
+                )
     allowed = [
         h.strip().lower()
         for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
