@@ -721,9 +721,18 @@ async def deploy_source_schema(
             detail={"code": "clickhouse_unavailable", "message": str(exc)},
         ) from exc
 
-    statements = [result.create_table_ddl, *views.values()]
+    db = settings.clickhouse.effective_data_database
+    statements, _table_exists = deploy_statements_for_build(
+        builder,
+        source,
+        version_id,
+        result,
+        db=db,
+        ch_client=ch,
+    )
     applied = 0
     try:
+        ch.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
         for stmt in statements:
             ch.execute(stmt)
             applied += 1
