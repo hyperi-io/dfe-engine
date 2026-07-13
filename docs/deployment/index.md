@@ -159,14 +159,13 @@ Implementation: tier behaviour lives in `argocd/values/profile-<tier>.yaml`
 so slim's omission of archiver/fetcher/transforms is a deploy-repo
 composition, not a chart change.
 
-> DESIGN FLAG (2026-06-29): `single`/`scale` enabling Kafka needs the Strimzi
-> operator present in those tiers - it is currently installed scale-only
-> (`layer-scale.yaml`). Resolve by gating the operator install on
-> (single|scale) or adding a non-operator single-broker Kafka path (mirroring
-> ClickHouse single). Until then, `single` with `kafka.mode: single` will
-> create a Kafka CR with no controller. (Also: the old `standard` profile was
-> renamed - clusters annotated `profile=standard` must move to `slim` (gRPC)
-> or `single` (kafka).)
+> **Kafka on tier `single`:** resolved (was the 2026-06-29 design flag) via
+> the non-operator path - `kafka.mode: single` renders a single-broker KRaft
+> StatefulSet (dfe-infra `kafka-single.yaml`, SCRAM-512 at format time), so
+> the Strimzi operator stays scale-only. Live validation of the single-broker
+> path is still pending. (Also: the old `standard` profile was renamed -
+> clusters annotated `profile=standard` must move to `slim` (gRPC) or
+> `single` (kafka).)
 
 ## Deploy-repo providers (provider-agnostic seam)
 
