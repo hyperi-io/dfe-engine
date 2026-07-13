@@ -10,7 +10,7 @@
 dfe-engine#99).
 
 A managed Kafka cluster (Confluent Cloud, provisioned MSK, Redpanda Cloud) has
-NO pause - only deletion stops spend (see ``docs/MANAGED-KAFKA-LIFECYCLE.md``).
+NO pause - only deletion stops spend (see ``docs/deployment/managed-kafka-lifecycle.md``).
 This group gives every managed provider the SAME three verbs behind one
 interface (:class:`dfe_engine.kafka.cloud.base.ManagedKafkaProvider`)::
 
@@ -117,7 +117,7 @@ def lifecycle_down(
     """Teardown-to-empty: delete creds BEFORE the cluster, then assert empty.
 
     Never a pause - these providers have none; the only spend-stop is deletion
-    (docs/MANAGED-KAFKA-LIFECYCLE.md). A cluster still present after this
+    (docs/deployment/managed-kafka-lifecycle.md). A cluster still present after this
     command is a defect, reported as a failure, not a convenience.
     """
     from dfe_engine.kafka.cloud.creds import forget_connection

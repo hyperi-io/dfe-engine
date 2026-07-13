@@ -90,7 +90,11 @@ async def compile_transform(
     """
     compiler_url = settings.services.transform_wasm_compiler_url
 
-    async with httpx.AsyncClient(timeout=300.0, verify=ssl_context()) as client:
+    # Bounded proxy to the WASM compiler. The timeout is raw-httpx here (a long-but-
+    # bounded compile) and MUST stay UNDER the pytest backstop (300s) so a hung
+    # compiler service fails a test FAST rather than stalling it -- the testing
+    # standard's wait-bound rule (raw httpx does not get scalo's stamina test-mode).
+    async with httpx.AsyncClient(timeout=120.0, verify=ssl_context()) as client:
         try:
             resp = await client.post(
                 f"{compiler_url}/compile",
@@ -147,6 +151,7 @@ async def test_transform(
     """
     wasm_url = settings.services.transform_wasm_url
 
+    # Bounded proxy to the transform host (60s, well under the 300s pytest backstop).
     async with httpx.AsyncClient(timeout=60.0, verify=ssl_context()) as client:
         try:
             resp = await client.post(

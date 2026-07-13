@@ -10,7 +10,7 @@
 The auto-merge deployment gate (gitcrud/auto_merge.py) says a production DFE_ENV
 with DFE_GITOPS_MODE=team may NOT auto-merge, and the design says that posture has
 NO escape hatch: a governed write must not land straight on the deploy repo's main
-(CLAUDE.md gitops section; docs/GITOPS-COMMIT-STANDARD.md section 4). Historically
+(CLAUDE.md gitops section; docs/control-plane/gitops-commit-standard.md section 4). Historically
 that refusal was only a response badge -- the commit+push happened first
 regardless. ``route_write`` closes that: when the gate refuses, the write is
 committed to a short-lived branch and a review PR is opened via the forge seam;

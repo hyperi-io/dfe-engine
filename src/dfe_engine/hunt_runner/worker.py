@@ -34,7 +34,7 @@ def query_settings(hunt_id: str, workload: str = "") -> dict[str, str]:
     ``workload`` puts the query in a CH WORKLOAD for server-side fair-share, but is
     only set when a workload name is CONFIGURED: setting an UNDEFINED workload errors
     on the server, and the "hunts" workload is not provisioned until the smoothing
-    backstop lands (docs/HUNT-SCHEDULE-SMOOTHING.md), so it defaults OFF. Pure, so it
+    backstop lands (docs/data-plane/hunt-schedule-smoothing.md), so it defaults OFF. Pure, so it
     is unit-testable; the real attribution is verified in the live-CH Phase A test.
     """
     settings = {"log_comment": f"hunt:{hunt_id}"}

@@ -4,7 +4,7 @@ A Source represents a data stream entering the DFE platform (e.g. filebeat,
 syslog, crowdstrike_edr). It contains identity, schema, and optional
 fetcher/transform/rules/sigma configuration.
 
-See docs/SOURCE.md for the full specification.
+See docs/data-plane/source.md for the full specification.
 
 Usage:
     from dfe_engine.source.models import Source, SchemaColumn
@@ -58,7 +58,7 @@ _ENGINE_REGISTRY = EngineRegistry.default()
 class SchemaColumn(BaseModel):
     """A single column in a schema definition.
 
-    See docs/SCHEMA.md for the column model:
+    See docs/data-plane/schema.md for the column model:
     type + attribute + use_case + expr + comment
     """
 
@@ -595,7 +595,7 @@ class Source(BaseModel):
     A Source represents a distinct data stream entering the platform.
     Everything flows from the _source label.
 
-    See docs/SOURCE.md for the full specification.
+    See docs/data-plane/source.md for the full specification.
     """
 
     model_config = ConfigDict(populate_by_name=True, extra="ignore")

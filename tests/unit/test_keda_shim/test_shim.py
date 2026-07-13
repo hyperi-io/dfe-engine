@@ -1,0 +1,95 @@
+#  Project:      dfe-engine
+#  File:         tests/unit/test_keda_shim/test_shim.py
+#  Purpose:      QueryShim fail-safe + clamp + injection-guard unit tests
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+"""Unit tests for the KEDA shim's query runner and (critically) its fail-safe.
+
+No live ClickHouse: a fake client is injected, so these run with the rest of the
+unit suite. The fail-safe tests are the important ones - a metric outage must hold
+last-good / cold value, never scale up.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from dfe_engine.keda_shim.shim import QueryShim
+from dfe_engine.settings import DFESettings
+
+
+class _FakeResult:
+    def __init__(self, rows: list[list]) -> None:
+        self.result_rows = rows
+
+
+class _FakeClient:
+    """Records the SQL/params it was asked to run; returns canned rows or raises."""
+
+    def __init__(self, rows: list[list] | None = None, error: Exception | None = None) -> None:
+        self.rows = rows if rows is not None else [[0]]
+        self.error = error
+        self.calls: list[tuple] = []
+
+    def query(self, sql, parameters=None, settings=None):
+        self.calls.append((sql, parameters, settings))
+        if self.error is not None:
+            raise self.error
+        return _FakeResult(self.rows)
+
+
+def _shim(client: _FakeClient) -> QueryShim:
+    return QueryShim(DFESettings(), client_factory=lambda: client)
+
+
+def test_pressure_returns_value():
+    shim = _shim(_FakeClient(rows=[[42]]))
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+
+def test_pressure_clamped_to_band():
+    shim = _shim(_FakeClient(rows=[[150]]))
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 100  # clamp_max 100
+
+
+def test_failsafe_holds_last_good():
+    client = _FakeClient(rows=[[42]])
+    shim = QueryShim(DFESettings(), client_factory=lambda: client)
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42  # caches 42
+    client.error = RuntimeError("CH down")
+    # A failure returns the cached last-good, NOT an error and NOT a scale-up.
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 42
+
+
+def test_failsafe_cold_hold_when_no_cache():
+    shim = _shim(_FakeClient(error=RuntimeError("CH down")))
+    assert shim.run("pressure", {"service": "dfe-receiver"}) == 0  # cold_hold
+
+
+def test_injection_param_rejected_and_failsafe():
+    client = _FakeClient(rows=[[42]])
+    shim = QueryShim(DFESettings(), client_factory=lambda: client)
+    # A malformed service never reaches ClickHouse and degrades to cold_hold.
+    assert shim.run("pressure", {"service": "x'; DROP TABLE t--"}) == 0
+    assert client.calls == []
+
+
+def test_backlog_uses_due_query():
+    client = _FakeClient(rows=[[7]])
+    shim = _shim(client)
+    assert shim.run("backlog") == 7
+    sql = client.calls[0][0]
+    assert "hunt_schedule" in sql  # proves it ran schedule.due_query, not a copy
+
+
+def test_unknown_query_raises_keyerror():
+    shim = _shim(_FakeClient())
+    with pytest.raises(KeyError):
+        shim.run("nope")
+
+
+def test_query_names_lists_builtins():
+    shim = _shim(_FakeClient())
+    assert shim.query_names == ["backlog", "pressure"]

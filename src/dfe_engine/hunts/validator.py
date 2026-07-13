@@ -102,9 +102,15 @@ class HuntValidator:
         for rule_info in rules:
             rule_name = rule_info.get("rule_name")
             rule_path = os.path.join(rule_repo_dir, f"{rule_name}.jinja2")
-            if not os.path.isfile(rule_path):
-                raise ValueError(f"Rule file does not exist: {rule_path}")
-            HuntValidator.validate_rule_syntax(rule_path, env)
+            if os.path.isfile(rule_path):
+                HuntValidator.validate_rule_syntax(rule_path, env)
+            else:
+                # Rule file may be uploaded AFTER the hunt is drafted (create-then-add);
+                # warn instead of blocking. Syntax is validated once the file exists.
+                logger.warning(
+                    f"Rule file not found for hunt rule '{rule_name}' at {rule_path}; "
+                    "create-time existence check skipped (rule may be added later)."
+                )
 
             # Validate source reference if SourceRegistry available
             source_name = rule_info.get("source")

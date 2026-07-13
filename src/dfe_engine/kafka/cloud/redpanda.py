@@ -329,7 +329,7 @@ class RedpandaCloudProvider(ManagedKafkaProvider):
 
         dataplane, _ = self._conn_from_cluster(self._get_cluster(token, cluster["id"]))
         # Credentials die BEFORE the cluster - deleting the cluster first orphans
-        # the key (the Confluent 403-orphan lesson; docs/MANAGED-KAFKA-LIFECYCLE.md).
+        # the key (the Confluent 403-orphan lesson; docs/deployment/managed-kafka-lifecycle.md).
         # Best-effort: the user may already be gone from a prior partial teardown.
         try:
             self._do("delete", f"{dataplane}/v1/users/{cfg.kafka_user}", token=token)

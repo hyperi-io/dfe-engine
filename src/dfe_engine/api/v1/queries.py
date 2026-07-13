@@ -156,7 +156,6 @@ async def execute_view(
     body: ViewExecuteRequest,
     user: CurrentUser,
     executor: ViewExec,
-    _auth: None = Depends(require_action(scopes_dict["query_execute"])),
 ) -> QueryResponse:
     """Execute a parameterized view and return JSON results.
 
@@ -207,7 +206,6 @@ async def execute_view(
 async def execute_raw_query(
     request: RawQueryRequest,
     user: CurrentUser,
-    _auth: None = Depends(require_action(scopes_dict["query_execute"])),
 ) -> QueryResponse:
     """Execute a raw query against a registered datasource adapter.
 

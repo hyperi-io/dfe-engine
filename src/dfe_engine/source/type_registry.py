@@ -249,7 +249,7 @@ class TypeRegistry:
 
         raise InvalidChOverrideError(
             f"ch_override '{ch_override}' is not a supported ClickHouse type. "
-            f"See docs/SCHEMA.md for the full override catalogue."
+            f"See docs/data-plane/schema.md for the full override catalogue."
         )
 
     # -----------------------------------------------------------------

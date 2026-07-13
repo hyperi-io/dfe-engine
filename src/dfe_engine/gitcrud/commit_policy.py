@@ -9,7 +9,7 @@
 
 Callers never hand-write commit messages; they pass a CommitContext and this module
 produces a conforming message (type(scope): summary <=50, ASCII, [skip ci], audit
-trailers). See docs/GITOPS-COMMIT-STANDARD.md.
+trailers). See docs/control-plane/gitops-commit-standard.md.
 """
 
 from __future__ import annotations

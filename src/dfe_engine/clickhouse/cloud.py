@@ -15,8 +15,7 @@ connection (the regular ``clickhouse.*`` block pointed at a ``*.clickhouse.cloud
 host). Wraps the "EV start button for a dev CH Cloud service": see it, start it,
 stop it - manually via the API/CLI, or opt-in auto-wake (Phase 2).
 
-Control-plane permissions the api key needs (least-privilege - see
-docs/CLICKHOUSE-CLOUD.md):
+Control-plane permissions the api key needs (least-privilege):
   - GET  /v1/organizations                              (discover the org)
   - GET  /v1/organizations/{org}/services               (list + read state)
   - PATCH /v1/organizations/{org}/services/{id}/state   (start / stop)

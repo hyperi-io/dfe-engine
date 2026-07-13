@@ -9,7 +9,7 @@
 
 Secrets backend coupling belongs in scalo.secrets (provider by config), never in
 engine code - that is what makes the secrets backing service swappable (file /
-openbao / aws / gcp / azure) without touching dfe-engine. See docs/BACKING-SERVICES.md.
+openbao / aws / gcp / azure) without touching dfe-engine. See docs/deployment/backing-services.md.
 
 Note: boto3 is deliberately NOT forbidden - it is the client for the object-store
 seam (the S3 API), which is portable across MinIO / S3 / any S3-compatible endpoint

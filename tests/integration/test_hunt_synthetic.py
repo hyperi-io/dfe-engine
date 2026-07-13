@@ -54,7 +54,7 @@ def _shares_db_across_concurrent_connections(ch_client, ch_params) -> bool:
     so concurrent connections spread across the OTHER nodes get UNKNOWN_DATABASE. The
     hunt coordinator therefore needs a single logical ClickHouse - a single node, or
     Replicated coordination tables - on the clustered 'scale' tier (see
-    HUNT-RUNNER-SCALING.md). This probes that premise so the test skips DETERMINISTICALLY
+    docs/data-plane/hunt-runner-scaling.md). This probes that premise so the test skips DETERMINISTICALLY
     where it cannot hold instead of failing flakily. It must be CONCURRENT: sequential
     connections often stick to one node and hide the split.
     """
@@ -140,7 +140,7 @@ def test_multi_pod_exactly_once_and_distributed(ch_params, ch_client, synth_db):
             "multi-pod needs a single logical ClickHouse: this endpoint is a multi-node "
             "cluster where a plain database is not shared across concurrent connections. "
             "Scale-tier coordination must use Replicated tables or a single CH endpoint "
-            "(see HUNT-RUNNER-SCALING.md)."
+            "(see docs/data-plane/hunt-runner-scaling.md)."
         )
 
     db = synth_db

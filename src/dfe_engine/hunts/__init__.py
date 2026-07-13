@@ -14,7 +14,6 @@ from .alert_grouping import (
     parse_duration,
 )
 from .checkpoint import HuntCheckpointManager
-from .fingerprint import fingerprint_query, normalize_query
 from .hdx_sanitizer import HdxSanitizer, HdxSanitizeResult
 from .hunt_output import HuntResultSchema
 from .rule_creation_service import (
@@ -66,8 +65,6 @@ __all__ = [
     "build_grouping_query",
     "compute_score",
     "evaluate_condition",
-    "fingerprint_query",
-    "normalize_query",
     "parse_duration",
     "validate_condition",
 ]

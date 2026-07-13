@@ -10,7 +10,7 @@
 
 A managed Kafka cluster (Confluent Cloud, provisioned MSK, Redpanda Cloud) is
 ALWAYS-ON - it bills continuously and has NO pause; only deletion stops spend.
-See ``docs/MANAGED-KAFKA-LIFECYCLE.md`` for the full rationale. This module is
+See ``docs/deployment/managed-kafka-lifecycle.md`` for the full rationale. This module is
 the per-provider SEAM (dfe-engine#99, WS-C): ``up`` creates + mints data-plane
 creds, ``down`` tears down to PROVABLY EMPTY (creds die before the cluster,
 never the other way round), ``status`` reads without mutating. Provider
@@ -55,7 +55,7 @@ class KafkaClusterState:
     """A managed cluster's current control-plane state (``status`` / post-``down``).
 
     ``exists is False`` is the ONLY provably-empty / $0 state - a cluster in any
-    other state is still billing (docs/MANAGED-KAFKA-LIFECYCLE.md: "the managed
+    other state is still billing (docs/deployment/managed-kafka-lifecycle.md: "the managed
     control plane keeps the cluster alive - and billing - until you delete it").
     """
 

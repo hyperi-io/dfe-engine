@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""The secrets seam is chosen by config, never hardcoded (see BACKING-SERVICES.md)."""
+"""The secrets seam is chosen by config, never hardcoded (see docs/deployment/backing-services.md)."""
 
 from __future__ import annotations
 

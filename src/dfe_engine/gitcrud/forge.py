@@ -8,7 +8,7 @@
 """Open a pull/merge request on the deploy repo's git forge.
 
 When a production+team governed write may NOT commit straight to main (see
-gitcrud/routing.py + docs/GITOPS-COMMIT-STANDARD.md section 4), the engine pushes
+gitcrud/routing.py + docs/control-plane/gitops-commit-standard.md section 4), the engine pushes
 a short-lived branch and opens a PR for review. The forge REST call is a seam:
 Forgejo/Gitea, GitHub and GitLab plug in behind one ``ForgeProvider`` protocol,
 selected from settings. REST goes over scalo's ``HttpClient`` (retries +

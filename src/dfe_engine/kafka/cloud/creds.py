@@ -8,7 +8,7 @@
 
 """Persist / forget a minted :class:`KafkaConnection` - ``.env`` + scalo.secrets.
 
-Two halves, per ``docs/MANAGED-KAFKA-LIFECYCLE.md``'s "persist creds (.env +
+Two halves, per ``docs/deployment/managed-kafka-lifecycle.md``'s "persist creds (.env +
 scalo.secrets)" checkpoint:
 
 - ``.env`` upsert (:func:`upsert_env_file`) - so anything reading ``.env``

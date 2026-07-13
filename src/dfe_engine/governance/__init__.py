@@ -9,7 +9,7 @@
 
 Actions are named bundles of var changes over the generic git-CRUD engine, each
 with its own RBAC handle; policies lock vars to defaults. Both are YAML in the
-gitops governance class. See docs/ARCHITECTURE.md ("Governed Ops").
+gitops governance class. See docs/architecture.md ("Governed Ops").
 """
 
 from .actions import ActionForbiddenError, ActionStore

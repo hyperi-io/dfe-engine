@@ -1,6 +1,5 @@
 import os
 import shutil
-import time
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -73,7 +72,10 @@ def test_create_update_checkpoint(
         file_path=file_path,
         query_id=generated_query_id,
     )
-    time.sleep(3)
+    # create_checkpoint_file() writes the JSON synchronously and the assertion
+    # below reads the timestamps FROM the file content (not its mtime), so there
+    # is nothing to wait for - gate on the real signal (the readable file), never
+    # a fixed timer. (Was time.sleep(3): a vestigial timing wait.)
 
     last_success_time = create_checkpoint_manager.get_last_successful_run_file(
         hunt_name=hunt_name,
