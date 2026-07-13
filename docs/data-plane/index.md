@@ -21,6 +21,7 @@ flowchart LR
 | [schema-classes.md](schema-classes.md) | engine class reference for the schema system (SchemaLoader, SchemaBuilderV2, DDL generation) |
 | [schema-sync.md](schema-sync.md) | engine<->loader runtime schema contract |
 | [field-mapping.md](field-mapping.md) | standards translation layer (Sigma / ECS / CIM views) |
+| [sigma.md](sigma.md) | Sigma rule-provider pipeline (feeds -> catalogue -> propagation -> source-views) + query cost leaderboard |
 | [expressions-cel.md](expressions-cel.md) | CEL profile, classifier tiers, SQL transpile |
 | [query-api.md](query-api.md) | query API surface + [python](query-api-python.md) / [rust](query-api-rust.md) / [typescript](query-api-typescript.md) consumption |
 | [hunt-runner-scaling.md](hunt-runner-scaling.md) | pull-based runner, deterministic-due scaling, keda-shim fail-safe |
