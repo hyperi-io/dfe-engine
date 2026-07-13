@@ -128,18 +128,19 @@ class SigmaViewDefinition(BaseModel):
 
 
 def _safe_ident(name: str, *, what: str) -> str:
-    """Validate a bare identifier destined for a backtick-quoted position.
+    """Validate a bare identifier for a backtick-quoted OR an unquoted DDL position.
 
-    Rejects a backtick (which would let the value break out of the ``\\`...\\```
-    quoting and inject arbitrary DDL) and an empty name. These are governed,
-    RBAC'd, git-stored values, but the identifier is interpolated into DDL so it is
-    checked as defence in depth - the same discipline json_promotion_service applies
-    to its JSON subcolumn accessor.
+    Rejects a backtick (which would break out of ``\\`...\\``` quoting), whitespace,
+    and the DDL control chars ``; ( ) ' " \\`` - so the value is safe even in the
+    UNQUOTED ``{db}.{table}`` positions the view DDL emits, not only the
+    backtick-wrapped column aliases. Governed, RBAC'd, git-stored values, checked as
+    defence in depth (the discipline json_promotion_service applies to its JSON
+    subcolumn accessor).
     """
     if not name:
         raise SigmaViewError(f"empty {what}")
-    if "`" in name:
-        raise SigmaViewError(f"illegal {what} (backtick): {name!r}")
+    if any(c in name for c in "`;()'\"\\") or any(c.isspace() for c in name):
+        raise SigmaViewError(f"illegal {what}: {name!r}")
     return name
 
 

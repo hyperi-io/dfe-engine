@@ -119,7 +119,9 @@ def test_provider_reach_rejects_ssrf_host(client, app, admin_headers, tmp_path):
     _wire_gitcrud(app, tmp_path)
     for kind, opts in (
         ("valhalla", {"base_url": "http://169.254.169.254"}),
+        ("valhalla", {"base_url": "http://169.254.169.254."}),  # N1: trailing-dot bypass
         ("git_repo", {"url": "http://127.0.0.1/x.git"}),
+        ("git_repo", {"url": "http://localhost./x.git"}),  # N1: trailing-dot localhost
     ):
         resp = client.post(
             "/api/v1/sigma/providers",

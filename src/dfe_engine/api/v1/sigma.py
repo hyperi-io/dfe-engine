@@ -457,14 +457,19 @@ def _make_provider(request: Request, config: ProviderConfig):
 def _confine_provider_url(url: str, field: str) -> None:
     """Confine a provider's outbound URL (SSRF defence, S1).
 
-    http(s) only; the host must NOT be loopback or link-local (the cloud metadata
-    endpoint 169.254.169.254 is link-local) or a well-known metadata hostname; and
-    when ``DFE_SIGMA_ALLOWED_HOSTS`` is set the host must be allow-listed. Private
-    RFC1918 hosts are NOT blocked (internal feeds are legitimate) - confine those
-    with the allowlist.
+    http(s) only; the host must RESOLVE only to public addresses - EVERY resolved
+    address is rejected if it is loopback, link-local (the cloud metadata endpoint
+    169.254.169.254 is link-local), unspecified (0.0.0.0), multicast or reserved.
+    RESOLVING (not just parsing the literal) closes the trailing-dot, DNS-name and
+    decimal/octal-numeric host bypasses. When ``DFE_SIGMA_ALLOWED_HOSTS`` is set the
+    host must also be allow-listed. Private RFC1918 hosts are NOT blocked (internal
+    feeds are legitimate) - confine those with the allowlist. NB register-time
+    resolution bounds the obvious bypasses; pin-at-connect would additionally close
+    DNS rebinding (follow-up).
     """
     import ipaddress
     import os
+    import socket
     from urllib.parse import urlparse
 
     parsed = urlparse(url.strip())
@@ -472,22 +477,40 @@ def _confine_provider_url(url: str, field: str) -> None:
         raise HTTPException(
             422, detail={"code": "bad_url_scheme", "message": f"{field} must be http(s)"}
         )
-    host = (parsed.hostname or "").lower()
+    host = (parsed.hostname or "").rstrip(".").lower()
     if not host:
         raise HTTPException(422, detail={"code": "bad_url", "message": f"{field} has no host"})
     if host in ("localhost", "metadata", "metadata.google.internal"):
         raise HTTPException(
             422, detail={"code": "host_blocked", "message": f"{field} host {host!r} is blocked"}
         )
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
-        ip = ipaddress.ip_address(host)
-        if ip.is_loopback or ip.is_link_local:
+        infos = socket.getaddrinfo(host, port, proto=socket.IPPROTO_TCP)
+    except OSError as exc:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "unresolvable_host",
+                "message": f"{field} host {host!r} does not resolve",
+            },
+        ) from exc
+    for info in infos:
+        ip = ipaddress.ip_address(info[4][0])
+        if (
+            ip.is_loopback
+            or ip.is_link_local
+            or ip.is_unspecified
+            or ip.is_multicast
+            or ip.is_reserved
+        ):
             raise HTTPException(
                 422,
-                detail={"code": "host_blocked", "message": f"{field} host {host!r} is link-local"},
+                detail={
+                    "code": "host_blocked",
+                    "message": f"{field} host {host!r} resolves to a blocked address ({ip})",
+                },
             )
-    except ValueError:
-        pass  # a hostname, not an IP literal
     allowed = [
         h.strip().lower()
         for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
