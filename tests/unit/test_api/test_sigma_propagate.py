@@ -74,7 +74,7 @@ def _seed_selected(client, headers, tmp_path) -> None:
     assert sel.status_code == 200, sel.text
 
 
-# ── Gate / auth ─────────────────────────────────────────────
+# -- Gate / auth ---------------------------------------------
 
 
 def test_propagate_requires_auth(client):
@@ -97,7 +97,7 @@ def test_viewer_cannot_propagate(client, app, viewer_headers, tmp_path):
     )
 
 
-# ── Propagate -> bindings -> hunt (Task A + B + C) ──────────
+# -- Propagate -> bindings -> hunt (Task A + B + C) ----------
 
 
 def test_propagate_generates_binding_and_hunt(client, app, admin_headers, tmp_path):

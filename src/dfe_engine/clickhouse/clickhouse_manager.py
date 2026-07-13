@@ -149,6 +149,10 @@ class ClickHouseClientWrapper:
     def _execute_single(self, query: str, *args, **kwargs):
         """Execute a single query statement through the resilience layer."""
         query_upper = query.strip().upper()
+        # Attribution: stamp the log_comment tag here too - the DESCRIBE/DDL/SELECT
+        # sub-paths below call self._client directly, bypassing the query/command/
+        # query_rows wrapper hooks, so execute()'d DDL would otherwise be unattributed.
+        kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
 
         # DESCRIBE, DESC, EXISTS, EXPLAIN, SHOW return data - use query()
         if query_upper.startswith(("DESCRIBE", "DESC", "EXISTS", "EXPLAIN", "SHOW")):

@@ -58,7 +58,7 @@ def _register_local_provider(client, headers, directory):
     )
 
 
-# ── Gate / auth ─────────────────────────────────────────────
+# -- Gate / auth ---------------------------------------------
 
 
 def test_catalogue_503_when_gitops_disabled(client, admin_headers):
@@ -80,7 +80,7 @@ def test_viewer_cannot_write(client, app, viewer_headers, tmp_path):
     assert sel.status_code == 403
 
 
-# ── Provider CRUD ───────────────────────────────────────────
+# -- Provider CRUD -------------------------------------------
 
 
 def test_list_providers_includes_builtin_default(client, app, admin_headers, tmp_path):
@@ -111,12 +111,31 @@ def test_register_get_enable_disable_provider(client, app, admin_headers, tmp_pa
     assert enabled.json()["enabled"] is True
 
 
+def test_provider_reach_rejects_ssrf_host(client, app, admin_headers, tmp_path):
+    # M1: a valhalla base_url / git url at a loopback or link-local host (the cloud
+    # metadata endpoint 169.254.169.254 is link-local) is rejected even for an admin
+    # - defence in depth on the SSRF surface (the valhalla base_url was previously
+    # unvalidated, bypassing the allow-list entirely).
+    _wire_gitcrud(app, tmp_path)
+    for kind, opts in (
+        ("valhalla", {"base_url": "http://169.254.169.254"}),
+        ("git_repo", {"url": "http://127.0.0.1/x.git"}),
+    ):
+        resp = client.post(
+            "/api/v1/sigma/providers",
+            json={"name": "evil", "kind": kind, "options": opts},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, (kind, resp.text)
+        assert resp.json()["code"] == "host_blocked", (kind, resp.text)
+
+
 def test_unknown_provider_404(client, app, admin_headers, tmp_path):
     _wire_gitcrud(app, tmp_path)
     assert client.get("/api/v1/sigma/providers/nope", headers=admin_headers).status_code == 404
 
 
-# ── Sync -> catalogue -> select ─────────────────────────────
+# -- Sync -> catalogue -> select -----------------------------
 
 
 def test_sync_populates_catalogue_and_select_flow(client, app, admin_headers, tmp_path):

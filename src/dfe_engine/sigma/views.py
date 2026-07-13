@@ -59,7 +59,7 @@ class SigmaViewError(ValueError):
     """Raised when a view definition cannot be rendered to safe DDL."""
 
 
-# ── Definition model ────────────────────────────────────────
+# -- Definition model ----------------------------------------
 
 
 class SigmaViewColumn(BaseModel):
@@ -124,7 +124,7 @@ class SigmaViewDefinition(BaseModel):
         return [c for c in self.columns if c.is_json_derived]
 
 
-# ── DDL generation ──────────────────────────────────────────
+# -- DDL generation ------------------------------------------
 
 
 def _safe_ident(name: str, *, what: str) -> str:
@@ -213,6 +213,12 @@ def build_sigma_view_ddl(
     dynamic-subcolumn idiom (optionally CAST to its declared type). ``{db}`` is a
     placeholder the deployer substitutes, consistent with the schema DDL writer.
     """
+    # `db` is normally the "{db}" placeholder the deployer substitutes, but the API
+    # generate action passes a real database name (a user-supplied param) - validate
+    # it as an identifier so it cannot inject into the DDL (parity with the
+    # governance/ch/render quoting seam). The placeholder itself passes through.
+    if db != "{db}":
+        db = _safe_ident(db, what="db")
     table = _safe_ident(table_name or definition.source_name, what="table_name")
     view_name = f"{table}_sigma"
 
@@ -226,7 +232,7 @@ def build_sigma_view_ddl(
     return f"CREATE OR REPLACE VIEW {db}.{view_name} AS\nSELECT\n    {body}\nFROM {db}.{table};\n"
 
 
-# ── Store ───────────────────────────────────────────────────
+# -- Store ---------------------------------------------------
 
 
 def _msg(source_name: str, summary: str, actor: str) -> str:

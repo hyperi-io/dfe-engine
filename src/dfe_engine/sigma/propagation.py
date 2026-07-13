@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass, field
+from datetime import datetime
 from typing import Any
 
 from scalo.logger import logger
@@ -186,16 +187,23 @@ def sigma_view_name(source: str) -> str:
 
 
 def _as_text(value: Any) -> str | None:
-    """Coerce a (possibly YAML-date) change signal to a stable string."""
+    """Coerce a (possibly YAML-date) change signal to a stable string.
+
+    Matches ``sigma.catalog._as_text`` (a ``datetime`` collapses to its date) so a
+    stored change signal and its regenerated compare value never spuriously differ
+    - a datetime isoformat vs a date isoformat would otherwise read as false drift.
+    """
     if value is None:
         return None
     if isinstance(value, str):
         return value
+    if isinstance(value, datetime):
+        return value.date().isoformat()
     iso = getattr(value, "isoformat", None)
     return iso() if callable(iso) else str(value)
 
 
-# ── Report ──────────────────────────────────────────────────
+# -- Report --------------------------------------------------
 
 
 @dataclass
@@ -228,7 +236,7 @@ class PropagationReport:
         }
 
 
-# ── Propagator ──────────────────────────────────────────────
+# -- Propagator ----------------------------------------------
 
 
 class SigmaPropagator:
@@ -538,7 +546,7 @@ class SigmaPropagator:
         self._hunts.save(hunt_name, config, created_by=self._actor)
 
 
-# ── hunt rule-list helpers (mirror the PUT /hunts merge contract) ──
+# -- hunt rule-list helpers (mirror the PUT /hunts merge contract) --
 
 
 def _rule_entries(rules: Any) -> list[dict[str, Any]]:

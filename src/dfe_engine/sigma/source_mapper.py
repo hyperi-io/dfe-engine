@@ -1,4 +1,4 @@
-"""Source-based Sigma field mapper — replaces PG + CSV field mapping.
+"""Source-based Sigma field mapper - replaces PG + CSV field mapping.
 
 Bridges the Sigma module to the Source model. Loads field mappings
 from Source.sigma config and generates Sigma views via DDLGenerator.
@@ -70,7 +70,7 @@ class SigmaSourceMapper:
         return self._source_registry.get_source(source_name)
 
     def get_field_mappings(self, source_name: str) -> dict[str, str]:
-        """Get Sigma field → column name mappings for a source.
+        """Get Sigma field -> column name mappings for a source.
 
         Resolution order:
         1. FieldMapRegistry (two-tier: default + source-specific)
@@ -160,7 +160,7 @@ class SigmaSourceMapper:
         non-empty field mappings.
 
         Returns:
-            Dict mapping source_name → Sigma view DDL string.
+            Dict mapping source_name -> Sigma view DDL string.
         """
         views: dict[str, str] = {}
         for source in self._source_registry.get_all_sources(enabled_only=enabled_only):
@@ -191,7 +191,7 @@ class SigmaSourceMapper:
         return self._ddl_gen.generate_sigma_view(source.table_name, mappings, DDLConfig(db=db))
 
     def _get_mappings_for_source(self, source: Source) -> dict[str, str]:
-        """Get Sigma mappings for a source (registry → legacy fallback).
+        """Get Sigma mappings for a source (registry -> legacy fallback).
 
         Like get_field_mappings() but takes a Source directly (avoids
         repeated registry lookups in batch operations).

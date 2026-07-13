@@ -287,7 +287,11 @@ class SqlBackend(TextQueryBackend):
             ):
                 return self._create_like_expression(field, str_value[1:-1], "contains")
             else:
-                return f"{field} ILIKE '{self._convert_wildcards(str_value)}'"
+                # F-SIGMA-ESCAPING: escape the SQL literal BEFORE mapping * -> %, so a
+                # crafted value (e.g. x*y' OR '1'='1) cannot break out of the
+                # single-quoted ILIKE literal. _escape_value leaves * untouched, so
+                # _convert_wildcards still maps the wildcards afterwards.
+                return f"{field} ILIKE '{self._convert_wildcards(self._escape_value(str_value))}'"
 
         if hasattr(value, "source"):
             source = str(value.source)
@@ -636,22 +640,27 @@ class SqlBackend(TextQueryBackend):
         elif severity == "informational":
             triage_score = 10
 
+        # Every string literal routes through _escape_value (F-SIGMA-ESCAPING): the
+        # values derive from attacker-craftable rule fields (title, tags -> tactic/
+        # technique, metadata overrides), so an unescaped quote would break out of
+        # the INSERT literal. triage_score is a bare number; now()/timestamp/
+        # 'logoriginal' are constants.
         static_values = [
             f"'{self._escape_value(alert_values.get('alert_description', ''))}'",
-            f"'{alert_values.get('alert_framework', 'MITRE ATT&CK')}'",
-            f"'{alert_values.get('alert_ratingtime_sla_applies', 'true')}'",
-            f"'{alert_values.get('alert_rule_name', rule.title)}'",
-            f"'{alert_values.get('alert_schedule', 'smd')}'",
-            f"'{alert_values.get('alert_schedule_duration', '10mins')}'",
-            f"'{severity}'",
+            f"'{self._escape_value(alert_values.get('alert_framework', 'MITRE ATT&CK'))}'",
+            f"'{self._escape_value(alert_values.get('alert_ratingtime_sla_applies', 'true'))}'",
+            f"'{self._escape_value(alert_values.get('alert_rule_name', rule.title))}'",
+            f"'{self._escape_value(alert_values.get('alert_schedule', 'smd'))}'",
+            f"'{self._escape_value(alert_values.get('alert_schedule_duration', '10mins'))}'",
+            f"'{self._escape_value(severity)}'",
             f"{alert_values.get('alert_triage_score', triage_score)}",
-            f"'{alert_values.get('alert_type', rule.title)}'",
+            f"'{self._escape_value(alert_values.get('alert_type', rule.title))}'",
             "now()",
             "'logoriginal'",
-            f"'{self.org_id}'",
-            f"'{self.source_table}'",
-            f"'{alert_values.get('tactic_name', '')}'",
-            f"'{alert_values.get('technique_name', '')}'",
+            f"'{self._escape_value(self.org_id)}'",
+            f"'{self._escape_value(self.source_table)}'",
+            f"'{self._escape_value(alert_values.get('tactic_name', ''))}'",
+            f"'{self._escape_value(alert_values.get('technique_name', ''))}'",
             "timestamp",
         ]
 

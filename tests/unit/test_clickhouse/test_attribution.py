@@ -81,8 +81,3 @@ def test_to_json_omits_none_and_sorts():
     payload = tags.to_json()
     assert "null" not in payload  # None fields omitted
     assert json.loads(payload) == {"service": "dfe-engine", "tenant_id": "acme", "user": "bob"}
-
-
-def test_brief_breadcrumb():
-    tags = DfeQueryTags(feature="hunts", kind="read", id="h123")
-    assert tags.brief() == "hunts read h123"

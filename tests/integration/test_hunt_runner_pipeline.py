@@ -93,12 +93,18 @@ def test_loaded_hunt_runs_windowed_insert_and_is_attributed(ch_client, scratch_d
     ).result_rows
     assert [int(r[0]) for r in rows] == [100, 150]
 
-    # The query is attributed in query_log via log_comment (the cost-model enabler).
+    # The query is attributed in query_log via a JSON DfeQueryTags log_comment (the
+    # cost-model enabler). The query_log_archive MV keeps only isValidJSON + tagged
+    # rows, so asserting the JSON shape here is what proves the hunt lands in the
+    # cost leaderboard (feature='hunts', id=the hunt).
     ch_client.command("SYSTEM FLUSH LOGS")
     tagged = ch_client.query(
         "SELECT count() FROM system.query_log "
-        "WHERE log_comment = {c:String} AND type = 'QueryFinish'",
-        parameters={"c": "hunt:scratch_hunt"},
+        "WHERE isValidJSON(log_comment) "
+        "AND JSONExtractString(log_comment, 'feature') = 'hunts' "
+        "AND JSONExtractString(log_comment, 'id') = {c:String} "
+        "AND type = 'QueryFinish'",
+        parameters={"c": "scratch_hunt"},
     ).result_rows
     assert int(tagged[0][0]) >= 1
 

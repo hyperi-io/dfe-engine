@@ -1,6 +1,6 @@
 """DFE Engine API v1 router assembly."""
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends, Request
 
 from dfe_engine.api.v1.account_groups import router as account_groups_router
 from dfe_engine.api.v1.accounts import router as accounts_router
@@ -36,8 +36,23 @@ from dfe_engine.api.v1.sources import router as sources_router
 from dfe_engine.api.v1.system import router as system_router
 from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
+from dfe_engine.clickhouse.attribution import tags_context
 
-v1_router = APIRouter(prefix="/v1")
+
+async def _attribution_scope(request: Request):
+    """Scope CH query attribution to the request (feature = the route path).
+
+    Every ClickHouse query the request issues is stamped with this feature in its
+    ``log_comment`` (via the ClickHouseClientWrapper hook + ``current_tags``), so
+    ``system.query_log`` and the query_log_archive cost leaderboard attribute cost
+    per endpoint. Auth-agnostic (no user dependency) so it runs on public routes
+    too; user/tenant enrichment is a follow-up needing the per-route auth context.
+    """
+    with tags_context(feature=request.url.path):
+        yield
+
+
+v1_router = APIRouter(prefix="/v1", dependencies=[Depends(_attribution_scope)])
 v1_router.include_router(auth_router)
 # OIDC RP login/callback - self-prefixed /auth/oidc, unauthenticated (it IS login)
 v1_router.include_router(oidc_login_router)

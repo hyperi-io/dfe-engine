@@ -6,7 +6,7 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Sigma router — rule listing, field mappings, and view generation.
+"""Sigma router - rule listing, field mappings, and view generation.
 
 Wraps ``SigmaSourceMapper`` for REST access to Sigma field resolution
 and ``SigmaRuleConverter`` for rule listing.
@@ -53,11 +53,11 @@ _WRITE = Depends(require_action(scopes_dict["sigma_write"]))
 _ADMIN = Depends(require_action(scopes_dict["sigma_admin"]))
 
 
-# ── Response models ─────────────────────────────────────────
+# -- Response models -----------------------------------------
 
 
 class FieldMapping(BaseModel):
-    """A single Sigma field → column mapping."""
+    """A single Sigma field -> column mapping."""
 
     sigma_field: str
     column_name: str
@@ -111,7 +111,7 @@ class SigmaViewSummary(BaseModel):
     json_derived_count: int = 0
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _view_store_or_none(request: Request) -> SigmaViewStore | None:
@@ -137,7 +137,7 @@ def _get_source_mapper(request: Request):
             status_code=503,
             detail={
                 "code": "not_configured",
-                "message": "SourceRegistry not configured — required for Sigma mappings",
+                "message": "SourceRegistry not configured - required for Sigma mappings",
             },
         )
 
@@ -157,7 +157,7 @@ def _source_not_found(source_name: str) -> HTTPException:
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.get(
@@ -185,7 +185,7 @@ async def get_field_mappings(
     )
 
 
-# ── View definition CRUD (Task A/B) ─────────────────────────
+# -- View definition CRUD (Task A/B) -------------------------
 #
 # A stored, operator-editable Sigma view definition per source (gitcrud
 # sigma_views, keyed by source name). Unlike the static field maps (real column
@@ -259,7 +259,7 @@ async def delete_sigma_view_definition(
     audit_resource_change(user.user_id, "sigma_view", source_name, "deleted")
 
 
-# ── View DDL generation / preview ───────────────────────────
+# -- View DDL generation / preview ---------------------------
 
 
 @router.post("/views/{source_name}", response_model=SigmaViewResult, dependencies=[_WRITE])
@@ -340,7 +340,7 @@ async def find_sources_for_logsource(
     ]
 
 
-# ══ Sigma rule catalogue: providers + id-keyed CRUD store + selection ══════════
+# == Sigma rule catalogue: providers + id-keyed CRUD store + selection ==========
 #
 # A pluggable provider fetches external sigma rules (SigmaHQ git repo default,
 # Valhalla, a local import dir) which UPSERT by id into ONE gitcrud-backed
@@ -348,7 +348,7 @@ async def find_sources_for_logsource(
 # implement". All governed by sigma:read (reads) / sigma:write (mutations).
 
 
-# ── Models ──────────────────────────────────────────────────
+# -- Models --------------------------------------------------
 
 
 class SyncReportModel(BaseModel):
@@ -409,7 +409,7 @@ class SelectionResponse(BaseModel):
     rules: list[str] = Field(default_factory=list)
 
 
-# ── Store / provider dependencies ───────────────────────────
+# -- Store / provider dependencies ---------------------------
 
 
 def _gitcrud(request: Request) -> GitCrud:
@@ -454,18 +454,65 @@ def _make_provider(request: Request, config: ProviderConfig):
     return build_provider(config, secrets=secrets, work_dir=_sigma_work_dir(request))
 
 
+def _confine_provider_url(url: str, field: str) -> None:
+    """Confine a provider's outbound URL (SSRF defence, S1).
+
+    http(s) only; the host must NOT be loopback or link-local (the cloud metadata
+    endpoint 169.254.169.254 is link-local) or a well-known metadata hostname; and
+    when ``DFE_SIGMA_ALLOWED_HOSTS`` is set the host must be allow-listed. Private
+    RFC1918 hosts are NOT blocked (internal feeds are legitimate) - confine those
+    with the allowlist.
+    """
+    import ipaddress
+    import os
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(
+            422, detail={"code": "bad_url_scheme", "message": f"{field} must be http(s)"}
+        )
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise HTTPException(422, detail={"code": "bad_url", "message": f"{field} has no host"})
+    if host in ("localhost", "metadata", "metadata.google.internal"):
+        raise HTTPException(
+            422, detail={"code": "host_blocked", "message": f"{field} host {host!r} is blocked"}
+        )
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_loopback or ip.is_link_local:
+            raise HTTPException(
+                422,
+                detail={"code": "host_blocked", "message": f"{field} host {host!r} is link-local"},
+            )
+    except ValueError:
+        pass  # a hostname, not an IP literal
+    allowed = [
+        h.strip().lower()
+        for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
+        if h.strip()
+    ]
+    if allowed and host not in allowed:
+        raise HTTPException(
+            422,
+            detail={
+                "code": "host_not_allowed",
+                "message": f"{field} host {host!r} not in DFE_SIGMA_ALLOWED_HOSTS",
+            },
+        )
+
+
 def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
     """Confine a provider's reach at register/update time (S1, defence in depth on
     top of the sigma:admin gate + the ProviderConfig file:// reject).
 
     - local_files ``directory`` MUST resolve UNDER the engine config dir, so a
       provider cannot read arbitrary server files.
-    - a git_repo ``url`` host must be on ``DFE_SIGMA_ALLOWED_HOSTS`` when that
-      allowlist is set (comma-list; empty = any host).
+    - a git_repo ``url`` and a valhalla ``base_url`` are confined by
+      :func:`_confine_provider_url` (http(s), no loopback/link-local/metadata host,
+      and the ``DFE_SIGMA_ALLOWED_HOSTS`` allowlist when set).
     """
-    import os
-    from urllib.parse import urlparse
-
     if config.kind == ProviderKind.LOCAL_FILES:
         directory = str(config.options.get("directory", "")).strip()
         if directory:
@@ -481,21 +528,11 @@ def _validate_provider_reach(request: Request, config: ProviderConfig) -> None:
                     },
                 )
     elif config.kind == ProviderKind.GIT_REPO:
-        allowed = [
-            h.strip().lower()
-            for h in os.environ.get("DFE_SIGMA_ALLOWED_HOSTS", "").split(",")
-            if h.strip()
-        ]
-        if allowed:
-            host = (urlparse(str(config.options.get("url", "")).strip()).hostname or "").lower()
-            if host not in allowed:
-                raise HTTPException(
-                    422,
-                    detail={
-                        "code": "host_not_allowed",
-                        "message": f"git url host {host!r} not in DFE_SIGMA_ALLOWED_HOSTS",
-                    },
-                )
+        _confine_provider_url(str(config.options.get("url", "")), "git url")
+    elif config.kind == ProviderKind.VALHALLA:
+        base_url = str(config.options.get("base_url", "")).strip()
+        if base_url:  # empty -> the provider's built-in Nextron API default (safe)
+            _confine_provider_url(base_url, "valhalla base_url")
 
 
 def _parse_since(value: str | None) -> datetime | None:
@@ -532,7 +569,7 @@ async def _run_sync(provider, catalog, actor, since, *, task) -> dict[str, Any]:
     return report.as_dict()
 
 
-# ── Provider CRUD ───────────────────────────────────────────
+# -- Provider CRUD -------------------------------------------
 
 
 @router.get("/providers", response_model=list[ProviderConfig], dependencies=[_READ])
@@ -617,7 +654,7 @@ async def delete_provider(name: str, request: Request, user: CurrentUser) -> Non
     audit_resource_change(user.user_id, "sigma_provider", name, "deleted")
 
 
-# ── Provider sync (submit -> poll) ──────────────────────────
+# -- Provider sync (submit -> poll) --------------------------
 
 
 @router.post("/providers/{name}/sync", response_model=SyncResponse, dependencies=[_WRITE])
@@ -668,7 +705,7 @@ async def get_sync(task_id: str, request: Request, user: CurrentUser) -> SyncRes
     return _sync_response(info)
 
 
-# ── Rule catalogue (paginated list / get / edit / adopt / delete) ────
+# -- Rule catalogue (paginated list / get / edit / adopt / delete) ----
 
 
 @router.get(
@@ -758,7 +795,7 @@ async def delete_catalogue_rule(rule_id: str, request: Request, user: CurrentUse
     audit_resource_change(user.user_id, "sigma_rule", rule_id, "deleted")
 
 
-# ── Selection CRUD (the meta-level "which rules to implement") ───────
+# -- Selection CRUD (the meta-level "which rules to implement") -------
 
 
 @router.get("/selected", response_model=SelectionResponse, dependencies=[_READ])
@@ -791,7 +828,7 @@ async def deselect_rule(rule_id: str, request: Request, user: CurrentUser) -> Se
     return SelectionResponse(rules=store.list_selected())
 
 
-# ══ Propagation: selected sigma rules -> sigma-bound DFE rules + hunts ══════════
+# == Propagation: selected sigma rules -> sigma-bound DFE rules + hunts ==========
 #
 # The final pipeline stage. POST /sigma/propagate GENERATES a DFE detection rule
 # per (selected sigma rule x matching source), converting the sigma detection to a
@@ -803,7 +840,7 @@ async def deselect_rule(rule_id: str, request: Request, user: CurrentUser) -> Se
 # (reads) / sigma:write (propagate + delete); gitops must be enabled (else 503).
 
 
-# ── Models ──────────────────────────────────────────────────
+# -- Models --------------------------------------------------
 
 
 class PropagateRequest(BaseModel):
@@ -868,10 +905,12 @@ class BindingSummary(BaseModel):
     hunts: list[str] = Field(default_factory=list)
     hand_edited: bool = False
     orphaned: bool = False
+    selected: bool = True
+    stale: bool = False
     drift: bool = False
 
 
-# ── Dependencies ────────────────────────────────────────────
+# -- Dependencies --------------------------------------------
 
 
 def _propagator(
@@ -917,7 +956,7 @@ def _propagate_response(info: TaskInfo) -> PropagateResponse:
     return PropagateResponse(task_id=info.id, status=info.status, report=report, error=info.error)
 
 
-# ── Endpoints ───────────────────────────────────────────────
+# -- Endpoints -----------------------------------------------
 
 
 @router.post("/propagate", response_model=PropagateResponse, dependencies=[_WRITE])

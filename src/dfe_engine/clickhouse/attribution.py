@@ -9,7 +9,7 @@
 
 A :class:`DfeQueryTags` snapshot lives in a ``ContextVar``, set via
 :func:`tags_context` at each API / hunt / CLI entrypoint. The canonical execution
-facade serialises it into ``settings["log_comment"]`` on EVERY query, so
+facade serialises it into ``settings["log_comment"]`` on every wrapper query, so
 ``system.query_log.log_comment`` records who / what / why per query (tenant, user,
 feature, kind). Pattern adapted from PostHog (MIT) - see THIRD-PARTY-NOTICES.
 
@@ -55,11 +55,6 @@ class DfeQueryTags:
             sort_keys=True,
         )
 
-    def brief(self) -> str:
-        """Short human breadcrumb for a leading ``/* ... */`` SQL comment."""
-        bits = [b for b in (self.feature, self.kind, self.id) if b]
-        return " ".join(bits)
-
 
 _BASE = DfeQueryTags()
 _TAGS: contextvars.ContextVar[DfeQueryTags] = contextvars.ContextVar("dfe_ch_tags", default=_BASE)
@@ -68,15 +63,6 @@ _TAGS: contextvars.ContextVar[DfeQueryTags] = contextvars.ContextVar("dfe_ch_tag
 def current_tags() -> DfeQueryTags:
     """The attribution tags for the current context (base tags if none set)."""
     return _TAGS.get()
-
-
-def tag_queries(**fields: Any) -> None:
-    """Merge ``fields`` into the ambient tags (copy-on-write) for this context.
-
-    Use at an entrypoint that owns the whole request; prefer :func:`tags_context`
-    where the scope is bounded so the tags are restored on exit.
-    """
-    _TAGS.set(replace(_TAGS.get(), **fields))
 
 
 @contextmanager

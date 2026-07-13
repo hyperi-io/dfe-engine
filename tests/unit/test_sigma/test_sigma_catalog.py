@@ -60,7 +60,7 @@ def _doc(
     )
 
 
-# ── Upsert: add / skip / update ─────────────────────────────
+# -- Upsert: add / skip / update -----------------------------
 
 
 def test_import_new_rule_adds_with_provenance(crud):
@@ -107,7 +107,7 @@ def test_reimport_changed_upstream_updates(crud):
     assert stored["provenance"]["local_edited"] is False
 
 
-# ── Local-edit-wins merge (the core Task B contract) ────────
+# -- Local-edit-wins merge (the core Task B contract) --------
 
 
 def test_local_edit_survives_reimport_with_upstream_change(crud):
@@ -210,7 +210,7 @@ def test_drift_is_sticky_until_operator_action(crud):
     assert store.get_rule(_UUID_A)["provenance"]["drift"] is False
 
 
-# ── Edit / adopt / delete ───────────────────────────────────
+# -- Edit / adopt / delete -----------------------------------
 
 
 def test_edit_marks_local_edited(crud):
@@ -246,7 +246,7 @@ def test_summaries_and_multi_rule_import(crud):
     assert ids == {_UUID_A, _UUID_B}
 
 
-# ── Selection CRUD (Task C) ─────────────────────────────────
+# -- Selection CRUD (Task C) ---------------------------------
 
 
 def test_select_deselect_list(crud):
@@ -263,7 +263,7 @@ def test_select_deselect_list(crud):
     assert sel.list_selected() == [_UUID_B]
 
 
-# ── Provider config store ───────────────────────────────────
+# -- Provider config store -----------------------------------
 
 
 def test_provider_store_lists_builtin_default(crud):

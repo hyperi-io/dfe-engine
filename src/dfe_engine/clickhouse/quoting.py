@@ -16,24 +16,6 @@ DDL/DML text that has no bind slot (row-policy predicates, meta-table projection
 
 from __future__ import annotations
 
-from typing import Any
-
-# Substrings that mark a param key whose value must never be logged (a floor, not
-# a ceiling - extend, never narrow). Masking is for logs ONLY, never execution.
-_SENSITIVE = (
-    "password",
-    "passwd",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "access_key",
-    "private_key",
-    "client_secret",
-    "credential",
-    "authorization",
-)
-
 
 def quote_identifier(name: str) -> str:
     """Backtick-quote a CH identifier, escaping embedded backticks.
@@ -55,16 +37,3 @@ def quote_literal(value: str) -> str:
     ``escape_str``. Prefer server-side ``parameters={}`` binding where a slot exists.
     """
     return "'" + value.replace("\\", "\\\\").replace("'", "''") + "'"
-
-
-def mask_sensitive(params: dict[str, Any]) -> dict[str, Any]:
-    """Redact obviously-sensitive param VALUES for logging (never for execution).
-
-    A key containing any of the sensitive tokens gets ``[HIDDEN]``; everything else
-    passes through. Apply at the log boundary, never to a params dict that is about
-    to be executed.
-    """
-    return {
-        key: ("[HIDDEN]" if any(token in key.lower() for token in _SENSITIVE) else value)
-        for key, value in params.items()
-    }

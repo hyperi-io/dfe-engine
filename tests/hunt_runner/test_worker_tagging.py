@@ -8,25 +8,40 @@
 """Prove ``query_settings`` builds the exact per-query tags the worker attaches.
 
 ``query_settings`` is pure (str -> dict), so it is tested here with no ClickHouse.
-``log_comment`` names the hunt so system.query_log can attribute cost back, and is
-ALWAYS set. ``workload`` is only added when a workload name is configured - an
-undefined CH workload errors on the server, so it must be opt-in (see the worker
-docstring). Real query_log attribution is verified in the live-CH Phase A test.
+``log_comment`` is a JSON ``DfeQueryTags`` payload (feature=hunts, id=the hunt) so
+system.query_log -> the query_log_archive MV keeps the row (the MV drops non-JSON
+log_comments) and cost attributes back to the hunt; it is ALWAYS set. ``workload``
+is only added when a workload name is configured - an undefined CH workload errors
+on the server, so it must be opt-in (see the worker docstring). Real query_log
+attribution is verified in the live-CH Phase A test.
 """
 
 from __future__ import annotations
 
+import json
+
 from dfe_engine.hunt_runner.worker import query_settings
 
 
-def test_query_settings_always_tags_log_comment():
-    # No workload configured -> log_comment only (safe on any CH).
-    assert query_settings("brute-force") == {"log_comment": "hunt:brute-force"}
+def test_query_settings_tags_log_comment_as_json():
+    # No workload configured -> log_comment only (safe on any CH). It is a JSON
+    # DfeQueryTags payload the query_log_archive MV can parse (isValidJSON + extract).
+    settings = query_settings("brute-force")
+    assert set(settings) == {"log_comment"}
+    tags = json.loads(settings["log_comment"])
+    assert tags == {
+        "service": "dfe-engine",
+        "feature": "hunts",
+        "kind": "hunt",
+        "id": "brute-force",
+    }
 
 
 def test_query_settings_embeds_the_exact_hunt_id():
     for hunt_id in ["x", "win_logon_anomaly", "a-very-long-hunt-identifier-42"]:
-        assert query_settings(hunt_id)["log_comment"] == f"hunt:{hunt_id}"
+        tags = json.loads(query_settings(hunt_id)["log_comment"])
+        assert tags["id"] == hunt_id
+        assert tags["feature"] == "hunts"
 
 
 def test_query_settings_adds_workload_only_when_configured():

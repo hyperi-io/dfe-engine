@@ -49,7 +49,7 @@ def _definition(**overrides) -> SigmaViewDefinition:
     return SigmaViewDefinition.model_validate(data)
 
 
-# ── Model validation ────────────────────────────────────────
+# -- Model validation ----------------------------------------
 
 
 def test_column_requires_exactly_one_source_kind():
@@ -67,7 +67,7 @@ def test_json_derived_flag_and_subset():
     assert definition.columns[2].is_json_derived is False
 
 
-# ── DDL: source columns ─────────────────────────────────────
+# -- DDL: source columns -------------------------------------
 
 
 def test_build_ddl_source_column_aliases():
@@ -84,7 +84,7 @@ def test_build_ddl_source_column_aliases():
     assert "\n    *" not in ddl
 
 
-# ── DDL: JSON-derived columns (Task B core) ─────────────────
+# -- DDL: JSON-derived columns (Task B core) -----------------
 
 
 def test_build_ddl_json_derived_extracts_from_json():
@@ -94,7 +94,7 @@ def test_build_ddl_json_derived_extracts_from_json():
         columns=[SigmaViewColumn(sigma_field="EventID", json_path="EventID")],
     )
     ddl = build_sigma_view_ddl(definition, db="default")
-    # assumeNotNull(_json).`path` AS `SigmaField` — matches json_promotion_service idiom
+    # assumeNotNull(_json).`path` AS `SigmaField` - matches json_promotion_service idiom
     assert "assumeNotNull(_json).`EventID` AS `EventID`" in ddl
 
 
@@ -145,7 +145,7 @@ def test_build_ddl_default_db_placeholder():
     assert "FROM {db}.win;" in ddl
 
 
-# ── DDL: injection safety ───────────────────────────────────
+# -- DDL: injection safety -----------------------------------
 
 
 def test_build_ddl_rejects_backtick_in_json_path():
@@ -175,7 +175,7 @@ def test_build_ddl_rejects_illegal_ch_type():
         build_sigma_view_ddl(definition, db="default")
 
 
-# ── Store CRUD over a real gitcrud repo ─────────────────────
+# -- Store CRUD over a real gitcrud repo ---------------------
 
 
 def test_store_save_get_roundtrip(crud):
@@ -244,7 +244,7 @@ def test_store_generate_ddl_from_stored_definition(crud):
     assert "`process_name` AS `Image`" in ddl
 
 
-# ── SigmaSourceMapper prefers a stored definition (Task A wiring) ────
+# -- SigmaSourceMapper prefers a stored definition (Task A wiring) ----
 
 
 class _FakeSourceRegistry:
