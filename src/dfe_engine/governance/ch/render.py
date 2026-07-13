@@ -19,17 +19,24 @@ from __future__ import annotations
 
 from typing import Any
 
+from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
+
 from .models import ChServiceRole, ChTier, org_policy_name, org_role_name
 
 
 def _bq(identifier: str) -> str:
-    """Backtick-quote a CH identifier (escaping embedded backticks)."""
-    return "`" + identifier.replace("`", "``") + "`"
+    """Backtick-quote a CH identifier - delegates to the canonical quoting seam."""
+    return quote_identifier(identifier)
 
 
 def _sq(value: str) -> str:
-    """Single-quote a CH string literal (escaping embedded single quotes)."""
-    return "'" + value.replace("'", "''") + "'"
+    """Single-quote a CH string literal - delegates to the canonical quoting seam.
+
+    Uses ``quote_literal`` so backslashes are escaped BEFORE single quotes: a
+    RESTRICTIVE row-policy predicate must not fail open via a crafted ``\\' OR 1=1``
+    (F-ROWPOLICY-BACKSLASH). The old inline ``_sq`` doubled quotes only.
+    """
+    return quote_literal(value)
 
 
 def _settings_kv(settings: dict[str, int]) -> str:

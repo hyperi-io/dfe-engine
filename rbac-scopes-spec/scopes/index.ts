@@ -128,6 +128,7 @@ const services_scopes = {
 const sigma_scopes = {
   sigma_read: "sigma:read",
   sigma_write: "sigma:write",
+  sigma_admin: "sigma:admin",
 } as const;
 
 const source_scopes = {

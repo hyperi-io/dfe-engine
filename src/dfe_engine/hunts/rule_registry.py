@@ -170,6 +170,7 @@ class RuleRegistry:
                     "source_db": rule.source_db,
                     "source_table": rule.source_table,
                     "hunt_name": rule.hunt_name,
+                    "sigma_rule_id": rule.sigma_rule_id,
                     "created_at": rule.created_at,
                 }
             )

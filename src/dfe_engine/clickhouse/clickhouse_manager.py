@@ -38,6 +38,7 @@ from scalo.logger import logger
 from scalo.resilience import ReconnectingResilience, ResilienceConfig, ServiceUnavailable
 
 from ..settings import get_settings
+from .attribution import merge_log_comment
 from .errors import is_connection_error, is_retryable_error
 
 if TYPE_CHECKING:
@@ -95,10 +96,12 @@ class ClickHouseClientWrapper:
         ``execute()`` yields only result_rows and ``query_rows()`` returns
         ``(columns, rows)``.
         """
+        kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
         return self._manager.run_resilient(lambda: self._client.query(query, *args, **kwargs))
 
     def command(self, statement: str, *args, **kwargs):
         """Raw DDL/DML passthrough to clickhouse-connect's ``command()``."""
+        kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
         return self._manager.run_resilient(lambda: self._client.command(statement, *args, **kwargs))
 
     def query_rows(self, query: str, *args, **kwargs):
@@ -109,6 +112,8 @@ class ClickHouseClientWrapper:
         assemble row dicts. Use this when the caller needs to map values back to
         their columns (e.g. sampling whole rows).
         """
+
+        kwargs["settings"] = merge_log_comment(kwargs.get("settings"))
 
         def op():
             result = self._client.query(query, *args, **kwargs)

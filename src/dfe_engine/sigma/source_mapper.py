@@ -21,14 +21,17 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
+from dfe_engine.gitcrud import ResourceNotFoundError
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2
 from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
+from dfe_engine.sigma.views import build_sigma_view_ddl
 from dfe_engine.source.models import Source
 from dfe_engine.source.registry import SourceRegistry
 from dfe_engine.source.type_registry import TypeRegistry
 
 if TYPE_CHECKING:
     from dfe_engine.fieldmap.registry import FieldMapRegistry
+    from dfe_engine.sigma.views import SigmaViewStore
 
 
 class SigmaSourceMapper:
@@ -41,6 +44,12 @@ class SigmaSourceMapper:
     via two-tier resolution (default + source-specific overrides).
     Falls back to Source.sigma.custom_mappings when no registry or
     no maps exist.
+
+    When a SigmaViewStore is provided, a stored CRUD view definition for a
+    source WINS over the static field maps in view generation: it can expose
+    columns DERIVED FROM the source's ``_json`` payload, which the field maps
+    (real-column -> Sigma-field only) cannot. Generation falls back to the field
+    maps when a source has no stored definition.
     """
 
     def __init__(
@@ -48,11 +57,13 @@ class SigmaSourceMapper:
         source_registry: SourceRegistry,
         registry: TypeRegistry | None = None,
         field_map_registry: FieldMapRegistry | None = None,
+        view_store: SigmaViewStore | None = None,
     ) -> None:
         self._source_registry = source_registry
         self._type_registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._type_registry)
         self._field_map_registry = field_map_registry
+        self._view_store = view_store
 
     def get_source(self, source_name: str) -> Source:
         """Get a Source by name from the registry."""
@@ -127,37 +138,57 @@ class SigmaSourceMapper:
     ) -> str | None:
         """Generate a Sigma view DDL for a source.
 
-        Uses get_field_mappings() for resolution (registry → legacy fallback).
-        Returns None if no mappings found.
+        Resolution order:
+        1. A stored CRUD view definition (SigmaViewStore) - can extract
+           JSON-derived columns from ``_json``.
+        2. Static field maps (registry -> legacy fallback).
+
+        Returns None if the source has neither a stored definition nor any
+        field mappings.
         """
         source = self._source_registry.get_source(source_name)
-        mappings = self.get_field_mappings(source_name)
-
-        if not mappings:
-            return None
-
-        config = DDLConfig(db=db)
-        return self._ddl_gen.generate_sigma_view(source.table_name, mappings, config)
+        return self._generate_for_source(source, db)
 
     def generate_all_sigma_views(
         self,
         db: str = "{db}",
         enabled_only: bool = True,
     ) -> dict[str, str]:
-        """Generate Sigma view DDLs for all sources with sigma mappings.
+        """Generate Sigma view DDLs for all sources with a view.
+
+        A source contributes a view when it has a stored view definition OR
+        non-empty field mappings.
 
         Returns:
             Dict mapping source_name → Sigma view DDL string.
         """
         views: dict[str, str] = {}
         for source in self._source_registry.get_all_sources(enabled_only=enabled_only):
-            mappings = self._get_mappings_for_source(source)
-            if mappings:
-                config = DDLConfig(db=db)
-                ddl = self._ddl_gen.generate_sigma_view(source.table_name, mappings, config)
+            ddl = self._generate_for_source(source, db)
+            if ddl:
                 views[source.source] = ddl
 
         return views
+
+    def _generate_for_source(self, source: Source, db: str) -> str | None:
+        """Render a source's Sigma view DDL (stored definition wins over field maps).
+
+        A stored ``SigmaViewStore`` definition is the SSoT when present (it alone
+        can declare JSON-derived columns); otherwise fall back to the static field
+        maps, returning None when a source has neither.
+        """
+        if self._view_store is not None:
+            try:
+                definition = self._view_store.get(source.source)
+            except ResourceNotFoundError:
+                definition = None
+            if definition is not None:
+                return build_sigma_view_ddl(definition, db=db, table_name=source.table_name)
+
+        mappings = self._get_mappings_for_source(source)
+        if not mappings:
+            return None
+        return self._ddl_gen.generate_sigma_view(source.table_name, mappings, DDLConfig(db=db))
 
     def _get_mappings_for_source(self, source: Source) -> dict[str, str]:
         """Get Sigma mappings for a source (registry → legacy fallback).
@@ -206,8 +237,15 @@ class SigmaSourceMapper:
         """Find sources matching a Sigma logsource specification.
 
         Maps Sigma logsource fields to Source taxonomy:
-        - product → source.sigma.taxonomy
-        - category/service → matched by convention
+        - product  -> source.sigma.taxonomy
+        - category -> source.sigma.category (None on the source = matches any)
+        - service  -> source.sigma.service  (None on the source = matches any)
+
+        A source is bound only when the product matches AND every logsource facet
+        the source DECLARES also matches - so two same-product sources (e.g.
+        windows_audit vs windows_sysmon) no longer both receive a sysmon-only rule
+        (P2.17). A source with no declared category/service keeps product-only
+        behaviour.
 
         Args:
             product: Sigma product (e.g. 'windows', 'linux').
@@ -219,12 +257,16 @@ class SigmaSourceMapper:
         """
         matches: list[Source] = []
         for source in self._source_registry.get_all_sources(enabled_only=True):
-            if not source.sigma:
+            sig = source.sigma
+            if not sig or not (product and sig.taxonomy):
                 continue
-
-            # Match by taxonomy (product)
-            if product and source.sigma.taxonomy:
-                if source.sigma.taxonomy.lower() == product.lower():
-                    matches.append(source)
+            if sig.taxonomy.lower() != product.lower():
+                continue
+            # Narrow by any facet the source declares; a None facet matches any.
+            if category and sig.category and sig.category.lower() != category.lower():
+                continue
+            if service and sig.service and sig.service.lower() != service.lower():
+                continue
+            matches.append(source)
 
         return matches

@@ -48,3 +48,16 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
         )
     except Exception as exc:
         logger.error("ClickHouse bootstrap failed for database %r: %s", database, exc)
+
+    # Best-effort: stand up the query-log cost/attribution archive MV (the cost
+    # leaderboard source over system.query_log). Independent of the core table
+    # bootstrap above - a CH with query logging disabled must not fail startup, so
+    # it carries its own guard.
+    try:
+        from dfe_engine.clickhouse import query_log_archive
+
+        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+        query_log_archive.ensure(manager.get_clickhouse_client())
+        logger.info("Ensured query_log_archive cost/attribution MV")
+    except Exception as exc:
+        logger.warning("query_log_archive bootstrap skipped: %s", exc)

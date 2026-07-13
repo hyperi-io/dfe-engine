@@ -136,6 +136,7 @@ services_scopes = {
 sigma_scopes = {
     "sigma_read": "sigma:read",
     "sigma_write": "sigma:write",
+    "sigma_admin": "sigma:admin",
 }
 
 source_scopes = {
