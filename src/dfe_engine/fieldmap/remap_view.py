@@ -29,6 +29,8 @@ import re
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
+from dfe_engine.schema.schema_ddl import unsafe_ident_reason
+
 # Standard JSON column name across all schema profiles. The canonical constant
 # lives at services.schema.json_promotion_service.JSON_COLUMN; kept as a single
 # literal here (as in sampling/clickhouse_reader) to avoid a service-layer import
@@ -132,22 +134,25 @@ def _safe_ident(name: str, *, what: str) -> str:
     Rejects a backtick (which would break out of ``\\`...\\``` quoting), whitespace,
     and the DDL control chars ``; ( ) ' " \\`` - so the value is safe even in the
     UNQUOTED ``{db}.{table}`` positions the view DDL emits, not only the
-    backtick-wrapped column aliases. Governed, RBAC'd, git-stored values, checked as
-    defence in depth (the discipline json_promotion_service applies to its JSON
-    subcolumn accessor).
+    backtick-wrapped column aliases. The charset rule is
+    ``schema_ddl.unsafe_ident_reason`` (ONE rule, two exception seams). Governed,
+    RBAC'd, git-stored values, checked as defence in depth (the discipline
+    json_promotion_service applies to its JSON subcolumn accessor).
     """
     if not name:
         raise RemapViewError(f"empty {what}")
-    if any(c in name for c in "`;()'\"\\") or any(c.isspace() for c in name):
+    if unsafe_ident_reason(name) is not None:
         raise RemapViewError(f"illegal {what}: {name!r}")
     return name
 
 
 def _parens_balanced(s: str) -> bool:
-    """True when parentheses are properly nested: the running open-count never
-    goes negative and ends at zero. This is what blocks a CAST breakout - a
-    premature ``)`` (e.g. ``String) OR (1=1``) closes the CAST early and injects
-    the trailer, yet has an equal ()-count, so a bare count check misses it."""
+    """Check parentheses are properly nested (open-count never negative, ends at zero).
+
+    This is what blocks a CAST breakout - a premature ``)`` (e.g.
+    ``String) OR (1=1``) closes the CAST early and injects the trailer, yet has
+    an equal ()-count, so a bare count check misses it.
+    """
     depth = 0
     for ch in s:
         if ch == "(":
@@ -212,6 +217,10 @@ def build_remap_view_ddl(
     standard-aligned alias; a JSON-derived column is extracted from ``_json`` with
     the dynamic-subcolumn idiom (optionally CAST to its declared type). ``{db}`` is a
     placeholder the deployer substitutes, consistent with the schema DDL writer.
+
+    Raises:
+        RemapViewError: An identifier, json_path, or declared CAST type fails
+            the injection-safety validation.
     """
     # `db` is normally the "{db}" placeholder the deployer substitutes, but a caller
     # may pass a real database name (a user-supplied param) - validate it as an

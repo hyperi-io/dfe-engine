@@ -152,7 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     if conn_config_path.exists():
         conn_config = ConnectionConfigLoader.load(conn_config_path)
-        logger.info("Loaded connection config from %s", str(conn_config_path))
+        logger.info(f"Loaded connection config from {conn_config_path}")
     else:
         conn_config = ConnectionConfigLoader.load_default()
     app.state.connection_registry = ConnectionRegistry(conn_config)

@@ -42,12 +42,11 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
         client.execute(default_ddl)
         client.execute(hunt_results_ddl)
         logger.info(
-            "Bootstrapped ClickHouse database %r (default + hunt_results tables, profile %r)",
-            database,
-            profile,
+            f"Bootstrapped ClickHouse database {database!r} "
+            f"(default + hunt_results tables, profile {profile!r})"
         )
     except Exception as exc:
-        logger.error("ClickHouse bootstrap failed for database %r: %s", database, exc)
+        logger.error(f"ClickHouse bootstrap failed for database {database!r}: {exc}")
 
     # Best-effort: stand up the query-log cost/attribution archive MV (the cost
     # leaderboard source over system.query_log). Independent of the core table
@@ -60,4 +59,4 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
         query_log_archive.ensure(manager.get_clickhouse_client())
         logger.info("Ensured query_log_archive cost/attribution MV")
     except Exception as exc:
-        logger.warning("query_log_archive bootstrap skipped: %s", exc)
+        logger.warning(f"query_log_archive bootstrap skipped: {exc}")

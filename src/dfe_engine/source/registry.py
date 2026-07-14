@@ -170,13 +170,24 @@ class SourceRegistry:
 
     # -----------------------------------------------------------------
     # Backend primitives (gitcrud vs DirectoryConfigStore)
+    #
+    # ALL backend branching lives here: the CRUD methods above/below call
+    # these and never test self._crud themselves.
     # -----------------------------------------------------------------
+
+    def _require_store(self) -> DirectoryConfigStore:
+        """Narrow the Optional store once: the directory backend always builds one."""
+        if self._store is None:
+            raise SourceRegistryError(
+                "no DirectoryConfigStore backend (the gitcrud backend is active)"
+            )
+        return self._store
 
     def _names(self) -> list[str]:
         """All stored source names."""
         if self._crud is not None:
             return self._crud.list(_SOURCES_CLASS)
-        return list(self._store.list_tables())
+        return list(self._require_store().list_tables())
 
     def _get_raw(self, source_name: str) -> dict[str, Any] | None:
         """Raw stored doc for a source, or None when absent."""
@@ -187,7 +198,134 @@ class SourceRegistry:
                 return self._crud.get(_SOURCES_CLASS, source_name)
             except ResourceNotFoundError:
                 return None
-        return self._store.get(source_name)
+        return self._require_store().get(source_name)
+
+    def _put_raw(
+        self,
+        name: str,
+        doc: dict[str, Any],
+        *,
+        created_by: str | None,
+        message: str,
+    ) -> str:
+        """Write one stored source doc; returns the destination label for the save log.
+
+        gitcrud: the doc gains the universal gitcrud ``metadata`` block (derived
+        from the doc's own description/display_name) and the write is ONE commit
+        in the deploy repo. Directory backend: plain YAML write, git commit when
+        the directory is a repo, then a cache refresh.
+        """
+        if self._crud is not None:
+            from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
+
+            stored = with_metadata(
+                doc,
+                ResourceMetadata(
+                    description=doc.get("description") or "",
+                    display_name=doc.get("display_name"),
+                ),
+            )
+            self._crud.put(
+                _SOURCES_CLASS,
+                name,
+                stored,
+                actor=created_by or "engine",
+                message=message,
+            )
+            return "gitcrud config/sources"
+
+        store = self._require_store()
+        yaml_path = self._sources_directory / f"{name}.yaml"
+        yaml_dump(doc, yaml_path)
+        if store.is_git:
+            commit_file(store, yaml_path, message, author=created_by)
+            if store._git_push:
+                store._git_push_remote()
+        store._refresh_all()
+        return str(yaml_path)
+
+    def _delete_raw(self, name: str, *, created_by: str | None, message: str) -> bool:
+        """Remove one stored source doc; False when it did not exist.
+
+        gitcrud: one attributed commit ("(by <created_by>)" suffix, like save).
+        Directory backend: unlink + engine-identity commit when git - it never
+        carried delete attribution, so ``created_by`` is deliberately unused there.
+        """
+        if self._crud is not None:
+            from dfe_engine.gitcrud.engine import ResourceNotFoundError
+
+            commit_msg = f"{message} (by {created_by})" if created_by else message
+            try:
+                self._crud.delete(
+                    _SOURCES_CLASS,
+                    name,
+                    actor=created_by or "engine",
+                    message=commit_msg,
+                )
+            except ResourceNotFoundError:
+                return False
+            return True
+
+        store = self._require_store()
+        yaml_path = self._sources_directory / f"{name}.yaml"
+        if not yaml_path.exists():
+            return False
+
+        # Git rm + commit if git-aware
+        if store.is_git and store._repo is not None:
+            try:
+                from dulwich import porcelain as git
+
+                repo_root = Path(store._repo.path)
+                rel_path = str(yaml_path.relative_to(repo_root))
+
+                yaml_path.unlink()
+                git.rm(store._repo, paths=[rel_path])
+                git.commit(
+                    store._repo,
+                    author=COMMITTER_IDENTITY.encode("utf-8"),
+                    committer=COMMITTER_IDENTITY.encode("utf-8"),
+                    message=message.encode(),
+                )
+                if store._git_push:
+                    store._git_push_remote()
+            except Exception as e:
+                logger.error(f"Git delete failed: {e}")
+        else:
+            yaml_path.unlink()
+
+        # Remove from cache
+        with store._lock:
+            store._cache.pop(name, None)
+        return True
+
+    def _put_many_raw(
+        self,
+        items: list[tuple[str, str]],
+        *,
+        created_by: str,
+        message: str,
+    ) -> None:
+        """Bulk-write raw YAML texts (name, text): ONE commit on gitcrud (put_many).
+
+        The directory backend copies the files verbatim (seeding is bootstrap,
+        not an operator edit - no per-file commit) and refreshes the cache.
+        """
+        if not items:
+            return
+        if self._crud is not None:
+            from dfe_engine.yaml_utils import yaml_load_string
+
+            self._crud.put_many(
+                [(_SOURCES_CLASS, name, yaml_load_string(text)) for name, text in items],
+                actor=created_by,
+                message=message,
+            )
+            return
+        store = self._require_store()
+        for name, text in items:
+            (self._sources_directory / f"{name}.yaml").write_text(text)
+        store._refresh_all()
 
     # -----------------------------------------------------------------
     # CRUD Operations
@@ -247,47 +385,12 @@ class SourceRegistry:
         # Serialize and write
         config_data = source.to_yaml_dict()
 
-        if self._crud is not None:
-            # gitcrud backend: the doc carries the universal metadata block and
-            # every mutation is ONE commit in the deploy repo.
-            from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
+        commit_msg = description or f"source: update {source.source}"
+        if created_by:
+            commit_msg = f"{commit_msg} (by {created_by})"
 
-            doc = with_metadata(
-                config_data,
-                ResourceMetadata(
-                    description=source.description or "",
-                    display_name=source.display_name,
-                ),
-            )
-            commit_msg = description or f"source: update {source.source}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            self._crud.put(
-                _SOURCES_CLASS,
-                source.source,
-                doc,
-                actor=created_by or "engine",
-                message=commit_msg,
-            )
-            logger.info(f"Saved source {source.source!r} → gitcrud config/sources")
-            return source
-
-        yaml_path = self._sources_directory / f"{source.source}.yaml"
-        yaml_dump(config_data, yaml_path)
-
-        # Git commit if git-aware
-        if self._store.is_git:
-            commit_msg = description or f"source: update {source.source}"
-            if created_by:
-                commit_msg = f"{commit_msg} (by {created_by})"
-            commit_file(self._store, yaml_path, commit_msg, author=created_by)
-            if self._store._git_push:
-                self._store._git_push_remote()
-
-        # Force cache refresh
-        self._store._refresh_all()
-
-        logger.info(f"Saved source {source.source!r} → {yaml_path}")
+        dest = self._put_raw(source.source, config_data, created_by=created_by, message=commit_msg)
+        logger.info(f"Saved source {source.source!r} -> {dest}")
         return source
 
     def create_source_from_write(
@@ -366,63 +469,24 @@ class SourceRegistry:
         msg = description or f"source: deploy {source_name} version {version_id}"
         return self.save_source(updated, created_by=created_by, description=msg)
 
-    def delete_source(self, source_name: str) -> None:
+    def delete_source(self, source_name: str, created_by: str | None = None) -> None:
         """Delete a source definition.
 
         Removes the YAML file and commits the deletion if git-aware.
 
         Args:
             source_name: The _source label.
+            created_by: Username/identity of who deleted it (gitcrud commit
+                attribution, same as save).
         """
-        if self._crud is not None:
-            from dfe_engine.gitcrud.engine import ResourceNotFoundError
-
-            try:
-                self._crud.delete(
-                    _SOURCES_CLASS,
-                    source_name,
-                    actor="engine",
-                    message=f"source: delete {source_name}",
-                )
-            except ResourceNotFoundError:
-                logger.warning(f"Source does not exist: {source_name!r}")
-                return
-            logger.info(f"Deleted source {source_name!r}")
+        deleted = self._delete_raw(
+            source_name,
+            created_by=created_by,
+            message=f"source: delete {source_name}",
+        )
+        if not deleted:
+            logger.warning(f"Source does not exist: {source_name!r}")
             return
-
-        yaml_path = self._sources_directory / f"{source_name}.yaml"
-
-        if not yaml_path.exists():
-            logger.warning(f"Source file does not exist: {yaml_path}")
-            return
-
-        # Git rm + commit if git-aware
-        if self._store.is_git and self._store._repo is not None:
-            try:
-                from dulwich import porcelain as git
-
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-
-                yaml_path.unlink()
-                git.rm(self._store._repo, paths=[rel_path])
-                git.commit(
-                    self._store._repo,
-                    author=COMMITTER_IDENTITY.encode("utf-8"),
-                    committer=COMMITTER_IDENTITY.encode("utf-8"),
-                    message=f"source: delete {source_name}".encode(),
-                )
-                if self._store._git_push:
-                    self._store._git_push_remote()
-            except Exception as e:
-                logger.error(f"Git delete failed: {e}")
-        else:
-            yaml_path.unlink()
-
-        # Remove from cache
-        with self._store._lock:
-            self._store._cache.pop(source_name, None)
-
         logger.info(f"Deleted source {source_name!r}")
 
     def list_sources(self, enabled_only: bool = False) -> list[dict[str, Any]]:
@@ -549,14 +613,22 @@ class SourceRegistry:
             candidate_match = None
 
         # A source with a match is receiver-routed: its operator must map onto
-        # the receiver's hot-path modes (equals -> key_value_set, exists ->
-        # key_present). The other four operators are a DOCUMENTED receiver gap.
-        if candidate_match is not None and candidate_match.operator not in ("equals", "exists"):
-            from dfe_engine.services.source_routing import UnsupportedMatchOperatorError
-
-            raise SourceValidationError(
-                str(UnsupportedMatchOperatorError(source.source, candidate_match.operator))
+        # the receiver's hot-path modes (source_routing._OPERATOR_TO_MODE is
+        # the SSoT). The unmapped operators are a DOCUMENTED receiver gap. A
+        # DISABLED source skips the gate - disabling is exactly how an operator
+        # retires a stored legacy-operator source; active/dormant still reject
+        # (a dormant source may activate later).
+        if candidate_match is not None and source.state != "disabled":
+            # Lazy import: source_routing imports this module (cycle).
+            from dfe_engine.services.source_routing import (
+                _OPERATOR_TO_MODE,
+                UnsupportedMatchOperatorError,
             )
+
+            if candidate_match.operator not in _OPERATOR_TO_MODE:
+                raise SourceValidationError(
+                    str(UnsupportedMatchOperatorError(source.source, candidate_match.operator))
+                )
 
         for table in self._names():
             if table == source.source:
@@ -607,7 +679,7 @@ class SourceRegistry:
         if self._crud is not None:
             logger.debug("on_change is a no-op on the gitcrud sources backend")
             return
-        self._store.on_change(source_name, callback)
+        self._require_store().on_change(source_name, callback)
 
     # -----------------------------------------------------------------
     # Git Operations (passthrough)
@@ -618,14 +690,14 @@ class SourceRegistry:
         """Whether the sources backend is git-native."""
         if self._crud is not None:
             return True
-        return self._store.is_git
+        return self._require_store().is_git
 
     @property
     def current_branch(self) -> str | None:
         """Current git branch name."""
         if self._crud is not None:
             return self._crud.repo.branch
-        return self._store.current_branch
+        return self._require_store().current_branch
 
     def list_branches(self) -> list[str]:
         """List all git branches."""
@@ -633,7 +705,7 @@ class SourceRegistry:
             raise SourceRegistryError(
                 "branch operations are owned by the gitcrud routing layer on this backend"
             )
-        return self._store.list_branches()
+        return self._require_store().list_branches()
 
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to a git branch. Refreshes cache after switch."""
@@ -641,7 +713,7 @@ class SourceRegistry:
             raise SourceRegistryError(
                 "branch operations are owned by the gitcrud routing layer on this backend"
             )
-        self._store.switch_branch(branch, create=create)
+        self._require_store().switch_branch(branch, create=create)
 
     # -----------------------------------------------------------------
     # Built-in Sources
@@ -663,16 +735,13 @@ class SourceRegistry:
         """
         import importlib.resources as resources
 
-        from dfe_engine.yaml_utils import yaml_load_string
-
         try:
             builtins_dir = resources.files("dfe_engine.source") / "builtin_sources"
         except Exception as e:
             logger.warning(f"Failed to locate built-in sources: {e}")
             return 0
 
-        count = 0
-        crud_items: list[tuple[str, str, dict[str, Any]]] = []
+        items: list[tuple[str, str]] = []
         for resource in builtins_dir.iterdir():
             if not resource.name.endswith(".yaml"):
                 continue
@@ -683,27 +752,17 @@ class SourceRegistry:
                 continue
 
             try:
-                content = resource.read_text()
-                if self._crud is not None:
-                    crud_items.append((_SOURCES_CLASS, source_name, yaml_load_string(content)))
-                else:
-                    dest = self._sources_directory / resource.name
-                    dest.write_text(content)
-                count += 1
+                items.append((source_name, resource.read_text()))
                 logger.info(f"Seeded built-in source: {source_name}")
             except Exception as e:
                 logger.warning(f"Failed to seed source {source_name!r}: {e}")
 
-        if crud_items:
-            self._crud.put_many(
-                crud_items,
-                actor="engine",
-                message="source: seed built-in sources",
-            )
-        if count > 0 and self._store is not None:
-            self._store._refresh_all()
-
-        return count
+        self._put_many_raw(
+            items,
+            created_by="engine",
+            message="source: seed built-in sources",
+        )
+        return len(items)
 
     # -----------------------------------------------------------------
     # Lifecycle

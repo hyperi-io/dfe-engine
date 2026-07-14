@@ -209,6 +209,18 @@ class TestCreateSource:
         )
         assert resp.status_code == 422
 
+    def test_create_rejects_removed_2_1_sigma_key(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        """A 2.1 body with the removed 'sigma' key fails loudly (422), never a
+        silent 200 that drops the mapping config."""
+        resp = client.post(
+            "/api/v1/sources",
+            json={**sample_source, "sigma": {"taxonomy": "windows"}},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
     def test_create_duplicate(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)

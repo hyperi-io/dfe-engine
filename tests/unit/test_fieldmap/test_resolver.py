@@ -1,7 +1,14 @@
 """Tests for field map resolver — two-tier merge logic."""
 
+import pytest
+
 from dfe_engine.fieldmap.models import FieldMap
-from dfe_engine.fieldmap.resolver import resolve_field, resolve_field_map
+from dfe_engine.fieldmap.registry import FieldMapError, FieldMapRegistry
+from dfe_engine.fieldmap.resolver import (
+    resolve_field,
+    resolve_field_map,
+    resolve_registry_mappings,
+)
 
 # ---------------------------------------------------------------
 # Helpers
@@ -82,6 +89,72 @@ class TestResolveFieldMap:
 # ---------------------------------------------------------------
 # resolve_field
 # ---------------------------------------------------------------
+
+
+# ---------------------------------------------------------------
+# resolve_registry_mappings (incl. the SourceView field_map pin)
+# ---------------------------------------------------------------
+
+
+@pytest.fixture
+def fm_registry(tmp_path):
+    FieldMapRegistry.reset_instance()
+    reg = FieldMapRegistry(
+        field_maps_directory=tmp_path / "field-maps",
+        writable=True,
+        refresh_interval=0,
+    )
+    yield reg
+    reg.close()
+    FieldMapRegistry.reset_instance()
+
+
+class TestResolveRegistryMappings:
+    def _seed(self, fm_registry):
+        fm_registry.save_map(FieldMap(standard="sigma", mappings={"A": "default_a", "B": "b"}))
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="windows_audit", mappings={"A": "convention_a"})
+        )
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="corp_pin", mappings={"A": "pinned_a"})
+        )
+
+    def test_source_name_convention(self, fm_registry):
+        self._seed(fm_registry)
+        result = resolve_registry_mappings(fm_registry, "sigma", "windows_audit")
+        assert result == {"A": "convention_a", "B": "b"}
+
+    def test_field_map_pin_bare_name(self, fm_registry):
+        """A field_map pin REPLACES the source-name convention layer."""
+        self._seed(fm_registry)
+        result = resolve_registry_mappings(
+            fm_registry, "sigma", "windows_audit", field_map="corp_pin"
+        )
+        assert result == {"A": "pinned_a", "B": "b"}
+
+    def test_field_map_pin_standard_slash_name(self, fm_registry):
+        self._seed(fm_registry)
+        result = resolve_registry_mappings(
+            fm_registry, "sigma", "windows_audit", field_map="sigma/corp_pin"
+        )
+        assert result == {"A": "pinned_a", "B": "b"}
+
+    def test_field_map_standard_mismatch_raises(self, fm_registry):
+        self._seed(fm_registry)
+        with pytest.raises(FieldMapError, match="ecs"):
+            resolve_registry_mappings(
+                fm_registry, "sigma", "windows_audit", field_map="ecs/corp_pin"
+            )
+
+    def test_missing_pinned_map_leaves_default_only(self, fm_registry):
+        self._seed(fm_registry)
+        result = resolve_registry_mappings(
+            fm_registry, "sigma", "windows_audit", field_map="no_such_map"
+        )
+        assert result == {"A": "default_a", "B": "b"}
+
+    def test_no_maps_returns_empty(self, fm_registry):
+        assert resolve_registry_mappings(fm_registry, "sigma", "windows_audit") == {}
 
 
 class TestResolveField:

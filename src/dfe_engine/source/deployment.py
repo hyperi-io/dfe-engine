@@ -311,10 +311,10 @@ def execute_ddl_statements(
         try:
             client.execute(stmt)
             executed.append(stmt)
-            logger.info("Source deploy DDL executed: %s...", stmt[:80])
+            logger.info(f"Source deploy DDL executed: {stmt[:80]}...")
         except Exception as exc:
             failed.append((stmt, str(exc)))
-            logger.error("Source deploy DDL failed: %s — %s", stmt[:80], exc)
+            logger.error(f"Source deploy DDL failed: {stmt[:80]} - {exc}")
     return executed, failed
 
 

@@ -128,6 +128,46 @@ def test_json_schema_adapter_via_framework() -> None:
     assert cols["tags"] == "json"
 
 
+def test_json_schema_nullable_object_list_form_recurses() -> None:
+    """A nullable object (type: ["object","null"]) with properties must RECURSE like a
+    plain object; a nullable typeless object still collapses to a json blob."""
+    schema = {
+        "type": ["object", "null"],
+        "properties": {
+            "nested": {
+                "type": ["object", "null"],
+                "properties": {"leaf": {"type": ["string", "null"]}},
+            },
+            "blob": {"type": ["object", "null"]},
+            "items": {"type": ["array", "null"]},
+        },
+    }
+    cols = {c.name: c.type for c in import_schema("json_schema", schema)}
+    assert cols["nested_leaf"] == "string"  # nullable object recursed
+    assert cols["blob"] == "json"  # nullable typeless object -> blob
+    assert cols["items"] == "json"  # nullable array -> blob
+
+
+def test_json_schema_adapter_accepts_yaml_text() -> None:
+    """The json_schema adapter's JSON/YAML claim: YAML text parses too."""
+    yaml_text = """
+type: object
+properties:
+  src_ip:
+    type: string
+    format: ipv4
+  count:
+    type: integer
+"""
+    cols = {c.name: c.type for c in import_schema("json_schema", yaml_text)}
+    assert cols == {"src_ip": "ip", "count": "integer"}
+
+
+def test_json_schema_adapter_rejects_unparseable_text() -> None:
+    with pytest.raises(ElasticSchemaConversionError, match="neither valid JSON"):
+        import_schema("json_schema", "{not: json: nor [yaml")
+
+
 def test_ocsf_adapter_class_and_dict_forms() -> None:
     """OCSF (the security-event standard, AWS Security Lake canonical) - both the API's
     list-of-single-key-dicts and the repo's dict form, OCSF `_t` types mapped."""

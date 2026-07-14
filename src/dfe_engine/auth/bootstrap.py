@@ -75,7 +75,7 @@ def bootstrap_auth(
     roles_path = rbac_dir / "roles.yaml"
     if not roles_path.exists():
         _seed_roles(roles_path)
-        logger.info("Seeded built-in roles.yaml to %s", str(roles_path))
+        logger.info(f"Seeded built-in roles.yaml to {roles_path}")
 
     # Load role config
     role_store = RoleStore(roles_path)

@@ -254,7 +254,7 @@ class ElasticSchemaService:
         filebeat template. ``None`` imports everything (back-compat).
         """
         props = _extract_mappings_properties(doc)
-        wanted = {r for r in roots} if roots is not None else None
+        wanted = set(roots) if roots is not None else None
         columns: list[SchemaColumn] = []
         for field_name, field_mapping in props.items():
             if wanted is not None and field_name not in wanted:

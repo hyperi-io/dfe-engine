@@ -71,12 +71,12 @@ def ensure_storage(*, settings: DFESettings) -> None:
 
     marker = schemas_dir / SEED_MARKER_NAME
     if marker.exists():
-        logger.info("Schemas already seeded (marker %r present); skipping", str(marker))
+        logger.info(f"Schemas already seeded (marker {str(marker)!r} present); skipping")
         return
     if not (seed_dir.is_dir()):
-        logger.warning("Schema seed %r not found; leaving schemas dir empty", str(seed_dir))
+        logger.warning(f"Schema seed {str(seed_dir)!r} not found; leaving schemas dir empty")
         return
 
     _copy_seed(schemas_dir=schemas_dir, seed_dir=seed_dir)
     marker.write_text("Seeded by dfe_engine.bootstrap.ensure_storage.\n")
-    logger.info("Seeded schemas from %r into %r", str(seed_dir), str(schemas_dir))
+    logger.info(f"Seeded schemas from {str(seed_dir)!r} into {str(schemas_dir)!r}")

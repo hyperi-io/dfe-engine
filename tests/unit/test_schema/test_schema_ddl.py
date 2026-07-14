@@ -428,6 +428,24 @@ class TestGenerateView:
         via_sigma = gen.generate_sigma_view("t", mappings)
         assert via_generic == via_sigma
 
+    def test_unsafe_mapping_identifiers_rejected(self, gen: DDLGenerator):
+        """A backtick/control char in a mapping cannot splice SQL into the view.
+
+        custom_mappings are settable by a source_write user - the sink must
+        refuse identifiers that would break out of backtick quoting.
+        """
+        from dfe_engine.schema.schema_ddl import DDLGenerationError
+
+        hostile = [
+            {"User": "x` , (SELECT * FROM secrets) AS `y"},  # quote breakout
+            {"User`; DROP TABLE t; --": "user_name"},  # hostile standard field
+            {"User": "col name"},  # whitespace
+            {"User": ""},  # empty
+        ]
+        for mappings in hostile:
+            with pytest.raises(DDLGenerationError):
+                gen.generate_view("t", mappings, "sigma")
+
 
 # ── Sigma View ──────────────────────────────────────────────────────
 

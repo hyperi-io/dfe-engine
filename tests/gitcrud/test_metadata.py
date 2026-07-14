@@ -20,7 +20,8 @@ from dfe_engine.gitcrud.metadata import (
 def test_extract_absent_metadata_is_empty() -> None:
     meta = extract_metadata({"spec": {"a": 1}})
     assert meta.description == ""
-    assert meta.labels == {} and meta.tags == []
+    assert meta.labels == {}
+    assert meta.tags == []
 
 
 def test_roundtrip_extract_and_attach() -> None:
@@ -61,3 +62,11 @@ def test_extra_metadata_is_forward_compatible() -> None:
     meta = extract_metadata({METADATA_KEY: {"description": "d", "future_key": "keep"}})
     assert meta.description == "d"
     assert meta.model_dump().get("future_key") == "keep"
+
+
+def test_with_metadata_round_trips_extra_keys() -> None:
+    # extras survive a read-modify-write cycle (with_metadata must not drop them)
+    meta = extract_metadata({METADATA_KEY: {"description": "d", "future_key": "keep"}})
+    doc = with_metadata({"spec": {}}, meta)
+    assert doc[METADATA_KEY]["description"] == "d"
+    assert doc[METADATA_KEY]["future_key"] == "keep"

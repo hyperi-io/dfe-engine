@@ -104,6 +104,27 @@ class TestCrudBackedCrud:
     def test_delete_missing_is_noop(self, registry):
         registry.delete_source("nope")  # warns, does not raise
 
+    def test_delete_commit_carries_attribution(self, registry, crud):
+        """Delete commits are attributed like saves: '(by <created_by>)' suffix."""
+        from dulwich.repo import Repo
+
+        registry.save_source(_source())
+        registry.delete_source("filebeat", created_by="kaz")
+        repo = Repo(str(crud.repo_path))
+        msg = repo[repo.head()].message.decode()
+        assert msg.startswith("source: delete filebeat")
+        assert "(by kaz)" in msg
+
+    def test_versioned_doc_save_draft_refuses_self_managed_envelope(self, registry, crud):
+        """A sources doc carries semver version keys owned by the Source model -
+        VersionedDoc.save_draft must refuse it with the clear error instead of
+        writing a mixed draft/semver envelope."""
+        from dfe_engine.gitcrud.versioned import VersionedDoc
+
+        registry.save_source(_source())
+        with pytest.raises(ValueError, match="self-managed"):
+            VersionedDoc(crud).save_draft("sources", "filebeat", {"x": 1}, actor="kaz")
+
     def test_match_conflict_enforced_across_docs(self, registry):
         registry.save_source(_source("alpha", value="shared"))
         with pytest.raises(SourceMatchConflictError):

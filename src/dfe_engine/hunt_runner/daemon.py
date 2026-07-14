@@ -60,5 +60,5 @@ def run_loop(
         if should_stop():
             break
         sleep(poll_seconds)
-    logger.info("hunt-runner loop exiting after %d tick(s)", ticks)
+    logger.info(f"hunt-runner loop exiting after {ticks} tick(s)")
     return ticks

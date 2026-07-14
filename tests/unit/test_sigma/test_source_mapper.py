@@ -423,6 +423,70 @@ class TestFieldMapRegistryIntegration:
         for _source_name, ddl in views.items():
             assert "`common_col` AS `CommonField`" in ddl
 
+    def test_field_map_pin_honoured(self, type_registry, fm_registry):
+        """A sigma view's field_map pins the registry override layer end-to-end."""
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        fm_registry.save_map(
+            FieldMap(standard="sigma", mappings={"User": "default_user", "EventID": "event_id"})
+        )
+        # The source-name convention map: bypassed when the view pins another.
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="windows_audit", mappings={"User": "convention_user"})
+        )
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+        )
+        source = _make_source(
+            "windows_audit",
+            sigma=SourceView(
+                standard="sigma",
+                taxonomy="windows",
+                field_map="corp_pin",
+                custom_mappings={"EventID": "inline_event_id"},
+            ),
+        )
+        m = SigmaSourceMapper(
+            FakeSourceRegistry([source]),
+            registry=type_registry,
+            field_map_registry=fm_registry,
+        )
+
+        mappings = m.get_field_mappings("windows_audit")
+        assert mappings["User"] == "pinned_user"  # pin, not the convention map
+        assert mappings["EventID"] == "inline_event_id"  # inline still wins per-key
+
+        ddl = m.generate_sigma_view("windows_audit")
+        assert ddl is not None
+        assert "`pinned_user` AS `User`" in ddl
+        assert "convention_user" not in ddl
+
+    def test_field_map_pin_standard_slash_form(self, type_registry, fm_registry):
+        """The 'standard/name' pin form resolves; a mismatched standard raises."""
+        from dfe_engine.fieldmap.registry import FieldMapError
+        from dfe_engine.sigma.source_mapper import SigmaSourceMapper
+
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+        )
+        good = _make_source(
+            "windows_audit",
+            sigma=SourceView(standard="sigma", taxonomy="windows", field_map="sigma/corp_pin"),
+        )
+        bad = _make_source(
+            "linux_syslog",
+            sigma=SourceView(standard="sigma", taxonomy="linux", field_map="ecs/corp_pin"),
+        )
+        m = SigmaSourceMapper(
+            FakeSourceRegistry([good, bad]),
+            registry=type_registry,
+            field_map_registry=fm_registry,
+        )
+
+        assert m.get_field_mappings("windows_audit")["User"] == "pinned_user"
+        with pytest.raises(FieldMapError, match="ecs"):
+            m.get_field_mappings("linux_syslog")
+
     def test_no_registry_behaves_like_legacy(self, mapper):
         """Without field_map_registry, mapper behaves identically to legacy."""
         mappings = mapper.get_field_mappings("windows_audit")

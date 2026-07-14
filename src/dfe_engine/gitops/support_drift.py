@@ -19,6 +19,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from ruamel.yaml import YAMLError
 from scalo.logger import logger
 
 from dfe_engine.yaml_utils import yaml_load
@@ -38,8 +39,8 @@ def support_drift_overrides(deploy_repo_path: str | Path) -> dict[str, str]:
         return {}
     try:
         data = yaml_load(path)
-    except Exception:  # malformed pins.yaml is the operator's problem, not a crash
-        logger.warning("SUPPORT-DRIFT check skipped: could not parse %s", path)
+    except (OSError, YAMLError):  # malformed pins.yaml is the operator's problem, not a crash
+        logger.warning(f"SUPPORT-DRIFT check skipped: could not parse {path}")
         return {}
     if not isinstance(data, dict):
         return {}
@@ -58,10 +59,10 @@ def log_support_drift(deploy_repo_path: str | Path) -> dict[str, str]:
     """Log the SUPPORT-DRIFT notice for any pins.yaml overrides; returns them."""
     overrides = support_drift_overrides(deploy_repo_path)
     if overrides:
+        listed = ", ".join(f"{name}={ref}" for name, ref in sorted(overrides.items()))
         logger.warning(
-            "SUPPORT-DRIFT: this environment runs an UNTESTED combination - "
-            "%d component(s) overridden off the certified stack (pins.yaml): %s",
-            len(overrides),
-            ", ".join(f"{name}={ref}" for name, ref in sorted(overrides.items())),
+            f"SUPPORT-DRIFT: this environment runs an UNTESTED combination - "
+            f"{len(overrides)} component(s) overridden off the certified stack "
+            f"(pins.yaml): {listed}"
         )
     return overrides

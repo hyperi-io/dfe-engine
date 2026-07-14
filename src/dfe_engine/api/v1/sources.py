@@ -131,7 +131,7 @@ class SourceEnabledPatchRequest(BaseModel):
             raise ValueError("Send 'state' or 'enabled'")
         return self
 
-    def target_state(self) -> str:
+    def target_state(self) -> SourceState:
         """The tri-state this patch requests."""
         if self.state is not None:
             return self.state
@@ -918,7 +918,7 @@ async def delete_source(name: str, user: CurrentUser, registry: SourceReg):
                 "message": f"Source {name!r} not found",
             },
         )
-    registry.delete_source(name)
+    registry.delete_source(name, created_by=git_author(user))
     audit_resource_change(user.user_id, "source", name, "deleted")
 
 
@@ -951,7 +951,7 @@ async def bulk_action(
     for name in body.sources:
         try:
             if body.action == "delete":
-                registry.delete_source(name)
+                registry.delete_source(name, created_by=git_author(user))
             else:
                 source = registry.get_source(name)
                 updated = source.model_copy(update={"state": action_to_state[body.action]})

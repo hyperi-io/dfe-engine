@@ -24,7 +24,7 @@ schema definition.
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from typing import Any
 
 from dfe_engine.schema.models import SchemaColumn
@@ -37,6 +37,30 @@ from dfe_engine.yaml_utils import yaml_load_string
 # An adapter turns a raw external schema definition (a parsed object, or text/bytes to
 # parse) plus an optional subtree-selection into DFE physical columns.
 SchemaAdapter = Callable[[Any, Iterable[str] | None], list[SchemaColumn]]
+
+
+def _parse_json(raw: Any, *, allow_yaml: bool = False) -> Any:
+    """Decode bytes and parse text to an object; a parsed object passes through.
+
+    With ``allow_yaml`` the text is tried as JSON first (json.loads gives the
+    sharper error for malformed JSON), then as YAML - JSON Schemas are commonly
+    authored in either. Raises ElasticSchemaConversionError when neither parses.
+    """
+    if isinstance(raw, bytes):
+        raw = raw.decode("utf-8")
+    if not isinstance(raw, str):
+        return raw
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as json_exc:
+        if not allow_yaml:
+            raise
+        try:
+            return yaml_load_string(raw)
+        except Exception as yaml_exc:
+            raise ElasticSchemaConversionError(
+                f"schema text is neither valid JSON ({json_exc}) nor valid YAML ({yaml_exc})"
+            ) from yaml_exc
 
 
 def _elastic_template_adapter(raw: Any, roots: Iterable[str] | None = None) -> list[SchemaColumn]:
@@ -74,14 +98,24 @@ _JSON_SCHEMA_TYPE_TO_ES = {
 }
 
 
+def _json_schema_type(prop: dict[str, Any]) -> Any:
+    """The declared JSON-Schema type, honouring the list form.
+
+    ``["object", "null"]`` (a nullable object/scalar) resolves to its non-null
+    member, so nullable objects still recurse and nullable scalars map like
+    their non-null type.
+    """
+    t = prop.get("type")
+    if isinstance(t, list):
+        t = next((x for x in t if x != "null"), None)
+    return t
+
+
 def _json_schema_es_type(prop: dict[str, Any]) -> str:
     fmt = prop.get("format")
     if isinstance(fmt, str) and fmt in _JSON_SCHEMA_FORMAT_TO_ES:
         return _JSON_SCHEMA_FORMAT_TO_ES[fmt]
-    t = prop.get("type")
-    if isinstance(t, list):  # e.g. ["string", "null"] - take the non-null
-        t = next((x for x in t if x != "null"), "string")
-    return _JSON_SCHEMA_TYPE_TO_ES.get(t, "keyword")
+    return _JSON_SCHEMA_TYPE_TO_ES.get(_json_schema_type(prop), "keyword")
 
 
 def _json_schema_to_properties(schema: Any) -> dict[str, Any]:
@@ -95,7 +129,7 @@ def _json_schema_to_properties(schema: Any) -> dict[str, Any]:
     for name, prop in schema_props.items():
         if not isinstance(prop, dict):
             continue
-        t = prop.get("type")
+        t = _json_schema_type(prop)
         if t == "object" and isinstance(prop.get("properties"), dict):
             props[str(name)] = {"properties": _json_schema_to_properties(prop)}
         elif t == "array" or (t == "object" and "properties" not in prop):
@@ -108,10 +142,7 @@ def _json_schema_to_properties(schema: Any) -> dict[str, Any]:
 def _json_schema_adapter(raw: Any, roots: Iterable[str] | None = None) -> list[SchemaColumn]:
     """A JSON Schema (draft 2020-12 etc.) as JSON/YAML text or a parsed dict. Also the
     substrate for OCSF, which is delivered as JSON."""
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    if isinstance(raw, str):
-        raw = json.loads(raw)
+    raw = _parse_json(raw, allow_yaml=True)
     props = _json_schema_to_properties(raw)
     if not props:
         raise ElasticSchemaConversionError(
@@ -136,7 +167,7 @@ _OCSF_TYPE_TO_ES = {
 }
 
 
-def _ocsf_attrs(schema: Any):
+def _ocsf_attrs(schema: Any) -> Iterator[tuple[str, Any]]:
     """Yield (name, definition) for an OCSF class' attributes, whether the API's
     list-of-single-key-dicts form or the repo's `{name: def}` dict form."""
     attrs = schema.get("attributes") if isinstance(schema, dict) else None
@@ -169,10 +200,7 @@ def _ocsf_adapter(raw: Any, roots: Iterable[str] | None = None) -> list[SchemaCo
     delivered as JSON, so it rides the JSON substrate; only the OCSF `_t` type map
     differs from a plain JSON Schema.
     """
-    if isinstance(raw, bytes):
-        raw = raw.decode("utf-8")
-    if isinstance(raw, str):
-        raw = json.loads(raw)
+    raw = _parse_json(raw)
     props = _ocsf_to_properties(raw)
     if not props:
         raise ElasticSchemaConversionError(

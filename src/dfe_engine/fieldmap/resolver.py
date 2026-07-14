@@ -17,9 +17,12 @@ Usage:
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING
 
 from dfe_engine.fieldmap.models import FieldMap
+
+if TYPE_CHECKING:
+    from dfe_engine.fieldmap.registry import FieldMapRegistry
 
 
 def resolve_field_map(
@@ -50,17 +53,42 @@ def resolve_field_map(
 
 
 def resolve_registry_mappings(
-    registry: Any,
+    registry: FieldMapRegistry,
     standard: str,
     source_name: str | None = None,
+    *,
+    field_map: str | None = None,
 ) -> dict[str, str]:
     """Resolve the two-tier registry mappings for a standard + source.
 
     Convenience over :func:`resolve_field_map`: loads the default and
     source-specific maps from a FieldMapRegistry (missing maps are fine)
     and merges them. Returns an empty dict when the standard has no maps.
+
+    ``field_map`` is a SourceView pin: it names the registry map that forms
+    the source-specific layer INSTEAD of the ``source_name`` convention -
+    either ``"{standard}/{name}"`` (the leading segment must match
+    *standard*) or a bare ``"{name}"``. The standard's ``_default`` map
+    stays the base either way.
+
+    Raises:
+        FieldMapError: *field_map* declares a standard other than *standard*.
     """
-    from dfe_engine.fieldmap.registry import FieldMapNotFoundError
+    from dfe_engine.fieldmap.registry import FieldMapError, FieldMapNotFoundError
+
+    # A field_map pin replaces the source-name convention for the override
+    # layer, so a view can share one named map across many sources.
+    override_name = source_name
+    if field_map:
+        pin = field_map
+        if "/" in pin:
+            pin_standard, _, pin = pin.partition("/")
+            if pin_standard != standard:
+                raise FieldMapError(
+                    f"field_map {field_map!r} pins standard {pin_standard!r} "
+                    f"but the view's standard is {standard!r}"
+                )
+        override_name = pin
 
     default_map: FieldMap | None = None
     source_map: FieldMap | None = None
@@ -70,9 +98,9 @@ def resolve_registry_mappings(
     except FieldMapNotFoundError:
         pass
 
-    if source_name:
+    if override_name:
         try:
-            source_map = registry.get_map(standard, source_name)
+            source_map = registry.get_map(standard, override_name)
         except FieldMapNotFoundError:
             pass
 

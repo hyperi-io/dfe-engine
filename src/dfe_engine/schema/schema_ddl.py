@@ -29,6 +29,43 @@ class DDLGenerationError(Exception):
     """Error generating DDL."""
 
 
+def unsafe_ident_reason(name: str) -> str | None:
+    """Why *name* is unsafe in a DDL identifier position, or None when safe.
+
+    THE one charset rule for operator-suppliable identifiers, shared by every
+    DDL sink (the view mappings here, ``fieldmap.remap_view``): empty, any of
+    the control chars ``\\` ; ( ) ' " \\\\``, or whitespace is rejected - each
+    would splice raw SQL past backtick quoting or an unquoted position. Each
+    sink raises its own exception type from this reason.
+    """
+    if not name:
+        return "empty identifier"
+    if any(c in name for c in "`;()'\"\\") or any(c.isspace() for c in name):
+        return (
+            "backticks, quotes, parens, semicolons, backslashes and "
+            "whitespace are not permitted in identifiers"
+        )
+    return None
+
+
+def _safe_view_ident(name: str, *, what: str) -> str:
+    """Validate a mapping identifier for the backtick-quoted view positions.
+
+    A source's inline ``custom_mappings`` are settable by a source_write user,
+    so a backtick (quote breakout), whitespace, or a DDL control char here
+    would splice raw SQL into the CREATE VIEW executed against ClickHouse.
+    Applies :func:`unsafe_ident_reason` (the rule shared with
+    ``fieldmap.remap_view._safe_ident``) - defence in depth at the sink,
+    whatever the caller validated.
+    """
+    if not name:
+        raise DDLGenerationError(f"empty {what} in view mapping")
+    reason = unsafe_ident_reason(name)
+    if reason is not None:
+        raise DDLGenerationError(f"unsafe {what} in view mapping: {name!r} ({reason})")
+    return name
+
+
 @dataclass
 class DDLConfig:
     """Configuration for DDL generation.
@@ -304,7 +341,9 @@ class DDLGenerator:
 
         aliases = []
         for standard_field, column_name in sorted(mappings.items()):
-            aliases.append(f"    `{column_name}` AS `{standard_field}`")
+            safe_col = _safe_view_ident(column_name, what="column name")
+            safe_field = _safe_view_ident(standard_field, what="standard field")
+            aliases.append(f"    `{safe_col}` AS `{safe_field}`")
 
         if aliases:
             select_parts = ",\n".join(aliases) + ",\n    *"

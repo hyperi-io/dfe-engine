@@ -125,7 +125,7 @@ def parse_interval(value: str | int) -> int:
 
     if looks_like_cron:
         if is_irregular(text):
-            logger.warning("irregular cron %r approximated to its min interval", text)
+            logger.warning(f"irregular cron {text!r} approximated to its min interval")
         return cron_to_interval_seconds(text)
 
     return duration_to_seconds(text)

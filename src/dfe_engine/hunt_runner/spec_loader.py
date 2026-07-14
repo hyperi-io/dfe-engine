@@ -45,7 +45,7 @@ def _resolve_schedule_value(definition: dict[str, Any], stem: str) -> str | int 
     if isinstance(schedule, dict):
         mode = schedule.get("mode", "rate")
         if mode != "rate":
-            logger.info("anchored hunt %s skipped (rate-only in v1)", stem)
+            logger.info(f"anchored hunt {stem} skipped (rate-only in v1)")
             return None
         # rate: an explicit interval wins; else the cron alias.
         if schedule.get("interval") is not None:
@@ -72,7 +72,7 @@ def _build_spec(definition: dict[str, Any], stem: str) -> HuntSpec | None:
 
     interval_seconds = parse_interval(value)
     if interval_seconds <= 0:
-        logger.warning("skipping hunt %s: non-positive interval %s", stem, interval_seconds)
+        logger.warning(f"skipping hunt {stem}: non-positive interval {interval_seconds}")
         return None
 
     return HuntSpec(
@@ -94,7 +94,7 @@ def load_specs(hunt_dir: str | Path) -> dict[str, HuntSpec]:
     """
     directory = Path(hunt_dir)
     if not directory.is_dir():
-        logger.debug("hunt dir %s does not exist; no specs loaded", directory)
+        logger.debug(f"hunt dir {directory} does not exist; no specs loaded")
         return {}
 
     specs: dict[str, HuntSpec] = {}
@@ -103,13 +103,13 @@ def load_specs(hunt_dir: str | Path) -> dict[str, HuntSpec]:
         try:
             definition = yaml_load(path)
             if not isinstance(definition, dict):
-                logger.warning("skipping hunt %s: not a YAML mapping", stem)
+                logger.warning(f"skipping hunt {stem}: not a YAML mapping")
                 continue
             spec = _build_spec(definition, stem)
             if spec is not None:
                 specs[stem] = spec
         except Exception as exc:  # one bad file must never break the whole load
-            logger.warning("skipping hunt %s: %s", stem, exc)
+            logger.warning(f"skipping hunt {stem}: {exc}")
             continue
 
     return specs

@@ -423,7 +423,7 @@ class SchemaRegistry:
             try:
                 schema = self._parse_meta_schema(table, config_data)
             except ValidationError as e:
-                logger.error("Invalid schema '%s' (excluded from list): %s", table, e)
+                logger.error(f"Invalid schema {table!r} (excluded from list): {e}")
                 continue
             except Exception as e:
                 logger.error(f"Failed to load schema {table!r}, (excluded from list): {e}")
