@@ -55,6 +55,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     bootstrap_registries(settings, gitcrud=gitcrud)
 
+    # SUPPORT-DRIFT: name every component the deploy repo's pins.yaml moves
+    # off the certified stack (untested combination, operator-owned risk).
+    if gitcrud is not None:
+        from dfe_engine.gitops.support_drift import log_support_drift
+
+        try:
+            log_support_drift(gitcrud.repo_path)
+        except Exception as exc:  # the notice must never break startup
+            logger.warning("SUPPORT-DRIFT check unavailable", error=str(exc))
+
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 
     bootstrap_clickhouse(settings=settings)
