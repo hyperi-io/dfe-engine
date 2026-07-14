@@ -19,6 +19,9 @@ Usage:
     deep_merge(base, overrides)  # mutates base in-place
 """
 
+import os
+import tempfile
+import threading
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -28,15 +31,34 @@ from ruamel.yaml import (
     YAMLError,  # noqa: F401 - re-exported
 )
 
-# Create a safe YAML instance for loading untrusted content
-_yaml_safe = YAML(typ="safe")
-_yaml_safe.default_flow_style = False
+# ruamel YAML instances carry mutable parser/emitter state and are NOT
+# thread-safe: a single shared instance dumped/loaded from two threads at once
+# corrupts that state and can emit a file with two documents (a ComposerError on
+# the next read). FastAPI runs sync handlers in a worker-thread pool and
+# background tasks (e.g. sigma propagate wait=0) run in their own threads, so
+# concurrent YAML ops across threads are real. Give each thread its own
+# instances via thread-local storage - no shared mutable state, no lock.
+_local = threading.local()
 
-# Create a round-trip YAML instance for preserving formatting
-_yaml_rt = YAML()
-_yaml_rt.default_flow_style = False
-_yaml_rt.preserve_quotes = True
-_yaml_rt.indent(mapping=2, sequence=4, offset=2)
+
+def _safe() -> YAML:
+    inst = getattr(_local, "safe", None)
+    if inst is None:
+        inst = YAML(typ="safe")
+        inst.default_flow_style = False
+        _local.safe = inst
+    return inst
+
+
+def _rt() -> YAML:
+    inst = getattr(_local, "rt", None)
+    if inst is None:
+        inst = YAML()
+        inst.default_flow_style = False
+        inst.preserve_quotes = True
+        inst.indent(mapping=2, sequence=4, offset=2)
+        _local.rt = inst
+    return inst
 
 
 def yaml_load(source: str | Path) -> Any:
@@ -55,7 +77,7 @@ def yaml_load(source: str | Path) -> Any:
     """
     path = Path(source)
     with open(path) as f:
-        return _yaml_safe.load(f)
+        return _safe().load(f)
 
 
 def yaml_load_string(content: str) -> Any:
@@ -71,20 +93,37 @@ def yaml_load_string(content: str) -> Any:
     Raises:
         YAMLError: If the YAML is invalid
     """
-    return _yaml_safe.load(StringIO(content))
+    return _safe().load(StringIO(content))
 
 
 def yaml_dump(data: Any, dest: str | Path) -> None:
     """
-    Dump data to a YAML file.
+    Dump data to a YAML file, ATOMICALLY.
+
+    Writes to a temp file in the destination directory and os.replace()s it
+    over the target, so a concurrent reader always sees either the complete
+    old file or the complete new one - never a partial or doubled write.
 
     Args:
         data: Data to serialize
         dest: Path to the output file
     """
     path = Path(dest)
-    with open(path, "w") as f:
-        _yaml_rt.dump(data, f)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w") as f:
+            _rt().dump(data, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        # Never leave a stray temp file behind on failure.
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
 
 
 def yaml_dump_string(data: Any) -> str:
@@ -98,7 +137,7 @@ def yaml_dump_string(data: Any) -> str:
         YAML string representation
     """
     stream = StringIO()
-    _yaml_rt.dump(data, stream)
+    _rt().dump(data, stream)
     return stream.getvalue()
 
 
