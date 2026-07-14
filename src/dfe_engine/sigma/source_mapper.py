@@ -1,11 +1,12 @@
 """Source-based Sigma field mapper - replaces PG + CSV field mapping.
 
 Bridges the Sigma module to the Source model. Loads field mappings
-from Source.sigma config and generates Sigma views via DDLGenerator.
+from the source's sigma ``SourceView`` entry and generates Sigma views
+via DDLGenerator.
 
-When a FieldMapRegistry is provided, uses the two-tier field map
-resolution (default + source-specific) as the primary mapping source.
-Falls back to Source.sigma.custom_mappings for backward compatibility.
+Mapping precedence (locked): the registry field maps (default +
+source-specific) form the base, and the sigma view's inline
+``custom_mappings`` WIN per-key over them.
 
 Usage:
     from dfe_engine.sigma.source_mapper import SigmaSourceMapper
@@ -41,9 +42,9 @@ class SigmaSourceMapper:
     Uses SourceRegistry to look up sources and their Sigma config.
 
     When a FieldMapRegistry is provided, field mappings are resolved
-    via two-tier resolution (default + source-specific overrides).
-    Falls back to Source.sigma.custom_mappings when no registry or
-    no maps exist.
+    via two-tier resolution (default + source-specific overrides) as the
+    base. The sigma view's inline ``custom_mappings`` then WIN per-key
+    over the registry result (locked precedence).
 
     When a SigmaViewStore is provided, a stored CRUD view definition for a
     source WINS over the static field maps in view generation: it can expose
@@ -72,9 +73,9 @@ class SigmaSourceMapper:
     def get_field_mappings(self, source_name: str) -> dict[str, str]:
         """Get Sigma field -> column name mappings for a source.
 
-        Resolution order:
-        1. FieldMapRegistry (two-tier: default + source-specific)
-        2. Source.sigma.custom_mappings (legacy fallback)
+        Resolution: the FieldMapRegistry (two-tier: default +
+        source-specific) is the base, and the sigma view's inline
+        ``custom_mappings`` WIN per-key over it (locked precedence).
 
         Args:
             source_name: Source name (e.g. 'windows_audit').
@@ -88,17 +89,7 @@ class SigmaSourceMapper:
         """
         # Validate source exists (raises SourceNotFoundError if missing)
         source = self._source_registry.get_source(source_name)
-
-        # Try FieldMapRegistry first
-        if self._field_map_registry:
-            resolved = self._resolve_from_registry(source_name)
-            if resolved:
-                return resolved
-
-        # Fallback: Source.sigma.custom_mappings
-        if not source.sigma:
-            return {}
-        return dict(source.sigma.custom_mappings)
+        return self._get_mappings_for_source(source)
 
     def get_schema_metadata(self, source_name: str) -> dict[str, dict[str, str | list[str] | None]]:
         """Get schema column metadata for a source.
@@ -191,19 +182,22 @@ class SigmaSourceMapper:
         return self._ddl_gen.generate_sigma_view(source.table_name, mappings, DDLConfig(db=db))
 
     def _get_mappings_for_source(self, source: Source) -> dict[str, str]:
-        """Get Sigma mappings for a source (registry -> legacy fallback).
+        """Get Sigma mappings for a source (registry base, inline wins).
 
         Like get_field_mappings() but takes a Source directly (avoids
-        repeated registry lookups in batch operations).
+        repeated registry lookups in batch operations). PRECEDENCE (locked):
+        the registry maps are the base and the sigma view's inline
+        ``custom_mappings`` override per-key, so the two mapping sources
+        cannot silently disagree.
         """
+        mappings: dict[str, str] = {}
         if self._field_map_registry:
-            resolved = self._resolve_from_registry(source.source)
-            if resolved:
-                return resolved
+            mappings.update(self._resolve_from_registry(source.source))
 
-        if source.sigma and source.sigma.custom_mappings:
-            return dict(source.sigma.custom_mappings)
-        return {}
+        sigma_view = source.view_for("sigma")
+        if sigma_view is not None:
+            mappings.update(sigma_view.custom_mappings)
+        return mappings
 
     def _resolve_from_registry(self, source_name: str) -> dict[str, str]:
         """Resolve Sigma field mappings from the FieldMapRegistry.
@@ -236,11 +230,12 @@ class SigmaSourceMapper:
     ) -> list[Source]:
         """Find sources matching a Sigma logsource specification.
 
-        Maps Sigma logsource fields to Source taxonomy:
-        - product  -> source.sigma.taxonomy
-        - category -> source.sigma.category (None on the source = matches any)
-        - service  -> source.sigma.service  (None on the source = matches any)
+        Maps Sigma logsource fields to the source's sigma view entry:
+        - product  -> sigma view taxonomy
+        - category -> sigma view category (None on the source = matches any)
+        - service  -> sigma view service  (None on the source = matches any)
 
+        A source with NO sigma view has no logsource binding and never matches.
         A source is bound only when the product matches AND every logsource facet
         the source DECLARES also matches - so two same-product sources (e.g.
         windows_audit vs windows_sysmon) no longer both receive a sysmon-only rule
@@ -257,8 +252,8 @@ class SigmaSourceMapper:
         """
         matches: list[Source] = []
         for source in self._source_registry.get_all_sources(enabled_only=True):
-            sig = source.sigma
-            if not sig or not (product and sig.taxonomy):
+            sig = source.view_for("sigma")
+            if sig is None or not (product and sig.taxonomy):
                 continue
             if sig.taxonomy.lower() != product.lower():
                 continue

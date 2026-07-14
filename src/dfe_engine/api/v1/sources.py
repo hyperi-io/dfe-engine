@@ -20,7 +20,7 @@ from __future__ import annotations
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
@@ -42,6 +42,7 @@ from dfe_engine.source.deployment import (
 from dfe_engine.source.models import (
     PaginatedSourceSummaryResponse,
     Source,
+    SourceState,
     SourceSummaryObject,
     SourceVersion,
     SourceVersionGetResponse,
@@ -106,17 +107,41 @@ def _source_response(source: Source, *, message: str) -> SourceResponse:
 
 
 class SourceEnabledPatchRequest(BaseModel):
-    """Partial update for source enabled status only."""
+    """Partial update for source lifecycle state only.
+
+    Send ``state`` for the tri-state (active | dormant | disabled), or the
+    compat boolean ``enabled`` (True -> active, False -> disabled). ``state``
+    wins when both are sent.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(description="Whether the source is active")
+    enabled: bool | None = Field(
+        default=None,
+        description="Compat boolean lifecycle (True -> active, False -> disabled)",
+    )
+    state: SourceState | None = Field(
+        default=None,
+        description="Tri-state lifecycle (active | dormant | disabled); wins over enabled",
+    )
+
+    @model_validator(mode="after")
+    def _require_one(self) -> SourceEnabledPatchRequest:
+        if self.state is None and self.enabled is None:
+            raise ValueError("Send 'state' or 'enabled'")
+        return self
+
+    def target_state(self) -> str:
+        """The tri-state this patch requests."""
+        if self.state is not None:
+            return self.state
+        return "active" if self.enabled else "disabled"
 
 
 class BulkActionRequest(BaseModel):
     """Bulk operation on multiple sources."""
 
-    action: str = Field(description="Action: enable, disable, delete")
+    action: str = Field(description="Action: enable, disable, dormant, delete")
     sources: list[str] = Field(description="Source names to act on")
 
 
@@ -372,6 +397,7 @@ async def get_source_version(
         source=source.source,
         display_name=source.display_name,
         description=source.description,
+        state=source.state,
         enabled=source.enabled,
         current=source.current,
         deployed_version=source.deployed_version,
@@ -792,7 +818,7 @@ async def update_source(
     Before the first deploy, edits update the working version in place. After deploy, a new
     major version is created only when ``current`` equals ``deployed_version`` and schema pins
     (``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),
-    ``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update
+    ``views``, or ``transform`` change. Draft versions (``current`` not deployed) update
     in place.
 
     ``header`` is optional: when omitted, no header is stored on the written version snapshot
@@ -842,10 +868,11 @@ async def patch_source_enabled(
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Enable or disable a source without changing versioned configuration.
+    """Set a source's lifecycle state without changing versioned configuration.
 
-    Does not create a new source version. Enabling may return ``409 match_conflict``
-    if another enabled source already uses the same receiver match rule.
+    Does not create a new source version. Activating may return ``409
+    match_conflict`` if another non-disabled source already uses the same
+    receiver match rule.
     """
     try:
         source = registry.get_source(name)
@@ -858,25 +885,22 @@ async def patch_source_enabled(
             },
         ) from None
 
-    if source.enabled == body.enabled:
-        return _source_response(
-            source,
-            message="enabled" if body.enabled else "disabled",
-        )
+    target = body.target_state()
+    if source.state == target:
+        return _source_response(source, message=target)
 
-    updated = source.model_copy(update={"enabled": body.enabled})
+    updated = source.model_copy(update={"state": target})
     try:
         saved = registry.save_source(
             updated,
             created_by=git_author(user),
-            description=(f"source: {'enable' if body.enabled else 'disable'} {name}"),
+            description=f"source: set {name} {target}",
         )
     except SourceValidationError as e:
         _raise_save_validation_http(e)
 
-    action = "enabled" if body.enabled else "disabled"
-    audit_resource_change(user.user_id, "source", saved.source, action)
-    return _source_response(saved, message=action)
+    audit_resource_change(user.user_id, "source", saved.source, target)
+    return _source_response(saved, message=target)
 
 
 @router.delete(
@@ -908,13 +932,16 @@ async def bulk_action(
     user: CurrentUser,
     registry: SourceReg,
 ):
-    """Perform a bulk action (enable, disable, delete) on multiple sources."""
-    if body.action not in ("enable", "disable", "delete"):
+    """Perform a bulk action (enable, disable, dormant, delete) on multiple sources."""
+    action_to_state = {"enable": "active", "disable": "disabled", "dormant": "dormant"}
+    if body.action not in (*action_to_state, "delete"):
         raise HTTPException(
             status_code=422,
             detail={
                 "code": "validation_error",
-                "message": f"Unknown action {body.action!r}. Must be: enable, disable, delete",
+                "message": (
+                    f"Unknown action {body.action!r}. Must be: enable, disable, dormant, delete"
+                ),
             },
         )
 
@@ -927,8 +954,8 @@ async def bulk_action(
                 registry.delete_source(name)
             else:
                 source = registry.get_source(name)
-                source.enabled = body.action == "enable"
-                registry.save_source(source, created_by=git_author(user))
+                updated = source.model_copy(update={"state": action_to_state[body.action]})
+                registry.save_source(updated, created_by=git_author(user))
             succeeded.append(name)
         except Exception as e:
             failed.append({"source": name, "error": str(e)})
@@ -1011,8 +1038,6 @@ def _version_detail_from_snapshot(
 
 def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
     views = dict(artifact.view_ddls)
-    if artifact.sigma_view_ddl:
-        views.setdefault("sigma", artifact.sigma_view_ddl)
     ddl = None
     if artifact.create_table_ddl:
         ddl = DDLResult(
@@ -1083,6 +1108,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         name=raw.get("source", ""),
         display_name=raw.get("display_name"),
         description=raw.get("description"),
+        state=raw.get("state", "active"),
         enabled=raw.get("enabled", True),
         current=raw.get("current", "1.0.0"),
         deployed_version=raw.get("deployed_version"),
@@ -1091,7 +1117,7 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
         header_type=raw.get("header_type"),
         has_transform=bool(raw.get("has_transform")),
         has_fetcher=bool(raw.get("has_fetcher")),
-        mapping_standards=list(raw.get("mapping_standards") or []),
+        views=list(raw.get("views") or []),
     )
 
 

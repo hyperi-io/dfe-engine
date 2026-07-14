@@ -440,13 +440,13 @@ class TestUpdateSource:
             **sample_source,
             "source": "source_alpha",
             "match": shared,
-            "mapping_standards": [],
+            "views": [],
         }
         second = {
             **sample_source,
             "source": "source_beta",
             "match": {"field": "ingest_type", "value": "other_value"},
-            "mapping_standards": [],
+            "views": [],
         }
         assert client.post("/api/v1/sources", json=first, headers=admin_headers).status_code == 201
         assert client.post("/api/v1/sources", json=second, headers=admin_headers).status_code == 201
@@ -522,11 +522,37 @@ class TestPatchSourceEnabled:
             headers=admin_headers,
         )
         assert enable.status_code == 200
-        assert enable.json()["message"] == "enabled"
+        assert enable.json()["message"] == "active"
         assert (
             client.get("/api/v1/sources/test_source", headers=admin_headers).json()["enabled"]
             is True
         )
+
+    def test_patch_state_dormant(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.patch(
+            "/api/v1/sources/test_source",
+            json={"state": "dormant"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "dormant"
+        detail = client.get("/api/v1/sources/test_source", headers=admin_headers).json()
+        assert detail["state"] == "dormant"
+        assert detail["enabled"] is False  # compat accessor
+
+    def test_patch_requires_state_or_enabled(
+        self, client: TestClient, admin_headers: dict, sample_source: dict
+    ):
+        client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
+        resp = client.patch(
+            "/api/v1/sources/test_source",
+            json={},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
 
     def test_idempotent_when_already_enabled(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -538,7 +564,7 @@ class TestPatchSourceEnabled:
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["message"] == "enabled"
+        assert resp.json()["message"] == "active"
 
     def test_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.patch(

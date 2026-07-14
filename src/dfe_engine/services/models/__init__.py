@@ -57,6 +57,7 @@ from dfe_engine.services.models.receiver import (
     ReceiverKafkaConfig,
     ReceiverRoutingConfig,
     ServerConfig,
+    SourceRule,
     TlsConfig,
     ValidationConfig,
 )
@@ -139,6 +140,7 @@ __all__ = [
     "ReceiverKafkaConfig",
     "ReceiverRoutingConfig",
     "ServerConfig",
+    "SourceRule",
     "TlsConfig",
     "ValidationConfig",
     # Loader

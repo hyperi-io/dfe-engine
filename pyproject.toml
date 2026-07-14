@@ -118,7 +118,7 @@ minversion = "6.0"
 log_cli = true
 log_cli_level = "INFO"
 python_files = "test_*.py"
-addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live'"
+addopts = "-vv -n 4 --cov=src/dfe_engine --cov-report=term-missing --cov-report=xml:cov.xml -m 'not integration and not live and not upstream'"
 testpaths = ["tests"]
 asyncio_mode = "auto"
 # Permanent hang guard (pytest-timeout): fail ANY test running longer than
@@ -148,6 +148,7 @@ markers = [
     "integration: Integration tests (require ClickHouse)",
     "e2e: End-to-end tests",
     "live: Full-stack e2e against a REAL deployed DFE (needs DFE_E2E_* env; skipped otherwise)",
+    "upstream: Validates the importer against LIVE external schema repos (elastic/beats etc.; network, CI-excluded)",
     "slow: Slow running tests",
     "smoke: Startup smoke tests (mandatory, every push)",
     "requires_schemas: Tests that need the dfe-schemas submodule checked out",

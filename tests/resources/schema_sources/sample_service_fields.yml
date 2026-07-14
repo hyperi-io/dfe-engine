@@ -1,0 +1,19 @@
+# Sample beats-format fields.yml used to exercise the beats_fields adapter offline: a
+# real leaf becomes a physical column, `type: alias` entries are skipped, and a group
+# flattens to a prefixed column name.
+- key: sample
+  title: Sample service log
+  fields:
+    - name: sample
+      type: group
+      fields:
+        - name: client_addr
+          type: keyword
+        - name: sent_bytes
+          type: long
+        - name: verb
+          type: alias
+          path: url.method
+        - name: status
+          type: alias
+          path: http.response.status_code

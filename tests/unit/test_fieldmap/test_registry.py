@@ -240,9 +240,9 @@ class TestMapExists:
 class TestSeedDefaults:
     def test_seeds_all_standards(self, registry):
         count = registry.seed_defaults()
-        assert count == 3  # sigma, ecs, cim
+        assert count == 4  # sigma, ecs, cim, ocsf
 
-        # Verify each standard has a default map
+        # Verify each standard has a non-empty default map
         sigma = registry.get_map("sigma")
         assert sigma.standard == "sigma"
         assert len(sigma.mappings) > 0
@@ -254,6 +254,10 @@ class TestSeedDefaults:
         cim = registry.get_map("cim")
         assert cim.standard == "cim"
         assert len(cim.mappings) > 0
+
+        ocsf = registry.get_map("ocsf")
+        assert ocsf.standard == "ocsf"
+        assert len(ocsf.mappings) > 0
 
     def test_non_destructive(self, registry):
         # Seed once
@@ -280,7 +284,7 @@ class TestSeedDefaults:
 
         # Seed with overwrite — should replace
         count = registry.seed_defaults(overwrite=True)
-        assert count == 3
+        assert count == 4  # sigma, ecs, cim, ocsf
 
         loaded = registry.get_map("sigma")
         assert "Custom" not in loaded.mappings

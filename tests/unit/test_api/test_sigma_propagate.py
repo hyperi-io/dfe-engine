@@ -36,7 +36,7 @@ def _add_windows_source(name: str = "windows_audit") -> None:
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": name},
             "schema": {"engine": "MergeTree"},
-            "sigma": {"taxonomy": "windows", "custom_mappings": {}},
+            "views": [{"standard": "sigma", "taxonomy": "windows"}],
         }
     )
 

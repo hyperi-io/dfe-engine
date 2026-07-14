@@ -642,18 +642,20 @@ FROM {db}.{source}
 
 ### Sigma Mapping as Source Metadata
 
-The Source definition can include a Sigma field mapping section:
+The Source definition declares its naming-standard views in the generic
+`views` list; the sigma entry carries the logsource binding and overrides:
 
 ```yaml
 # sources/windows_audit.yaml
-sigma:
-  taxonomy: windows                     # Built-in mapping set
-  custom_mappings:                      # Per-source overrides
-    CommandLine: command_line
-    ParentCommandLine: parent_cmd
+views:
+  - standard: sigma
+    taxonomy: windows                   # Sigma logsource product binding
+    custom_mappings:                    # Per-source overrides (win over field_map)
+      CommandLine: command_line
+      ParentCommandLine: parent_cmd
 ```
 
-The engine generates the Sigma view from source schema + mapping config.
+The engine generates the Sigma view from source schema + the sigma view entry.
 
 ---
 

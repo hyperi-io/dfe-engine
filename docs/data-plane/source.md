@@ -515,7 +515,7 @@ what needs to happen. The actual execution happens on shared service instances:
 | `source.transform` | Shared transform instance(s) | Transform loads source configs, processes each |
 | `source.schema` | dfe-engine | Schema DDL generated and applied by engine |
 | `source.rules` | Hunt scheduler | SQL queries executed on cron, matches → alerts |
-| `source.sigma` | dfe-engine | Generates compatibility view for Sigma field names |
+| `source.views` | dfe-engine | Generates naming-standard compatibility views (sigma, ecs, cim, ocsf) |
 
 A single transform-vector deployment may process transforms for 20 different
 sources. The source definition says *this source needs a vector transform
@@ -615,12 +615,13 @@ ClickHouse-native. The mapping is per-source — different sources map
 differently. Zero storage overhead.
 
 ```yaml
-# In source definition
-sigma:
-  taxonomy: windows                     # Built-in mapping set
-  custom_mappings:                      # Per-source overrides
-    CommandLine: command_line
-    ParentCommandLine: parent_cmd
+# In source definition (a views entry with standard: sigma)
+views:
+  - standard: sigma
+    taxonomy: windows                   # Sigma logsource product binding
+    custom_mappings:                    # Per-source overrides (win over field_map)
+      CommandLine: command_line
+      ParentCommandLine: parent_cmd
 ```
 
 Converted Sigma rules become DFE Rules tied to the source, querying the

@@ -10,11 +10,11 @@ from dfe_engine.source.models import (
     SourceHeader,
     SourceMatch,
     SourceSchema,
-    SourceSigma,
     SourceSummaryObject,
     SourceTransform,
     SourceVersion,
     SourceVersionGetResponse,
+    SourceView,
     SourceWriteRequest,
     apply_source_write_update,
     draft_build_version_to_invalidate,
@@ -153,7 +153,7 @@ class TestSourceMatch:
         assert m.value == ""
 
     def test_value_required_for_equals(self):
-        with pytest.raises(ValueError, match="match\.value is required"):
+        with pytest.raises(ValueError, match=r"match\.value is required"):
             SourceMatch(field="_json.f", operator="includes", value="  ")
 
 
@@ -241,23 +241,40 @@ class TestSourceFetcher:
 
 
 # ---------------------------------------------------------------------------
-# SourceSigma
+# SourceView
 # ---------------------------------------------------------------------------
 
 
-class TestSourceSigma:
+class TestSourceView:
     def test_defaults(self):
-        s = SourceSigma()
-        assert s.taxonomy is None
-        assert s.custom_mappings == {}
+        v = SourceView(standard="sigma")
+        assert v.standard == "sigma"
+        assert v.field_map is None
+        assert v.custom_mappings == {}
+        assert v.taxonomy is None
+        assert v.category is None
+        assert v.service is None
 
     def test_with_mappings(self):
-        s = SourceSigma(
+        v = SourceView(
+            standard="sigma",
             taxonomy="windows",
             custom_mappings={"CommandLine": "command_line"},
         )
-        assert s.taxonomy == "windows"
-        assert s.custom_mappings["CommandLine"] == "command_line"
+        assert v.taxonomy == "windows"
+        assert v.custom_mappings["CommandLine"] == "command_line"
+
+    def test_standard_forced_lowercase(self):
+        v = SourceView(standard="ECS")
+        assert v.standard == "ecs"
+
+    def test_unknown_standard_rejected(self):
+        with pytest.raises(ValueError, match="Unknown view standard"):
+            SourceView(standard="splunk_cim_v9")
+
+    def test_field_map_path(self):
+        v = SourceView(standard="ecs", field_map="ecs/filebeat")
+        assert v.field_map == "ecs/filebeat"
 
 
 # ---------------------------------------------------------------------------
@@ -296,17 +313,21 @@ class TestSource:
                     "engine": "vector",
                     "config_file": "/etc/vector/filebeat.yaml",
                 },
-                "sigma": {
-                    "taxonomy": "linux",
-                    "custom_mappings": {"User": "user_name"},
-                },
+                "views": [
+                    {
+                        "standard": "sigma",
+                        "taxonomy": "linux",
+                        "custom_mappings": {"User": "user_name"},
+                    }
+                ],
             }
         )
         assert s.source == "filebeat"
         assert s.display_name == "Elastic Filebeat"
         assert s.schema_config.meta_schema == "logs_beats_filebeat"
         assert s.transform.engine == "vector"
-        assert s.sigma.taxonomy == "linux"
+        assert s.view_for("sigma") is not None
+        assert s.view_for("sigma").taxonomy == "linux"
 
     def test_derived_properties(self):
         s = Source(
@@ -335,31 +356,72 @@ class TestSource:
         )
         assert s.display_name == "CrowdStrike EDR"
 
-    def test_mapping_standards_default_empty(self):
+    def test_views_default_empty(self):
         s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
-        assert s.mapping_standards == []
+        assert s.views == []
+        assert s.view_for("sigma") is None
 
-    def test_mapping_standards_set(self):
+    def test_state_default_active(self):
+        s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
+        assert s.state == "active"
+        assert s.enabled is True
+
+    def test_legacy_enabled_false_maps_to_disabled(self):
+        s = Source(source="syslog", enabled=False, match=SourceMatch(field="f", value="v"))
+        assert s.state == "disabled"
+        assert s.enabled is False
+
+    def test_state_wins_over_enabled(self):
+        s = Source.model_validate(
+            {
+                "source": "syslog",
+                "enabled": True,
+                "state": "dormant",
+                "match": {"field": "f", "value": "v"},
+            }
+        )
+        assert s.state == "dormant"
+        assert s.enabled is False  # compat accessor: enabled == (state == active)
+
+    def test_state_in_yaml_dict(self):
+        s = Source.model_validate(
+            {"source": "syslog", "state": "dormant", "match": {"field": "f", "value": "v"}}
+        )
+        d = s.to_yaml_dict()
+        assert d["state"] == "dormant"
+        assert "enabled" not in d
+        # round-trips
+        assert Source.model_validate(d).state == "dormant"
+
+    def test_enabled_serialized_on_api_dump(self):
+        s = Source.model_validate(
+            {"source": "syslog", "state": "dormant", "match": {"field": "f", "value": "v"}}
+        )
+        dumped = s.model_dump(mode="json")
+        assert dumped["state"] == "dormant"
+        assert dumped["enabled"] is False
+
+    def test_views_set(self):
         s = Source(
             source="syslog",
             match=SourceMatch(field="f", value="v"),
-            mapping_standards=["sigma", "ecs"],
+            views=[SourceView(standard="sigma"), SourceView(standard="ecs")],
         )
-        assert s.mapping_standards == ["sigma", "ecs"]
+        assert [v.standard for v in s.views] == ["sigma", "ecs"]
 
-    def test_mapping_standards_in_yaml_dict(self):
+    def test_views_in_yaml_dict(self):
         s = Source(
             source="syslog",
             match=SourceMatch(field="f", value="v"),
-            mapping_standards=["sigma"],
+            views=[SourceView(standard="sigma")],
         )
         d = s.to_yaml_dict()
-        assert d["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
+        assert d["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
 
-    def test_mapping_standards_excluded_when_empty(self):
+    def test_views_excluded_when_empty(self):
         s = Source(source="syslog", match=SourceMatch(field="f", value="v"))
         d = s.to_yaml_dict()
-        assert "mapping_standards" not in d["versions"]["1.0.0"]
+        assert "views" not in d["versions"]["1.0.0"]
 
 
 # ---------------------------------------------------------------------------
@@ -436,7 +498,7 @@ class TestSourceYaml:
         assert "transform" not in yaml_dict
         assert "deployed_version" not in yaml_dict
         assert "fetcher" not in yaml_dict
-        assert "sigma" not in yaml_dict
+        assert "views" not in yaml_dict
         assert "description" not in yaml_dict
 
     def test_round_trip_preserves_data(self):
@@ -463,16 +525,43 @@ class TestSourceYaml:
         assert s1.schema_config.engine == s2.schema_config.engine
 
 
+class TestMaterialisationAction:
+    def test_locked_rule(self):
+        from dfe_engine.source.models import materialisation_action
+
+        assert materialisation_action("active") == "create"
+        assert materialisation_action("dormant") == "leave"
+        assert materialisation_action("disabled") == "reclaim"
+
+
 class TestSourceVersion:
     def test_to_yaml_dict_omits_empty_containers(self):
         ver = SourceVersion(
             date_time="2026-06-10",
             match=SourceMatch(field="f", value="v"),
-            mapping_standards=[],
+            views=[],
         )
         out = ver.to_yaml_dict()
-        assert "mapping_standards" not in out
+        assert "views" not in out
         assert out["date_time"] == "2026-06-10"
+
+    def test_to_yaml_dict_prunes_empty_view_containers(self):
+        ver = SourceVersion(
+            date_time="2026-06-10",
+            match=SourceMatch(field="f", value="v"),
+            views=[SourceView(standard="sigma")],
+        )
+        out = ver.to_yaml_dict()
+        assert out["views"] == [{"standard": "sigma"}]
+
+    def test_view_for(self):
+        ver = SourceVersion(
+            date_time="2026-06-10",
+            match=SourceMatch(field="f", value="v"),
+            views=[SourceView(standard="sigma", taxonomy="windows")],
+        )
+        assert ver.view_for("sigma").taxonomy == "windows"
+        assert ver.view_for("ecs") is None
 
 
 class TestSourceWriteRequest:
@@ -866,15 +955,50 @@ class TestSourceWriteRequest:
         )
         assert draft_build_version_to_invalidate(existing, updated) == "1.0.0"
 
-    def test_source_version_bump_required_sigma(self):
+    def test_source_version_bump_required_views(self):
+        """LANDMINE 2 guard: any views change must bump a deployed version."""
         base = {
             "date_time": "2026-01-01",
             "match": {"field": "f", "value": "v"},
             "schema": {},
         }
         prev = SourceVersion.model_validate(base)
-        updated = SourceVersion.model_validate({**base, "sigma": {"taxonomy": "windows"}})
-        assert source_version_bump_required(prev, updated) is True
+
+        # Standard set change bumps.
+        added = SourceVersion.model_validate(
+            {**base, "views": [{"standard": "sigma", "taxonomy": "windows"}]}
+        )
+        assert source_version_bump_required(prev, added) is True
+
+        # Per-view custom_mappings change bumps.
+        remapped = SourceVersion.model_validate(
+            {
+                **base,
+                "views": [
+                    {
+                        "standard": "sigma",
+                        "taxonomy": "windows",
+                        "custom_mappings": {"User": "user_name"},
+                    }
+                ],
+            }
+        )
+        assert source_version_bump_required(added, remapped) is True
+
+        # Sigma logsource facet change bumps.
+        rebound = SourceVersion.model_validate(
+            {
+                **base,
+                "views": [{"standard": "sigma", "taxonomy": "windows", "service": "sysmon"}],
+            }
+        )
+        assert source_version_bump_required(added, rebound) is True
+
+        # Identical views do not bump.
+        same = SourceVersion.model_validate(
+            {**base, "views": [{"standard": "sigma", "taxonomy": "windows"}]}
+        )
+        assert source_version_bump_required(added, same) is False
 
 
 class TestSourceVersionGetResponse:
@@ -968,7 +1092,10 @@ class TestSourceVersioning:
                         "meta_schema_version": "1.0.0",
                         "engine": "MergeTree",
                     },
-                    "mapping_standards": ["ecs/no_transform", "sigma/no_transform"],
+                    "views": [
+                        {"standard": "ecs", "field_map": "ecs/no_transform"},
+                        {"standard": "sigma", "field_map": "sigma/no_transform"},
+                    ],
                     "fetcher": {
                         "source_type": "aws.cloudtrail",
                         "base_url": "https://{service}.{region}.amazonaws.com",
@@ -1005,21 +1132,19 @@ class TestSourceVersioning:
         assert s.schema_config.ttl_days == 45
 
     def test_legacy_flat_moves_versioned_keys_into_snapshot(self):
+        """Guards _VERSIONED_KEYS: flat bodies normalize into the version tree."""
         s = Source.model_validate(
             {
                 "source": "pull_src",
                 "match": {"field": "f", "value": "v"},
-                "field_mappings": ["ecs/custom"],
                 "fetcher": {"source_type": "m365"},
-                "sigma": {"taxonomy": "windows"},
-                "mapping_standards": ["sigma"],
+                "views": [{"standard": "sigma", "taxonomy": "windows"}],
             }
         )
         ver = s.versions["1.0.0"]
-        assert ver.field_mappings == ["ecs/custom"]
         assert ver.fetcher is not None
-        assert ver.sigma is not None
-        assert ver.mapping_standards == ["sigma"]
+        assert ver.view_for("sigma") is not None
+        assert ver.view_for("sigma").taxonomy == "windows"
 
     def test_versioned_input_defaults_current_from_deployed_only(self):
         ver_body = {

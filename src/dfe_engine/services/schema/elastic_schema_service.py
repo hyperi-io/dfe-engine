@@ -6,19 +6,37 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Elastic index template → DFE meta-schema ``SchemaColumn`` definitions.
-
-Converts Elasticsearch index template mappings to DFE meta-schema ``SchemaColumn`` definitions.
+"""Elastic index template -> DFE meta-schema ``SchemaColumn`` definitions.
 
 Walks ``mappings.properties`` (Beat-style ``template.mappings`` or top-level
 ``mappings``), emits ``SchemaColumn`` rows aligned with YAML conventions such as
 snake_case ``name``, ``@source:`` dotted ``expr``, primitive ``type``,
 and heuristic ``use_case`` / ``attribute``.
+
+PHYSICAL-ONLY. The importer emits the source's PHYSICAL columns (the raw ES field
+path -> snake_case name, kept as ``@source:``); it does NOT bake in a naming
+standard. ECS / Sigma / CIM naming is a read-time REMAP VIEW
+(``fieldmap.remap_view``, ``{source}_ecs`` etc.), so a beats source's ECS column
+names come from the ECS view over these physical columns, not from the importer.
+
+SUBTREE SELECTION. ``template_*_to_columns(..., roots=[...])`` imports only the
+named top-level subtrees (JSON root scalars + common + ECS + the module subtree
+like ``aws``) - the mechanism a per-MODULE beats source uses to import just its
+slice of the monolithic filebeat template.
+
+SIMPLE PRIMITIVES FIRST (by design, a PRIMARY meta-schema benefit). The importer maps
+to the meta-schema's SIMPLE primitives (``integer``, ``datetime``, ``float``), NOT the
+exact ClickHouse type (Int8 / UInt64 / DateTime64(9)). That simplification IS the point
+- a clean, portable starting schema. A user who wants to min-max to an exact CH type
+does so AFTER, per column, via a ``ch_override`` (e.g. ES ``unsigned_long`` -> ``UInt64``,
+``date_nanos`` -> ``DateTime64(9)``). So ``unsigned_long`` -> ``integer`` and
+``date_nanos`` -> ``datetime`` is correct-BY-DEFAULT, not a gap.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from typing import Any
 
 from dfe_engine.schema.models import SchemaColumn
@@ -179,22 +197,78 @@ def _extract_mappings_properties(doc: dict[str, Any]) -> dict[str, Any]:
     return props
 
 
+def _fields_to_properties(entries: Any) -> dict[str, Any]:
+    """Convert a beats ``fields.yml`` field list into the ``mappings.properties`` shape
+    the ES-template importer already walks - so a beats schema re-uses the SAME
+    column-mapping code path (no second importer).
+
+    A ``group`` (or an entry with nested ``fields`` and no leaf ``type``) becomes a
+    ``properties`` container; an ``alias`` keeps ``type: alias`` (skipped downstream,
+    exactly as in an ES template); a leaf keeps its ES ``type``. A dotted ``name``
+    (e.g. ``body_sent.bytes``) passes through as the property key and splits into the
+    column path downstream, so both the nested-group and flat-dotted beats shapes work.
+    """
+    props: dict[str, Any] = {}
+    if not isinstance(entries, list):
+        return props
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        # A `key`-only entry is beats MODULE metadata (key/title/description + fields),
+        # NOT a field - flatten its fields at this level (the module namespace is the
+        # inner `name: <module>` group, not the `key` itself).
+        if entry.get("key") and not entry.get("name"):
+            props.update(_fields_to_properties(entry.get("fields") or []))
+            continue
+        name = entry.get("name")
+        if not name:
+            continue
+        etype = entry.get("type")
+        sub = entry.get("fields")
+        if etype == "group" or (sub is not None and etype is None):
+            props[str(name)] = {"properties": _fields_to_properties(sub or [])}
+        elif etype == "alias":
+            props[str(name)] = {"type": "alias"}
+        elif sub is not None:
+            props[str(name)] = {"properties": _fields_to_properties(sub)}
+        else:
+            props[str(name)] = {"type": etype or "keyword"}
+    return props
+
+
 class ElasticSchemaService:
     """Convert Elasticsearch index template JSON to meta-schema columns."""
 
     @staticmethod
-    def template_dict_to_columns(doc: dict[str, Any]) -> list[SchemaColumn]:
+    def template_dict_to_columns(
+        doc: dict[str, Any], roots: Iterable[str] | None = None
+    ) -> list[SchemaColumn]:
+        """Convert an Elastic template dict to physical columns.
+
+        ``roots`` (subtree selection): when given, only the named top-level
+        ``mappings.properties`` entries are imported - the JSON root scalars you
+        want (``@timestamp``, ``message``, ``tags``) PLUS the subtrees you want
+        (``host``, ``agent``, ``event``, ``ecs``, and the module-specific like
+        ``aws``). This is how a per-MODULE beats source (``filebeat_aws``) imports
+        just common + ECS + its own subtree instead of the whole monolithic
+        filebeat template. ``None`` imports everything (back-compat).
+        """
         props = _extract_mappings_properties(doc)
+        wanted = {r for r in roots} if roots is not None else None
         columns: list[SchemaColumn] = []
         for field_name, field_mapping in props.items():
+            if wanted is not None and field_name not in wanted:
+                continue
             _walk_mapping(field_name, field_mapping, columns)
         columns.sort(key=lambda c: c.name)
         return columns
 
     @staticmethod
-    def template_json_to_columns(raw: bytes | str | dict[str, Any]) -> list[SchemaColumn]:
+    def template_json_to_columns(
+        raw: bytes | str | dict[str, Any], roots: Iterable[str] | None = None
+    ) -> list[SchemaColumn]:
         if isinstance(raw, dict):
-            return ElasticSchemaService.template_dict_to_columns(raw)
+            return ElasticSchemaService.template_dict_to_columns(raw, roots)
         if isinstance(raw, bytes):
             text = raw.decode("utf-8")
         else:
@@ -205,4 +279,26 @@ class ElasticSchemaService:
             raise ElasticSchemaConversionError(f"Invalid JSON: {exc}") from exc
         if not isinstance(doc, dict):
             raise ElasticSchemaConversionError("JSON root must be an object")
-        return ElasticSchemaService.template_dict_to_columns(doc)
+        return ElasticSchemaService.template_dict_to_columns(doc, roots)
+
+    @staticmethod
+    def beats_fields_to_columns(
+        fields: Any, roots: Iterable[str] | None = None
+    ) -> list[SchemaColumn]:
+        """Convert a beats ``fields.yml`` (parsed YAML - a list of field groups) to
+        physical columns, RE-USING the ES-template importer.
+
+        Same `_map_es_type` + physical naming + subtree-selection as an index-template
+        import - just fed from the beats field format instead of a generated template.
+        Re-running it over a module's ``fields.yml`` refreshes a source's columns so
+        incoming data keeps landing as the format evolves. filebeat is imported
+        PER-MODULE (one call per module `fields.yml`); other beats whole.
+        """
+        props = _fields_to_properties(fields)
+        if not props:
+            raise ElasticSchemaConversionError(
+                "fields.yml produced no properties (expected a list of field groups)"
+            )
+        return ElasticSchemaService.template_dict_to_columns(
+            {"mappings": {"properties": props}}, roots
+        )

@@ -19,8 +19,17 @@ from dfe_engine.gitcrud import (
 
 
 def test_default_registry_classes_are_the_rbac_prefixes():
-    # deploy-repo scope: helmvars + governance (datamodel/hunts arrive with multi-repo)
-    assert default_registry().classes() == ["governance", "helmvars"]
+    # deploy-repo scope: helmvars + governance + sources (the first datamodel
+    # class to land; the rest arrive with multi-repo)
+    assert default_registry().classes() == ["governance", "helmvars", "sources"]
+
+
+def test_sources_class_registered():
+    cls = default_registry().get("sources")
+    assert cls.directory == "config/sources"
+    assert cls.rbac_prefix == "sources"
+    assert cls.versioned is True
+    assert cls.action("write") == "sources:write"
 
 
 def test_default_registry_governance_types_share_the_class_prefix():

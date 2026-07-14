@@ -19,7 +19,7 @@ from pydantic import BaseModel, Field, field_validator
 
 _NAME_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
 
-KNOWN_STANDARDS = frozenset({"sigma", "ecs", "cim"})
+KNOWN_STANDARDS = frozenset({"sigma", "ecs", "cim", "ocsf"})
 
 DEFAULT_MAP_NAME = "_default"
 

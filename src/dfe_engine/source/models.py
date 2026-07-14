@@ -1,8 +1,8 @@
 """Source model — Pydantic models for the Source top-level data entity.
 
 A Source represents a data stream entering the DFE platform (e.g. filebeat,
-syslog, crowdstrike_edr). It contains identity, schema, and optional
-fetcher/transform/rules/sigma configuration.
+syslog, crowdstrike_edr). It contains identity, schema, naming-standard views,
+and optional fetcher/transform configuration.
 
 See docs/data-plane/source.md for the full specification.
 
@@ -44,6 +44,30 @@ SourceMatchOperator = Literal[
     "starts_with",
     "ends_with",
 ]
+
+# Tri-state source lifecycle:
+# - active   - schema materialised + receiver redirect + transform all ON.
+# - dormant  - schema RETAINED (pre-positioned), redirect + transform OFF.
+# - disabled - all off, table reclaimed (== the old enabled=False).
+SourceState = Literal["active", "dormant", "disabled"]
+
+
+def materialisation_action(state: str) -> Literal["create", "leave", "reclaim"]:
+    """Lazy materialisation rule (locked): CREATE on active / LEAVE on dormant /
+    guarded RECLAIM on disabled.
+
+    Creates are idempotent (no has-been-materialised bit), dormant is a no-op
+    (never drop a dormant source's table - the pre-2.2 bug), and a drop happens
+    only on disabled behind the caller's guard. Gitops-declarative: the action
+    derives from the declared state alone.
+    """
+    actions: dict[str, Literal["create", "leave", "reclaim"]] = {
+        "active": "create",
+        "dormant": "leave",
+        "disabled": "reclaim",
+    }
+    return actions[state]
+
 
 # Single permitted-engine registry, shared by every SourceSchema validation so the
 # allow-list cannot drift from the DDL path. Loaded once (the YAML is packaged).
@@ -289,23 +313,53 @@ class SourceFetcher(BaseModel):
     poll_interval_secs: int = Field(default=300, description="Polling interval in seconds")
 
 
-class SourceSigma(BaseModel):
-    """Sigma field mapping configuration for this source."""
+class SourceView(BaseModel):
+    """A naming-standard view this source exposes (sigma, ecs, cim, ocsf).
 
-    taxonomy: str | None = Field(default=None, description="Built-in mapping set (e.g. 'windows')")
-    # Optional logsource narrowing. When set, propagation only binds a rule to this
-    # source if the rule's category/service also match; None matches ANY (so a
-    # bare-taxonomy source keeps the product-only behaviour). See P2.17.
+    Collapses the former ``mapping_standards`` + ``sigma`` + ``field_mappings``
+    trio into one generic entry per standard. Inline ``custom_mappings`` WIN
+    over the registry ``field_map`` when both are present.
+    """
+
+    standard: str = Field(..., description="Naming standard (sigma, ecs, cim, ocsf)")
+    field_map: str | None = Field(
+        default=None,
+        description="FieldMap registry path for this view (optional)",
+    )
+    custom_mappings: dict[str, str] = Field(
+        default_factory=dict,
+        description=(
+            "Inline per-source field overrides (standard_field: column_name); "
+            "wins over the registry field_map"
+        ),
+    )
+    # Sigma-only logsource binding for rule->source propagation. When set,
+    # propagation only binds a rule to this source if the rule's category/service
+    # also match; None matches ANY (so a bare-taxonomy source keeps the
+    # product-only behaviour). Ignored for non-sigma standards. See P2.17.
+    taxonomy: str | None = Field(
+        default=None, description="Sigma logsource product this source serves (sigma views only)"
+    )
     category: str | None = Field(
         default=None, description="Sigma logsource category this source serves (None = any)"
     )
     service: str | None = Field(
         default=None, description="Sigma logsource service this source serves (None = any)"
     )
-    custom_mappings: dict[str, str] = Field(
-        default_factory=dict,
-        description="Per-source field overrides (SigmaField: column_name)",
-    )
+
+    @field_validator("standard")
+    @classmethod
+    def _validate_standard(cls, v: str) -> str:
+        # Lazy import: the fieldmap package __init__ pulls schema_ddl which
+        # imports this module (circular at import time, fine at validation time).
+        from dfe_engine.fieldmap.models import KNOWN_STANDARDS
+
+        normalized = v.lower()
+        if normalized not in KNOWN_STANDARDS:
+            raise ValueError(
+                f"Unknown view standard {v!r}. Valid: {', '.join(sorted(KNOWN_STANDARDS))}"
+            )
+        return normalized
 
 
 _DEFAULT_SOURCE_VERSION = "1.0.0"
@@ -314,9 +368,7 @@ _VERSIONED_KEYS = (
     "header",
     "schema",
     "schema_config",
-    "mapping_standards",
-    "sigma",
-    "field_mappings",
+    "views",
     "fetcher",
     "match",
     "transform",
@@ -338,14 +390,9 @@ class SourceVersion(BaseModel):
         description="Schema configuration (None when the version did not author one)",
         alias="schema",
     )
-    mapping_standards: list[str] = Field(
+    views: list[SourceView] = Field(
         default_factory=list,
-        description="Standards to generate mapping views for (e.g. sigma, ecs, cim)",
-    )
-    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
-    field_mappings: list[str] | None = Field(
-        default=None,
-        description="Field map registry paths for this version (optional)",
+        description="Naming-standard views this version exposes (sigma, ecs, cim, ocsf)",
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
     match: SourceMatch = Field(..., description="Receiver match rule (required)")
@@ -357,6 +404,13 @@ class SourceVersion(BaseModel):
         """Header for runtime/DDL resolution, defaulting the profile when unauthored."""
         return self.header or SourceHeader()
 
+    def view_for(self, standard: str) -> SourceView | None:
+        """This version's view entry for *standard*, or None when not declared."""
+        for view in self.views:
+            if view.standard == standard:
+                return view
+        return None
+
     def effective_schema(self) -> SourceSchema:
         """Schema config for runtime/DDL resolution, defaulting to empty when unauthored."""
         return self.schema_config or SourceSchema()
@@ -364,6 +418,11 @@ class SourceVersion(BaseModel):
     def to_yaml_dict(self) -> dict[str, Any]:
         """Serialize for YAML persistence under ``versions.<id>``."""
         raw = self.model_dump(mode="json", by_alias=True, exclude_none=True)
+        # Prune empty per-view containers (e.g. custom_mappings: {}) for clean YAML.
+        for view in raw.get("views") or []:
+            for key in list(view.keys()):
+                if isinstance(view[key], (dict, list)) and not view[key]:
+                    del view[key]
         for key in list(raw.keys()):
             if isinstance(raw[key], (dict, list)) and not raw[key]:
                 del raw[key]
@@ -420,7 +479,15 @@ class SourceWriteRequest(BaseModel):
     )
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
-    enabled: bool = Field(default=True, description="Whether the source is active")
+    enabled: bool = Field(
+        default=True,
+        description="Compat boolean lifecycle (True -> active, False -> disabled); "
+        "``state`` wins when both are sent",
+    )
+    state: SourceState | None = Field(
+        default=None,
+        description="Tri-state lifecycle (active | dormant | disabled); overrides ``enabled``",
+    )
     match: SourceMatch = Field(..., description="Receiver match rule (required)")
     header: SourceHeader | None = Field(
         default=None,
@@ -435,14 +502,9 @@ class SourceWriteRequest(BaseModel):
         default=None, description="Transform stage (optional, top-level)"
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
-    sigma: SourceSigma | None = Field(default=None, description="Sigma field mappings (optional)")
-    mapping_standards: list[str] | None = Field(
+    views: list[SourceView] | None = Field(
         default=None,
-        description="Standards to generate mapping views for",
-    )
-    field_mappings: list[str] | None = Field(
-        default=None,
-        description="Field map registry paths for this revision",
+        description="Naming-standard views for this revision (sigma, ecs, cim, ocsf)",
     )
 
     @model_validator(mode="before")
@@ -455,15 +517,19 @@ class SourceWriteRequest(BaseModel):
                 raise ValueError(f"Fields not allowed on write: {names}")
         return data
 
+    def effective_state(self) -> SourceState:
+        """The tri-state this write requests (``state`` wins over ``enabled``)."""
+        if self.state is not None:
+            return self.state
+        return "active" if self.enabled else "disabled"
+
     def to_version_snapshot(self) -> SourceVersion:
         """Build a new immutable version entry from this write payload."""
         return SourceVersion(
             date_time=date.today().isoformat(),
             header=self.header,
             schema_config=self.schema_config or SourceSchema(),
-            mapping_standards=self.mapping_standards or [],
-            sigma=self.sigma,
-            field_mappings=self.field_mappings,
+            views=self.views or [],
             fetcher=self.fetcher,
             match=self.match,
             transform=self.transform,
@@ -478,7 +544,7 @@ def source_from_write(write: SourceWriteRequest, *, source_name: str) -> Source:
         "source": source_name,
         "display_name": write.display_name,
         "description": write.description,
-        "enabled": write.enabled,
+        "state": write.effective_state(),
         "deployed_version": None,
         "current": version_id,
         "versions": {version_id: snapshot.model_dump(mode="json", by_alias=True)},
@@ -510,11 +576,11 @@ def source_version_bump_required(previous: SourceVersion, updated: SourceVersion
     new_schema = updated.effective_schema()
     if _schema_pin_for_bump(prev_schema) != _schema_pin_for_bump(new_schema):
         return True
-    if (previous.field_mappings or []) != (updated.field_mappings or []):
-        return True
-    prev_sigma = previous.sigma.model_dump(mode="json") if previous.sigma else None
-    new_sigma = updated.sigma.model_dump(mode="json") if updated.sigma else None
-    if prev_sigma != new_sigma:
+    # Any view change bumps: the standard set, a field_map pin, per-view
+    # custom_mappings, or the sigma view's taxonomy/category/service.
+    prev_views = [v.model_dump(mode="json") for v in previous.views]
+    new_views = [v.model_dump(mode="json") for v in updated.views]
+    if prev_views != new_views:
         return True
     prev_transform = previous.transform.model_dump(mode="json") if previous.transform else None
     new_transform = updated.transform.model_dump(mode="json") if updated.transform else None
@@ -583,7 +649,7 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         if write.display_name is not None
         else existing.display_name,
         "description": write.description if write.description is not None else existing.description,
-        "enabled": write.enabled,
+        "state": write.effective_state(),
         "deployed_version": existing.deployed_version,
         "current": target_current,
         "versions": {
@@ -612,7 +678,11 @@ class Source(BaseModel):
     source: str = Field(..., description="The _source label — immutable identifier")
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
-    enabled: bool = Field(default=True, description="Whether the source is active")
+    state: SourceState = Field(
+        default="active",
+        description="Lifecycle state: active (all on), dormant (schema pre-positioned, "
+        "routing/transform off), disabled (all off, table reclaimed)",
+    )
     deployed_version: str | None = Field(
         default=None,
         description="Version deployed to ClickHouse / runtime (null until first deploy)",
@@ -634,6 +704,13 @@ class Source(BaseModel):
             return data
 
         data = dict(data)
+        # Legacy boolean lifecycle: map `enabled` onto the tri-state when the
+        # input does not declare `state` (enabled==True -> active, False ->
+        # disabled). `state` wins when both are present.
+        enabled_raw = data.pop("enabled", None)
+        if "state" not in data and enabled_raw is not None:
+            data["state"] = "active" if enabled_raw else "disabled"
+
         if data.get("versions"):
             top_match = data.pop("match", None)
             top_transform = data.pop("transform", None)
@@ -704,6 +781,15 @@ class Source(BaseModel):
             )
         return self
 
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def enabled(self) -> bool:
+        """Compat accessor over the tri-state: enabled == (state == active).
+
+        Serialized on API responses so boolean consumers keep working.
+        """
+        return self.state == "active"
+
     def runtime_version_id(self) -> str:
         """Version used for runtime accessors when ``deployed_version`` is unset."""
         return self.deployed_version or self.current
@@ -727,14 +813,13 @@ class Source(BaseModel):
         return self.version().effective_schema()
 
     @property
-    def mapping_standards(self) -> list[str]:
-        """Deployed version mapping standards (legacy accessor)."""
-        return self.version().mapping_standards
+    def views(self) -> list[SourceView]:
+        """Deployed version naming-standard views (legacy accessor)."""
+        return self.version().views
 
-    @property
-    def sigma(self) -> SourceSigma | None:
-        """Deployed version sigma config (legacy accessor)."""
-        return self.version().sigma
+    def view_for(self, standard: str) -> SourceView | None:
+        """Deployed version's view entry for *standard*, or None when not declared."""
+        return self.version().view_for(standard)
 
     @property
     def fetcher(self) -> SourceFetcher | None:
@@ -780,7 +865,7 @@ class Source(BaseModel):
         data: dict[str, Any] = {
             "source": self.source,
             "display_name": self.display_name,
-            "enabled": self.enabled,
+            "state": self.state,
             "current": self.current,
             "versions": {vid: ver.to_yaml_dict() for vid, ver in sorted(self.versions.items())},
         }
@@ -802,7 +887,8 @@ class SourceVersionGetResponse(BaseModel):
     source: str = Field(..., description="Source name (_source label)")
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
-    enabled: bool = Field(default=True, description="Whether the source is active")
+    state: SourceState = Field(default="active", description="Lifecycle state")
+    enabled: bool = Field(default=True, description="Compat accessor (state == active)")
     current: str = Field(..., description="Working version id")
     deployed_version: str | None = Field(
         default=None,
@@ -831,7 +917,8 @@ class SourceSummaryObject(BaseModel):
     name: str = Field(description="Source name (_source label)")
     display_name: str | None = Field(default=None, description="Human-readable display name")
     description: str | None = Field(default=None, description="Source description")
-    enabled: bool = Field(default=True, description="Whether the source is active")
+    state: SourceState = Field(default="active", description="Lifecycle state")
+    enabled: bool = Field(default=True, description="Compat accessor (state == active)")
     current: str = Field(description="Working version id")
     deployed_version: str | None = Field(
         default=None,
@@ -847,9 +934,9 @@ class SourceSummaryObject(BaseModel):
         default=False, description="Whether a transform stage is configured"
     )
     has_fetcher: bool = Field(default=False, description="Whether a fetcher is configured")
-    mapping_standards: list[str] = Field(
+    views: list[str] = Field(
         default_factory=list,
-        description="Mapping standards on the deployed version",
+        description="Naming-standard views on the deployed version (standard names)",
     )
 
 

@@ -6,7 +6,7 @@ import pytest
 
 from dfe_engine.fieldmap.models import FieldMap
 from dfe_engine.fieldmap.registry import FieldMapRegistry
-from dfe_engine.source.models import Source, SourceSigma
+from dfe_engine.source.models import Source, SourceView
 from dfe_engine.source.registry import SourceNotFoundError
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -18,7 +18,7 @@ from dfe_engine.source.type_registry import TypeRegistry
 def _make_source(
     name: str = "windows_audit",
     *,
-    sigma: SourceSigma | None = None,
+    sigma: SourceView | None = None,
     enabled: bool = True,
     engine: str = "MergeTree",
     meta_schema: str | None = None,
@@ -35,16 +35,17 @@ def _make_source(
     if meta_schema:
         data["schema"]["meta_schema"] = meta_schema
     if sigma is not None:
-        data["sigma"] = sigma.model_dump(mode="json")
+        data["views"] = [sigma.model_dump(mode="json")]
     return Source.model_validate(data)
 
 
 def _make_sigma(
     taxonomy: str | None = "windows",
     mappings: dict[str, str] | None = None,
-) -> SourceSigma:
-    """Create a SourceSigma config."""
-    return SourceSigma(
+) -> SourceView:
+    """Create a sigma SourceView entry."""
+    return SourceView(
+        standard="sigma",
         taxonomy=taxonomy,
         custom_mappings=mappings or {},
     )
@@ -302,13 +303,13 @@ class TestGetSourcesForLogsource:
         # the sysmon source, not the audit source that declares a different service.
         audit = _make_source(
             "windows_audit",
-            sigma=SourceSigma(taxonomy="windows", service="audit"),
+            sigma=SourceView(standard="sigma", taxonomy="windows", service="audit"),
         )
         sysmon = _make_source(
             "windows_sysmon",
-            sigma=SourceSigma(taxonomy="windows", service="sysmon"),
+            sigma=SourceView(standard="sigma", taxonomy="windows", service="sysmon"),
         )
-        bare = _make_source("windows_any", sigma=SourceSigma(taxonomy="windows"))
+        bare = _make_source("windows_any", sigma=SourceView(standard="sigma", taxonomy="windows"))
         from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
         m = SigmaSourceMapper(FakeSourceRegistry([audit, sysmon, bare]), registry=type_registry)
@@ -354,45 +355,50 @@ def mapper_with_registry(source_registry, type_registry, fm_registry):
 
 
 class TestFieldMapRegistryIntegration:
-    def test_registry_mappings_preferred_over_legacy(self, mapper_with_registry, fm_registry):
-        """FieldMapRegistry mappings take priority over Source.sigma.custom_mappings."""
+    def test_inline_mappings_win_over_registry(self, mapper_with_registry, fm_registry):
+        """LANDMINE 5 guard: inline custom_mappings WIN per-key over the registry (locked)."""
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
-                mappings={"EventID": "registry_event_id"},
+                mappings={"EventID": "registry_event_id", "RegistryOnly": "registry_col"},
             )
         )
         mappings = mapper_with_registry.get_field_mappings("windows_audit")
-        # Registry mapping should win over Source.sigma.custom_mappings
-        assert mappings["EventID"] == "registry_event_id"
+        # The source's inline custom_mappings override the registry per-key...
+        assert mappings["EventID"] == "event_id"
+        # ...while registry-only keys survive in the merge.
+        assert mappings["RegistryOnly"] == "registry_col"
 
-    def test_falls_back_to_legacy_when_no_registry_maps(self, mapper_with_registry):
-        """When registry has no sigma maps, falls back to Source.sigma.custom_mappings."""
+    def test_inline_only_when_no_registry_maps(self, mapper_with_registry):
+        """When the registry has no sigma maps, the inline custom_mappings stand alone."""
         mappings = mapper_with_registry.get_field_mappings("windows_audit")
-        # No maps in registry → falls back to Source.sigma.custom_mappings
         assert mappings["EventID"] == "event_id"
 
     def test_source_specific_override_from_registry(self, mapper_with_registry, fm_registry):
-        """Source-specific registry map overrides default registry map."""
+        """Source-specific registry map overrides default registry map.
+
+        Uses keys the source's inline custom_mappings do NOT declare, so the
+        two-tier registry resolution is what decides them.
+        """
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
-                mappings={"EventID": "default_eid", "User": "user_name"},
+                mappings={"User": "default_user", "Extra": "extra_col"},
             )
         )
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
                 source="windows_audit",
-                mappings={"EventID": "win_event_id"},
+                mappings={"User": "win_user"},
             )
         )
         mappings = mapper_with_registry.get_field_mappings("windows_audit")
-        assert mappings["EventID"] == "win_event_id"
-        assert mappings["User"] == "user_name"
+        assert mappings["User"] == "win_user"
+        assert mappings["Extra"] == "extra_col"
 
-    def test_generate_view_uses_registry(self, mapper_with_registry, fm_registry):
-        """generate_sigma_view uses registry mappings when available."""
+    def test_generate_view_merges_registry_and_inline(self, mapper_with_registry, fm_registry):
+        """generate_sigma_view renders the merged registry + inline mappings."""
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
@@ -402,6 +408,7 @@ class TestFieldMapRegistryIntegration:
         ddl = mapper_with_registry.generate_sigma_view("windows_audit")
         assert ddl is not None
         assert "`registry_col` AS `RegistryField`" in ddl
+        assert "`event_id` AS `EventID`" in ddl  # inline mapping in the same view
 
     def test_generate_all_views_uses_registry(self, mapper_with_registry, fm_registry):
         """generate_all_sigma_views picks up registry mappings for all sources."""

@@ -97,6 +97,25 @@ def test_mappings_properties_missing_raises() -> None:
         ElasticSchemaService.template_dict_to_columns({"mappings": {"properties": []}})
 
 
+def test_subtree_selection_imports_only_named_roots() -> None:
+    """roots=[...] imports just the JSON-root scalars + subtrees you name (per-module
+    beats import: common + ECS + the module subtree, not the whole template)."""
+    # Only the '@timestamp' root scalar + the 'event' subtree - drop container + message.
+    cols = ElasticSchemaService.template_dict_to_columns(
+        MINIMAL_BEAT_TEMPLATE, roots=["@timestamp", "event"]
+    )
+    names = {c.name for c in cols}
+    assert names == {"timestamp", "event_dataset"}
+    assert "container_name" not in names
+    assert "message" not in names
+
+
+def test_subtree_selection_none_imports_everything() -> None:
+    """roots=None is back-compat: import the whole template."""
+    full = {c.name for c in ElasticSchemaService.template_dict_to_columns(MINIMAL_BEAT_TEMPLATE)}
+    assert {"container_name", "timestamp", "message", "event_dataset"} <= full
+
+
 def test_document_root_not_object_raises() -> None:
     with pytest.raises(ElasticSchemaConversionError, match="Document root"):
         ElasticSchemaService.template_dict_to_columns([])  # type: ignore[arg-type]

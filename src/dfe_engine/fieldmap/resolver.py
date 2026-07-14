@@ -17,6 +17,8 @@ Usage:
 
 from __future__ import annotations
 
+from typing import Any
+
 from dfe_engine.fieldmap.models import FieldMap
 
 
@@ -45,6 +47,36 @@ def resolve_field_map(
         merged.update(source_map.mappings)
 
     return merged
+
+
+def resolve_registry_mappings(
+    registry: Any,
+    standard: str,
+    source_name: str | None = None,
+) -> dict[str, str]:
+    """Resolve the two-tier registry mappings for a standard + source.
+
+    Convenience over :func:`resolve_field_map`: loads the default and
+    source-specific maps from a FieldMapRegistry (missing maps are fine)
+    and merges them. Returns an empty dict when the standard has no maps.
+    """
+    from dfe_engine.fieldmap.registry import FieldMapNotFoundError
+
+    default_map: FieldMap | None = None
+    source_map: FieldMap | None = None
+
+    try:
+        default_map = registry.get_map(standard)
+    except FieldMapNotFoundError:
+        pass
+
+    if source_name:
+        try:
+            source_map = registry.get_map(standard, source_name)
+        except FieldMapNotFoundError:
+            pass
+
+    return resolve_field_map(default_map, source_map)
 
 
 def resolve_field(

@@ -1362,7 +1362,7 @@ def _source_write_after_promote(
         }
     )
     return SourceWriteRequest(
-        enabled=source.enabled,
+        state=source.state,
         display_name=source.display_name,
         description=source.description,
         match=snap.match,
@@ -1370,9 +1370,7 @@ def _source_write_after_promote(
         schema_config=schema_cfg,
         transform=snap.transform,
         fetcher=snap.fetcher,
-        sigma=snap.sigma,
-        field_mappings=snap.field_mappings,
-        mapping_standards=snap.mapping_standards or None,
+        views=snap.views or None,
     )
 
 

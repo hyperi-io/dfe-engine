@@ -162,7 +162,7 @@ def test_build_ddl_rejects_backtick_in_alias():
         source_name="win",
         columns=[SigmaViewColumn(sigma_field="a`b", source_column="x")],
     )
-    with pytest.raises(SigmaViewError, match="sigma_field"):
+    with pytest.raises(SigmaViewError, match="field"):
         build_sigma_view_ddl(definition, db="default")
 
 
@@ -267,7 +267,7 @@ def _source(name: str, mappings: dict[str, str]) -> Source:
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": name},
             "schema": {"engine": "MergeTree"},
-            "sigma": {"taxonomy": "windows", "custom_mappings": mappings},
+            "views": [{"standard": "sigma", "taxonomy": "windows", "custom_mappings": mappings}],
         }
     )
 

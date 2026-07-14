@@ -41,13 +41,13 @@ class TestBuiltinAlertsSource:
         assert "1.0.0" in data["versions"]
         assert "header" not in data
         assert "schema" not in data
-        assert data["versions"]["1.0.0"]["mapping_standards"] == ["sigma"]
+        assert data["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
 
-    def test_has_sigma_mapping_standard(self):
-        """dfe_alerts declares sigma mapping standard."""
+    def test_has_sigma_view(self):
+        """dfe_alerts declares a sigma naming-standard view."""
         data = _load_builtin("dfe_alerts")
         source = Source.model_validate(data)
-        assert "sigma" in source.mapping_standards
+        assert source.view_for("sigma") is not None
 
     def test_references_detection_columns(self):
         """dfe_alerts references the hunt-results/detection.yaml additional fields."""

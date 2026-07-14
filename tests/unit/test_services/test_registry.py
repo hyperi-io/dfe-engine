@@ -36,7 +36,7 @@ def receiver_yaml():
         "  brokers:\n"
         "    - localhost:9092\n"
         "routing:\n"
-        "  default_topic: unmatched\n"
+        "  default_source: default\n"
     )
 
 
