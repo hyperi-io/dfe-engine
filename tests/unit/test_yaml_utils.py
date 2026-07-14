@@ -29,7 +29,7 @@ class TestConcurrentYaml:
                     # Varying-length payloads make a truncation-tail race
                     # (a stale second document) more likely if writes are not atomic.
                     yaml_dump({"members": [f"u{worker}-{j}" for j in range(i % 12)], "n": i}, path)
-            except BaseException as exc:  # noqa: BLE001 - capture for the assert
+            except BaseException as exc:
                 errors.append(exc)
             finally:
                 stop.set()
@@ -42,7 +42,7 @@ class TestConcurrentYaml:
                     # yield a non-dict. Either is a failure.
                     assert isinstance(data, dict)
                     assert "n" in data
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:
                 errors.append(exc)
 
         threads = [threading.Thread(target=writer, args=(w,)) for w in range(4)]
@@ -67,7 +67,7 @@ class TestConcurrentYaml:
                     assert out.count("worker:") == 1
                     assert f"worker: {worker}" in out
                     results.append(out)
-            except BaseException as exc:  # noqa: BLE001
+            except BaseException as exc:
                 errors.append(exc)
 
         threads = [threading.Thread(target=dump, args=(w,)) for w in range(6)]
