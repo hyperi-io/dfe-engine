@@ -31,8 +31,8 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.settings import get_settings
 from dfe_engine.source.deployment import (
+    SchemaDeployResult,
     SourceBuildArtifact,
-    SourceDeployArtifact,
     SourceDeploymentStore,
     SourcePlanArtifact,
     deploy_statements_for_build,
@@ -188,18 +188,6 @@ class SourcePlanResponse(BaseModel):
     )
 
 
-class SourceDeployResponse(BaseModel):
-    """Result of deploying a source version to ClickHouse."""
-
-    source_name: str
-    version: str
-    success: bool
-    deployed_version: str | None = None
-    deployed_at: str
-    ddl_executed: list[str] = Field(default_factory=list)
-    ddl_failed: list[dict[str, str]] = Field(default_factory=list)
-
-
 class SourceVersionDetail(SourceVersion):
     """Source version snapshot plus persisted build/deploy payloads."""
 
@@ -207,7 +195,7 @@ class SourceVersionDetail(SourceVersion):
         default=None,
         description="Last schema build for this version (source-builds)",
     )
-    source_deployment: SourceDeployResponse | None = Field(
+    source_deployment: SchemaDeployResult | None = Field(
         default=None,
         description="Last deploy run for this version (source-deploys)",
     )
@@ -229,19 +217,6 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
         ...,
         description="Configuration snapshot for ``selected`` plus pipeline artifacts",
     )
-
-
-class SchemaDeployResult(BaseModel):
-    """Plan / deploy result for a source's schema."""
-
-    source_name: str
-    version: str
-    dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
-    applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
-    create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
-    validation_errors: list[str] = Field(default_factory=list)
-    statements_applied: int = 0
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -732,12 +707,10 @@ async def deploy_source_schema(
         ch_client=ch,
     )
     applied = 0
-    executed_stmts: list[str] = []
     try:
         ch.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
         for stmt in statements:
             ch.execute(stmt)
-            executed_stmts.append(stmt)
             applied += 1
     except Exception as exc:
         raise HTTPException(
@@ -749,14 +722,17 @@ async def deploy_source_schema(
         ) from exc
 
     store = SourceDeploymentStore.from_settings(settings)
-    deploy_artifact = SourceDeployArtifact(
+    deploy_result = SchemaDeployResult(
         source_name=name,
         version=version_id,
-        deployed_at=datetime.now(tz=UTC).isoformat(),
-        success=True,
-        ddl_executed=executed_stmts,
+        dry_run=False,
+        applied=True,
+        create_table=result.create_table_ddl,
+        views=views,
+        validation_errors=[],
+        statements_applied=applied,
     )
-    store.save_deploy(deploy_artifact, source)
+    store.save_deploy(deploy_result, source)
     try:
         registry.set_deployed_version(
             name,
@@ -768,16 +744,7 @@ async def deploy_source_schema(
         _raise_save_validation_http(exc)
 
     audit_resource_change(user.user_id, "schema", name, "deployed")
-    return SchemaDeployResult(
-        source_name=name,
-        version=version_id,
-        dry_run=False,
-        applied=True,
-        create_table=result.create_table_ddl,
-        views=views,
-        validation_errors=[],
-        statements_applied=applied,
-    )
+    return deploy_result
 
 
 @router.get(
@@ -986,7 +953,6 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 
 
 def _utc_now_iso() -> str:
-    from datetime import UTC, datetime
 
     return datetime.now(tz=UTC).isoformat()
 
@@ -1036,7 +1002,7 @@ def _version_detail_from_snapshot(
     return SourceVersionDetail(
         **snap.model_dump(mode="json"),
         source_build=_build_to_response(build) if build else None,
-        source_deployment=_deploy_to_response(deploy) if deploy else None,
+        source_deployment=deploy,
     )
 
 
@@ -1059,18 +1025,6 @@ def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
         validation_errors=list(artifact.validation_errors),
         built_at=artifact.built_at,
         column_count=artifact.column_count,
-    )
-
-
-def _deploy_to_response(artifact: SourceDeployArtifact) -> SourceDeployResponse:
-    return SourceDeployResponse(
-        source_name=artifact.source_name,
-        version=artifact.version,
-        success=artifact.success,
-        deployed_version=artifact.deployed_version,
-        deployed_at=artifact.deployed_at,
-        ddl_executed=list(artifact.ddl_executed),
-        ddl_failed=list(artifact.ddl_failed),
     )
 
 
