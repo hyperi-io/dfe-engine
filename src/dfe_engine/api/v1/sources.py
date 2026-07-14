@@ -17,12 +17,13 @@ POST   /api/v1/sources/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
@@ -30,8 +31,8 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.git_identity import git_author
 from dfe_engine.settings import get_settings
 from dfe_engine.source.deployment import (
+    SchemaDeployResult,
     SourceBuildArtifact,
-    SourceDeployArtifact,
     SourceDeploymentStore,
     SourcePlanArtifact,
     deploy_statements_for_build,
@@ -212,18 +213,6 @@ class SourcePlanResponse(BaseModel):
     )
 
 
-class SourceDeployResponse(BaseModel):
-    """Result of deploying a source version to ClickHouse."""
-
-    source_name: str
-    version: str
-    success: bool
-    deployed_version: str | None = None
-    deployed_at: str
-    ddl_executed: list[str] = Field(default_factory=list)
-    ddl_failed: list[dict[str, str]] = Field(default_factory=list)
-
-
 class SourceVersionDetail(SourceVersion):
     """Source version snapshot plus persisted build/deploy payloads."""
 
@@ -231,7 +220,7 @@ class SourceVersionDetail(SourceVersion):
         default=None,
         description="Last schema build for this version (source-builds)",
     )
-    source_deployment: SourceDeployResponse | None = Field(
+    source_deployment: SchemaDeployResult | None = Field(
         default=None,
         description="Last deploy run for this version (source-deploys)",
     )
@@ -253,19 +242,6 @@ class SourceVersionGetDetailResponse(SourceVersionGetResponse):
         ...,
         description="Configuration snapshot for ``selected`` plus pipeline artifacts",
     )
-
-
-class SchemaDeployResult(BaseModel):
-    """Plan / deploy result for a source's schema."""
-
-    source_name: str
-    version: str
-    dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
-    applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
-    create_table: str = Field(description="CREATE TABLE DDL")
-    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
-    validation_errors: list[str] = Field(default_factory=list)
-    statements_applied: int = 0
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -643,6 +619,7 @@ async def deploy_source_schema(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
+    settings: Settings,
     version: str | None = Query(
         None, description="Source version id (defaults to deployed_version)"
     ),
@@ -689,7 +666,6 @@ async def deploy_source_schema(
             },
         )
 
-    settings = get_settings()
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
@@ -747,9 +723,18 @@ async def deploy_source_schema(
             detail={"code": "clickhouse_unavailable", "message": str(exc)},
         ) from exc
 
-    statements = [result.create_table_ddl, *views.values()]
+    db = settings.clickhouse.effective_data_database
+    statements, _table_exists = deploy_statements_for_build(
+        builder,
+        source,
+        version_id,
+        result,
+        db=db,
+        ch_client=ch,
+    )
     applied = 0
     try:
+        ch.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
         for stmt in statements:
             ch.execute(stmt)
             applied += 1
@@ -762,8 +747,8 @@ async def deploy_source_schema(
             },
         ) from exc
 
-    audit_resource_change(user.user_id, "schema", name, "deployed")
-    return SchemaDeployResult(
+    store = SourceDeploymentStore.from_settings(settings)
+    deploy_result = SchemaDeployResult(
         source_name=name,
         version=version_id,
         dry_run=False,
@@ -773,6 +758,19 @@ async def deploy_source_schema(
         validation_errors=[],
         statements_applied=applied,
     )
+    store.save_deploy(deploy_result, source)
+    try:
+        registry.set_deployed_version(
+            name,
+            version_id,
+            created_by=git_author(user),
+            description=f"source: deploy {name} version {version_id}",
+        )
+    except SourceValidationError as exc:
+        _raise_save_validation_http(exc)
+
+    audit_resource_change(user.user_id, "schema", name, "deployed")
+    return deploy_result
 
 
 @router.get(
@@ -982,7 +980,6 @@ async def seed_sources(user: CurrentUser, registry: SourceReg):
 
 
 def _utc_now_iso() -> str:
-    from datetime import UTC, datetime
 
     return datetime.now(tz=UTC).isoformat()
 
@@ -1032,7 +1029,7 @@ def _version_detail_from_snapshot(
     return SourceVersionDetail(
         **snap.model_dump(mode="json"),
         source_build=_build_to_response(build) if build else None,
-        source_deployment=_deploy_to_response(deploy) if deploy else None,
+        source_deployment=deploy,
     )
 
 
@@ -1053,18 +1050,6 @@ def _build_to_response(artifact: SourceBuildArtifact) -> SchemaBuildResult:
         validation_errors=list(artifact.validation_errors),
         built_at=artifact.built_at,
         column_count=artifact.column_count,
-    )
-
-
-def _deploy_to_response(artifact: SourceDeployArtifact) -> SourceDeployResponse:
-    return SourceDeployResponse(
-        source_name=artifact.source_name,
-        version=artifact.version,
-        success=artifact.success,
-        deployed_version=artifact.deployed_version,
-        deployed_at=artifact.deployed_at,
-        ddl_executed=list(artifact.ddl_executed),
-        ddl_failed=list(artifact.ddl_failed),
     )
 
 
