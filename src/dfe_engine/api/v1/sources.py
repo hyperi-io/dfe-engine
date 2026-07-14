@@ -17,12 +17,13 @@ POST   /api/v1/sources/seed             → Seed built-in defaults
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
 from dfe_engine.auth.audit import audit_resource_change
@@ -617,6 +618,7 @@ async def deploy_source_schema(
     name: str,
     user: CurrentUser,
     registry: SourceReg,
+    settings: Settings,
     version: str | None = Query(
         None, description="Source version id (defaults to deployed_version)"
     ),
@@ -663,7 +665,6 @@ async def deploy_source_schema(
             },
         )
 
-    settings = get_settings()
     builder = SchemaBuilderV2(
         TypeRegistry.default(),
         schemas_base_dir=settings.schemas.schemas_dir or None,
@@ -731,10 +732,12 @@ async def deploy_source_schema(
         ch_client=ch,
     )
     applied = 0
+    executed_stmts: list[str] = []
     try:
         ch.execute(f"CREATE DATABASE IF NOT EXISTS {db}")
         for stmt in statements:
             ch.execute(stmt)
+            executed_stmts.append(stmt)
             applied += 1
     except Exception as exc:
         raise HTTPException(
@@ -744,6 +747,25 @@ async def deploy_source_schema(
                 "message": f"ClickHouse rejected DDL after {applied} statement(s): {exc}",
             },
         ) from exc
+
+    store = SourceDeploymentStore.from_settings(settings)
+    deploy_artifact = SourceDeployArtifact(
+        source_name=name,
+        version=version_id,
+        deployed_at=datetime.now(tz=UTC).isoformat(),
+        success=True,
+        ddl_executed=executed_stmts,
+    )
+    store.save_deploy(deploy_artifact, source)
+    try:
+        registry.set_deployed_version(
+            name,
+            version_id,
+            created_by=git_author(user),
+            description=f"source: deploy {name} version {version_id}",
+        )
+    except SourceValidationError as exc:
+        _raise_save_validation_http(exc)
 
     audit_resource_change(user.user_id, "schema", name, "deployed")
     return SchemaDeployResult(
