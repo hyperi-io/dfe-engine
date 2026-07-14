@@ -6,9 +6,9 @@ from pathlib import Path
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
 from dfe_engine.source.deployment import (
+    SchemaDeployResult,
     SourceDeployDocument,
     SourceDeploymentStore,
-    SourceDeployVersionRecord,
     SourcePlanArtifact,
     artifact_from_build,
     deploy_statements_for_build,
@@ -111,17 +111,55 @@ class TestSourceDeploymentStore:
             source="x",
             deployed_version="2.0.0",
             versions={
-                "1.0.0": SourceDeployVersionRecord(
-                    deployed_at="2026-01-01T00:00:00+00:00",
-                    success=True,
+                "1.0.0": SchemaDeployResult(
+                    source_name="x",
+                    version="1.0.0",
+                    dry_run=False,
+                    applied=True,
+                    create_table="CREATE TABLE x_v1",
                 ),
-                "2.0.0": SourceDeployVersionRecord(
-                    deployed_at="2026-01-02T00:00:00+00:00",
-                    success=True,
+                "2.0.0": SchemaDeployResult(
+                    source_name="x",
+                    version="2.0.0",
+                    dry_run=False,
+                    applied=True,
+                    create_table="CREATE TABLE x_v2",
                 ),
             },
         )
         assert previous_deployed_version_ids(source, doc) == ["1.0.0"]
+
+    def test_round_trip_deploy_result(self, tmp_path: Path):
+        store = SourceDeploymentStore(
+            builds_dir=tmp_path / "builds",
+            plans_dir=tmp_path / "plans",
+            deploys_dir=tmp_path / "deploys",
+        )
+        source = Source.model_validate(
+            {
+                "source": "syslog",
+                "enabled": True,
+                "match": {"field": "f", "value": "v"},
+                "current": "1.0.0",
+                "versions": {"1.0.0": {"date_time": "2026-01-01"}},
+            }
+        )
+        result = SchemaDeployResult(
+            source_name="syslog",
+            version="1.0.0",
+            dry_run=False,
+            applied=True,
+            create_table="CREATE TABLE dfe.syslog (x UInt8)",
+            views={"sigma": "CREATE VIEW dfe.v AS SELECT 1"},
+            statements_applied=2,
+        )
+        store.save_deploy(result, source)
+        loaded = store.load_deploy("syslog", "1.0.0")
+        assert loaded == result
+        doc = yaml_load(tmp_path / "deploys" / "syslog.yaml")
+        assert doc["deployed_version"] == "1.0.0"
+        assert doc["versions"]["1.0.0"]["create_table"].startswith("CREATE TABLE")
+        assert doc["versions"]["1.0.0"]["applied"] is True
 
     def test_migrates_legacy_per_version_files(self, tmp_path: Path):
         store = SourceDeploymentStore(

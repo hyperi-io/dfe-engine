@@ -61,13 +61,21 @@ class SourcePlanVersionRecord(BaseModel):
     )
 
 
-class SourceDeployVersionRecord(BaseModel):
-    """Deploy run result for one source version."""
+class SchemaDeployResult(BaseModel):
+    """Persisted (and API) result of planning/deploying a source version's schema.
 
-    deployed_at: str
-    success: bool
-    ddl_executed: list[str] = Field(default_factory=list)
-    ddl_failed: list[dict[str, str]] = Field(default_factory=list)
+    Same object returned by ``POST /api/v1/sources/{name}/deploy`` and nested under
+    ``source_deployment`` on version detail.
+    """
+
+    source_name: str
+    version: str
+    dry_run: bool = Field(description="True = plan only; the DDL was NOT applied")
+    applied: bool = Field(description="Whether the DDL was executed against ClickHouse")
+    create_table: str = Field(description="CREATE TABLE DDL")
+    views: dict[str, str] = Field(default_factory=dict, description="View name → DDL")
+    validation_errors: list[str] = Field(default_factory=list)
+    statements_applied: int = 0
 
 
 class VersionedSourceArtifactDocument(BaseModel):
@@ -94,7 +102,7 @@ class SourceDeployDocument(BaseModel):
         default=None,
         description="Last successfully deployed version (at most one live deploy)",
     )
-    versions: dict[str, SourceDeployVersionRecord] = Field(default_factory=dict)
+    versions: dict[str, SchemaDeployResult] = Field(default_factory=dict)
 
 
 def _semver_sort_key(version_id: str) -> tuple[int, int, int]:
@@ -108,13 +116,13 @@ def previous_deployed_version_ids(
     source: Source,
     deploy_doc: SourceDeployDocument | None,
 ) -> list[str]:
-    """Successful deploy history for this source, excluding the live ``deployed_version``."""
+    """Applied deploy history for this source, excluding the live ``deployed_version``."""
     if deploy_doc is None:
         return []
     live = source.deployed_version
     ids: list[str] = []
     for version_id, record in deploy_doc.versions.items():
-        if not record.success:
+        if not record.applied:
             continue
         if live is not None and version_id == live:
             continue
@@ -146,16 +154,6 @@ class SourcePlanArtifact(BaseModel):
     view_ddls: dict[str, str] = Field(default_factory=dict)
     ready: bool = False
     ready_reason: str | None = None
-
-
-class SourceDeployArtifact(BaseModel):
-    source_name: str
-    version: str
-    deployed_at: str
-    success: bool
-    deployed_version: str | None = None
-    ddl_executed: list[str] = Field(default_factory=list)
-    ddl_failed: list[dict[str, str]] = Field(default_factory=list)
 
 
 def qualify_ddl_statements(statements: list[str], db: str) -> list[str]:
@@ -376,33 +374,6 @@ def _plan_artifact_from_record(
     )
 
 
-def _deploy_record_from_artifact(artifact: SourceDeployArtifact) -> SourceDeployVersionRecord:
-    return SourceDeployVersionRecord(
-        deployed_at=artifact.deployed_at,
-        success=artifact.success,
-        ddl_executed=list(artifact.ddl_executed),
-        ddl_failed=list(artifact.ddl_failed),
-    )
-
-
-def _deploy_artifact_from_record(
-    source_name: str,
-    version: str,
-    record: SourceDeployVersionRecord,
-    *,
-    deployed_version: str | None,
-) -> SourceDeployArtifact:
-    return SourceDeployArtifact(
-        source_name=source_name,
-        version=version,
-        deployed_at=record.deployed_at,
-        success=record.success,
-        deployed_version=deployed_version if record.success else None,
-        ddl_executed=list(record.ddl_executed),
-        ddl_failed=list(record.ddl_failed),
-    )
-
-
 class SourceDeploymentStore:
     """Filesystem store: ``{dir}/{source}.yaml`` with a ``versions`` map."""
 
@@ -470,7 +441,7 @@ class SourceDeploymentStore:
         if track_deployed_version:
             deployed = None
             for vid, rec in merged_versions.items():
-                if isinstance(rec, dict) and rec.get("success"):
+                if isinstance(rec, dict) and rec.get("applied"):
                     deployed = vid
             out["deployed_version"] = deployed
         return out
@@ -561,8 +532,8 @@ class SourceDeploymentStore:
             return None
         return _plan_artifact_from_record(source_name, version, doc.versions[version])
 
-    def save_deploy(self, artifact: SourceDeployArtifact, source: Source) -> Path:
-        _assert_version_on_source(source, artifact.version)
+    def save_deploy(self, result: SchemaDeployResult, source: Source) -> Path:
+        _assert_version_on_source(source, result.version)
         doc = self._read_document(
             self.deploys_dir,
             source.source,
@@ -573,9 +544,9 @@ class SourceDeploymentStore:
             deployed_version=None,
             versions={},
         )
-        doc.versions[artifact.version] = _deploy_record_from_artifact(artifact)
-        if artifact.success:
-            doc.deployed_version = artifact.version
+        doc.versions[result.version] = result
+        if result.applied:
+            doc.deployed_version = result.version
         doc.versions = _prune_versions_to_source(doc.versions, source)
         path = self._source_file(self.deploys_dir, source.source)
         yaml_dump(doc.model_dump(mode="json"), path)
@@ -589,7 +560,7 @@ class SourceDeploymentStore:
             track_deployed_version=True,
         )
 
-    def load_deploy(self, source_name: str, version: str) -> SourceDeployArtifact | None:
+    def load_deploy(self, source_name: str, version: str) -> SchemaDeployResult | None:
         doc = self._read_document(
             self.deploys_dir,
             source_name,
@@ -598,12 +569,7 @@ class SourceDeploymentStore:
         )
         if doc is None or version not in doc.versions:
             return None
-        return _deploy_artifact_from_record(
-            source_name,
-            version,
-            doc.versions[version],
-            deployed_version=doc.deployed_version,
-        )
+        return doc.versions[version]
 
 
 def run_source_build(
