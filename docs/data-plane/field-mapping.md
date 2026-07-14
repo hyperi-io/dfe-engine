@@ -10,9 +10,14 @@ not the owner of mapping logic.
 
 | Priority | Layer | Description |
 |----------|-------|-------------|
-| 1 (highest) | source-specific map | per-source field overrides |
-| 2 | default table map | standard-wide defaults |
-| 3 (lowest) | passthrough | field name used as-is |
+| 1 (highest) | inline `custom_mappings` | per-source overrides on the source's view entry - win per key |
+| 2 | registry override map | the view's `field_map` pin (`"{standard}/{name}"` or bare name), else the source-name convention |
+| 3 | default map | the standard's `_default` map (standard-wide defaults) |
+| 4 (lowest) | passthrough | field name used as-is |
+
+A `field_map` pin replaces the source-name convention for the override
+layer, so one named map can be shared across many sources; a view with only
+inline mappings renders even without a registry.
 
 Maps are YAML in the config repo (engine-, UI-, or human-editable). The
 resolver lives at `src/dfe_engine/fieldmap/resolver.py`; view generation at

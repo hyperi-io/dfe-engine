@@ -158,12 +158,13 @@ accepts repeated `schema_type` (top-level path segment, e.g. `meta`).
 | POST | `/sources/{name}/build` | Build DDL from a source version (`?version=` source id; default `deployed_version`) |
 | POST | `/sources/{name}/plan` | Dry-run deploy plan (`?version=` defaults to `current`; not persisted) |
 | POST | `/sources/{name}/deploy` | Apply plan DDL to ClickHouse and set `deployed_version` (`?version=` defaults to `current`) |
+| PUT | `/sources/{name}` | Update source |
+| PATCH | `/sources/{name}` | Set lifecycle state (`state: active\|dormant\|disabled`, or compat `enabled`); no new version; `409 match_conflict` if activating duplicates another non-disabled source's match |
+| DELETE | `/sources/{name}` | Delete source |
+| POST | `/sources/bulk` | Bulk action (`enable` / `disable` / `dormant` / `delete`) on named sources |
+| POST | `/sources/seed` | Seed defaults |
 
 Artifact files: `source-builds/{name}.yaml` and `source-deploys/{name}.yaml` (per-version maps like `sources/{name}.yaml`). Plans are not persisted.
-| PUT | `/sources/{name}` | Update source |
-| DELETE | `/sources/{name}` | Delete source |
-| POST | `/sources/bulk` | Bulk import |
-| POST | `/sources/seed` | Seed defaults |
 
 ### Services (`/api/v1/services`)
 

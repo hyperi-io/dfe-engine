@@ -58,8 +58,10 @@ surface small and the policy readable.
 `src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
 because every resource is just YAML in git. A `ResourceClass` says where a class
 lives (a directory) and which RBAC prefix governs it. The default registry covers
-the deploy repo: `helmvars` (the overlays under `values/`) and the `governance`
-class (`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`).
+the deploy repo: `helmvars` (the overlays under `values/`), `sources` (the
+all-in-one source-definition docs under `config/sources/` - the first datamodel
+class in the deploy repo) and the `governance` class (`accounts`, `groups`,
+`roles`, `actions`, `policies` under `governance/`, plus the CH RBAC types).
 
 The engine is small on purpose. Read, flatten to dot-paths, set or delete a path,
 write a whole doc, delete a resource -- every mutation ends in one commit via

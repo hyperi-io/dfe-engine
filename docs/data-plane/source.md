@@ -6,8 +6,9 @@
 
 ## Problem
 
-Today, routing a data source through the DFE pipeline requires configuring
-four independent systems that have no shared concept of "this is one source":
+Without a Source entity, routing a data source through the DFE pipeline
+requires configuring four independent systems that have no shared concept of
+"this is one source":
 
 1. **Receiver** — field-match routing rules scattered in `category_to_topic`
 2. **Transform** — separate vector/wasm source config with input/output topics
@@ -57,7 +58,7 @@ A Source **contains** all source-scoped components:
 | **fetcher** | No | SaaS API pull (CrowdStrike, M365, Okta, etc.) |
 | **transform** | No | Enrichment/normalisation stage (vector or wasm) |
 | **rules** | No | SQL detection queries against this source's table |
-| **sigma** | No | Sigma field mappings + auto-generated compatibility view |
+| **views** | No | Naming-standard views (sigma, ecs, cim, ocsf) with per-source field overrides |
 
 Instead of configuring fetchers, transforms, schemas, and detection rules
 as independent systems, they are **nested inside the Source they belong to**.
@@ -72,7 +73,7 @@ Global (configure once)         Source (one per data stream)
 └─────────────────────┘         │   ├── transform (optional)  │
                                 │   ├── fetcher (optional)    │
                                 │   ├── rules (optional)      │
-                                │   └── sigma (optional)      │
+                                │   └── views (optional)      │
                                 ├─────────────────────────────┤
                                 │ source: crowdstrike_edr     │
                                 │   ├── match rule            │
@@ -97,7 +98,7 @@ Global (configure once)         Source (one per data stream)
 source: filebeat                        # The _source label — immutable identifier
 display_name: Filebeat
 description: Elastic Filebeat log collector
-enabled: true
+state: active                           # Lifecycle: active | dormant | disabled (see Lifecycle)
 
 # --- Header ---
 # Common schema header. When a source is first created, the schema starts
@@ -112,8 +113,11 @@ header:
 # The receiver evaluates match rules and sets _source in the JSON payload.
 match:
   field: tags.collector.type            # JSON field to inspect
-  value: filebeat                       # Expected value (exact match)
-  # Future: regex, multi-field, compound rules
+  operator: equals                      # equals (default) | exists - the receiver-evaluable set
+  value: filebeat                       # Operand (unused when operator is exists)
+  # The model also defines not_equals / includes / starts_with / ends_with,
+  # but the receiver's hot-path router cannot evaluate them (a documented
+  # receiver gap) - saves reject them for any non-disabled source.
 
 # --- Topics (derived, not configured) ---
 # topic_land: filebeat_land             # Auto: {_source}_land
@@ -140,6 +144,16 @@ transform:
   env: {}                               # Per-transform ENV overrides
   files: []                             # Enrichment files (CSV, MMDB)
 
+# --- Views (optional) ---
+# Naming-standard views this source exposes (sigma, ecs, cim, ocsf).
+# One entry per standard; inline custom_mappings WIN over the field_map pin.
+views:
+  - standard: sigma
+    field_map: sigma/windows            # FieldMap registry pin ("standard/name" or bare name)
+    taxonomy: windows                   # Sigma logsource product binding (sigma views only)
+    custom_mappings:                    # Per-source overrides (win over field_map)
+      CommandLine: command_line
+
 # --- Schema (mandatory) ---
 # The source owns its ClickHouse table schema.
 # One source = one table = one schema.
@@ -151,8 +165,13 @@ schema:
   derived_schema: filebeat/derived      # Source-specific field overrides (optional)
   additional_fields: filebeat/add       # Extra fields, indexes (optional)
   ttl_days: 90                          # Data retention
-  engine: MergeTree                     # MergeTree | ReplicatedMergeTree | SharedMergeTree
+  engine: MergeTree                     # Base variant only (MergeTree, ReplacingMergeTree(...), ...)
+                                        # Topology (Replicated/Shared/Cloud) resolves at DDL time
 ```
+
+The legacy 2.1 keys `sigma`, `mapping_standards`, and `field_mappings` were
+removed in 2.2 - writes carrying them are rejected with a "removed in 2.2"
+error. Declare naming-standard views via the `views` list instead.
 
 ### Minimal Source (just match + common header)
 
@@ -175,6 +194,41 @@ schema:
 No fetcher, no transform. The receiver matches and routes to `syslog_land`,
 the loader picks it up and inserts into `{db}.syslog` using the common
 time_series header schema. Fields can be added incrementally later.
+
+---
+
+## Lifecycle
+
+A source has a tri-state lifecycle (`state`), not a boolean toggle:
+
+| State | Schema (table) | Receiver routing + transform | Receiver match |
+|-------|----------------|------------------------------|----------------|
+| `active` | Materialised (idempotent CREATE) | On | Held (conflict-checked) |
+| `dormant` | Retained - pre-positioned, never dropped | Off | Held (conflict-checked - it may activate later) |
+| `disabled` | Reclaimed (guarded DROP) | Off | Released - another source may claim it |
+
+```mermaid
+stateDiagram-v2
+    [*] --> active: create
+    active --> dormant: pause (schema stays)
+    dormant --> active: resume
+    active --> disabled: turn off (table reclaimed)
+    dormant --> disabled
+    disabled --> active: re-enable (table recreated)
+    disabled --> dormant
+```
+
+Materialisation derives from the declared state alone (gitops-declarative):
+CREATE on active, LEAVE on dormant, guarded RECLAIM on disabled. Creates are
+idempotent and a dormant source's table is never dropped.
+
+`enabled` remains as a compat accessor: `enabled == (state == active)`. It is
+serialised on API responses, and writes accept either field - `state` wins
+when both are sent, `enabled: true` maps to `active`, `enabled: false` to
+`disabled`. A PUT that omits both keeps the existing state (editing a
+description never silently re-activates a dormant or disabled source).
+`PATCH /api/v1/sources/{name}` changes the state without creating a new
+source version.
 
 ---
 
@@ -272,33 +326,47 @@ from `{_source}_land`. The `_load` topic is never created.
 
 ## How the Receiver Routes
 
-Today the receiver uses `event_category` field lookups and a
-`category_to_topic` mapping. The Source model changes this to:
+The engine compiles Source `match` rules into the dfe-receiver's native
+`routing` contract (`compile_receiver_routing` emits the exact serde the
+receiver deserialises - `SourceRule`/`RoutingConfig` in the receiver's
+`src/config/mod.rs`):
 
-1. Receiver loads all Source definitions at startup
-2. For each incoming event, evaluates `match` rules in priority order
-3. First match wins — sets `_source` in the JSON payload
-4. Produces to `{_source}_land` topic
-5. Unmatched events go to `unmatched_land` (unchanged)
-
-The `_source` field becomes a **first-class field in every event**, injected
-by the receiver before the data hits Kafka. Downstream services (transform,
-loader) consume it directly — no independent routing config needed.
-
-### Receiver Config Change
-
-The receiver's `routing.category_to_topic` dict is replaced by the Source
-registry. The receiver needs only:
+1. The engine iterates ACTIVE sources (dormant and disabled are excluded)
+2. Each `match` becomes one `source_rules` entry - first match wins
+3. A matching rule stamps `_source` in the JSON payload
+4. Topic = `source_to_topic[_source]` if overridden, else `{_source}{topic_suffix}`
+5. Unmatched events get `default_source`
 
 ```yaml
 routing:
-  source_field: _source           # Field name set in JSON (fixed)
-  topic_suffix_land: _land        # Topic suffix for raw data
-  topic_suffix_load: _load        # Topic suffix for transformed data
-  default_source: unmatched       # Fallback when no match rule hits
+  source_rules:                   # Compiled from Source.match, first match wins
+    - field: tags.collector.type  # JSON field path (dot notation for nested)
+      mode: key_value_set         # key_present | key_value_set | key_value_use
+      match_value: filebeat       # key_value_set only
+      source: filebeat            # _source to stamp
+  default_source: default         # _source when no rule matches
+  topic_suffix: _land             # Topic derives as {_source}{topic_suffix}
+  source_to_topic: {}             # Per-source topic overrides (rarely needed)
 ```
 
-Match rules come from the Source definitions, not from receiver config.
+Operator translation:
+
+| Source `match.operator` | Receiver `mode` |
+|-------------------------|-----------------|
+| `equals` | `key_value_set` |
+| `exists` | `key_present` |
+
+The other four operators (`not_equals`, `includes`, `starts_with`,
+`ends_with`) have no receiver mode - a documented receiver gap. The registry
+rejects them at save time for any non-disabled source; if a legacy stored doc
+still carries one, the compile skips that source with a loud warning rather
+than failing the whole receiver config.
+
+The `_source` field becomes a **first-class field in every event**, injected
+by the receiver before the data hits Kafka. Downstream services (transform,
+loader) consume it directly — no independent routing config needed. Match
+rules come from the Source definitions, not from hand-written receiver
+config.
 
 ---
 
@@ -315,9 +383,11 @@ target table. With Source:
 ```yaml
 # Loader config simplifies to:
 routing:
+  source_routing: true            # Route by the _source field directly
   source_field: _source           # Field containing the source label
   default_db: common              # Database (or per-org with org_id)
-  # No category_to_table — _source IS the table name
+  # category_to_table is still emitted (ACTIVE sources only) as a
+  # diagnostic aid - _source IS the table name, no lookup needed
 ```
 
 ---
@@ -374,30 +444,37 @@ ClickHouse column comments in DDL.
 
 | Source Event | Schema Action |
 |-------------|---------------|
-| Source created | `CREATE TABLE IF NOT EXISTS` |
+| Source created / active | `CREATE TABLE IF NOT EXISTS` (idempotent) |
 | Schema YAML updated | `ALTER TABLE` via SchemaModifier (add/modify columns) |
-| Source disabled | No action (table remains, no new data) |
+| Source dormant | No action - table retained, pre-positioned for reactivation |
+| Source disabled | Guarded reclaim - the table is dropped behind the caller's guard |
 | Source deleted | Table retained (data preservation) — manual DROP if needed |
 
 ---
 
 ## Source Registry
 
-Sources are managed as YAML files in the config directory, following the
-same pattern as service configs:
+Sources are managed as YAML files - one file per source - by
+`SourceRegistry`, which has two storage backends:
+
+- **gitcrud** (preferred - active whenever gitops is enabled): the
+  all-in-one source YAML IS the gitcrud doc in the deploy repo's
+  `config/sources/` (ResourceClass `sources`). Every mutation is one git
+  commit, attributed to the caller, and the stored doc carries the universal
+  gitcrud `metadata` block.
+- **DirectoryConfigStore** (standalone fallback): a plain YAML directory as
+  SSoT - the same git-aware, cached, callback-driven store used by
+  `ServiceConfigRegistry`.
 
 ```
-<config_directory>/
-  sources/
-    filebeat.yaml
-    syslog.yaml
-    crowdstrike_edr.yaml
-    windows_audit.yaml
-    ...
+# gitcrud backend                   # DirectoryConfigStore backend
+<deploy_repo>/                      <config_directory>/
+  config/                             sources/
+    sources/                            filebeat.yaml
+      filebeat.yaml                     syslog.yaml
+      syslog.yaml                       ...
+      ...
 ```
-
-Backed by `DirectoryConfigStore` — same git-aware, cached, callback-driven
-store used by `ServiceConfigRegistry`.
 
 ### CRUD Operations
 
@@ -406,14 +483,18 @@ store used by `ServiceConfigRegistry`.
 | **Create** | Validates source definition, creates Kafka topics (or marks for creation), runs schema DDL, updates receiver match rules |
 | **Read** | Returns source config + status (topic exists, table exists, transform running) |
 | **Update** | Validates changes, applies schema migration if fields changed, updates receiver/transform config |
-| **Delete** | Soft-delete (disable) by default. Hard-delete removes match rule + transform config but preserves table + data |
+| **Delete** | Removes the source definition (one attributed git commit on the gitcrud backend); table + data preserved. To pause instead, set `state: dormant` or `disabled` |
 | **List** | All sources with status overlay (healthy, degraded, disabled) |
 
 ### Validation Rules
 
 - `_source` label must be unique
 - `_source` label must match naming rules (`[a-z][a-z0-9_]*`, max 64 chars)
-- Match rules must not conflict (two sources matching the same field+value)
+- Match rules must not conflict across non-disabled sources (same
+  field+operator+value); a dormant source HOLDS its match, only disabling
+  releases it
+- Match operator must be receiver-evaluable (`equals` or `exists`) for any
+  non-disabled source
 - If transform is specified, engine must be `vector` or `wasm`
 - Schema YAML files must exist and pass SchemaBuilder validation
 - Schema must include `_source` as a column (injected if missing)
@@ -429,7 +510,7 @@ by the Source registry:
 
 | Service | Before (per-service config) | After (source-driven) |
 |---------|---------------------------|----------------------|
-| **Receiver** | `routing.category_to_topic` dict | Compiled match table from Source definitions |
+| **Receiver** | `routing.category_to_topic` dict | Compiled `routing.source_rules` from Source definitions |
 | **Loader** | `routing.category_to_table` dict | `_source` field → `{db}.{_source}` table (direct) |
 | **Archiver** | No change | No change (archives all topics) |
 
@@ -510,7 +591,7 @@ what needs to happen. The actual execution happens on shared service instances:
 
 | Source component | Runs on | How |
 |-----------------|---------|-----|
-| `source.match` | Global receiver | Compiled into receiver match table |
+| `source.match` | Global receiver | Compiled into receiver `source_rules` |
 | `source.fetcher` | Shared fetcher instance(s) | Fetcher loads source configs, polls each |
 | `source.transform` | Shared transform instance(s) | Transform loads source configs, processes each |
 | `source.schema` | dfe-engine | Schema DDL generated and applied by engine |
@@ -651,48 +732,29 @@ scratch.
 
 ## API / UI Model
 
-With Source as the top-level entity, the API simplifies to two sections:
-
-### Global (infrastructure)
-
-```
-GET    /api/v1/global/receiver          # Receiver config
-PUT    /api/v1/global/receiver          # Update receiver config
-GET    /api/v1/global/loader            # Loader config
-PUT    /api/v1/global/loader            # Update loader config
-GET    /api/v1/global/archiver          # Archiver config
-PUT    /api/v1/global/archiver          # Update archiver config
-```
-
-Rarely touched after initial setup. Infrastructure concern.
-
-### Sources (data)
+Sources are the primary API entity. The shipped surface
+(see [ui-api-guide.md](../control-plane/ui-api-guide.md)):
 
 ```
-GET    /api/v1/sources                  # List all sources
-POST   /api/v1/sources                  # Create source (match + header → schema auto-created)
-GET    /api/v1/sources/{source}         # Get source (includes status)
-PUT    /api/v1/sources/{source}         # Update source
-DELETE /api/v1/sources/{source}         # Disable/delete source
-
-# Source sub-resources
-GET    /api/v1/sources/{source}/schema  # Get schema definition
-PUT    /api/v1/sources/{source}/schema  # Update schema (triggers ALTER TABLE)
-GET    /api/v1/sources/{source}/transform  # Get transform config
-PUT    /api/v1/sources/{source}/transform  # Set/update transform
-DELETE /api/v1/sources/{source}/transform  # Remove transform
-GET    /api/v1/sources/{source}/fetcher    # Get fetcher config
-PUT    /api/v1/sources/{source}/fetcher    # Set/update fetcher
-DELETE /api/v1/sources/{source}/fetcher    # Remove fetcher
-GET    /api/v1/sources/{source}/rules      # List rules for this source
-POST   /api/v1/sources/{source}/rules      # Create rule
-GET    /api/v1/sources/{source}/rules/{rule}  # Get rule
-PUT    /api/v1/sources/{source}/rules/{rule}  # Update rule
-DELETE /api/v1/sources/{source}/rules/{rule}  # Delete rule
-GET    /api/v1/sources/{source}/sigma      # Get sigma mapping + view status
-PUT    /api/v1/sources/{source}/sigma      # Set/update sigma mapping
-GET    /api/v1/sources/{source}/status     # Health: topics, table, transform, fetcher
+GET    /api/v1/sources                  # List sources (paginated)
+POST   /api/v1/sources                  # Create source (flat write body; views/transform/fetcher inline)
+GET    /api/v1/sources/{name}           # Get source (deployed-version accessors + state + enabled)
+GET    /api/v1/sources/{name}/versions/{version}  # One immutable version snapshot
+GET    /api/v1/sources/{name}/columns   # Composed schema columns for a version
+POST   /api/v1/sources/{name}/build     # Build DDL from a source version
+POST   /api/v1/sources/{name}/plan      # Dry-run deploy plan (not persisted)
+POST   /api/v1/sources/{name}/deploy    # Apply plan DDL to ClickHouse, set deployed_version
+PUT    /api/v1/sources/{name}           # Update source (bumps major version when a deployed pin changes)
+PATCH  /api/v1/sources/{name}           # Set lifecycle state (state or enabled) - no new version
+DELETE /api/v1/sources/{name}           # Delete the definition
+POST   /api/v1/sources/bulk             # Bulk action: enable | disable | dormant | delete
+POST   /api/v1/sources/seed             # Seed built-in sources (non-destructive)
 ```
+
+Transform, fetcher, and views are sections of the source write body, not
+sub-resources. Global service configs (receiver, loader, archiver) live
+under the service-config API - they carry infrastructure concerns only, the
+per-source routing is compiled from Source definitions.
 
 The day-to-day workflow revolves around Sources. Adding a new data source is
 one POST. The engine handles topic creation, schema DDL, and wiring.
@@ -701,16 +763,16 @@ one POST. The engine handles topic creation, schema DDL, and wiring.
 
 ## Migration Path
 
-The Source model is **additive** — existing service configs continue to work.
-Migration is incremental:
+The Source model landed incrementally, without Rust rewrites:
 
-1. **Phase 1:** Source model + registry in dfe-engine (Python). Sources as
-   YAML SSoT. Schema lifecycle wired to source. Config generators produce
-   receiver/loader/transform/fetcher configs from Source definitions.
-   Services still read their own config format — no Rust changes.
-2. **Phase 2:** Control plane API exposes Source CRUD. UI built around
-   Sources. Global service configs exposed as simple forms.
-3. **Phase 3:** Rust services read Source definitions directly (or a compiled
-   routing table). Service-level per-source routing config deprecated.
+1. **Source model + registry** in dfe-engine (Python). Sources as YAML SSoT
+   (gitcrud deploy-repo backend, DirectoryConfigStore fallback). Schema
+   lifecycle wired to source state.
+2. **Control-plane API** exposes Source CRUD; the UI is built around Sources.
+3. **Compiled routing** - the engine emits the receiver's NATIVE `routing`
+   serde (`source_rules`) and the loader's `source_routing` config from
+   Source definitions, so the Rust services deserialise what they always
+   deserialised. No service-side migration.
 
-Phase 1 is implementable now without any Rust changes.
+The 2.1 per-source keys (`sigma`, `mapping_standards`, `field_mappings`) were
+a clean break in 2.2, not a deprecation - writes carrying them are rejected.
