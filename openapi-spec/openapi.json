@@ -2864,7 +2864,7 @@
           "Sources"
         ],
         "summary": "Update Source",
-        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``field_mappings``, ``sigma``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.\n\n``header`` is optional: when omitted, no header is stored on the written version snapshot\n(same as create). Send ``header`` explicitly to set or change it.",
+        "description": "Update a source from a flat revision body.\n\nBefore the first deploy, edits update the working version in place. After deploy, a new\nmajor version is created only when ``current`` equals ``deployed_version`` and schema pins\n(``meta_schema``, ``meta_schema_version``, ``derived_schema``, ``additional_fields``),\n``views``, or ``transform`` change. Draft versions (``current`` not deployed) update\nin place.\n\n``header`` is optional: when omitted, no header is stored on the written version snapshot\n(same as create). Send ``header`` explicitly to set or change it.",
         "operationId": "update_source_api_v1_sources__name__put",
         "parameters": [
           {
@@ -2930,7 +2930,7 @@
           "Sources"
         ],
         "summary": "Patch Source Enabled",
-        "description": "Enable or disable a source without changing versioned configuration.\n\nDoes not create a new source version. Enabling may return ``409 match_conflict``\nif another enabled source already uses the same receiver match rule.",
+        "description": "Set a source's lifecycle state without changing versioned configuration.\n\nDoes not create a new source version. Activating may return ``409\nmatch_conflict`` if another non-disabled source already uses the same\nreceiver match rule.",
         "operationId": "patch_source_enabled_api_v1_sources__name__patch",
         "parameters": [
           {
@@ -3037,7 +3037,7 @@
           "Sources"
         ],
         "summary": "Bulk Action",
-        "description": "Perform a bulk action (enable, disable, delete) on multiple sources.",
+        "description": "Perform a bulk action (enable, disable, dormant, delete) on multiple sources.",
         "operationId": "bulk_action_api_v1_sources_bulk_post",
         "requestBody": {
           "content": {
@@ -12126,7 +12126,7 @@
           "action": {
             "type": "string",
             "title": "Action",
-            "description": "Action: enable, disable, delete"
+            "description": "Action: enable, disable, dormant, delete"
           },
           "sources": {
             "items": {
@@ -19032,7 +19032,7 @@
           "sigma_field"
         ],
         "title": "SigmaViewColumn",
-        "description": "One column exposed by a Sigma source-view.\n\nA column maps a standard ``sigma_field`` (the alias the view exposes) to EITHER\na real table column (``source_column``) OR a dotted path inside the source's\n``_json`` column (``json_path``) - exactly one of the two. ``type`` is an\noptional ClickHouse type the extracted value is CAST to (mainly for a\nJSON-derived column, whose subcolumn is otherwise a ``Dynamic``)."
+        "description": "One column exposed by a Sigma source-view.\n\nA column maps a standard ``sigma_field`` (the alias the view exposes) to EITHER\na real table column (``source_column``) OR a dotted path inside the source's\n``_json`` column (``json_path``) - exactly one of the two. ``type`` is an\noptional ClickHouse type the extracted value is CAST to (mainly for a\nJSON-derived column, whose subcolumn is otherwise a ``Dynamic``). This is the\nSigma-named shape of :class:`~dfe_engine.fieldmap.remap_view.RemapColumn`."
       },
       "SigmaViewDefinition": {
         "properties": {
@@ -19269,11 +19269,16 @@
             "title": "Description",
             "description": "Source description"
           },
-          "enabled": {
-            "type": "boolean",
-            "title": "Enabled",
-            "description": "Whether the source is active",
-            "default": true
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "dormant",
+              "disabled"
+            ],
+            "title": "State",
+            "description": "Lifecycle state: active (all on), dormant (schema pre-positioned, routing/transform off), disabled (all off, table reclaimed)",
+            "default": "active"
           },
           "deployed_version": {
             "anyOf": [
@@ -19300,6 +19305,12 @@
             "type": "object",
             "title": "Versions",
             "description": "Version id \u2192 configuration snapshot and pipeline artifacts"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "Compat accessor over the tri-state: enabled == (state == active).\n\nSerialized on API responses so boolean consumers keep working.",
+            "readOnly": true
           },
           "match": {
             "anyOf": [
@@ -19329,6 +19340,7 @@
         "type": "object",
         "required": [
           "source",
+          "enabled",
           "match",
           "transform"
         ],
@@ -19338,18 +19350,39 @@
       "SourceEnabledPatchRequest": {
         "properties": {
           "enabled": {
-            "type": "boolean",
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Enabled",
-            "description": "Whether the source is active"
+            "description": "Compat boolean lifecycle (True -> active, False -> disabled)"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "dormant",
+                  "disabled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Tri-state lifecycle (active | dormant | disabled); wins over enabled"
           }
         },
         "additionalProperties": false,
         "type": "object",
-        "required": [
-          "enabled"
-        ],
         "title": "SourceEnabledPatchRequest",
-        "description": "Partial update for source enabled status only."
+        "description": "Partial update for source lifecycle state only.\n\nSend ``state`` for the tri-state (active | dormant | disabled), or the\ncompat boolean ``enabled`` (True -> active, False -> disabled). ``state``\nwins when both are sent."
       },
       "SourceFetcher": {
         "properties": {
@@ -19770,57 +19803,6 @@
         "title": "SourceSchemaColumnsResponse",
         "description": "Composed source columns plus meta-schema ``resource_type``."
       },
-      "SourceSigma": {
-        "properties": {
-          "taxonomy": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Taxonomy",
-            "description": "Built-in mapping set (e.g. 'windows')"
-          },
-          "category": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Category",
-            "description": "Sigma logsource category this source serves (None = any)"
-          },
-          "service": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Service",
-            "description": "Sigma logsource service this source serves (None = any)"
-          },
-          "custom_mappings": {
-            "additionalProperties": {
-              "type": "string"
-            },
-            "type": "object",
-            "title": "Custom Mappings",
-            "description": "Per-source field overrides (SigmaField: column_name)"
-          }
-        },
-        "type": "object",
-        "title": "SourceSigma",
-        "description": "Sigma field mapping configuration for this source."
-      },
       "SourceSummaryObject": {
         "properties": {
           "name": {
@@ -19852,10 +19834,21 @@
             "title": "Description",
             "description": "Source description"
           },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "dormant",
+              "disabled"
+            ],
+            "title": "State",
+            "description": "Lifecycle state",
+            "default": "active"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
-            "description": "Whether the source is active",
+            "description": "Compat accessor (state == active)",
             "default": true
           },
           "current": {
@@ -19913,13 +19906,13 @@
             "description": "Whether a fetcher is configured",
             "default": false
           },
-          "mapping_standards": {
+          "views": {
             "items": {
               "type": "string"
             },
             "type": "array",
-            "title": "Mapping Standards",
-            "description": "Mapping standards on the deployed version"
+            "title": "Views",
+            "description": "Naming-standard views on the deployed version (standard names)"
           }
         },
         "type": "object",
@@ -20003,39 +19996,13 @@
             ],
             "description": "Schema configuration (None when the version did not author one)"
           },
-          "mapping_standards": {
+          "views": {
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/SourceView"
             },
             "type": "array",
-            "title": "Mapping Standards",
-            "description": "Standards to generate mapping views for (e.g. sigma, ecs, cim)"
-          },
-          "sigma": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceSigma"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Sigma field mappings (optional)"
-          },
-          "field_mappings": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Field Mappings",
-            "description": "Field map registry paths for this version (optional)"
+            "title": "Views",
+            "description": "Naming-standard views this version exposes (sigma, ecs, cim, ocsf)"
           },
           "fetcher": {
             "anyOf": [
@@ -20125,10 +20092,21 @@
             "title": "Description",
             "description": "Source description"
           },
+          "state": {
+            "type": "string",
+            "enum": [
+              "active",
+              "dormant",
+              "disabled"
+            ],
+            "title": "State",
+            "description": "Lifecycle state",
+            "default": "active"
+          },
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
-            "description": "Whether the source is active",
+            "description": "Compat accessor (state == active)",
             "default": true
           },
           "current": {
@@ -20185,6 +20163,77 @@
         "title": "SourceVersionGetDetailResponse",
         "description": "Single-version GET with build/plan/deploy status on ``version``."
       },
+      "SourceView": {
+        "properties": {
+          "standard": {
+            "type": "string",
+            "title": "Standard",
+            "description": "Naming standard (sigma, ecs, cim, ocsf)"
+          },
+          "field_map": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Map",
+            "description": "FieldMap registry path for this view (optional)"
+          },
+          "custom_mappings": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Custom Mappings",
+            "description": "Inline per-source field overrides (standard_field: column_name); wins over the registry field_map"
+          },
+          "taxonomy": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Taxonomy",
+            "description": "Sigma logsource product this source serves (sigma views only)"
+          },
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category",
+            "description": "Sigma logsource category this source serves (None = any)"
+          },
+          "service": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Service",
+            "description": "Sigma logsource service this source serves (None = any)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "standard"
+        ],
+        "title": "SourceView",
+        "description": "A naming-standard view this source exposes (sigma, ecs, cim, ocsf).\n\nCollapses the former ``mapping_standards`` + ``sigma`` + ``field_mappings``\ntrio into one generic entry per standard. Inline ``custom_mappings`` WIN\nover the registry ``field_map`` when both are present."
+      },
       "SourceWriteRequest": {
         "properties": {
           "source": {
@@ -20226,8 +20275,25 @@
           "enabled": {
             "type": "boolean",
             "title": "Enabled",
-            "description": "Whether the source is active",
+            "description": "Compat boolean lifecycle (True -> active, False -> disabled); ``state`` wins when both are sent",
             "default": true
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "active",
+                  "dormant",
+                  "disabled"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State",
+            "description": "Tri-state lifecycle (active | dormant | disabled); overrides ``enabled``"
           },
           "match": {
             "$ref": "#/components/schemas/SourceMatch",
@@ -20277,22 +20343,11 @@
             ],
             "description": "SaaS API fetcher (optional)"
           },
-          "sigma": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/SourceSigma"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Sigma field mappings (optional)"
-          },
-          "mapping_standards": {
+          "views": {
             "anyOf": [
               {
                 "items": {
-                  "type": "string"
+                  "$ref": "#/components/schemas/SourceView"
                 },
                 "type": "array"
               },
@@ -20300,23 +20355,8 @@
                 "type": "null"
               }
             ],
-            "title": "Mapping Standards",
-            "description": "Standards to generate mapping views for"
-          },
-          "field_mappings": {
-            "anyOf": [
-              {
-                "items": {
-                  "type": "string"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Field Mappings",
-            "description": "Field map registry paths for this revision"
+            "title": "Views",
+            "description": "Naming-standard views for this revision (sigma, ecs, cim, ocsf)"
           }
         },
         "type": "object",

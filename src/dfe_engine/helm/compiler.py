@@ -295,9 +295,11 @@ class HelmValuesCompiler:
         return apps
 
     def compile_ddl(self) -> list[str]:
-        """Compile CREATE TABLE DDL for all enabled sources.
+        """Compile CREATE TABLE DDL for active AND dormant sources.
 
-        Uses SchemaBuilderV2 to generate DDL from Source definitions.
+        Dormant sources keep their schema pre-positioned (creates are
+        idempotent), so enabling one later needs no schema step - only
+        disabled sources are excluded (their tables are reclaimed).
 
         Returns:
             List of DDL statement strings.
@@ -308,7 +310,7 @@ class HelmValuesCompiler:
             from dfe_engine.source.type_registry import TypeRegistry
 
             builder = SchemaBuilderV2(registry=TypeRegistry())
-            for source in self._source.get_all_sources(enabled_only=True):
+            for source in self._source.get_all_sources(states=("active", "dormant")):
                 try:
                     result = builder.build(source)
                     if result.create_table_ddl:
@@ -321,9 +323,10 @@ class HelmValuesCompiler:
         return statements
 
     def compile_kafka_topics(self) -> list[dict[str, Any]]:
-        """Compile Kafka topic specs from enabled sources.
+        """Compile Kafka topic specs from ACTIVE sources only.
 
-        Each source with a ``topic_land`` produces a topic spec.
+        Each source with a ``topic_land`` produces a topic spec. Dormant
+        sources have no live pipeline, so they get no topic.
 
         Returns:
             List of topic spec dicts with name, partitions, replication_factor.
@@ -331,7 +334,7 @@ class HelmValuesCompiler:
         topics: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        for source in self._source.get_all_sources(enabled_only=True):
+        for source in self._source.get_all_sources(states=("active",)):
             topic = source.topic_land
             if topic and topic not in seen:
                 seen.add(topic)

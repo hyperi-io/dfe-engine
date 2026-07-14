@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, TypeVar
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from scalo.logger import logger
 
 from dfe_engine.schema.schema_builder_v2 import SchemaBuilderV2, SchemaBuildResult
@@ -19,14 +19,28 @@ TDoc = TypeVar("TDoc", bound="VersionedSourceArtifactDocument")
 
 
 class SourceBuildVersionRecord(BaseModel):
-    """Build output for one source version."""
+    """Build output for one source version.
+
+    The legacy separately-persisted ``sigma_view_ddl`` is folded into
+    ``view_ddls["sigma"]`` on read (older on-disk source-builds carry it).
+    """
 
     built_at: str
     validation_errors: list[str] = Field(default_factory=list)
     create_table_ddl: str = ""
-    sigma_view_ddl: str | None = None
     view_ddls: dict[str, str] = Field(default_factory=dict)
     column_count: int = 0
+
+    @model_validator(mode="before")
+    @classmethod
+    def _fold_legacy_sigma_view(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            legacy = data.pop("sigma_view_ddl", None)
+            if legacy:
+                views = dict(data.get("view_ddls") or {})
+                views.setdefault("sigma", legacy)
+                data["view_ddls"] = views
+        return data
 
 
 class SourcePlanVersionRecord(BaseModel):
@@ -117,7 +131,6 @@ class SourceBuildArtifact(BaseModel):
     built_at: str
     validation_errors: list[str] = Field(default_factory=list)
     create_table_ddl: str = ""
-    sigma_view_ddl: str | None = None
     view_ddls: dict[str, str] = Field(default_factory=dict)
     column_count: int = 0
 
@@ -183,7 +196,6 @@ def build_from_artifact(artifact: SourceBuildArtifact) -> SchemaBuildResult:
         source_name=artifact.source_name,
         columns=[],
         create_table_ddl=artifact.create_table_ddl,
-        sigma_view_ddl=artifact.sigma_view_ddl,
         view_ddls=dict(artifact.view_ddls),
         validation_errors=list(artifact.validation_errors),
     )
@@ -196,7 +208,6 @@ def artifact_from_build(result: SchemaBuildResult, *, version: str) -> SourceBui
         built_at=datetime.now(tz=UTC).isoformat(),
         validation_errors=list(result.validation_errors),
         create_table_ddl=result.create_table_ddl or "",
-        sigma_view_ddl=result.sigma_view_ddl,
         view_ddls=dict(result.view_ddls or {}),
         column_count=len(result.columns),
     )
@@ -232,8 +243,6 @@ def deploy_statements_for_build(
             if index_stmt:
                 statements.append(index_stmt.strip())
 
-    if result.sigma_view_ddl:
-        statements.append(result.sigma_view_ddl.strip())
     for view_ddl in (result.view_ddls or {}).values():
         statements.append(view_ddl.strip())
 
@@ -314,7 +323,6 @@ def _build_record_from_artifact(artifact: SourceBuildArtifact) -> SourceBuildVer
         built_at=artifact.built_at,
         validation_errors=list(artifact.validation_errors),
         create_table_ddl=artifact.create_table_ddl,
-        sigma_view_ddl=artifact.sigma_view_ddl,
         view_ddls=dict(artifact.view_ddls),
         column_count=artifact.column_count,
     )
@@ -331,7 +339,6 @@ def _build_artifact_from_record(
         built_at=record.built_at,
         validation_errors=list(record.validation_errors),
         create_table_ddl=record.create_table_ddl,
-        sigma_view_ddl=record.sigma_view_ddl,
         view_ddls=dict(record.view_ddls),
         column_count=record.column_count,
     )

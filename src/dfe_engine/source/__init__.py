@@ -1,7 +1,8 @@
 """DFE Source model — the top-level data abstraction.
 
 A Source represents a data stream entering the DFE platform. It contains
-identity, schema, and optional fetcher/transform/rules/sigma configuration.
+identity, schema, naming-standard views, and optional fetcher/transform
+configuration.
 
 Storage model:
 - YAML directory is the Single Source of Truth (SSoT)
@@ -37,8 +38,8 @@ from dfe_engine.source.models import (
     SourceHeader,
     SourceMatch,
     SourceSchema,
-    SourceSigma,
     SourceTransform,
+    SourceView,
 )
 from dfe_engine.source.registry import (
     SourceMatchConflictError,
@@ -79,8 +80,8 @@ __all__ = [
     "SourceHeader",
     "SourceMatch",
     "SourceSchema",
-    "SourceSigma",
     "SourceTransform",
+    "SourceView",
     # Registry
     "SourceMatchConflictError",
     "SourceNotFoundError",

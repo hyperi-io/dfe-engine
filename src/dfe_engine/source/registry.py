@@ -1,18 +1,17 @@
 """Source Registry — CRUD management for Source definitions.
 
-Backed by DirectoryConfigStore (YAML directory as SSoT), mirroring the
-ServiceConfigRegistry pattern. Each source is a YAML file in the
-sources directory.
+Two interchangeable backends behind one registry surface:
 
-Directory layout:
-    <sources_directory>/
-        filebeat.yaml
-        syslog.yaml
-        crowdstrike_edr.yaml
-        ...
+- **gitcrud** (preferred): the all-in-one source YAML IS the gitcrud doc in the
+  deploy repo's ``config/sources/`` (ResourceClass ``sources``). Every mutation
+  is one git commit; the stored doc carries the universal gitcrud ``metadata``
+  block. Pass ``crud=GitCrud(...)`` to select it.
+- **DirectoryConfigStore** (standalone): a plain YAML directory as SSoT,
+  mirroring the ServiceConfigRegistry pattern. Used when no gitops deploy repo
+  is configured.
 
 Each file is named ``{source_name}.yaml`` and contains the full
-Source definition as a YAML document.
+Source definition as a YAML document (API payload = exchange file = stored doc).
 
 Usage:
     from dfe_engine.source.registry import SourceRegistry
@@ -24,9 +23,10 @@ Usage:
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
@@ -40,6 +40,11 @@ from dfe_engine.source.models import (
     source_from_write,
 )
 from dfe_engine.yaml_utils import yaml_dump
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.engine import GitCrud
+
+_SOURCES_CLASS = "sources"
 
 
 class SourceRegistryError(Exception):
@@ -79,7 +84,8 @@ class SourceMatchConflictError(SourceValidationError):
 class SourceRegistry:
     """Registry for managing Source definitions.
 
-    Backed by DirectoryConfigStore (YAML directory as SSoT).
+    Backed by the gitcrud engine (deploy-repo ``config/sources/``) when a
+    ``crud`` is provided, else by DirectoryConfigStore (YAML directory as SSoT).
     Provides CRUD operations, validation (unique _source, no match
     conflicts), change callbacks, and git-aware writes.
     """
@@ -88,21 +94,37 @@ class SourceRegistry:
 
     def __init__(
         self,
-        sources_directory: str | Path,
+        sources_directory: str | Path | None = None,
         writable: bool | None = None,
         git_branch: str | None = None,
         git_push: bool = False,
         refresh_interval: int = 30,
+        *,
+        crud: GitCrud | None = None,
     ) -> None:
         """Initialize the registry.
 
         Args:
-            sources_directory: Path to the YAML sources directory.
+            sources_directory: Path to the YAML sources directory
+                (DirectoryConfigStore backend; ignored when ``crud`` is given).
             writable: Whether writes are allowed. None = auto-detect.
             git_branch: Git branch for writes. None = current branch.
             git_push: Auto-push after git commits.
             refresh_interval: Seconds between background cache refresh polls.
+            crud: Governed Ops engine over the deploy repo. When provided the
+                ``sources`` resource class (config/sources/) is the SSoT and
+                every mutation is one git commit.
         """
+        self._crud = crud
+        self._store: DirectoryConfigStore | None = None
+
+        if crud is not None:
+            cls = crud.resource_class(_SOURCES_CLASS)
+            self._sources_directory = crud.repo_path / cls.directory
+            return
+
+        if sources_directory is None:
+            raise SourceRegistryError("sources_directory is required without a gitcrud backend")
         self._sources_directory = Path(sources_directory)
         self._sources_directory.mkdir(parents=True, exist_ok=True)
 
@@ -147,6 +169,27 @@ class SourceRegistry:
         cls._instance = None
 
     # -----------------------------------------------------------------
+    # Backend primitives (gitcrud vs DirectoryConfigStore)
+    # -----------------------------------------------------------------
+
+    def _names(self) -> list[str]:
+        """All stored source names."""
+        if self._crud is not None:
+            return self._crud.list(_SOURCES_CLASS)
+        return list(self._store.list_tables())
+
+    def _get_raw(self, source_name: str) -> dict[str, Any] | None:
+        """Raw stored doc for a source, or None when absent."""
+        if self._crud is not None:
+            from dfe_engine.gitcrud.engine import ResourceNotFoundError
+
+            try:
+                return self._crud.get(_SOURCES_CLASS, source_name)
+            except ResourceNotFoundError:
+                return None
+        return self._store.get(source_name)
+
+    # -----------------------------------------------------------------
     # CRUD Operations
     # -----------------------------------------------------------------
 
@@ -162,7 +205,7 @@ class SourceRegistry:
         Raises:
             SourceNotFoundError: Source not found.
         """
-        config_data = self._store.get(source_name)
+        config_data = self._get_raw(source_name)
         if config_data is None:
             raise SourceNotFoundError(f"Source not found: {source_name!r}")
 
@@ -203,6 +246,32 @@ class SourceRegistry:
 
         # Serialize and write
         config_data = source.to_yaml_dict()
+
+        if self._crud is not None:
+            # gitcrud backend: the doc carries the universal metadata block and
+            # every mutation is ONE commit in the deploy repo.
+            from dfe_engine.gitcrud.metadata import ResourceMetadata, with_metadata
+
+            doc = with_metadata(
+                config_data,
+                ResourceMetadata(
+                    description=source.description or "",
+                    display_name=source.display_name,
+                ),
+            )
+            commit_msg = description or f"source: update {source.source}"
+            if created_by:
+                commit_msg = f"{commit_msg} (by {created_by})"
+            self._crud.put(
+                _SOURCES_CLASS,
+                source.source,
+                doc,
+                actor=created_by or "engine",
+                message=commit_msg,
+            )
+            logger.info(f"Saved source {source.source!r} → gitcrud config/sources")
+            return source
+
         yaml_path = self._sources_directory / f"{source.source}.yaml"
         yaml_dump(config_data, yaml_path)
 
@@ -305,6 +374,22 @@ class SourceRegistry:
         Args:
             source_name: The _source label.
         """
+        if self._crud is not None:
+            from dfe_engine.gitcrud.engine import ResourceNotFoundError
+
+            try:
+                self._crud.delete(
+                    _SOURCES_CLASS,
+                    source_name,
+                    actor="engine",
+                    message=f"source: delete {source_name}",
+                )
+            except ResourceNotFoundError:
+                logger.warning(f"Source does not exist: {source_name!r}")
+                return
+            logger.info(f"Deleted source {source_name!r}")
+            return
+
         yaml_path = self._sources_directory / f"{source_name}.yaml"
 
         if not yaml_path.exists():
@@ -344,14 +429,14 @@ class SourceRegistry:
         """List all source definitions.
 
         Args:
-            enabled_only: If True, only return enabled sources.
+            enabled_only: If True, only return active sources.
 
         Returns:
-            List of source metadata dicts (source, display_name, enabled, updated_at).
+            List of source metadata dicts (source, display_name, state, updated_at).
         """
         results = []
-        for table in self._store.list_tables():
-            config_data = self._store.get(table)
+        for table in self._names():
+            config_data = self._get_raw(table)
             if config_data is None:
                 continue
 
@@ -376,6 +461,7 @@ class SourceRegistry:
                     "source": source.source,
                     "display_name": source.display_name,
                     "description": source.description,
+                    "state": source.state,
                     "enabled": source.enabled,
                     "current": source.current,
                     "deployed_version": source.deployed_version,
@@ -383,30 +469,40 @@ class SourceRegistry:
                     "header_type": source.header.type if source.header else None,
                     "has_transform": source.transform is not None,
                     "has_fetcher": source.fetcher is not None,
-                    "mapping_standards": list(source.mapping_standards),
+                    "views": [v.standard for v in source.views],
                     "updated_at": updated_at or "",
                 }
             )
 
         return results
 
-    def get_all_sources(self, enabled_only: bool = False) -> list[Source]:
+    def get_all_sources(
+        self,
+        enabled_only: bool = False,
+        *,
+        states: Collection[str] | None = None,
+    ) -> list[Source]:
         """Load all source definitions as Source models.
 
         Args:
-            enabled_only: If True, only return enabled sources.
+            enabled_only: If True, only return ACTIVE sources (compat filter).
+            states: Explicit tri-state filter (e.g. {"active", "dormant"} for
+                the schema-pre-positioning DDL compile). Wins over enabled_only.
 
         Returns:
             List of Source models.
         """
         sources = []
-        for table in self._store.list_tables():
-            config_data = self._store.get(table)
+        for table in self._names():
+            config_data = self._get_raw(table)
             if config_data is None:
                 continue
             try:
                 source = Source.model_validate(config_data)
-                if enabled_only and not source.enabled:
+                if states is not None:
+                    if source.state not in states:
+                        continue
+                elif enabled_only and not source.enabled:
                     continue
                 sources.append(source)
             except Exception:
@@ -416,7 +512,7 @@ class SourceRegistry:
 
     def source_exists(self, source_name: str) -> bool:
         """Check if a source exists in the registry."""
-        return self._store.get(source_name) is not None
+        return self._get_raw(source_name) is not None
 
     # -----------------------------------------------------------------
     # Match Table
@@ -446,17 +542,27 @@ class SourceRegistry:
     # -----------------------------------------------------------------
 
     def _validate_save(self, source: Source) -> None:
-        """Validate before saving: unique source, no match conflicts."""
+        """Validate before saving: unique source, receiver-evaluable match, no conflicts."""
         try:
             candidate_match = source.versions[source.current].match
         except KeyError:
             candidate_match = None
 
-        for table in self._store.list_tables():
+        # A source with a match is receiver-routed: its operator must map onto
+        # the receiver's hot-path modes (equals -> key_value_set, exists ->
+        # key_present). The other four operators are a DOCUMENTED receiver gap.
+        if candidate_match is not None and candidate_match.operator not in ("equals", "exists"):
+            from dfe_engine.services.source_routing import UnsupportedMatchOperatorError
+
+            raise SourceValidationError(
+                str(UnsupportedMatchOperatorError(source.source, candidate_match.operator))
+            )
+
+        for table in self._names():
             if table == source.source:
                 continue  # Same source (update)
 
-            config_data = self._store.get(table)
+            config_data = self._get_raw(table)
             if config_data is None:
                 continue
 
@@ -465,12 +571,14 @@ class SourceRegistry:
             except Exception:
                 continue
 
-            # Check match conflicts: same field+value on different sources
+            # Check match conflicts: same field+value on different sources.
+            # Dormant counts as conflicting (its schema is pre-positioned and it
+            # may activate later); only disabled sources release their match.
             if (
                 candidate_match
                 and existing.match
-                and existing.enabled
-                and source.enabled
+                and existing.state != "disabled"
+                and source.state != "disabled"
                 and candidate_match.field == existing.match.field
                 and candidate_match.operator == existing.match.operator
                 and candidate_match.value == existing.match.value
@@ -492,7 +600,13 @@ class SourceRegistry:
         Args:
             source_name: The _source label.
             callback: Function called with (table_name, data) on change.
+
+        No-op on the gitcrud backend: the engine is the only writer there, so
+        there is no background poller to observe out-of-band edits.
         """
+        if self._crud is not None:
+            logger.debug("on_change is a no-op on the gitcrud sources backend")
+            return
         self._store.on_change(source_name, callback)
 
     # -----------------------------------------------------------------
@@ -501,20 +615,32 @@ class SourceRegistry:
 
     @property
     def is_git(self) -> bool:
-        """Whether the sources directory is a git repository."""
+        """Whether the sources backend is git-native."""
+        if self._crud is not None:
+            return True
         return self._store.is_git
 
     @property
     def current_branch(self) -> str | None:
         """Current git branch name."""
+        if self._crud is not None:
+            return self._crud.repo.branch
         return self._store.current_branch
 
     def list_branches(self) -> list[str]:
         """List all git branches."""
+        if self._crud is not None:
+            raise SourceRegistryError(
+                "branch operations are owned by the gitcrud routing layer on this backend"
+            )
         return self._store.list_branches()
 
     def switch_branch(self, branch: str, create: bool = False) -> None:
         """Switch to a git branch. Refreshes cache after switch."""
+        if self._crud is not None:
+            raise SourceRegistryError(
+                "branch operations are owned by the gitcrud routing layer on this backend"
+            )
         self._store.switch_branch(branch, create=create)
 
     # -----------------------------------------------------------------
@@ -524,8 +650,10 @@ class SourceRegistry:
     def seed_builtin_sources(self, overwrite: bool = False) -> int:
         """Seed the sources directory with built-in source definitions.
 
-        Copies built-in YAML files from package resources. Non-destructive
-        by default — skips files that already exist.
+        Copy-on-adopt: built-ins ship in-engine and are copied into the
+        deployment's sources store. Non-destructive by default — skips
+        sources that already exist. On the gitcrud backend all seeds land
+        in ONE commit.
 
         Args:
             overwrite: If True, overwrite existing source definitions.
@@ -535,6 +663,8 @@ class SourceRegistry:
         """
         import importlib.resources as resources
 
+        from dfe_engine.yaml_utils import yaml_load_string
+
         try:
             builtins_dir = resources.files("dfe_engine.source") / "builtin_sources"
         except Exception as e:
@@ -542,6 +672,7 @@ class SourceRegistry:
             return 0
 
         count = 0
+        crud_items: list[tuple[str, str, dict[str, Any]]] = []
         for resource in builtins_dir.iterdir():
             if not resource.name.endswith(".yaml"):
                 continue
@@ -553,14 +684,23 @@ class SourceRegistry:
 
             try:
                 content = resource.read_text()
-                dest = self._sources_directory / resource.name
-                dest.write_text(content)
+                if self._crud is not None:
+                    crud_items.append((_SOURCES_CLASS, source_name, yaml_load_string(content)))
+                else:
+                    dest = self._sources_directory / resource.name
+                    dest.write_text(content)
                 count += 1
                 logger.info(f"Seeded built-in source: {source_name}")
             except Exception as e:
                 logger.warning(f"Failed to seed source {source_name!r}: {e}")
 
-        if count > 0:
+        if crud_items:
+            self._crud.put_many(
+                crud_items,
+                actor="engine",
+                message="source: seed built-in sources",
+            )
+        if count > 0 and self._store is not None:
             self._store._refresh_all()
 
         return count
@@ -571,4 +711,5 @@ class SourceRegistry:
 
     def close(self) -> None:
         """Stop background refresh and cleanup."""
-        self._store.stop()
+        if self._store is not None:
+            self._store.stop()

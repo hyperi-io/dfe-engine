@@ -1,7 +1,12 @@
 """Source routing config generator.
 
 Compiles Source definitions from SourceRegistry into receiver/loader
-routing configuration for source_routing mode.
+routing configuration.
+
+The receiver emit targets the REAL dfe-receiver ``routing`` contract
+(``src/config/mod.rs`` SourceRule/RoutingConfig): ``source_rules`` stamp
+``_source`` (first match wins) and the topic derives as
+``source_to_topic[_source]`` else ``{_source}{topic_suffix}``.
 
 Usage:
     from dfe_engine.services.source_routing import compile_receiver_routing, compile_loader_routing
@@ -15,50 +20,87 @@ from __future__ import annotations
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     ReceiverRoutingConfig,
-    SourceMatchRule,
+    SourceRule,
 )
 from dfe_engine.source.registry import SourceRegistry
+
+# SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
+# router has exactly three modes; the other four engine operators (not_equals,
+# includes, starts_with, ends_with) have NO receiver equivalent - a DOCUMENTED
+# receiver gap. compile rejects them (see UnsupportedMatchOperatorError).
+_OPERATOR_TO_MODE = {
+    "equals": "key_value_set",
+    "exists": "key_present",
+}
+
+
+class UnsupportedMatchOperatorError(ValueError):
+    """A receiver-routed source uses a match operator the receiver cannot evaluate."""
+
+    def __init__(self, source: str, operator: str) -> None:
+        super().__init__(
+            f"Source {source!r}: match operator {operator!r} has no dfe-receiver "
+            f"equivalent (hot-path router modes: key_present, key_value_set, "
+            f"key_value_use). Use 'equals' or 'exists', or route this source "
+            f"another way - the missing operators are a documented receiver gap."
+        )
+        self.source = source
+        self.operator = operator
 
 
 def compile_receiver_routing(
     registry: SourceRegistry,
     *,
-    default_topic: str = "unmatched",
+    default_source: str = "default",
+    topic_suffix: str = "_land",
 ) -> ReceiverRoutingConfig:
-    """Compile Source match rules into a ReceiverRoutingConfig.
+    """Compile Source match rules into the receiver's ``routing`` contract.
 
-    Iterates all enabled Sources, extracts their ``match`` config,
-    and builds a ``source_match_table`` for the receiver's source_routing mode.
+    Iterates ACTIVE sources (a dormant source keeps its schema pre-positioned
+    but its receiver redirect stays off), translating each ``match`` into a
+    receiver ``SourceRule``:
+
+    - ``equals`` -> ``key_value_set`` (match_value=value, source=_source name)
+    - ``exists`` -> ``key_present``  (source=_source name)
 
     Sources without a ``match`` config are skipped — they won't be
     directly matched by the receiver (e.g. fetcher-based SaaS sources).
+    ``source_to_topic`` is emitted only where a source's landing topic
+    deviates from ``{_source}{topic_suffix}`` (none do today - the Source
+    model derives ``topic_land`` by that same rule).
 
-    Args:
-        registry: SourceRegistry to read Source definitions from.
-        default_topic: Fallback topic for unmatched messages.
-
-    Returns:
-        ReceiverRoutingConfig with source_routing=True and populated match table.
+    Raises:
+        UnsupportedMatchOperatorError: a source uses one of the four match
+            operators the receiver's hot-path router does not implement.
     """
-    match_table: list[SourceMatchRule] = []
+    rules: list[SourceRule] = []
+    source_to_topic: dict[str, str] = {}
 
-    for source in registry.get_all_sources(enabled_only=True):
+    for source in registry.get_all_sources(states=("active",)):
         if not source.match:
             continue
 
-        match_table.append(
-            SourceMatchRule(
+        mode = _OPERATOR_TO_MODE.get(source.match.operator)
+        if mode is None:
+            raise UnsupportedMatchOperatorError(source.source, source.match.operator)
+
+        rules.append(
+            SourceRule(
                 field=source.match.field,
-                operator=source.match.operator,
-                value=source.match.value,
-                topic=source.topic_land,
+                mode=mode,
+                match_value=source.match.value if mode == "key_value_set" else None,
+                source=source.source,
             )
         )
+        expected_topic = f"{source.source}{topic_suffix}"
+        if source.topic_land != expected_topic:
+            source_to_topic[source.source] = source.topic_land
 
     return ReceiverRoutingConfig(
-        source_routing=True,
-        source_match_table=match_table,
-        default_topic=default_topic,
+        source_rules=rules,
+        default_source=default_source,
+        topic_suffix=topic_suffix,
+        source_to_topic=source_to_topic,
     )
 
 
@@ -85,9 +127,10 @@ def compile_loader_routing(
     Returns:
         LoaderRoutingConfig with source_routing=True.
     """
-    # Build a diagnostic map of source → table_name
+    # Build a diagnostic map of source → table_name (ACTIVE only: dormant
+    # sources have no live loader path).
     source_to_table: dict[str, str] = {}
-    for source in registry.get_all_sources(enabled_only=True):
+    for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
 
     return LoaderRoutingConfig(

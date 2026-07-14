@@ -57,15 +57,21 @@ def default_registry() -> ResourceClassRegistry:
     """DFE Governed Ops resource types for the DEPLOY repo (see docs/architecture.md).
 
     Typed entries sharing RBAC class prefixes. Scope here is the deploy repo:
-    `helmvars` (overlays) + the `governance` class (rbac + actions + policies).
-    The `datamodel` (sources/schemas/fieldmaps) and `hunts` (defs/rules/alert-dests)
-    classes live in the config-SSoT repo and arrive with the multi-repo work
-    (option A); they are a second registry over that repo.
+    `helmvars` (overlays), the `governance` class (rbac + actions + policies),
+    and `sources` (the all-in-one source-definition doc under config/sources -
+    the first datamodel class to land in the deploy repo). The remaining
+    datamodel types (schemas/fieldmaps) and `hunts` (defs/rules/alert-dests)
+    arrive with the multi-repo work (option A).
     """
     return ResourceClassRegistry(
         [
             # helmvars class - deployment overlays
             ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
+            # datamodel class - source definitions. The stored doc IS the
+            # exchange format (API payload = file = gitcrud doc); the Source
+            # model owns its own semver version envelope (current/versions/
+            # deployed_version), which is what versioned=True declares here.
+            ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),
             # governance class - RBAC + curated actions + protected-var policies
             ResourceClass("accounts", "governance/rbac/accounts", rbac_prefix="governance"),
             ResourceClass("groups", "governance/rbac/groups", rbac_prefix="governance"),

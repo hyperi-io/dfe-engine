@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
 #  File:         sigma/views.py
-#  Purpose:      CRUD-managed Sigma source-view definitions + DDL generation
+#  Purpose:      CRUD-managed Sigma source-view definitions (facade over remap_view)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -14,49 +14,41 @@ by static field maps (real table column -> Sigma field), a view DEFINITION is a
 stored, operator-editable object (gitcrud ``sigma_views`` class, keyed by source
 name) that also declares columns DERIVED FROM the source's ``_json`` column.
 
-Those JSON-derived columns are the new capability: the fixed meta schema only knows
-``_timestamp_load`` / ``_org_id`` / ``_source`` / ``_raw`` / ``_json``, so a Sigma
-field like ``EventID`` that lives INSIDE the JSON payload is not a real column. The
-view extracts it with the same dynamic-subcolumn idiom the JSON promotion + sampler
-paths use - ``assumeNotNull(_json).`path``` - optionally CAST to a declared type,
-and aliases it to the Sigma field name.
-
-The stored definition is the SSoT the DDL is generated FROM (see
-``build_sigma_view_ddl`` + ``SigmaViewStore.generate_ddl``); the API's generate
-action and ``SigmaSourceMapper`` both prefer a stored definition and fall back to
-static field maps when none exists. The store reuses the SAME sigma gitcrud
-registry (``catalog.sigma_registry``) over the deploy repo, so every view mutation
-is one attributed git commit - survivability + audit come free.
+The view MODEL + DDL generation are now the STANDARD-AGNOSTIC engine in
+:mod:`dfe_engine.fieldmap.remap_view` (the same engine ECS + CIM views use); this
+module is the thin Sigma facade over it - it keeps the ``sigma_field`` stored
+contract + the CRUD store, and delegates rendering. Those JSON-derived columns are
+the capability the fixed meta schema lacks: a Sigma field like ``EventID`` that
+lives INSIDE the JSON payload is not a real column, so the view extracts it with
+the dynamic-subcolumn idiom ``assumeNotNull(_json).`path``` (optionally CAST). The
+store reuses the SAME sigma gitcrud registry (``catalog.sigma_registry``) over the
+deploy repo, so every view mutation is one attributed git commit - survivability +
+audit come free.
 """
 
 from __future__ import annotations
 
-import re
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
+from dfe_engine.fieldmap.remap_view import (
+    RemapColumn,
+    RemapViewDefinition,
+    RemapViewError,
+    build_remap_view_ddl,
+)
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.commit_policy import CommitContext, build_message
 
 from .catalog import VIEWS_CLASS, sigma_registry
 
-# Standard JSON column name across all schema profiles. The canonical constant
-# lives at services.schema.json_promotion_service.JSON_COLUMN; it is a single
-# literal here (as in sampling/clickhouse_reader) to avoid a service-layer import
-# from the sigma package - keep the two in step if the column is ever renamed.
-JSON_COLUMN = "_json"
+# The Sigma standard name (the view suffix + the remap-view standard).
+SIGMA_STANDARD = "sigma"
 
-# A conservative allow-list for an operator-declared ClickHouse type used verbatim
-# in a CAST. Letters/digits/underscore plus the punctuation real CH types need -
-# parentheses (parametrised types), commas + spaces (Enum/DateTime args) and single
-# quotes (Enum member literals). It deliberately rejects anything that could break
-# out of the CAST expression (backticks, parens-mismatch aside, semicolons, ...).
-_CH_TYPE_RE = re.compile(r"^[A-Za-z0-9_(), ']+$")
-
-
-class SigmaViewError(ValueError):
-    """Raised when a view definition cannot be rendered to safe DDL."""
+# Rendering errors surface as SigmaViewError for API/back-compat; it IS the shared
+# remap-view error so callers catching either type keep working.
+SigmaViewError = RemapViewError
 
 
 # -- Definition model ----------------------------------------
@@ -69,7 +61,8 @@ class SigmaViewColumn(BaseModel):
     a real table column (``source_column``) OR a dotted path inside the source's
     ``_json`` column (``json_path``) - exactly one of the two. ``type`` is an
     optional ClickHouse type the extracted value is CAST to (mainly for a
-    JSON-derived column, whose subcolumn is otherwise a ``Dynamic``).
+    JSON-derived column, whose subcolumn is otherwise a ``Dynamic``). This is the
+    Sigma-named shape of :class:`~dfe_engine.fieldmap.remap_view.RemapColumn`.
     """
 
     sigma_field: str = Field(description="Standard Sigma field name (the view alias)")
@@ -99,6 +92,15 @@ class SigmaViewColumn(BaseModel):
         """True when this column is extracted from a path inside ``_json``."""
         return bool(self.json_path)
 
+    def to_remap(self) -> RemapColumn:
+        """The standard-agnostic form (``sigma_field`` -> ``field``)."""
+        return RemapColumn(
+            field=self.sigma_field,
+            source_column=self.source_column,
+            json_path=self.json_path,
+            type=self.type,
+        )
+
 
 class SigmaViewDefinition(BaseModel):
     """A CRUD-managed Sigma view definition for one source.
@@ -120,84 +122,21 @@ class SigmaViewDefinition(BaseModel):
 
     @property
     def json_derived_columns(self) -> list[SigmaViewColumn]:
-        """The subset of columns extracted from ``_json`` (Task B)."""
+        """The subset of columns extracted from ``_json``."""
         return [c for c in self.columns if c.is_json_derived]
 
-
-# -- DDL generation ------------------------------------------
-
-
-def _safe_ident(name: str, *, what: str) -> str:
-    """Validate a bare identifier for a backtick-quoted OR an unquoted DDL position.
-
-    Rejects a backtick (which would break out of ``\\`...\\``` quoting), whitespace,
-    and the DDL control chars ``; ( ) ' " \\`` - so the value is safe even in the
-    UNQUOTED ``{db}.{table}`` positions the view DDL emits, not only the
-    backtick-wrapped column aliases. Governed, RBAC'd, git-stored values, checked as
-    defence in depth (the discipline json_promotion_service applies to its JSON
-    subcolumn accessor).
-    """
-    if not name:
-        raise SigmaViewError(f"empty {what}")
-    if any(c in name for c in "`;()'\"\\") or any(c.isspace() for c in name):
-        raise SigmaViewError(f"illegal {what}: {name!r}")
-    return name
+    def to_remap(self) -> RemapViewDefinition:
+        """The standard-agnostic form (fixed ``standard='sigma'``)."""
+        return RemapViewDefinition(
+            standard=SIGMA_STANDARD,
+            source_name=self.source_name,
+            description=self.description,
+            columns=[c.to_remap() for c in self.columns],
+            include_source_columns=self.include_source_columns,
+        )
 
 
-def _parens_balanced(s: str) -> bool:
-    """True when parentheses are properly nested: the running open-count never
-    goes negative and ends at zero. This is what blocks a CAST breakout - a
-    premature ``)`` (e.g. ``String) OR (1=1``) closes the CAST early and injects
-    the trailer, yet has an equal ()-count, so a bare count check misses it."""
-    depth = 0
-    for ch in s:
-        if ch == "(":
-            depth += 1
-        elif ch == ")":
-            depth -= 1
-            if depth < 0:
-                return False
-    return depth == 0
-
-
-def _safe_type(ch_type: str) -> str:
-    """Validate an operator-declared ClickHouse type for a CAST (allow-list).
-
-    The charset already blocks the obvious injectors (=, ;, backtick, ...); the
-    remaining break-out is an unbalanced/premature ``)`` that ends the CAST early,
-    so parentheses must be properly nested too.
-    """
-    if not _CH_TYPE_RE.match(ch_type) or not _parens_balanced(ch_type):
-        raise SigmaViewError(f"illegal ClickHouse type: {ch_type!r}")
-    return ch_type
-
-
-def _json_accessor(json_path: str) -> str:
-    """Dynamic-subcolumn accessor for a path inside ``_json``.
-
-    Matches the codebase idiom (json_promotion_service._json_subcolumn): the WHOLE
-    dotted path is ONE backtick-quoted identifier - that is how the ``JSON`` column
-    reports a nested path - and ``assumeNotNull`` unwraps a ``Nullable(JSON)`` column
-    (a no-op on a non-nullable one) so subcolumn access type-checks. Rejects a
-    backtick to keep it injection-safe.
-    """
-    if "`" in json_path:
-        raise SigmaViewError(f"illegal json_path (backtick): {json_path!r}")
-    if not json_path:
-        raise SigmaViewError("empty json_path")
-    return f"assumeNotNull({JSON_COLUMN}).`{json_path}`"
-
-
-def _column_select_expr(col: SigmaViewColumn) -> str:
-    """Render one column to a ``<expr> AS `<sigma_field>``` SELECT term."""
-    alias = _safe_ident(col.sigma_field, what="sigma_field")
-    if col.is_json_derived:
-        expr = _json_accessor(col.json_path or "")
-    else:
-        expr = f"`{_safe_ident(col.source_column or '', what='source_column')}`"
-    if col.type:
-        expr = f"CAST({expr} AS {_safe_type(col.type)})"
-    return f"{expr} AS `{alias}`"
+# -- DDL generation (delegates to the shared remap-view engine) ----
 
 
 def build_sigma_view_ddl(
@@ -206,31 +145,12 @@ def build_sigma_view_ddl(
     db: str = "{db}",
     table_name: str | None = None,
 ) -> str:
-    """Render a ``CREATE OR REPLACE VIEW`` DDL from a stored view definition.
+    """Render a ``CREATE OR REPLACE VIEW {table}_sigma`` DDL from a stored definition.
 
-    The view is named ``{table}_sigma`` over table ``{table}`` (``table`` defaults
-    to the definition's ``source_name``). Each declared column becomes a
-    Sigma-aligned alias; a JSON-derived column is extracted from ``_json`` with the
-    dynamic-subcolumn idiom (optionally CAST to its declared type). ``{db}`` is a
-    placeholder the deployer substitutes, consistent with the schema DDL writer.
+    Thin wrapper over :func:`~dfe_engine.fieldmap.remap_view.build_remap_view_ddl`
+    with ``standard='sigma'`` - identical output to the former bespoke builder.
     """
-    # `db` is normally the "{db}" placeholder the deployer substitutes, but the API
-    # generate action passes a real database name (a user-supplied param) - validate
-    # it as an identifier so it cannot inject into the DDL (parity with the
-    # governance/ch/render quoting seam). The placeholder itself passes through.
-    if db != "{db}":
-        db = _safe_ident(db, what="db")
-    table = _safe_ident(table_name or definition.source_name, what="table_name")
-    view_name = f"{table}_sigma"
-
-    select_terms = [_column_select_expr(col) for col in definition.columns]
-    if definition.include_source_columns:
-        select_terms.append("*")
-    if not select_terms:
-        select_terms = ["*"]
-
-    body = ",\n    ".join(select_terms)
-    return f"CREATE OR REPLACE VIEW {db}.{view_name} AS\nSELECT\n    {body}\nFROM {db}.{table};\n"
+    return build_remap_view_ddl(definition.to_remap(), db=db, table_name=table_name)
 
 
 # -- Store ---------------------------------------------------

@@ -82,7 +82,15 @@ class VersionedDoc:
     @staticmethod
     def _versions(env: dict) -> dict[int, Any]:
         """Version map with int keys (YAML may load numeric keys as str)."""
-        return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
+        try:
+            return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
+        except (TypeError, ValueError) as e:
+            # e.g. the `sources` class: semver keys, envelope owned by the
+            # Source model itself - not the integer draft/publish lifecycle.
+            raise ValueError(
+                "resource carries a self-managed (non-integer) version envelope; "
+                "its lifecycle is owned by its own model, not VersionedDoc"
+            ) from e
 
     def _save(self, cls: str, name: str, env: dict, actor: str, msg: str):
         self._require_versioned(cls)

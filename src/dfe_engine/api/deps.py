@@ -48,17 +48,25 @@ Settings = Annotated[DFESettings, Depends(get_app_settings)]
 _registries: dict[str, Any] = {}
 
 
-def bootstrap_registries(settings: DFESettings) -> None:
-    """Initialize singleton registries on startup. Called from lifespan."""
+def bootstrap_registries(settings: DFESettings, gitcrud: Any | None = None) -> None:
+    """Initialize singleton registries on startup. Called from lifespan.
+
+    ``gitcrud`` (the Governed Ops engine over the deploy repo, when gitops is
+    enabled) makes the deploy repo's ``config/sources/`` the sources SSoT;
+    without it the registry falls back to the plain sources directory.
+    """
     if settings.schemas.schemas_dir:
         from dfe_engine.schema.registry import SchemaRegistry
 
         _registries["meta_schema"] = SchemaRegistry(schemas_directory=settings.schemas.schemas_dir)
 
-    if settings.source.sources_dir:
+    if gitcrud is not None or settings.source.sources_dir:
         from dfe_engine.source.registry import SourceRegistry
 
-        _registries["source"] = SourceRegistry(sources_directory=settings.source.sources_dir)
+        _registries["source"] = SourceRegistry(
+            sources_directory=settings.source.sources_dir or None,
+            crud=gitcrud,
+        )
 
     if settings.services.config_yaml_dir:
         from dfe_engine.services.registry import ServiceConfigRegistry

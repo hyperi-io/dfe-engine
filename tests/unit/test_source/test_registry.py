@@ -158,6 +158,43 @@ class TestList:
         assert len(sources) == 2
         assert all(isinstance(s, Source) for s in sources)
 
+    def test_get_all_sources_states_filter(self, registry: SourceRegistry):
+        """Tri-state filter: DDL compile wants active+dormant, routing wants active."""
+        registry.save_source(_make_source("act", match_value="act", state="active"))
+        registry.save_source(_make_source("dor", match_value="dor", state="dormant"))
+        registry.save_source(_make_source("dis", match_value="dis", state="disabled"))
+
+        ddl_set = {s.source for s in registry.get_all_sources(states=("active", "dormant"))}
+        assert ddl_set == {"act", "dor"}
+
+        routing_set = {s.source for s in registry.get_all_sources(states=("active",))}
+        assert routing_set == {"act"}
+
+        # compat: enabled_only == active only
+        assert {s.source for s in registry.get_all_sources(enabled_only=True)} == {"act"}
+
+    def test_dormant_match_still_conflicts(self, registry: SourceRegistry):
+        """A dormant source holds its receiver match (it may activate later)."""
+        registry.save_source(_make_source("dor", match_value="shared", state="dormant"))
+        with pytest.raises(SourceMatchConflictError):
+            registry.save_source(_make_source("act", match_value="shared", state="active"))
+
+    def test_unsupported_match_operator_rejected_on_save(self, registry: SourceRegistry):
+        """Receiver-routed sources must use equals/exists (documented receiver gap)."""
+        bad = Source.model_validate(
+            {
+                "source": "bad_op",
+                "match": {"field": "f", "operator": "includes", "value": "v"},
+            }
+        )
+        with pytest.raises(SourceValidationError, match="documented receiver gap"):
+            registry.save_source(bad)
+
+    def test_disabled_releases_match(self, registry: SourceRegistry):
+        registry.save_source(_make_source("dis", match_value="shared", state="disabled"))
+        registry.save_source(_make_source("act", match_value="shared", state="active"))
+        assert registry.get_source("act").state == "active"
+
     def test_get_all_sources_enabled_only(self, registry: SourceRegistry):
         registry.save_source(_make_source("a", match_value="a"))
         registry.save_source(_make_source("b", match_value="b", enabled=False))
@@ -262,13 +299,16 @@ class TestRoundTrip:
                     },
                     "poll_interval_secs": 60,
                 },
-                "sigma": {
-                    "taxonomy": "windows",
-                    "custom_mappings": {
-                        "CommandLine": "command_line",
-                        "ParentCommandLine": "parent_cmd",
-                    },
-                },
+                "views": [
+                    {
+                        "standard": "sigma",
+                        "taxonomy": "windows",
+                        "custom_mappings": {
+                            "CommandLine": "command_line",
+                            "ParentCommandLine": "parent_cmd",
+                        },
+                    }
+                ],
             }
         )
 
@@ -289,8 +329,8 @@ class TestRoundTrip:
         assert loaded.transform.config_file == source.transform.config_file
         assert loaded.fetcher.source_type == source.fetcher.source_type
         assert loaded.fetcher.auth.type == source.fetcher.auth.type
-        assert loaded.sigma.taxonomy == source.sigma.taxonomy
-        assert loaded.sigma.custom_mappings == source.sigma.custom_mappings
+        assert loaded.view_for("sigma").taxonomy == source.view_for("sigma").taxonomy
+        assert loaded.view_for("sigma").custom_mappings == source.view_for("sigma").custom_mappings
 
     def test_update_draft_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(

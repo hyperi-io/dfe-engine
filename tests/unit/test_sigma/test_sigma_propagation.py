@@ -82,7 +82,7 @@ def _add_windows_source(env, name: str = "windows_audit") -> None:
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": name},
             "schema": {"engine": "MergeTree"},
-            "sigma": {"taxonomy": "windows", "custom_mappings": {}},
+            "views": [{"standard": "sigma", "taxonomy": "windows"}],
         }
     )
 
@@ -209,7 +209,7 @@ def test_propagate_skips_rule_with_no_matching_source(env):
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": "linux_syslog"},
             "schema": {"engine": "MergeTree"},
-            "sigma": {"taxonomy": "linux", "custom_mappings": {}},
+            "views": [{"standard": "sigma", "taxonomy": "linux"}],
         }
     )
     _import_and_select(env, _rule_yaml(), _ID)

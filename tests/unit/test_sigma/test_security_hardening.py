@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import pytest
 
+from dfe_engine.fieldmap.remap_view import RemapViewError as SigmaViewError
+from dfe_engine.fieldmap.remap_view import _safe_type
 from dfe_engine.sigma.providers import ProviderConfig, ProviderKind
-from dfe_engine.sigma.views import SigmaViewError, _safe_type
 
 
 class TestCastTypeHardening:

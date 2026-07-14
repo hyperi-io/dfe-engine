@@ -1,0 +1,24 @@
+resource_type: core
+standard: ocsf
+version: "1.3.0"
+description: Default OCSF (Open Cybersecurity Schema Framework) field mappings for DFE platform
+# OCSF field -> DFE physical column. The RHS columns match the ECS/CIM maps, so one
+# physical schema yields {source}_ecs, {source}_cim AND {source}_ocsf views. A minimal
+# seed of the well-known network / actor / device / event fields - extend as needed.
+mappings:
+  src_endpoint.ip: source_ip
+  dst_endpoint.ip: destination_ip
+  src_endpoint.port: source_port
+  dst_endpoint.port: destination_port
+  actor.user.name: user_name
+  device.hostname: hostname
+  actor.process.name: process_name
+  actor.process.cmd_line: command_line
+  actor.process.pid: process_id
+  actor.process.parent_process.name: parent_process_name
+  actor.process.parent_process.cmd_line: parent_command_line
+  actor.process.parent_process.pid: parent_process_id
+  file.name: target_filename
+  file.path: file_path
+  message: message
+  time: _timestamp

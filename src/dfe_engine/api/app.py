@@ -39,7 +39,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     from dfe_engine.api.deps import bootstrap_registries, shutdown_registries
 
-    bootstrap_registries(settings)
+    # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). Built
+    # BEFORE the registries so the SourceRegistry can back onto the deploy
+    # repo's config/sources. None when gitops is disabled -> the governance
+    # routers return 503 (not_configured) and sources fall back to the
+    # plain sources directory.
+    from dfe_engine.gitcrud.factory import build_gitcrud
+
+    try:
+        gitcrud = build_gitcrud(settings.gitops)
+    except Exception as exc:  # never let gitops setup break app startup
+        logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
+        gitcrud = None
+    app.state.gitcrud = gitcrud
+
+    bootstrap_registries(settings, gitcrud=gitcrud)
 
     from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 
@@ -82,17 +96,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.jwt_authority = jwt_authority_for(settings)
 
-    # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). None when
-    # gitops is disabled -> the governance routers return 503 (not_configured).
-    from dfe_engine.gitcrud.factory import build_gitcrud
     from dfe_engine.governance import PolicyStore
 
-    try:
-        gitcrud = build_gitcrud(settings.gitops)
-    except Exception as exc:  # never let gitops setup break app startup
-        logger.warning("Governed Ops gitcrud unavailable", error=str(exc))
-        gitcrud = None
-    app.state.gitcrud = gitcrud
     # Forge client for opening review PRs when a production+team write may not
     # commit straight to main (gitcrud/routing.py). None -> that posture refuses.
     try:

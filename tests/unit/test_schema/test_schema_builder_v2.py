@@ -76,8 +76,7 @@ def _make_source(
     header_type="timeseries",
     ttl_days=90,
     engine="",  # empty = inherit the builder's default_engine (default MergeTree)
-    sigma_mappings=None,
-    mapping_standards=None,
+    views=None,
 ) -> Source:
     """Helper to create a Source with schema config."""
     schema_config = {}
@@ -96,10 +95,8 @@ def _make_source(
         "header": {"type": header_type, "version": "1.0.0"},
         "schema": schema_config,
     }
-    if sigma_mappings:
-        data["sigma"] = {"custom_mappings": sigma_mappings}
-    if mapping_standards:
-        data["mapping_standards"] = mapping_standards
+    if views:
+        data["views"] = views
 
     return Source.model_validate(data)
 
@@ -254,24 +251,30 @@ class TestBuild:
 
 
 class TestSigmaView:
-    def test_sigma_view_generated(self, registry, schemas_dir):
+    def test_sigma_view_from_inline_custom_mappings(self, registry, schemas_dir):
+        """A sigma view with inline custom_mappings renders without any registry."""
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
             meta_schema="meta.yaml",
-            sigma_mappings={"User": "user_name", "EventID": "event_id"},
+            views=[
+                {
+                    "standard": "sigma",
+                    "custom_mappings": {"User": "user_name", "EventID": "event_id"},
+                }
+            ],
         )
         result = builder.build(source)
 
-        assert result.sigma_view_ddl is not None
-        assert "test_source_sigma" in result.sigma_view_ddl
-        assert "`user_name` AS `User`" in result.sigma_view_ddl
-        assert "`event_id` AS `EventID`" in result.sigma_view_ddl
+        assert "sigma" in result.view_ddls
+        assert "test_source_sigma" in result.view_ddls["sigma"]
+        assert "`user_name` AS `User`" in result.view_ddls["sigma"]
+        assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
 
-    def test_no_sigma_config(self, registry, schemas_dir):
+    def test_no_views_config(self, registry, schemas_dir):
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(meta_schema="meta.yaml")
         result = builder.build(source)
-        assert result.sigma_view_ddl is None
+        assert result.view_ddls == {}
 
 
 # ── Validation ──────────────────────────────────────────────────────
@@ -378,18 +381,18 @@ def fm_registry(field_maps_dir):
 
 
 class TestViewDDLIntegration:
-    def test_no_views_without_registry(self, registry, schemas_dir):
-        """Without field_map_registry, view_ddls is empty."""
+    def test_no_views_without_registry_or_inline(self, registry, schemas_dir):
+        """Without a registry, a view with no inline mappings produces no DDL."""
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = _make_source(
             meta_schema="meta.yaml",
-            mapping_standards=["sigma"],
+            views=[{"standard": "sigma"}],
         )
         result = builder.build(source)
         assert result.view_ddls == {}
 
-    def test_no_views_without_mapping_standards(self, registry, schemas_dir, fm_registry):
-        """With registry but no mapping_standards on source, no views."""
+    def test_no_views_without_declared_views(self, registry, schemas_dir, fm_registry):
+        """With registry but no views on source, no view DDLs."""
         builder = SchemaBuilderV2(
             registry=registry,
             schemas_base_dir=schemas_dir,
@@ -400,7 +403,7 @@ class TestViewDDLIntegration:
         assert result.view_ddls == {}
 
     def test_generates_views_for_declared_standards(self, registry, schemas_dir, fm_registry):
-        """With registry + mapping_standards, views are generated."""
+        """LANDMINE 6 guard: views still drives ViewGenerator standard-by-standard."""
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
@@ -420,7 +423,7 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            mapping_standards=["sigma", "ecs"],
+            views=[{"standard": "sigma"}, {"standard": "ecs"}],
         )
         result = builder.build(source)
 
@@ -440,15 +443,15 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            mapping_standards=["sigma", "ecs"],
+            views=[{"standard": "sigma"}, {"standard": "ecs"}],
         )
         result = builder.build(source)
 
         assert "sigma" in result.view_ddls
         assert "ecs" not in result.view_ddls
 
-    def test_legacy_sigma_view_coexists_with_view_ddls(self, registry, schemas_dir, fm_registry):
-        """Legacy sigma_view_ddl and new view_ddls are both populated."""
+    def test_inline_custom_mappings_merge_with_registry(self, registry, schemas_dir, fm_registry):
+        """LANDMINE 5 guard: inline custom_mappings merge onto the registry base."""
         fm_registry.save_map(FieldMap(standard="sigma", mappings={"EventID": "event_id"}))
         builder = SchemaBuilderV2(
             registry=registry,
@@ -457,16 +460,32 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            sigma_mappings={"User": "user_name"},
-            mapping_standards=["sigma"],
+            views=[{"standard": "sigma", "custom_mappings": {"User": "user_name"}}],
         )
         result = builder.build(source)
 
-        # Legacy path
-        assert result.sigma_view_ddl is not None
-        assert "`user_name` AS `User`" in result.sigma_view_ddl
-        # New path
-        assert "sigma" in result.view_ddls
+        # ONE merged sigma view carries both the registry and inline mappings.
+        assert "`user_name` AS `User`" in result.view_ddls["sigma"]
+        assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
+
+    def test_inline_custom_mappings_win_over_registry(self, registry, schemas_dir, fm_registry):
+        """LANDMINE 5 guard: inline WINS per-key over the registry map (locked)."""
+        fm_registry.save_map(
+            FieldMap(standard="sigma", mappings={"User": "user_name", "EventID": "event_id"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[{"standard": "sigma", "custom_mappings": {"User": "custom_user"}}],
+        )
+        result = builder.build(source)
+
+        assert "`custom_user` AS `User`" in result.view_ddls["sigma"]
+        assert "`user_name` AS `User`" not in result.view_ddls["sigma"]
         assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
 
     def test_source_specific_overrides_in_views(self, registry, schemas_dir, fm_registry):
@@ -491,7 +510,7 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            mapping_standards=["sigma"],
+            views=[{"standard": "sigma"}],
         )
         result = builder.build(source)
 

@@ -6,6 +6,8 @@ All defaults match the Rust `impl Default` values exactly.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
@@ -133,46 +135,58 @@ class ValidationConfig(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class SourceMatchRule(BaseModel):
-    """A compiled match rule for source_routing mode.
+class SourceRule(BaseModel):
+    """One `_source` stamping rule - the dfe-receiver ``SourceRule`` serde contract.
 
-    Compiled from Source.match definitions by the config generator.
+    Field names and semantics mirror dfe-receiver ``src/config/mod.rs`` EXACTLY
+    (first match wins; only evaluated when the common header is on):
+
+    - ``key_present``:   field exists            -> ``_source = source``
+    - ``key_value_set``: field value==match_value -> ``_source = source``
+    - ``key_value_use``: field exists            -> ``_source = <field value>``
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    field: str = Field(..., description="JSON field to inspect")
-    operator: str = Field(
-        default="equals", description="Match operator (equals, exists, includes, …)"
+    field: str = Field(..., description="JSON field path (dot notation for nested)")
+    mode: Literal["key_present", "key_value_set", "key_value_use"] = Field(
+        ..., description="Match mode (key_present | key_value_set | key_value_use)"
     )
-    value: str = Field(default="", description="Expected value / operand")
-    topic: str = Field(..., description="Target Kafka topic")
+    match_value: str | None = Field(
+        default=None, description="Value to match against (key_value_set only)"
+    )
+    source: str | None = Field(
+        default=None,
+        description="_source to stamp (key_present + key_value_set; ignored for key_value_use)",
+    )
 
 
 class ReceiverRoutingConfig(BaseModel):
-    """Message routing configuration for the receiver.
+    """Message routing configuration - the dfe-receiver ``RoutingConfig`` contract.
 
-    Two modes:
-    - Legacy: inspect topic_fields, look up category_to_topic map.
-    - Source routing: evaluate source_match_table compiled from SourceRegistry.
+    The engine EMITS this shape (compiled from Source definitions); the
+    receiver deserialises it verbatim. Topic = ``source_to_topic[_source]``
+    else ``{_source}{topic_suffix}``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    source_routing: bool = Field(
-        default=False,
-        description="Use Source match rules instead of category_to_topic",
-    )
-    source_match_table: list[SourceMatchRule] = Field(
+    source_rules: list[SourceRule] = Field(
         default_factory=list,
-        description="Compiled match rules (populated by config generator when source_routing=True)",
+        description="_source stamping rules, first match wins (compiled from Source.match)",
     )
-    topic_fields: list[str] = Field(
-        default_factory=lambda: ["tags.event.category", "event_category"]
+    default_source: str = Field(default="default", description="_source when no rule matches")
+    topic_suffix: str = Field(
+        default="_land", description="Suffix appended to _source to form the topic"
     )
-    default_topic: str = "unmatched"
-    topic_suffix: str = "_land"
-    category_to_topic: dict[str, str] = Field(default_factory=dict)
+    source_to_topic: dict[str, str] = Field(
+        default_factory=dict,
+        description="Optional per-source topic overrides ({source: topic})",
+    )
+    legacy_compat: bool = Field(
+        default=False,
+        description="Receiver appends pre-2.2 key_value_use rules when true",
+    )
     dlq: DlqConfig = Field(default_factory=DlqConfig)
 
 
