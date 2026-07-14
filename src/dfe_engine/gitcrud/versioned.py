@@ -72,18 +72,20 @@ class VersionedDoc:
         VersionedDoc owns every write, so a stored doc is always an envelope; a doc
         with no ``versions`` map reads as "no published versions" (no legacy
         flat-doc back-compat - nothing is GA to migrate from).
+
+        The non-integer-key guard lives HERE (not in _versions) so every path
+        that loads an envelope is covered - including save_draft's
+        read-before-write, which would otherwise write a draft into a doc it
+        does not own and leave a mixed envelope behind.
         """
         self._require_versioned(cls)
         try:
-            return self._crud.get(cls, name)
+            env = self._crud.get(cls, name)
         except ResourceNotFoundError:
             return None
-
-    @staticmethod
-    def _versions(env: dict) -> dict[int, Any]:
-        """Version map with int keys (YAML may load numeric keys as str)."""
         try:
-            return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
+            for key in env.get(_VERSIONS) or {}:
+                int(key)
         except (TypeError, ValueError) as e:
             # e.g. the `sources` class: semver keys, envelope owned by the
             # Source model itself - not the integer draft/publish lifecycle.
@@ -91,6 +93,15 @@ class VersionedDoc:
                 "resource carries a self-managed (non-integer) version envelope; "
                 "its lifecycle is owned by its own model, not VersionedDoc"
             ) from e
+        return env
+
+    @staticmethod
+    def _versions(env: dict) -> dict[int, Any]:
+        """Version map with int keys (YAML may load numeric keys as str).
+
+        Key validity is guaranteed by _envelope; None/missing still reads as {}.
+        """
+        return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
 
     def _save(self, cls: str, name: str, env: dict, actor: str, msg: str):
         self._require_versioned(cls)

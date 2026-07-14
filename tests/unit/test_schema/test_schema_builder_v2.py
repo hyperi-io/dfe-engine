@@ -488,6 +488,98 @@ class TestViewDDLIntegration:
         assert "`user_name` AS `User`" not in result.view_ddls["sigma"]
         assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
 
+    def test_field_map_pin_honoured(self, registry, schemas_dir, fm_registry):
+        """A view's field_map pins the override layer to a NON-source-name map."""
+        fm_registry.save_map(
+            FieldMap(standard="sigma", mappings={"User": "default_user", "EventID": "event_id"})
+        )
+        # The source-name convention map: bypassed when the view pins another.
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="test_source", mappings={"User": "convention_user"})
+        )
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[{"standard": "sigma", "field_map": "corp_pin"}],
+        )
+        result = builder.build(source)
+
+        assert "`pinned_user` AS `User`" in result.view_ddls["sigma"]
+        assert "convention_user" not in result.view_ddls["sigma"]
+        # The _default layer still forms the base under a pin.
+        assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
+
+    def test_field_map_pin_standard_slash_form(self, registry, schemas_dir, fm_registry):
+        """The 'standard/name' pin form resolves the same map as the bare name."""
+        fm_registry.save_map(
+            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[{"standard": "sigma", "field_map": "sigma/corp_pin"}],
+        )
+        result = builder.build(source)
+        assert "`pinned_user` AS `User`" in result.view_ddls["sigma"]
+
+    def test_field_map_pin_standard_mismatch_raises(self, registry, schemas_dir, fm_registry):
+        """A pin declaring a DIFFERENT standard than its view is a config error."""
+        from dfe_engine.fieldmap.registry import FieldMapError
+
+        fm_registry.save_map(FieldMap(standard="sigma", mappings={"User": "default_user"}))
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[{"standard": "sigma", "field_map": "ecs/corp_pin"}],
+        )
+        with pytest.raises(FieldMapError, match="ecs"):
+            builder.build(source)
+
+    def test_inline_wins_over_field_map_pin(self, registry, schemas_dir, fm_registry):
+        """Inline custom_mappings still WIN per-key on top of a pinned map."""
+        fm_registry.save_map(
+            FieldMap(
+                standard="sigma",
+                source="corp_pin",
+                mappings={"User": "pinned_user", "EventID": "pinned_event_id"},
+            )
+        )
+        builder = SchemaBuilderV2(
+            registry=registry,
+            schemas_base_dir=schemas_dir,
+            field_map_registry=fm_registry,
+        )
+        source = _make_source(
+            meta_schema="meta.yaml",
+            views=[
+                {
+                    "standard": "sigma",
+                    "field_map": "corp_pin",
+                    "custom_mappings": {"User": "inline_user"},
+                }
+            ],
+        )
+        result = builder.build(source)
+
+        assert "`inline_user` AS `User`" in result.view_ddls["sigma"]
+        assert "`pinned_user` AS `User`" not in result.view_ddls["sigma"]
+        assert "`pinned_event_id` AS `EventID`" in result.view_ddls["sigma"]
+
     def test_source_specific_overrides_in_views(self, registry, schemas_dir, fm_registry):
         """Source-specific field map overrides default in view DDL."""
         fm_registry.save_map(

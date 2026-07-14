@@ -180,3 +180,12 @@ tmp/
 
 # Playwright MCP session artefacts (tool output, never committed)
 .playwright-mcp/
+
+# Runtime-generated engine state when run from the repo root (dev runs):
+# SourceDeploymentStore + pipeline output default to cwd-relative dirs.
+# Generated, never committed.
+.benchmarks/
+/pipelines/
+/source-builds/
+/source-deploys/
+/source-plans/

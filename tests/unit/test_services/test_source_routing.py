@@ -166,12 +166,43 @@ class TestCompileReceiverRouting:
         config = compile_receiver_routing(registry)
         assert config.source_to_topic == {}
 
-    def test_unsupported_operator_rejected(self):
+    def test_unsupported_operator_skipped_with_warning(self):
+        """A stored legacy-operator source is skipped LOUDLY, not a compile failure."""
+        from scalo.logger import logger
+
         reg = FakeSourceRegistry(
             [_make_source("bad", match_field="f", match_value="v", match_operator="includes")]
         )
-        with pytest.raises(UnsupportedMatchOperatorError, match="documented receiver gap"):
-            compile_receiver_routing(reg)
+        captured: list[str] = []
+        handler_id = logger.add(captured.append, level="WARNING")
+        try:
+            config = compile_receiver_routing(reg)
+        finally:
+            logger.remove(handler_id)
+
+        assert config.source_rules == []  # the legacy source is absent, no raise
+        assert any("documented receiver gap" in msg for msg in captured)
+        assert any("'bad'" in msg and "'includes'" in msg for msg in captured)
+
+    def test_unsupported_operator_does_not_brick_other_sources(self):
+        """One legacy stored doc must not fail the whole receiver config compile."""
+        reg = FakeSourceRegistry(
+            [
+                _make_source("bad", match_field="f", match_value="v", match_operator="includes"),
+                _make_source("good", match_field="agent.type", match_value="good"),
+                _make_source("present", match_field="tags.marker", match_operator="exists"),
+            ]
+        )
+        config = compile_receiver_routing(reg)
+        stamped = {r.source for r in config.source_rules}
+        assert stamped == {"good", "present"}
+
+    def test_unsupported_operator_error_message(self):
+        """The registry save path still surfaces this error's message on save."""
+        err = UnsupportedMatchOperatorError("bad", "includes")
+        assert "documented receiver gap" in str(err)
+        assert err.source == "bad"
+        assert err.operator == "includes"
 
     def test_empty_registry(self):
         empty = FakeSourceRegistry([])

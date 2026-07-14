@@ -14,22 +14,26 @@ from dfe_engine.gitcrud.merge import three_way_merge
 
 def test_no_changes() -> None:
     r = three_way_merge({"a": 1}, {"a": 1}, {"a": 1})
-    assert r.clean and r.merged == {"a": 1}
+    assert r.clean
+    assert r.merged == {"a": 1}
 
 
 def test_ours_only_change_kept() -> None:
     r = three_way_merge({"a": 1}, {"a": 2}, {"a": 1})
-    assert r.clean and r.merged == {"a": 2}
+    assert r.clean
+    assert r.merged == {"a": 2}
 
 
 def test_theirs_only_change_applied() -> None:
     r = three_way_merge({"a": 1}, {"a": 1}, {"a": 9})
-    assert r.clean and r.merged == {"a": 9}
+    assert r.clean
+    assert r.merged == {"a": 9}
 
 
 def test_both_same_change_no_conflict() -> None:
     r = three_way_merge({"a": 1}, {"a": 5}, {"a": 5})
-    assert r.clean and r.merged == {"a": 5}
+    assert r.clean
+    assert r.merged == {"a": 5}
 
 
 def test_divergent_scalar_change_conflicts_keeping_ours() -> None:
@@ -41,12 +45,14 @@ def test_divergent_scalar_change_conflicts_keeping_ours() -> None:
 
 def test_ours_added_key_kept() -> None:
     r = three_way_merge({}, {"new": 1}, {})
-    assert r.clean and r.merged == {"new": 1}
+    assert r.clean
+    assert r.merged == {"new": 1}
 
 
 def test_theirs_added_key_applied() -> None:
     r = three_way_merge({}, {}, {"up": 1})
-    assert r.clean and r.merged == {"up": 1}
+    assert r.clean
+    assert r.merged == {"up": 1}
 
 
 def test_both_added_different_value_conflicts() -> None:
@@ -55,14 +61,30 @@ def test_both_added_different_value_conflicts() -> None:
     assert r.merged == {"k": 1}
 
 
+def test_both_added_dicts_under_new_key_merge_per_field() -> None:
+    # base lacks the key entirely; both sides added dicts -> recurse against
+    # an empty base so the independent additions merge, no conflict
+    r = three_way_merge({}, {"new": {"x": 1}}, {"new": {"y": 2}})
+    assert r.clean
+    assert r.merged == {"new": {"x": 1, "y": 2}}
+
+
+def test_both_added_dicts_conflicting_inner_key_still_conflicts() -> None:
+    r = three_way_merge({}, {"new": {"x": 1}}, {"new": {"x": 2}})
+    assert r.conflicts == ["new.x"]
+    assert r.merged == {"new": {"x": 1}}  # ours kept
+
+
 def test_theirs_deleted_unchanged_key_is_removed() -> None:
     r = three_way_merge({"a": 1, "b": 2}, {"a": 1, "b": 2}, {"a": 1})
-    assert r.clean and r.merged == {"a": 1}  # b removed
+    assert r.clean
+    assert r.merged == {"a": 1}  # b removed
 
 
 def test_we_deleted_unchanged_key_is_removed() -> None:
     r = three_way_merge({"a": 1, "b": 2}, {"a": 1}, {"a": 1, "b": 2})
-    assert r.clean and r.merged == {"a": 1}
+    assert r.clean
+    assert r.merged == {"a": 1}
 
 
 def test_nested_dict_merges_per_field() -> None:

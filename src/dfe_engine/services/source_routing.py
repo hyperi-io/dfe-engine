@@ -17,6 +17,8 @@ Usage:
 
 from __future__ import annotations
 
+from scalo.logger import logger
+
 from dfe_engine.services.models.loader import LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     ReceiverRoutingConfig,
@@ -27,7 +29,9 @@ from dfe_engine.source.registry import SourceRegistry
 # SourceMatch.operator -> receiver SourceRule.mode. The receiver's hot-path
 # router has exactly three modes; the other four engine operators (not_equals,
 # includes, starts_with, ends_with) have NO receiver equivalent - a DOCUMENTED
-# receiver gap. compile rejects them (see UnsupportedMatchOperatorError).
+# receiver gap. The registry save path rejects them for non-disabled sources
+# (see UnsupportedMatchOperatorError); compile skips a stored legacy one with
+# a loud warning instead of failing the whole receiver config.
 _OPERATOR_TO_MODE = {
     "equals": "key_value_set",
     "exists": "key_present",
@@ -69,9 +73,11 @@ def compile_receiver_routing(
     deviates from ``{_source}{topic_suffix}`` (none do today - the Source
     model derives ``topic_land`` by that same rule).
 
-    Raises:
-        UnsupportedMatchOperatorError: a source uses one of the four match
-            operators the receiver's hot-path router does not implement.
+    A stored source whose match operator has no receiver mode is SKIPPED with
+    a loud warning rather than raised on: the registry save path rejects new
+    ones (see ``UnsupportedMatchOperatorError``), so this only fires for a
+    legacy stored doc - and one legacy doc must not brick the whole receiver
+    config compile.
     """
     rules: list[SourceRule] = []
     source_to_topic: dict[str, str] = {}
@@ -82,7 +88,12 @@ def compile_receiver_routing(
 
         mode = _OPERATOR_TO_MODE.get(source.match.operator)
         if mode is None:
-            raise UnsupportedMatchOperatorError(source.source, source.match.operator)
+            logger.warning(
+                f"Source {source.source!r}: match operator {source.match.operator!r} has no "
+                f"receiver mode (documented receiver gap) - skipping this source in the "
+                f"receiver routing compile"
+            )
+            continue
 
         rules.append(
             SourceRule(

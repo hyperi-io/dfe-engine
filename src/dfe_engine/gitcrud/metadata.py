@@ -55,7 +55,7 @@ class ResourceMetadata(BaseModel):
         """Whether this resource matches a UI/CLI filter (label k=v and/or a tag)."""
         if label is not None and self.labels.get(label[0]) != label[1]:
             return False
-        return not (tag is not None and tag not in self.tags)
+        return tag is None or tag in self.tags
 
 
 def extract_metadata(doc: dict[str, Any]) -> ResourceMetadata:
@@ -70,8 +70,9 @@ def with_metadata(doc: dict[str, Any], metadata: ResourceMetadata) -> dict[str, 
     """Return ``doc`` with its ``metadata`` block set (non-empty fields only), so the
     stored file stays clean."""
     out = dict(doc)
-    meta = metadata.model_dump(exclude_none=True)
-    meta = {k: v for k, v in meta.items() if v not in ({}, [], "")}
+    # exclude_defaults (not exclude_none + empty-filter) so unknown EXTRA keys
+    # survive the round-trip while defaulted standard fields stay off disk.
+    meta = metadata.model_dump(exclude_defaults=True)
     if meta:
         out[METADATA_KEY] = meta
     else:

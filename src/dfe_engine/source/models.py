@@ -52,7 +52,12 @@ SourceMatchOperator = Literal[
 SourceState = Literal["active", "dormant", "disabled"]
 
 
-def materialisation_action(state: str) -> Literal["create", "leave", "reclaim"]:
+def state_from_enabled(enabled: bool) -> SourceState:
+    """The tri-state a legacy boolean maps to (True -> active, False -> disabled)."""
+    return "active" if enabled else "disabled"
+
+
+def materialisation_action(state: SourceState) -> Literal["create", "leave", "reclaim"]:
     """Lazy materialisation rule (locked): CREATE on active / LEAVE on dormant /
     guarded RECLAIM on disabled.
 
@@ -364,6 +369,10 @@ class SourceView(BaseModel):
 
 _DEFAULT_SOURCE_VERSION = "1.0.0"
 _FORBIDDEN_WRITE_KEYS = frozenset({"versions", "current", "deployed_version", "date_time"})
+# 2.1 keys removed by the views clean break. Rejected LOUDLY on write: with
+# extra="ignore" a pre-2.2 client would otherwise get a 200 while its mapping
+# config silently vanished.
+_REMOVED_WRITE_KEYS = frozenset({"sigma", "mapping_standards", "field_mappings"})
 _VERSIONED_KEYS = (
     "header",
     "schema",
@@ -395,6 +404,19 @@ class SourceVersion(BaseModel):
         description="Naming-standard views this version exposes (sigma, ecs, cim, ocsf)",
     )
     fetcher: SourceFetcher | None = Field(default=None, description="SaaS API fetcher (optional)")
+
+    @field_validator("views")
+    @classmethod
+    def _views_one_per_standard(cls, v: list[SourceView]) -> list[SourceView]:
+        # Duplicate standards would let view_for() (first wins) and the DDL
+        # overlay (last wins) silently disagree - refuse them outright.
+        seen: set[str] = set()
+        for view in v:
+            if view.standard in seen:
+                raise ValueError(f"duplicate view for standard {view.standard!r}")
+            seen.add(view.standard)
+        return v
+
     match: SourceMatch = Field(..., description="Receiver match rule (required)")
     transform: SourceTransform | None = Field(
         default=None, description="Transform stage (optional)"
@@ -406,10 +428,7 @@ class SourceVersion(BaseModel):
 
     def view_for(self, standard: str) -> SourceView | None:
         """This version's view entry for *standard*, or None when not declared."""
-        for view in self.views:
-            if view.standard == standard:
-                return view
-        return None
+        return next((v for v in self.views if v.standard == standard), None)
 
     def effective_schema(self) -> SourceSchema:
         """Schema config for runtime/DDL resolution, defaulting to empty when unauthored."""
@@ -515,13 +534,27 @@ class SourceWriteRequest(BaseModel):
             if forbidden:
                 names = ", ".join(sorted(forbidden))
                 raise ValueError(f"Fields not allowed on write: {names}")
+            removed = _REMOVED_WRITE_KEYS.intersection(data.keys())
+            if removed:
+                names = ", ".join(sorted(removed))
+                raise ValueError(
+                    f"Fields removed in 2.2: {names} - declare naming-standard "
+                    f"views via the 'views' list instead"
+                )
         return data
 
-    def effective_state(self) -> SourceState:
-        """The tri-state this write requests (``state`` wins over ``enabled``)."""
+    def effective_state(self, current: SourceState = "active") -> SourceState:
+        """The tri-state this write requests (``state`` wins over ``enabled``).
+
+        When the body sent NEITHER field, keep *current* - a PUT that only
+        edits e.g. the description must not silently re-activate a dormant
+        or disabled source. Creates pass the default (active).
+        """
         if self.state is not None:
             return self.state
-        return "active" if self.enabled else "disabled"
+        if "enabled" in self.model_fields_set:
+            return state_from_enabled(self.enabled)
+        return current
 
     def to_version_snapshot(self) -> SourceVersion:
         """Build a new immutable version entry from this write payload."""
@@ -649,7 +682,7 @@ def apply_source_write_update(existing: Source, write: SourceWriteRequest) -> So
         if write.display_name is not None
         else existing.display_name,
         "description": write.description if write.description is not None else existing.description,
-        "state": write.effective_state(),
+        "state": write.effective_state(existing.state),
         "deployed_version": existing.deployed_version,
         "current": target_current,
         "versions": {

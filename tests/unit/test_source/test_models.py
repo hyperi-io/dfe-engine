@@ -563,6 +563,19 @@ class TestSourceVersion:
         assert ver.view_for("sigma").taxonomy == "windows"
         assert ver.view_for("ecs") is None
 
+    def test_duplicate_view_standards_rejected(self):
+        """Duplicate standards would let view_for (first wins) and the DDL
+        overlay (last wins) silently disagree - refused outright."""
+        with pytest.raises(ValueError, match="duplicate view"):
+            SourceVersion(
+                date_time="2026-01-01",
+                match=SourceMatch(field="f", value="v"),
+                views=[
+                    SourceView(standard="sigma", taxonomy="windows"),
+                    SourceView(standard="sigma", taxonomy="linux"),
+                ],
+            )
+
 
 class TestSourceWriteRequest:
     def test_rejects_version_tree_keys(self):
@@ -579,6 +592,36 @@ class TestSourceWriteRequest:
             SourceWriteRequest.model_validate(
                 {"source": "x", "deployed_version": "1.0.0"},
             )
+
+    @pytest.mark.parametrize("removed_key", ["sigma", "mapping_standards", "field_mappings"])
+    def test_rejects_removed_2_1_keys(self, removed_key):
+        """Pre-2.2 mapping keys fail LOUDLY - extra=ignore would otherwise 200
+        while the client's mapping config silently vanished."""
+        with pytest.raises(ValueError, match=r"removed in 2\.2"):
+            SourceWriteRequest.model_validate(
+                {
+                    "source": "x",
+                    "match": {"field": "f", "value": "v"},
+                    removed_key: {"taxonomy": "windows"},
+                }
+            )
+
+    def test_apply_write_update_without_state_or_enabled_keeps_dormant(self):
+        """A PUT that sends NEITHER state nor enabled must not re-activate a
+        dormant source (effective_state keeps the current tri-state)."""
+        existing = Source.model_validate(
+            {
+                "source": "dormant_src",
+                "state": "dormant",
+                "match": {"field": "f", "value": "v"},
+            }
+        )
+        write = SourceWriteRequest.model_validate(
+            {"description": "doc-only edit", "match": {"field": "f", "value": "v"}}
+        )
+        updated = apply_source_write_update(existing, write)
+        assert updated.state == "dormant"
+        assert updated.description == "doc-only edit"
 
     def test_create_uses_1_0_0_not_header_profile_version(self):
         write = SourceWriteRequest.model_validate(

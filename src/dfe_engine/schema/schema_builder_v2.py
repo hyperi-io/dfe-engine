@@ -229,42 +229,56 @@ class SchemaBuilderV2:
     ) -> dict[str, str]:
         """Generate standard view DDLs for the source's declared views.
 
-        The FieldMapRegistry two-tier resolution (via ViewGenerator, interface
-        unchanged) is the base. A view's inline ``custom_mappings`` then WIN
-        per-key over the registry result (locked precedence) - such a view is
-        re-rendered from the merged mappings, and renders even without a
-        registry.
+        The FieldMapRegistry two-tier resolution is the base: a view's
+        ``field_map`` pin replaces the source-name convention for the
+        registry override layer, and its inline ``custom_mappings`` then WIN
+        per-key over the registry result (locked precedence) - such a view
+        renders even without a registry. Views with neither go through the
+        ViewGenerator (interface unchanged); each view renders exactly once.
         """
         declared = list(views) if views is not None else list(source.views)
         if not declared:
             return {}
 
+        # A view the overlay loop below renders (a field_map pin or inline
+        # mappings) is excluded from the ViewGenerator pass - one render per
+        # view, no double work.
+        plain = [v for v in declared if not (v.custom_mappings or v.field_map)]
+
         view_ddls: dict[str, str] = {}
-        if self._field_map_registry:
+        if self._field_map_registry and plain:
             from dfe_engine.fieldmap.view_generator import ViewGenerator
 
             view_gen = ViewGenerator(self._field_map_registry, self._registry)
             view_ddls = view_gen.generate_views_for_source(
                 source_name=source.source,
                 table_name=source.table_name,
-                standards=[v.standard for v in declared],
+                standards=[v.standard for v in plain],
                 config=config,
             )
 
-        # Inline-wins overlay: merge registry base + per-view custom_mappings.
+        # Inline-wins overlay: merge registry base (honouring a field_map pin)
+        # + per-view custom_mappings.
         from dfe_engine.fieldmap.resolver import resolve_registry_mappings
 
         for view in declared:
-            if not view.custom_mappings:
+            if not (view.custom_mappings or view.field_map):
                 continue
             mappings: dict[str, str] = {}
             if self._field_map_registry:
                 mappings.update(
                     resolve_registry_mappings(
-                        self._field_map_registry, view.standard, source.source
+                        self._field_map_registry,
+                        view.standard,
+                        source.source,
+                        field_map=view.field_map,
                     )
                 )
             mappings.update(view.custom_mappings)
+            if not mappings:
+                # A pin-only view whose maps are absent: same skip the
+                # ViewGenerator applies to a standard with no maps.
+                continue
             view_ddls[view.standard] = self._ddl_gen.generate_view(
                 source.table_name, mappings, view.standard, config
             )

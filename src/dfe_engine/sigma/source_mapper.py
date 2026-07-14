@@ -188,39 +188,26 @@ class SigmaSourceMapper:
         repeated registry lookups in batch operations). PRECEDENCE (locked):
         the registry maps are the base and the sigma view's inline
         ``custom_mappings`` override per-key, so the two mapping sources
-        cannot silently disagree.
+        cannot silently disagree. A sigma view's ``field_map`` pin replaces
+        the source-name convention for the registry override layer.
         """
-        mappings: dict[str, str] = {}
-        if self._field_map_registry:
-            mappings.update(self._resolve_from_registry(source.source))
+        from dfe_engine.fieldmap.resolver import resolve_registry_mappings
 
         sigma_view = source.view_for("sigma")
+        mappings: dict[str, str] = {}
+        if self._field_map_registry:
+            mappings.update(
+                resolve_registry_mappings(
+                    self._field_map_registry,
+                    "sigma",
+                    source.source,
+                    field_map=sigma_view.field_map if sigma_view else None,
+                )
+            )
+
         if sigma_view is not None:
             mappings.update(sigma_view.custom_mappings)
         return mappings
-
-    def _resolve_from_registry(self, source_name: str) -> dict[str, str]:
-        """Resolve Sigma field mappings from the FieldMapRegistry.
-
-        Returns merged mappings (default + source-specific), or empty dict.
-        """
-        from dfe_engine.fieldmap.registry import FieldMapNotFoundError
-        from dfe_engine.fieldmap.resolver import resolve_field_map
-
-        default_map = None
-        source_map = None
-
-        try:
-            default_map = self._field_map_registry.get_map("sigma")
-        except FieldMapNotFoundError:
-            pass
-
-        try:
-            source_map = self._field_map_registry.get_map("sigma", source_name)
-        except FieldMapNotFoundError:
-            pass
-
-        return resolve_field_map(default_map, source_map)
 
     def get_sources_for_logsource(
         self,

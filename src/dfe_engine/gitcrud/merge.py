@@ -17,9 +17,11 @@ Because gitcrud objects are STRUCTURED YAML (dicts/lists), the merge is per-FIEL
 line-based - so it never trips on YAML reordering/indentation the way ``git merge-file``
 would, and it needs no external package. Per key: if ours and theirs agree, take it; if
 only one side changed it from base, take that side; if both changed it differently,
-recurse into dicts, else record a CONFLICT (keeping ours) for a human to resolve. Lists
-are treated atomically (divergent list edits conflict) - reliable element-identity list
-merging is a deliberate later enhancement.
+recurse into dicts (a key absent from base recurses against an empty base when both
+sides added dicts, so independent additions merge per-field), else record a CONFLICT
+(keeping ours) for a human to resolve. Lists are treated atomically (divergent list
+edits conflict) - reliable element-identity list merging is a deliberate later
+enhancement.
 """
 
 from __future__ import annotations
@@ -67,9 +69,13 @@ def _merge_value(b: Any, o: Any, t: Any, path: list[str], conflicts: list[str]) 
         return t
     if t == b:  # theirs did not change it -> take ours
         return o
-    # all three differ - recurse if all dicts, else it is a genuine conflict
-    if isinstance(b, dict) and isinstance(o, dict) and isinstance(t, dict):
-        return _merge_dict(b, o, t, path, conflicts)
+    # all three differ - recurse if both sides are dicts, else it is a genuine
+    # conflict. A base with NO such key (both sides ADDED a dict) recurses
+    # against {} so the two additions merge per-field instead of conflicting
+    # atomically; a non-dict base (both sides replaced a scalar with different
+    # dicts) stays a conflict.
+    if isinstance(o, dict) and isinstance(t, dict) and (isinstance(b, dict) or b is _MISSING):
+        return _merge_dict(b if isinstance(b, dict) else {}, o, t, path, conflicts)
     conflicts.append(".".join(path) or "<root>")
     return o  # keep ours; the human resolves
 

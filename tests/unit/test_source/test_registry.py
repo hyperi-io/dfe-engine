@@ -190,6 +190,19 @@ class TestList:
         with pytest.raises(SourceValidationError, match="documented receiver gap"):
             registry.save_source(bad)
 
+    def test_disabled_source_with_legacy_operator_saves(self, registry: SourceRegistry):
+        """Disabling is how an operator retires a legacy-operator source - the
+        operator gate must not block that exit path (active/dormant still reject)."""
+        legacy = Source.model_validate(
+            {
+                "source": "legacy_op",
+                "state": "disabled",
+                "match": {"field": "f", "operator": "includes", "value": "v"},
+            }
+        )
+        registry.save_source(legacy)
+        assert registry.get_source("legacy_op").state == "disabled"
+
     def test_disabled_releases_match(self, registry: SourceRegistry):
         registry.save_source(_make_source("dis", match_value="shared", state="disabled"))
         registry.save_source(_make_source("act", match_value="shared", state="active"))
