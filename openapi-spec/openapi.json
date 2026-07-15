@@ -21696,9 +21696,18 @@
             "default": ""
           },
           "attribute": {
-            "type": "string",
-            "title": "Attribute",
-            "default": ""
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute"
           },
           "description": {
             "type": "string",
@@ -21885,9 +21894,18 @@
             "default": ""
           },
           "attribute": {
-            "type": "string",
-            "title": "Attribute",
-            "default": ""
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribute"
           },
           "description": {
             "type": "string",

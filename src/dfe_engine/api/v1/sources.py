@@ -166,7 +166,7 @@ class SchemaColumn(BaseModel):
     name: str
     type: str
     use_case: str = ""
-    attribute: str = ""
+    attribute: list[str] | None = None
     description: str = ""
 
 
@@ -1106,15 +1106,20 @@ def _to_summary(raw: dict[str, Any]) -> SourceSummaryObject:
     )
 
 
+def _normalize_attribute(value: Any) -> list[str] | None:
+    """Match meta-schema column ``attribute``: list[str] | None."""
+    if value is None or value == [] or value == "":
+        return None
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
 def _to_api_schema_column(col: Any) -> SchemaColumn:
     return SchemaColumn(
         name=col.name,
         type=col.type,
         use_case=getattr(col, "use_case", "") or "",
-        attribute=(
-            ", ".join(col.attribute)
-            if isinstance(col.attribute, list)
-            else (getattr(col, "attribute", "") or "")
-        ),
+        attribute=_normalize_attribute(getattr(col, "attribute", None)),
         description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
     )

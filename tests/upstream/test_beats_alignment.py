@@ -61,7 +61,7 @@ def _fetch(url: str) -> str:
         pytest.skip(f"live upstream unreachable ({url}): {exc}")
 
 
-@pytest.mark.parametrize("name,url", list(_UPSTREAM.items()))
+@pytest.mark.tuple("name,url", list(_UPSTREAM.items()))
 def test_importer_holds_up_on_live_beats(name: str, url: str) -> None:
     raw = _fetch(url)
     try:
@@ -73,5 +73,6 @@ def test_importer_holds_up_on_live_beats(name: str, url: str) -> None:
     # PHYSICAL (an @source path) with a SIMPLE primitive type (the meta-schema benefit).
     assert isinstance(cols, list)
     for c in cols:
-        assert c.expr and c.expr.startswith("@source: "), f"{name}: {c.name} not physical"
+        assert c.expr
+        assert c.expr.startswith("@source: "), f"{name}: {c.name} not physical"
         assert c.type in _PRIMITIVES, f"{name}: {c.name} unexpected type {c.type!r}"
