@@ -131,6 +131,32 @@ class TestAddVersion:
         assert len(cols) == 4
         assert cols[-1].name == "severity"
 
+    def test_add_version_persists_ch_override(self, versioned_schema):
+        from dfe_engine.schema.models import SchemaColumnWrite
+
+        col = SchemaColumnWrite.model_validate(
+            {
+                "name": "event_id",
+                "type": "datetime",
+                "_field_type": "user_defined",
+                "ch_override": "DateTime",
+                "expr": "@source: EventId",
+            }
+        )
+        SchemaManager.add_version(
+            versioned_schema,
+            "1.2.0",
+            [col.to_yaml_dict()],
+            type="model",
+            summary="With ch_override",
+        )
+        data = yaml_load(versioned_schema)
+        written = data["versions"]["1.2.0"]["columns"][0]
+        assert written["ch_override"] == "DateTime"
+
+        loaded = SchemaLoader.load_columns(versioned_schema, version="1.2.0")
+        assert loaded[0].ch_override == "DateTime"
+
     def test_set_current_true(self, versioned_schema):
         SchemaManager.add_version(
             versioned_schema,

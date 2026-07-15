@@ -445,6 +445,9 @@ class TestSchemasRouter:
                     key in body["items"][0]
                     for key in ("name", "type", "use_case", "attribute", "description")
                 )
+                # attribute matches meta-schema column shape: list[str] | null
+                for item in body["items"]:
+                    assert item["attribute"] is None or isinstance(item["attribute"], list)
 
                 page2 = tc.get(f"{base_url}?page=2&per_page=2", headers=headers)
                 assert page2.status_code == 200
