@@ -332,3 +332,24 @@ class TestMetaSchemaAddVersionRequest:
     def test_rejects_empty_columns(self):
         with pytest.raises(pydantic.ValidationError, match="at least 1"):
             MetaSchemaAddVersionRequest.model_validate({"type": "model", "columns": []})
+
+    def test_ch_override_preserved_in_yaml_dict(self):
+        """API writes must keep ch_override so it survives version create."""
+        req = MetaSchemaAddVersionRequest.model_validate(
+            {
+                "type": "model",
+                "summary": "Copy: cloudtrail",
+                "columns": [
+                    {
+                        "name": "event_id",
+                        "type": "datetime",
+                        "_field_type": "user_defined",
+                        "ch_override": "DateTime",
+                        "expr": "@source: EventId",
+                    }
+                ],
+            }
+        )
+        dumped = req.columns[0].to_yaml_dict()
+        assert dumped["ch_override"] == "DateTime"
+        assert dumped["type"] == "datetime"

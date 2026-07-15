@@ -74,6 +74,8 @@ class SchemaColumn(BaseModel):
     type: NonEmptyStr = Field(..., description="Type of the column")
     attribute: list[str] | None = Field(default=None, description="Attributes of the column")
     use_case: str | None = Field(default=None, description="Use case of the column")
+    default: str | None = Field(default=None, description="DEFAULT expression")
+    order: int | None = Field(default=None, description="Position in ORDER BY / PRIMARY KEY")
     expr: str | None = Field(default=None, description="Expression for the column")
     comment: str | None = Field(default=None, description="Comment for the column")
     field_type: str | None = Field(
@@ -81,6 +83,14 @@ class SchemaColumn(BaseModel):
         validation_alias=AliasChoices("_field_type", "field_type"),
         serialization_alias="_field_type",
         description="Column classification (e.g. base); stored as _field_type in YAML",
+    )
+    ch_override: str | None = Field(
+        default=None,
+        description="Exact ClickHouse type — bypasses primitive mapping",
+    )
+    codec: str | None = Field(
+        default=None,
+        description="Explicit CODEC contents — required to set a codec with ch_override",
     )
     matched_searchable: list[str] = Field(
         default_factory=list,
@@ -97,7 +107,9 @@ class SchemaColumn(BaseModel):
             return [value] if value else None
         return list(value)
 
-    @field_validator("use_case", "expr", "comment", mode="before")
+    @field_validator(
+        "use_case", "expr", "comment", "default", "ch_override", "codec", mode="before"
+    )
     @classmethod
     def _empty_str_to_none(cls, value: Any) -> Any:
         if value == "":

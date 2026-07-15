@@ -18462,6 +18462,30 @@
             "title": "Use Case",
             "description": "Use case of the column"
           },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default",
+            "description": "DEFAULT expression"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order",
+            "description": "Position in ORDER BY / PRIMARY KEY"
+          },
           "expr": {
             "anyOf": [
               {
@@ -18490,6 +18514,30 @@
             "type": "string",
             "title": "Field Type",
             "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
+          "ch_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ch Override",
+            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+          },
+          "codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codec",
+            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
           },
           "matched_searchable": {
             "items": {
@@ -21935,6 +21983,30 @@
             "title": "Use Case",
             "description": "Use case of the column"
           },
+          "default": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default",
+            "description": "DEFAULT expression"
+          },
+          "order": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Order",
+            "description": "Position in ORDER BY / PRIMARY KEY"
+          },
           "expr": {
             "anyOf": [
               {
@@ -21970,6 +22042,30 @@
             ],
             "title": "Field Type",
             "description": "Column classification (e.g. base); stored as _field_type in YAML"
+          },
+          "ch_override": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ch Override",
+            "description": "Exact ClickHouse type \u2014 bypasses primitive mapping"
+          },
+          "codec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Codec",
+            "description": "Explicit CODEC contents \u2014 required to set a codec with ch_override"
           },
           "_matched_searchable": {
             "items": {
