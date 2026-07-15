@@ -126,7 +126,7 @@ class SchemaColumn(BaseModel):
     name: str
     type: str
     use_case: str = ""
-    attribute: str = ""
+    attribute: list[str] | None = None
     description: str = ""
     field_type: str | None = Field(
         default=None,
@@ -136,16 +136,21 @@ class SchemaColumn(BaseModel):
     )
 
 
+def _normalize_attribute(value: Any) -> list[str] | None:
+    """Match meta-schema column ``attribute``: list[str] | None."""
+    if value is None or value == [] or value == "":
+        return None
+    if isinstance(value, str):
+        return [value]
+    return list(value)
+
+
 def _composed_column_to_api(col: Any) -> SchemaColumn:
     return SchemaColumn(
         name=col.name,
         type=col.type,
         use_case=getattr(col, "use_case", "") or "",
-        attribute=(
-            ", ".join(col.attribute)
-            if isinstance(col.attribute, list)
-            else (getattr(col, "attribute", "") or "")
-        ),
+        attribute=_normalize_attribute(getattr(col, "attribute", None)),
         description=getattr(col, "comment", None) or getattr(col, "description", "") or "",
         field_type=getattr(col, "field_type", None),
     )
@@ -1753,7 +1758,7 @@ async def promote_field(
                     name=c.name,
                     type=c.type,
                     use_case=c.use_case or "",
-                    attribute=", ".join(c.attribute),
+                    attribute=_normalize_attribute(c.attribute),
                     description=c.comment or "",
                     field_type=c.field_type,
                 )
