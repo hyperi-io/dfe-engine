@@ -30,7 +30,7 @@ lives in that deployment's own private config, never in this repo.
 ```bash
 git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
-git submodule update --init   # config -> dfe-devex, schemas -> dfe-schemas
+git submodule update --init schemas   # schemas -> dfe-schemas (DDL/schema seed)
 uv sync
 ```
 
@@ -77,13 +77,13 @@ All configuration is environment variables with the `DFE_` prefix
 
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
-| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config submodule root. Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
+| `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's config repo, e.g. dfe-devex, for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
 | `DFE_SCHEMAS_DIR` | `/app/schemas` | `./schemas` | Schema submodule root (`dfe-schemas`). |
 
-- The Docker image bakes the `config/` and `schemas/` submodule trees in at
-  `/app/config` and `/app/schemas`, and the Dockerfile sets `DFE_CONFIG_DIR`
-  and `DFE_SCHEMAS_DIR` to those paths. A container therefore runs with no env
-  set.
+- The Docker image bakes the `schemas/` submodule tree in as a seed at
+  `/app/schemas`; `/app/config` is an empty baked default. The Dockerfile sets
+  `DFE_CONFIG_DIR` and `DFE_SCHEMAS_DIR` to those paths, so a container runs
+  with no env set - config is supplied at deploy (a mounted volume/ConfigMap).
 - Setting either variable at runtime (`docker run -e ...`, a K8s pod `env:`,
   or a local `.env`) overrides the baked-in default - for example, to point at
   a mounted volume or ConfigMap.
