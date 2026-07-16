@@ -126,8 +126,13 @@ class ConnectionRegistry:
     def get_client_for_user(self, auth: AuthContext) -> tuple[Any, list[str]]:
         """Convenience: resolve connection and return (client, org_ids).
 
-        The caller is responsible for wrapping the client in a
-        ``TenantScopedClient`` if ``org_ids`` is non-empty.
+        Returns the raw client for the user's highest-privilege role
+        plus the user's ``org_ids``. This does NOT scope the client to
+        an org -- org isolation is enforced elsewhere: at query time
+        via the executor's RESERVED ``org_id`` view parameter, and
+        (opt-in) via CH RESTRICTIVE row policies on ``_org_id`` from
+        the governance reconciler. ``org_ids`` is returned so callers
+        can log or key on it, not to filter rows here.
 
         Args:
             auth: Authenticated user context.
