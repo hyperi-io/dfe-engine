@@ -170,6 +170,38 @@ class TestHuntResultsTable:
 # ── generate_all ─────────────────────────────────────────────────
 
 
+# ── target database ──────────────────────────────────────────────
+# The default "{db}" placeholder is what the reference-SQL output wants (the
+# caller substitutes it). A LIVE caller must pass the real name instead: the
+# resolver senses by querying system.databases for that exact name, and "{db}"
+# matches no row -- so a Replicated/Shared database reads back as None, falls
+# past the Replicated branch, and a macro-configured server wrongly resolves to
+# ON CLUSTER against a database that already replicates itself.
+
+
+@requires_schemas
+class TestTargetDatabase:
+    def test_defaults_to_placeholder(self):
+        # The static/reference path must keep emitting the placeholder.
+        ddl = DDLFileWriter().generate_default_table()
+        assert "CREATE TABLE IF NOT EXISTS {db}.default" in ddl
+
+    def test_real_database_reaches_default_table_ddl(self):
+        ddl = DDLFileWriter(database="dfe").generate_default_table()
+        assert "CREATE TABLE IF NOT EXISTS dfe.default" in ddl
+        assert "{db}.default" not in ddl
+
+    def test_real_database_reaches_hunt_results_ddl(self):
+        ddl = DDLFileWriter(database="dfe").generate_hunt_results_table()
+        assert "CREATE TABLE IF NOT EXISTS dfe.hunt_results" in ddl
+        assert "{db}.hunt_results" not in ddl
+
+    def test_real_database_reaches_checkpoint_ddl(self):
+        ddl = DDLFileWriter(database="dfe").generate_detection_checkpoint_table()
+        assert "CREATE TABLE IF NOT EXISTS dfe.detection_checkpoint" in ddl
+        assert "{db}.detection_checkpoint" not in ddl
+
+
 def _leaves(tree, prefix=""):
     """Flatten the nested generate_all() tree to (path, sql) pairs."""
     for key, value in tree.items():
