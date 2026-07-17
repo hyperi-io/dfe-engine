@@ -10,13 +10,15 @@
 
 from __future__ import annotations
 
-from pydantic import SecretStr
+import pytest
+from pydantic import SecretStr, ValidationError
 
 from dfe_engine.services.models.archiver import ArchiverConfig
 from dfe_engine.services.models.common import SaslConfig
 from dfe_engine.services.models.fetcher import FetcherConfig, FetcherSourceConfig
 from dfe_engine.services.models.loader import (
     ClickHouseConfig,
+    GrpcConfig,
     LoaderBufferConfig,
     LoaderConfig,
     LoaderKafkaConfig,
@@ -216,6 +218,139 @@ class TestValidateLoaderSasl:
         config = self._make_config_with_sasl("aws_msk_iam", aws_region="ap-southeast-2")
         errors, _ = run_loader_validation(config)
         assert not any("region" in e.lower() for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# _validate_loader — transport scoping (kafka vs grpc)
+# ---------------------------------------------------------------------------
+
+
+class TestValidateLoaderTransport:
+    """The Kafka requirements apply only to the Kafka transport.
+
+    Mirrors dfe-loader/src/config/loader.rs Config::validate() scoped by
+    transport, so the engine can author a gRPC-transport loader config.
+    """
+
+    def _make_grpc(self, listen: str | None = "0.0.0.0:6000") -> LoaderConfig:
+        config = LoaderConfig()
+        config.transport = "grpc"
+        config.grpc.listen = listen
+        return config
+
+    def test_grpc_without_brokers_or_topics_passes(self):
+        # The acceptance case: a grpc-only config carries no Kafka wiring at all.
+        config = self._make_grpc()
+        config.kafka.brokers = []
+        config.kafka.topics = []
+        config.kafka.topic_regex = None
+        errors, _ = run_loader_validation(config)
+        assert errors == []
+
+    def test_kafka_without_brokers_still_fails(self):
+        # The kafka path must keep its broker requirement.
+        config = LoaderConfig()
+        config.transport = "kafka"
+        config.kafka.brokers = []
+        errors, _ = run_loader_validation(config)
+        assert any("broker" in e.lower() for e in errors)
+
+    def test_grpc_without_listen_produces_error(self):
+        # scalo fails the first recv() with "no listen address configured for
+        # receiving" -- catch it at author time instead.
+        config = self._make_grpc(listen=None)
+        errors, _ = run_loader_validation(config)
+        assert any("grpc.listen" in e for e in errors)
+
+    def test_grpc_with_listen_passes(self):
+        config = self._make_grpc()
+        errors, _ = run_loader_validation(config)
+        assert errors == []
+
+    def test_grpc_still_requires_clickhouse_hosts(self):
+        # ClickHouse is the sink on both transports.
+        config = self._make_grpc()
+        config.clickhouse.hosts = []
+        errors, _ = run_loader_validation(config)
+        assert any("clickhouse" in e.lower() or "host" in e.lower() for e in errors)
+
+    def test_grpc_ignores_kafka_sasl_gaps(self):
+        # A half-filled SASL block is inert under grpc -- it must not error.
+        config = self._make_grpc()
+        config.kafka.sasl = SaslConfig(enabled=True, mechanism="scram_sha_512", username="")
+        errors, _ = run_loader_validation(config)
+        assert errors == []
+
+    def test_kafka_transport_is_case_insensitive(self):
+        config = LoaderConfig()
+        config.transport = "KAFKA"
+        config.kafka.brokers = []
+        errors, _ = run_loader_validation(config)
+        assert any("broker" in e.lower() for e in errors)
+
+    def test_grpc_with_auto_init_topics_warns(self):
+        config = self._make_grpc()
+        config.auto_init.enabled = True
+        config.auto_init.create_topics = True
+        _, warnings = run_loader_validation(config)
+        assert any("create_topics" in w for w in warnings)
+
+
+# ---------------------------------------------------------------------------
+# LoaderConfig / GrpcConfig — model defaults
+# ---------------------------------------------------------------------------
+
+
+class TestLoaderTransportModelDefaults:
+    """Defaults must match the Rust impl Default values exactly.
+
+    SSoT: dfe-loader/src/config/kafka.rs GrpcConfig::default() and
+    dfe-loader/src/config/loader.rs default_transport().
+    """
+
+    def test_transport_defaults_to_kafka(self):
+        assert LoaderConfig().transport == "kafka"
+
+    def test_grpc_listen_defaults_to_none(self):
+        # Rust: listen: None -- no port is assumed.
+        assert GrpcConfig().listen is None
+
+    def test_grpc_defaults_mirror_rust(self):
+        config = GrpcConfig()
+        assert config.recv_buffer_size == 10_000
+        assert config.recv_timeout_ms == 100
+        assert config.max_message_size == 16 * 1024 * 1024
+        assert config.compression is False
+        assert config.default_topic == "default_land"
+
+    def test_loader_config_carries_grpc_block_by_default(self):
+        assert LoaderConfig().grpc.listen is None
+
+    def test_invalid_transport_rejected(self):
+        with pytest.raises(ValidationError, match="Invalid transport"):
+            LoaderConfig(transport="rabbitmq")
+
+    @pytest.mark.parametrize(
+        ("given", "expected"),
+        [("GRPC", "grpc"), ("Grpc", "grpc"), ("KAFKA", "kafka")],
+    )
+    def test_transport_is_normalised_to_lowercase(self, given, expected):
+        # The loader dispatches on an EXACT match (transport.rs:546,
+        # `config.transport == "grpc"`), so an authored "GRPC" would silently run
+        # the Kafka path. Normalise here rather than emit a casing the binary
+        # mis-dispatches.
+        assert LoaderConfig(transport=given).transport == expected
+
+    def test_grpc_transport_round_trips_through_yaml_shape(self):
+        # The authored shape the engine emits for a grpc loader.
+        config = LoaderConfig.model_validate(
+            {"transport": "grpc", "grpc": {"listen": "0.0.0.0:6000"}}
+        )
+        assert config.transport == "grpc"
+        assert config.grpc.listen == "0.0.0.0:6000"
+        dumped = config.model_dump(mode="json", by_alias=True)
+        assert dumped["transport"] == "grpc"
+        assert dumped["grpc"]["listen"] == "0.0.0.0:6000"
 
 
 # ---------------------------------------------------------------------------
