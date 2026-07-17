@@ -17,6 +17,7 @@ from scalo.logger import logger
 
 from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
 from dfe_engine.schema.ddl_writer import DDLFileWriter
+from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
 from dfe_engine.settings import DFESettings, get_clickhouse_config
 
 
@@ -30,15 +31,30 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
     profile = settings.clickhouse.default_table_profile
 
     try:
-        writer = DDLFileWriter()
+        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+        client = manager.get_clickhouse_client()
+
+        # Sense the target server rather than trusting a static setting. This is a
+        # LIVE path, so the client is the authority on what the topology actually
+        # is: a multi-node cluster needs Replicated tables created ON CLUSTER, and
+        # ON CLUSTER can ONLY come from sensing (a named topology cannot express
+        # it). Without this every node behind the headless service ends up with
+        # its own unreplicated table and the data silently splits across them.
+        # The configured topology stays as the fallback for when sensing fails.
+        resolver = EngineResolver(
+            client=client,
+            topology_setting=settings.clickhouse.topology,
+        )
+        writer = DDLFileWriter(resolver=resolver)
         default_ddl = writer.generate_default_table(profile_name=profile).replace("{db}", database)
         hunt_results_ddl = writer.generate_hunt_results_table(profile_name=profile).replace(
             "{db}", database
         )
 
-        manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
-        client = manager.get_clickhouse_client()
-        client.execute(f"CREATE DATABASE IF NOT EXISTS {database}")
+        # The database itself must be created cluster-wide too, else the ON CLUSTER
+        # table DDL below lands on nodes that have no database to put it in.
+        on_cluster = resolver.resolve(parse_engine("MergeTree"), database).on_cluster
+        client.execute(f"CREATE DATABASE IF NOT EXISTS {database}{on_cluster}")
         client.execute(default_ddl)
         client.execute(hunt_results_ddl)
         logger.info(

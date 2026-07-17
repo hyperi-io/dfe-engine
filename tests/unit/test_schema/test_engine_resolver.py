@@ -14,6 +14,9 @@ from dfe_engine.schema.engine_resolver import (
     Topology,
     parse_engine,
 )
+from dfe_engine.schema.schema_ddl import DDLConfig, DDLGenerator
+from dfe_engine.source.models import SchemaColumn
+from dfe_engine.source.type_registry import TypeRegistry
 
 # ── parse_engine ────────────────────────────────────────────────────
 
@@ -109,3 +112,45 @@ class TestCascade:
 def test_topology_enum_values():
     assert Topology.SINGLE.value == "single"
     assert Topology.REPLICATED.value == "replicated"
+
+
+# ── generator wiring ────────────────────────────────────────────────
+# The generator must defer to an injected resolver. Live paths inject one built
+# with a client so the engine is SENSED; if the generator quietly kept resolving
+# from DDLConfig.topology instead, every table would fall back to the "single"
+# default and a clustered deployment would silently create unreplicated tables
+# per-node (the 2026-07-16 dfe-k8s split-brain).
+
+
+class TestGeneratorHonoursInjectedResolver:
+    def _columns(self):
+        return [SchemaColumn(name="_timestamp", type="timestamp")]
+
+    def test_injected_resolver_overrides_config_topology(self):
+        gen = DDLGenerator(
+            TypeRegistry.default(),
+            resolver=EngineResolver(override="replicated"),
+        )
+        # cfg.topology is the "single" default and must NOT win.
+        ddl = gen.generate_create_table("t", self._columns(), DDLConfig(db="d"))
+        assert "ENGINE = ReplicatedMergeTree" in ddl
+
+    def test_without_resolver_config_topology_still_applies(self):
+        gen = DDLGenerator(TypeRegistry.default())
+        ddl = gen.generate_create_table(
+            "t", self._columns(), DDLConfig(db="d", topology="replicated")
+        )
+        assert "ENGINE = ReplicatedMergeTree" in ddl
+
+    def test_default_stays_plain_mergetree(self):
+        gen = DDLGenerator(TypeRegistry.default())
+        ddl = gen.generate_create_table("t", self._columns(), DDLConfig(db="d"))
+        assert "ENGINE = MergeTree()" in ddl
+        assert "ON CLUSTER" not in ddl
+
+    def test_explicit_cluster_pin_still_emits_on_cluster(self):
+        gen = DDLGenerator(TypeRegistry.default())
+        ddl = gen.generate_create_table(
+            "t", self._columns(), DDLConfig(db="d", cluster="mycluster")
+        )
+        assert "ON CLUSTER mycluster" in ddl

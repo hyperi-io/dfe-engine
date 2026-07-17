@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Any
 
 from ..source.type_registry import TypeRegistry
+from .engine_resolver import EngineResolver
 from .schema_ddl import DDLConfig, DDLGenerator
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
 
@@ -30,10 +31,28 @@ class DDLFileWriter:
     Orchestrates SchemaLoader and DDLGenerator to produce standalone ``.sql`` files for each known table structure.
     """
 
-    def __init__(self, registry: TypeRegistry | None = None, *, topology: str = "single") -> None:
+    def __init__(
+        self,
+        registry: TypeRegistry | None = None,
+        *,
+        topology: str = "single",
+        resolver: EngineResolver | None = None,
+    ) -> None:
+        """Initialise the writer.
+
+        Args:
+            registry: Type registry for primitive -> ClickHouse type resolution.
+            topology: "single" -> <engine>(); "replicated" -> Replicated<engine>.
+                     Ignored when *resolver* is given. Note this alone never
+                     yields ON CLUSTER - only sensing does.
+            resolver: Engine resolver to use instead of the static *topology*.
+                     Build one with a live client (see ``EngineResolver``) so the
+                     engine is sensed from the target server; that is the only
+                     path that emits ON CLUSTER, which a real multi-node cluster
+                     needs.
+        """
         self._registry = registry or TypeRegistry.default()
-        self._ddl_gen = DDLGenerator(self._registry)
-        # "single" -> MergeTree; "replicated" -> ReplicatedMergeTree + ON CLUSTER.
+        self._ddl_gen = DDLGenerator(self._registry, resolver=resolver)
         self._topology = topology
 
     @staticmethod
