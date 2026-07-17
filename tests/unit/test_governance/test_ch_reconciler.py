@@ -14,6 +14,7 @@ diff, both of which are pure functions.
 
 from __future__ import annotations
 
+import hashlib
 from types import SimpleNamespace
 
 from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBinding
@@ -22,6 +23,8 @@ from dfe_engine.governance.ch.reconciler import (
     _default_tier_name,
     compute_drops,
 )
+from dfe_engine.secrets import build_secrets
+from dfe_engine.settings import SecretsSettings
 
 
 def _org(name: str, ids: list[str]) -> SimpleNamespace:
@@ -31,6 +34,43 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
 def _rec() -> ChRbacReconciler:
     # render_all is pure - it never touches the client.
     return ChRbacReconciler(admin_client=None)
+
+
+# ── _hash_for (mint-or-reuse) ───────────────────────────────────────
+# Real file-backed store, no mocks. Reuse is load-bearing: CREATE USER IF NOT
+# EXISTS never rotates an existing password, so a fresh mint on every reconcile
+# would leave ClickHouse holding a password the store no longer knows.
+
+
+class TestHashFor:
+    def _store(self, tmp_path):
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def test_mints_and_stores_plaintext_returning_its_hash(self, tmp_path):
+        store = self._store(tmp_path)
+        rec = ChRbacReconciler(admin_client=None, secrets_store=store)
+        digest = rec._hash_for("ch/service/loader")
+        # the plaintext is recoverable from the store; the hash is of that plaintext
+        plaintext = store.get("ch/service/loader")
+        assert digest == hashlib.sha256(plaintext.encode()).hexdigest()
+
+    def test_reuses_existing_secret_across_runs(self, tmp_path):
+        store = self._store(tmp_path)
+        first = ChRbacReconciler(admin_client=None, secrets_store=store)._hash_for("ch/service/x")
+        # a second reconciler (fresh instance, same store) must not rotate
+        second = ChRbacReconciler(admin_client=None, secrets_store=store)._hash_for("ch/service/x")
+        assert first == second
+
+    def test_honours_a_preexisting_password(self, tmp_path):
+        store = self._store(tmp_path)
+        store.put("ch/service/loader", "already-set")
+        rec = ChRbacReconciler(admin_client=None, secrets_store=store)
+        assert rec._hash_for("ch/service/loader") == hashlib.sha256(b"already-set").hexdigest()
+
+    def test_distinct_paths_get_distinct_secrets(self, tmp_path):
+        store = self._store(tmp_path)
+        rec = ChRbacReconciler(admin_client=None, secrets_store=store)
+        assert rec._hash_for("ch/service/a") != rec._hash_for("ch/service/b")
 
 
 class TestDefaultTierName:
