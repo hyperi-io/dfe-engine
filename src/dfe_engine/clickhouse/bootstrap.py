@@ -45,11 +45,13 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
             client=client,
             topology_setting=settings.clickhouse.topology,
         )
-        writer = DDLFileWriter(resolver=resolver)
-        default_ddl = writer.generate_default_table(profile_name=profile).replace("{db}", database)
-        hunt_results_ddl = writer.generate_hunt_results_table(profile_name=profile).replace(
-            "{db}", database
-        )
+        # Pass the REAL database (not the "{db}" placeholder + a later string
+        # replace): sensing reads the target database's own engine, and a
+        # placeholder matches nothing, so a Replicated/Shared database would be
+        # misread as plain and wrongly get ON CLUSTER.
+        writer = DDLFileWriter(resolver=resolver, database=database)
+        default_ddl = writer.generate_default_table(profile_name=profile)
+        hunt_results_ddl = writer.generate_hunt_results_table(profile_name=profile)
 
         # The database itself must be created cluster-wide too, else the ON CLUSTER
         # table DDL below lands on nodes that have no database to put it in.

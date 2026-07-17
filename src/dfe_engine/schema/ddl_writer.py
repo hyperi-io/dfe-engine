@@ -37,6 +37,7 @@ class DDLFileWriter:
         *,
         topology: str = "single",
         resolver: EngineResolver | None = None,
+        database: str = "{db}",
     ) -> None:
         """Initialise the writer.
 
@@ -50,10 +51,17 @@ class DDLFileWriter:
                      engine is sensed from the target server; that is the only
                      path that emits ON CLUSTER, which a real multi-node cluster
                      needs.
+            database: Target database. Defaults to the ``{db}`` placeholder, which
+                     is what the reference-SQL output wants (the caller substitutes
+                     it). A LIVE caller must pass the REAL name: sensing keys on it
+                     to read the database's engine, and "{db}" matches no database,
+                     so a Replicated/Shared target would be misread as a plain one
+                     and wrongly get ON CLUSTER (it replicates on its own).
         """
         self._registry = registry or TypeRegistry.default()
         self._ddl_gen = DDLGenerator(self._registry, resolver=resolver)
         self._topology = topology
+        self._database = database
 
     @staticmethod
     def _profile_version(profile_name: str) -> str:
@@ -103,6 +111,7 @@ class DDLFileWriter:
             profile_name=profile_name, profile_version=profile_version
         )
         config = DDLConfig(
+            db=self._database,
             profile_name=profile_name,
             profile_version=profile_version,
             description=description,
@@ -151,6 +160,7 @@ class DDLFileWriter:
         )
 
         config = DDLConfig(
+            db=self._database,
             partition_column="query_checkpoint_time",
             schema_version=detection_checkpoint_version,
             description=table_description,
@@ -188,6 +198,7 @@ class DDLFileWriter:
         )
 
         config = DDLConfig(
+            db=self._database,
             profile_name=profile_name,
             profile_version=profile_version,
             schema_version=hunt_results_version,
