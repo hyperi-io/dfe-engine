@@ -168,6 +168,26 @@ class TestSplitRepoUrl:
         with pytest.raises(ValueError):
             _split_repo_url("not-a-url")
 
+    def test_http_port_is_kept_in_the_authority(self):
+        # A self-hosted forge on a non-default port is the DFE DEFAULT (Forgejo
+        # :3000), and the API answers on the same port as the git remote.
+        c = _split_repo_url(
+            "http://dfe-forgejo.forgejo.svc.cluster.local:3000/dfe-admin/deploy.git"
+        )
+        assert c.authority == "dfe-forgejo.forgejo.svc.cluster.local:3000"
+        # host stays bare so provider inference / the github.com check never see a port.
+        assert c.host == "dfe-forgejo.forgejo.svc.cluster.local"
+
+    def test_authority_matches_host_when_no_port(self):
+        c = _split_repo_url("https://git.example.com/acme/deploy.git")
+        assert c.authority == c.host == "git.example.com"
+
+    def test_ssh_port_is_not_carried_into_the_api_authority(self):
+        # ssh://host:2222 is the SSH port -- the REST API is not there, so carrying
+        # it would swap one unreachable api_base for another.
+        c = _split_repo_url("ssh://git@git.example.com:2222/acme/deploy.git")
+        assert c.authority == "git.example.com"
+
 
 class TestBuildForge:
     def _gs(self, **kw) -> GitopsSettings:
@@ -199,6 +219,31 @@ class TestBuildForge:
         )
         assert isinstance(forge, GitHubForge)
         assert forge._base == "https://ghe.corp/api/v3"
+
+    def test_selfhosted_api_base_keeps_the_remote_port(self):
+        # REGRESSION (live 2026-07-17): the api_base was built from urlsplit().hostname,
+        # which drops the port, so the in-cluster Forgejo remote became
+        # http://dfe-forgejo...  -> :80, nothing listening. The PR POST hung for the
+        # full 15s client timeout and surfaced as "forgejo PR request error: timed out",
+        # i.e. review PRs could never work on ANY self-hosted forge on a non-default
+        # port. Worse, the blocking call sat in an async endpoint, so it starved the
+        # event loop until the health probes failed and the engine was killed.
+        forge = build_forge(
+            self._gs(
+                repo_url="http://dfe-forgejo.forgejo.svc.cluster.local:3000/dfe-admin/deploy.git"
+            )
+        )
+        assert isinstance(forge, ForgejoForge)
+        assert forge._base == "http://dfe-forgejo.forgejo.svc.cluster.local:3000"
+
+    def test_selfhosted_github_api_base_keeps_the_remote_port(self):
+        # GitHub Enterprise derives /api/v3 from the remote, so it needs the port too.
+        # provider is explicit: "ghe.corp" carries no "github" for _infer_provider.
+        forge = build_forge(
+            self._gs(forge_provider="github", repo_url="https://ghe.corp:8443/acme/deploy.git")
+        )
+        assert isinstance(forge, GitHubForge)
+        assert forge._base == "https://ghe.corp:8443/api/v3"
 
     def test_none_when_push_off(self):
         assert build_forge(self._gs(push=False)) is None

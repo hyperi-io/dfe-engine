@@ -52,7 +52,11 @@ class ForgeProvider(Protocol):
 @dataclass(frozen=True)
 class _RepoCoords:
     scheme: str
+    # Bare hostname, no port -- what provider inference and the github.com check want.
     host: str
+    # host:port when the remote carried one; the API's authority. Kept separate from
+    # `host` so a port can never leak into a hostname comparison.
+    authority: str
     owner: str
     repo: str
 
@@ -66,13 +70,22 @@ def _split_repo_url(repo_url: str) -> _RepoCoords:
     url = repo_url.strip()
     if url.startswith(("http://", "https://", "ssh://")):
         parts = urlsplit(url)
+        is_ssh = parts.scheme == "ssh"
         scheme = "https" if parts.scheme in ("ssh", "") else parts.scheme
         host = parts.hostname or ""
+        # The REST API lives on the same host:port as an http(s) remote, so the port
+        # has to survive. urlsplit().hostname DROPS it, which sent every review PR to
+        # :80 on a self-hosted forge -- and a self-hosted Forgejo on :3000 is the DFE
+        # default, so the PR just hung until the 15s client timeout. An ssh:// port is
+        # the SSH port, not the API's, so it is deliberately NOT carried over.
+        authority = host if is_ssh or not parts.port else f"{host}:{parts.port}"
         path = parts.path
     elif "@" in url and ":" in url.split("@", 1)[1]:
-        # scp-like SSH: git@host:owner/repo.git
+        # scp-like SSH: git@host:owner/repo.git (the part after ':' is the path,
+        # never a port -- so there is nothing to carry).
         host_part, path = url.split("@", 1)[1].split(":", 1)
         host = host_part
+        authority = host
         scheme = "https"
     else:
         raise ValueError(f"unrecognised repo_url: {repo_url!r}")
@@ -86,7 +99,7 @@ def _split_repo_url(repo_url: str) -> _RepoCoords:
         repo = repo[:-4]
     if not host or not owner or not repo:
         raise ValueError(f"repo_url missing host/owner/repo: {repo_url!r}")
-    return _RepoCoords(scheme=scheme, host=host, owner=owner, repo=repo)
+    return _RepoCoords(scheme=scheme, host=host, authority=authority, owner=owner, repo=repo)
 
 
 def _infer_provider(host: str) -> str:
@@ -245,9 +258,9 @@ def build_forge(gs: GitopsSettings) -> ForgeProvider | None:
         api_base = (
             "https://api.github.com"
             if coords.host.lower() == "github.com"
-            else f"{coords.scheme}://{coords.host}/api/v3"
+            else f"{coords.scheme}://{coords.authority}/api/v3"
         )
     else:
-        api_base = f"{coords.scheme}://{coords.host}"
+        api_base = f"{coords.scheme}://{coords.authority}"
 
     return forge_cls(api_base=api_base, owner=coords.owner, repo=coords.repo, token=gs.token)
