@@ -112,14 +112,12 @@ def render_ddl(
 def ensure(wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = DFE_AUDIT) -> None:
     """Create the archive DB + table + MV if absent (idempotent).
 
-    ``wrapper`` is a :class:`ClickHouseClientWrapper`. The engine is resolved via
-    the SAME topology config-override the data tables use
-    (``settings.clickhouse.topology``: single -> ``MergeTree()``, replicated ->
-    ``ReplicatedMergeTree``) - NOT by independently sensing the live cluster. Like
-    the data-table static DDL path (schema_ddl), this override-only resolve does NOT
-    emit ``ON CLUSTER`` (that needs live sensing), so on a genuinely clustered
-    Atomic-db deployment the archive table + MV are created on the connected node
-    only - identical to every other engine-owned table. Safe to call every startup.
+    ``wrapper`` is a :class:`ClickHouseClientWrapper`. The engine is SENSED from it,
+    exactly as the data-table bootstrap does: on a clustered Atomic-db deployment
+    that yields ``ReplicatedMergeTree`` + ``ON CLUSTER``, so the archive table + MV
+    exist on every node rather than only the one the connection landed on. The
+    configured ``settings.clickhouse.topology`` remains the fallback for when
+    sensing fails. Safe to call every startup.
 
     ``system.query_log`` is created LAZILY - the server only materialises it on the
     first log flush - so on a freshly-started server the MV's source table does not
@@ -129,9 +127,10 @@ def ensure(wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = D
     the server (``log_queries=0``) the source never appears and the create surfaces
     that as a real error - the archive genuinely cannot work without query logging.
     """
-    engine = EngineResolver(override=get_settings().clickhouse.topology).resolve(
-        EngineSpec("MergeTree"), database
-    )
+    engine = EngineResolver(
+        client=wrapper,
+        topology_setting=get_settings().clickhouse.topology,
+    ).resolve(EngineSpec("MergeTree"), database)
     wrapper.command("SYSTEM FLUSH LOGS")
     for stmt in render_ddl(engine, ttl_days=ttl_days, database=database):
         wrapper.command(stmt)

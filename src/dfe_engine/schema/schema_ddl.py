@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from scalo.logger import logger
 
 from dfe_engine import __version__
-from dfe_engine.schema.engine_resolver import EngineResolver, parse_engine
+from dfe_engine.schema.engine_resolver import EngineResolver, ResolvedEngine, parse_engine
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -81,7 +81,9 @@ class DDLConfig:
     # server supplies the znode path/replica from its default_replica_path /
     # default_replica_name macros (infra-layer config, never in the DDL). The
     # replicated form is portable across on-prem Replicated databases and CH
-    # Cloud (auto-substituted to SharedMergeTree).
+    # Cloud (auto-substituted to SharedMergeTree). Only consulted when the
+    # generator has no injected resolver - it carries no ON CLUSTER intent, so a
+    # multi-node cluster needs the sensing resolver (see DDLGenerator.resolver).
     topology: str = "single"
     ttl_days: int | None = 90
     ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp", "_timestamp_load"])
@@ -141,6 +143,7 @@ class DDLGenerator:
         registry: TypeRegistry,
         *,
         use_legacy_indexes: bool = False,
+        resolver: EngineResolver | None = None,
     ) -> None:
         """Initialize the DDL generator.
 
@@ -148,9 +151,31 @@ class DDLGenerator:
             registry: TypeRegistry for type resolution.
             use_legacy_indexes: Use tokenbf/ngrambf instead of text index
                                (for ClickHouse < v25.10).
+            resolver: Engine resolver to select the table engine. Pass one built
+                     with a live client to enable the sense layer - that is the
+                     ONLY way ON CLUSTER is ever emitted (a named topology from
+                     config cannot express it). When omitted, the engine is
+                     resolved from ``DDLConfig.topology`` alone, which suits the
+                     static/offline paths (reference SQL, gitops artefacts) that
+                     have no server to introspect.
         """
         self._registry = registry
         self._index_templates = _INDEX_TEMPLATES_LEGACY if use_legacy_indexes else _INDEX_TEMPLATES
+        self._resolver = resolver
+
+    # ── engine resolution ───────────────────────────────────────────
+
+    def _resolve_engine(self, cfg: DDLConfig) -> ResolvedEngine:
+        """Resolve the engine for *cfg*, preferring an injected resolver.
+
+        The injected resolver carries whatever cascade inputs the caller has
+        (notably a live client, which is what enables sensing). Falling back to
+        ``DDLConfig.topology`` as an override keeps the static/offline callers -
+        reference SQL, gitops artefacts - rendering exactly as they always have.
+        """
+        spec = parse_engine(cfg.engine)
+        resolver = self._resolver or EngineResolver(override=cfg.topology)
+        return resolver.resolve(spec, cfg.db)
 
     # ── CREATE TABLE ────────────────────────────────────────────────
 
@@ -174,15 +199,25 @@ class DDLGenerator:
         cfg = config or DDLConfig()
         lines: list[str] = []
 
+        # Resolve the engine first: it decides BOTH the ENGINE clause below and
+        # whether this table needs ON CLUSTER on the header.
+        resolved = self._resolve_engine(cfg)
+
         # Header comment
         lines.extend(
             [line for line in self._build_schema_header(cfg, table_name, generated_time) if line]
         )
 
-        # CREATE TABLE
+        # CREATE TABLE. ON CLUSTER comes from an explicit cfg.cluster pin, else
+        # from the resolver - which only ever senses it from a live server (a
+        # named topology from config carries no ON CLUSTER intent). Without it a
+        # Replicated table is created on the ONE node the connection landed on,
+        # and the siblings behind a headless service silently diverge.
         create = f"CREATE TABLE IF NOT EXISTS {cfg.db}.{table_name}"
         if cfg.cluster:
             create += f" ON CLUSTER {cfg.cluster}"
+        else:
+            create += resolved.on_cluster
         lines.append(f"{create}\n(")
 
         # Column + index + projection definitions
@@ -201,17 +236,11 @@ class DDLGenerator:
         # (code 36) by BOTH CH Cloud and on-prem Replicated databases, so we never
         # produce it. "single" -> plain <engine>() for a keeperless standalone
         # (local dev); on CH Cloud that too auto-substitutes to SharedMergeTree.
-        # Render the ENGINE clause through the shared resolver: split cfg.engine
-        # into variant + params and emit the topology-correct form. This is what
-        # genericises beyond plain MergeTree - ANY family variant with its params
-        # (ReplacingMergeTree(ver), SummingMergeTree(cols), ...) renders correctly:
-        # single -> <variant>(params); replicated -> argumentless
-        # Replicated<variant>(params) (no double-parens, no dropped ver). ON CLUSTER
-        # stays on the header via cfg.cluster - this static config path never senses
-        # a live cluster, so the resolver's sensed on_cluster is empty here.
-        spec = parse_engine(cfg.engine)
-        engine_clause = EngineResolver(override=cfg.topology).resolve(spec, cfg.db).clause
-        lines.append(f")\nENGINE = {engine_clause}")
+        # The resolver genericises beyond plain MergeTree - ANY family variant with
+        # its params (ReplacingMergeTree(ver), SummingMergeTree(cols), ...) renders
+        # correctly: single -> <variant>(params); replicated -> argumentless
+        # Replicated<variant>(params) (no double-parens, no dropped ver).
+        lines.append(f")\nENGINE = {resolved.clause}")
 
         # PARTITION BY
         if any(column for column in columns if column.name == cfg.partition_column):

@@ -235,8 +235,11 @@ class ClickHouseSettings(BaseModel):
     )
     connections_min: int = Field(default=10)
     connections_max: int = Field(default=300)
-    # Deployment topology: "single" (standalone CH -> MergeTree DDL) or
-    # "replicated" (cluster CH + Keeper -> ReplicatedMergeTree + ON CLUSTER).
+    # Deployment topology FALLBACK: "single" (standalone CH -> MergeTree DDL) or
+    # "replicated" (Replicated/Shared db or Cloud -> ReplicatedMergeTree). Live
+    # paths sense the server and ignore this; it only decides when sensing is
+    # unavailable (no client) or fails. It cannot express ON CLUSTER - a real
+    # multi-node cluster is recognised by sensing alone (see EngineResolver).
     topology: str = Field(default="single")
     # Default MergeTree-family VARIANT for tables that do not pin their own engine.
     # The topology above decides the Replicated/Shared prefix; this decides the
