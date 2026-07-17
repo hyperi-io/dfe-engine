@@ -15,9 +15,10 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
@@ -340,6 +341,21 @@ def create_app(
     # include is the only reliable point. get_openapi recurses and would
     # otherwise pull in their JSONResponse stream_item_field.
     app.include_router(create_health_router(health_manager), include_in_schema=False)
+
+    # Prometheus scrape endpoint. scalo COLLECTS metrics but deliberately does not
+    # mount an endpoint (scalo/metrics/prometheus.py documents the app doing it), so
+    # without this the engine served a 404 at /metrics while its chart advertised
+    # prometheus.io/scrape + prometheus.io/path: /metrics.
+    #
+    # Same path + same names as every other DFE service, so one scrape config and one
+    # dashboard cover the stack. The OTLP half of self-monitoring needs no route --
+    # scalo pushes to OTEL_EXPORTER_OTLP_ENDPOINT, which the charts resolve from the
+    # ONE telemetry.mode seam (HyperDX by default).
+    #
+    # include_in_schema=False: a scrape endpoint is not API surface.
+    @app.get("/metrics", include_in_schema=False)
+    def metrics_endpoint() -> Response:
+        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
     # Custom OpenAPI schema with Bearer auth
     def custom_openapi():

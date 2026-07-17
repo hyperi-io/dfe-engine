@@ -11,7 +11,14 @@ dependencies = [
     # scalo (Apache-2.0 rename/continuation of hyperi-pylib) for logging + common utils
     # >=2.29.5: scalo.crypto CryptoProfile posture + TLS escape valves (SCALO_TLS_*)
     # >=2.29.6: scalo.resilience ReconnectingResilience (+ OutageState/ResilienceConfig/ServiceUnavailable)
-    "scalo[expression,http]>=2.29.7",
+    # [metrics] + [opentelemetry]: WITHOUT them scalo logs "Prometheus metrics
+    # disabled (prometheus_client not installed)" and then, on the very next line,
+    # "Metrics initialized: backend=prometheus" -- so the engine looked instrumented
+    # while exporting nothing and /metrics 404'd. The charts have been setting
+    # OTEL_EXPORTER_OTLP_ENDPOINT + prometheus scrape annotations on a process that
+    # could not honour either. Self-monitoring is one of the two default E2E
+    # acceptance tests, so this is load-bearing, not nice-to-have.
+    "scalo[expression,http,metrics,opentelemetry]>=2.29.7",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
