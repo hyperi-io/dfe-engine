@@ -21,20 +21,67 @@ descriptor = ServiceDescriptor(
     consumer_group="clickhouse-loader",
     liveness_paths=("/live", "/health"),
     readiness_paths=("/ready", "/health"),
-    description="Kafka consumer — loads events into ClickHouse.",
+    description="Kafka consumer or gRPC server -- loads events into ClickHouse.",
+    # Bound only when transport is 'grpc': the loader listens for Push RPCs from
+    # dfe-receiver. Port 6000 per the dfe-loader GrpcConfig.listen doc example
+    # (src/config/kafka.rs:80) and dfe-receiver's own loader endpoint example
+    # (src/error.rs:257, "grpc://loader.internal:6000").
+    extra_ports={"grpc": 6000},
 )
 
 
 def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> None:
     """Cross-field validation for dfe-loader config.
 
-    Mirrors dfe-loader/src/config/loader.rs Config::validate().
-    """
-    if not config.kafka.brokers:
-        errors.append("At least one Kafka broker must be configured")
+    Mirrors dfe-loader/src/config/loader.rs Config::validate(), scoped by the
+    transport the config selects.
 
-    if not config.kafka.topics and not config.kafka.topic_regex:
-        errors.append("Either kafka.topics or kafka.topic_regex must be configured")
+    The Rust validate() checks kafka.brokers unconditionally, but that check is
+    unreachable for a gRPC deployment: serde fills kafka.brokers from
+    KafkaConfig::default() (["localhost:9092"]), so a grpc-transport YAML never
+    presents an empty broker list to the binary. The engine AUTHORS configs, so
+    the broker requirement is scoped to the transport that actually consumes it
+    -- otherwise a legitimate grpc-only config is rejected at author time.
+
+    The grpc.listen requirement is not in the Rust validate() either, but scalo
+    fails the first recv() with "no listen address configured for receiving"
+    (scalo-rs/src/transport/grpc/mod.rs:652-655) when listen is unset. Catching
+    it here turns a runtime pod failure into an author-time error.
+    """
+    transport = config.transport.lower()
+
+    if transport == "kafka":
+        if not config.kafka.brokers:
+            errors.append("At least one Kafka broker must be configured")
+
+        if not config.kafka.topics and not config.kafka.topic_regex:
+            errors.append("Either kafka.topics or kafka.topic_regex must be configured")
+
+        if config.kafka.sasl and config.kafka.sasl.enabled:
+            mechanism = config.kafka.sasl.mechanism.lower().replace("-", "_")
+            if mechanism in ("plain", "scram_sha_256", "scram_sha_512"):
+                if not config.kafka.sasl.username:
+                    errors.append(f"SASL {mechanism} requires username")
+                if not config.kafka.sasl.password.get_secret_value():
+                    errors.append(f"SASL {mechanism} requires password")
+            elif mechanism == "oauthbearer":
+                if not config.kafka.sasl.oauth_token_endpoint:
+                    errors.append("SASL OAUTHBEARER requires oauth_token_endpoint")
+                if not config.kafka.sasl.oauth_client_id:
+                    errors.append("SASL OAUTHBEARER requires oauth_client_id")
+            elif mechanism == "aws_msk_iam":
+                if not config.kafka.sasl.aws_region:
+                    errors.append("SASL AWS_MSK_IAM requires aws_region")
+
+    elif transport == "grpc":
+        if not config.grpc.listen:
+            errors.append("grpc.listen is required when transport is 'grpc'")
+
+        if config.auto_init.enabled and config.auto_init.create_topics:
+            warnings.append(
+                "auto_init.create_topics is true but transport is 'grpc' -- no Kafka topics "
+                "are consumed, so topic creation has no effect"
+            )
 
     if not config.clickhouse.hosts:
         errors.append("At least one ClickHouse host must be configured")
@@ -44,22 +91,6 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
 
     if config.buffer.flush_rows == 0:
         errors.append("buffer.flush_rows must be greater than 0")
-
-    if config.kafka.sasl and config.kafka.sasl.enabled:
-        mechanism = config.kafka.sasl.mechanism.lower().replace("-", "_")
-        if mechanism in ("plain", "scram_sha_256", "scram_sha_512"):
-            if not config.kafka.sasl.username:
-                errors.append(f"SASL {mechanism} requires username")
-            if not config.kafka.sasl.password.get_secret_value():
-                errors.append(f"SASL {mechanism} requires password")
-        elif mechanism == "oauthbearer":
-            if not config.kafka.sasl.oauth_token_endpoint:
-                errors.append("SASL OAUTHBEARER requires oauth_token_endpoint")
-            if not config.kafka.sasl.oauth_client_id:
-                errors.append("SASL OAUTHBEARER requires oauth_client_id")
-        elif mechanism == "aws_msk_iam":
-            if not config.kafka.sasl.aws_region:
-                errors.append("SASL AWS_MSK_IAM requires aws_region")
 
     if config.routing.route_all_by_org and config.routing.routed_orgs:
         warnings.append("route_all_by_org is true, routed_orgs list will be ignored")

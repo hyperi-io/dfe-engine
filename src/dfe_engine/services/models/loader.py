@@ -35,6 +35,51 @@ class LoaderKafkaConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# gRPC transport
+# ---------------------------------------------------------------------------
+
+
+class GrpcConfig(BaseModel):
+    """gRPC transport configuration for receiving messages from dfe-receiver.
+
+    When ``transport`` is "grpc" the loader starts a gRPC server on ``listen``
+    and accepts Push RPCs from remote senders (e.g. dfe-receiver).
+
+    Mirrors the Rust GrpcConfig in dfe-loader/src/config/kafka.rs.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    listen: str | None = Field(
+        default=None,
+        description='Server listen address (e.g. "0.0.0.0:6000"). Required when transport is grpc',
+    )
+    recv_buffer_size: int = Field(
+        default=10_000,
+        gt=0,
+        description="Messages buffered from incoming RPCs",
+    )
+    recv_timeout_ms: int = Field(
+        default=100,
+        ge=0,
+        description="Receive timeout in milliseconds (0 = non-blocking)",
+    )
+    max_message_size: int = Field(
+        default=16 * 1024 * 1024,
+        gt=0,
+        description="Maximum message size in bytes (both send and receive)",
+    )
+    compression: bool = Field(
+        default=False,
+        description="Enable gzip compression for gRPC messages",
+    )
+    default_topic: str = Field(
+        default="default_land",
+        description="Routing key for messages without a topic in the gRPC metadata",
+    )
+
+
+# ---------------------------------------------------------------------------
 # ClickHouse
 # ---------------------------------------------------------------------------
 
@@ -310,7 +355,12 @@ class LoaderConfig(BaseServiceConfig):
 
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
+    transport: str = Field(
+        default="kafka",
+        description="Transport backend: kafka or grpc. Bound at startup (restart required)",
+    )
     kafka: LoaderKafkaConfig = Field(default_factory=LoaderKafkaConfig)
+    grpc: GrpcConfig = Field(default_factory=GrpcConfig)
     clickhouse: ClickHouseConfig = Field(default_factory=ClickHouseConfig)
     payload: PayloadConfig = Field(default_factory=PayloadConfig)
     routing: LoaderRoutingConfig = Field(default_factory=LoaderRoutingConfig)
@@ -326,3 +376,15 @@ class LoaderConfig(BaseServiceConfig):
         description="Schema cache config (aliased from 'schema' in YAML)",
     )
     auto_init: AutoInitConfig = Field(default_factory=AutoInitConfig)
+
+    @field_validator("transport")
+    @classmethod
+    def validate_transport(cls, v: str) -> str:
+        allowed = {"kafka", "grpc"}
+        if v.lower() not in allowed:
+            msg = f"Invalid transport: {v}. Allowed: {', '.join(sorted(allowed))}"
+            raise ValueError(msg)
+        # Normalise, do not just accept: the loader dispatches on an EXACT match
+        # (dfe-loader/src/kafka/transport.rs:546, `config.transport == "grpc"`),
+        # so authoring "GRPC" would silently run the Kafka path instead.
+        return v.lower()

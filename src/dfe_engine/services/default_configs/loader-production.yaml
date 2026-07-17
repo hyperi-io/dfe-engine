@@ -9,6 +9,10 @@
 #   max_replicas: 8
 #   trigger: kafka consumer lag (threshold: 50000)
 
+# Transport backend: kafka or grpc. Kafka on the K8s path -- the KEDA trigger
+# above scales on consumer-group lag, which only exists for a Kafka transport.
+transport: kafka
+
 kafka:
   brokers:
     - kafka-bootstrap.kafka.svc.cluster.local:9092

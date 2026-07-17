@@ -2,6 +2,12 @@
 # Smaller buffers and debug logging for fast dev iteration
 # See: dfe-loader/config.dev.yaml
 
+# Transport backend: kafka or grpc. Matches the dfe-loader serde default
+# (src/config/loader.rs:112) and dfe-loader/config.dev.yaml, which consumes
+# from Kafka. For a receiver -> loader direct-gRPC profile, set transport: grpc
+# and give grpc.listen a bind address; the kafka block is then unused.
+transport: kafka
+
 kafka:
   brokers:
     - localhost:9092
