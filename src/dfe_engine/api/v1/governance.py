@@ -10,6 +10,8 @@
 GET  /api/v1/governance/actions                 -> list actions (governance:read)
 GET  /api/v1/governance/actions/{name}          -> get an action (governance:read)
 POST /api/v1/governance/actions/{name}/invoke   -> invoke (per-action required_action)
+GET  /api/v1/governance/policies                -> list policies (governance:read)
+GET  /api/v1/governance/policies/{name}         -> get a policy (governance:read)
 POST/PUT/DELETE /api/v1/governance/admin/actions[/{name}]   -> CRUD defs (governance:write)
 POST/DELETE     /api/v1/governance/admin/policies[/{name}]  -> CRUD policies (governance:write)
 
@@ -35,6 +37,7 @@ from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
     ActionStore,
+    PolicyStore,
     ProtectedPolicy,
     ProtectedVarError,
 )
@@ -67,6 +70,10 @@ def _gitcrud(request: Request) -> GitCrud:
 
 def _actions(request: Request) -> ActionStore:
     return ActionStore(_gitcrud(request))
+
+
+def _policies(request: Request) -> PolicyStore:
+    return PolicyStore(_gitcrud(request))
 
 
 def _forge(request: Request):
@@ -132,6 +139,22 @@ async def list_actions(user: CurrentUser, request: Request) -> list[str]:
 async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
     try:
         return _actions(request).get(name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+
+@router.get("/policies", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
+async def list_policies(user: CurrentUser, request: Request) -> list[str]:
+    return _policies(request).list()
+
+
+@router.get(
+    "/policies/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
+)
+async def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolicy:
+    _check_name(name)
+    try:
+        return _policies(request).get(name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
 
