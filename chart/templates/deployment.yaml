@@ -13,10 +13,15 @@ spec:
       {{- include "dfe-engine.selectorLabels" . | nindent 6 }}
   template:
     metadata:
-      {{- with .Values.podAnnotations }}
       annotations:
+        # Scrape the observability port (#106 P2.4). scalo serves /metrics on
+        # 9090; the API port 8000 no longer exposes it (P1.3).
+        prometheus.io/scrape: "true"
+        prometheus.io/port: {{ .Values.service.port | quote }}
+        prometheus.io/path: "/metrics"
+        {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
-      {{- end }}
+        {{- end }}
       labels:
         {{- include "dfe-engine.labels" . | nindent 8 }}
         {{- with .Values.podLabels }}
@@ -36,14 +41,28 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          # Container-level hardening (#106 P3.4). readOnlyRootFilesystem is NOT set
+          # yet: the engine writes the minted JWT key under DFE_SECRETS_PATH on the
+          # image rootfs -- that lands with the shared-signing-key follow-up (P1.1).
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
           ports:
+            # Observability (health + /metrics), served by scalo on 9090.
+            - name: obs
+              containerPort: {{ .Values.service.port }}
+              protocol: TCP
+            # API traffic. The ingress + in-cluster consumers target this.
             - name: http
               containerPort: {{ .Values.config.api.port }}
               protocol: TCP
+          # Probes hit the observability port (#106 P2.4), not the API port.
           livenessProbe:
             httpGet:
               path: /health/live
-              port: http
+              port: obs
             initialDelaySeconds: 10
             periodSeconds: 30
             timeoutSeconds: 5
@@ -51,15 +70,18 @@ spec:
           readinessProbe:
             httpGet:
               path: /health/ready
-              port: http
+              port: obs
             initialDelaySeconds: 5
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
+          # Startup reuses the liveness path -- there is no /startupz (#106 P2.7).
+          # The generous failureThreshold gives the long startup budget; liveness
+          # stays tight and is suspended until this passes.
           startupProbe:
             httpGet:
-              path: /health/startup
-              port: http
+              path: /health/live
+              port: obs
             initialDelaySeconds: 5
             periodSeconds: 5
             failureThreshold: 30
@@ -131,6 +153,12 @@ spec:
             {{- else if .Values.configVolume.enabled }}
             - name: DFE_CONFIG_DIR
               value: {{ .Values.configVolume.mountPath | quote }}
+            {{- end }}
+            # scalo.secrets root (#106 P1.1). Image default is /app/secrets; set here
+            # so it is surfaced/overridable (e.g. a shared-key mount for >1 replica).
+            {{- if .Values.config.secrets.path }}
+            - name: DFE_SECRETS_PATH
+              value: {{ .Values.config.secrets.path | quote }}
             {{- end }}
           {{- if .Values.configVolume.enabled }}
           volumeMounts:

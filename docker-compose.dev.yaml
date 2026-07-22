@@ -12,9 +12,16 @@
 
 services:
   prism:
-    image: stoplight/prism:5
+    # Digest-pinned (#106 P3.2) so the floating major tag cannot be repointed.
+    image: stoplight/prism:5@sha256:3f6d29e31bfe0b99587f0f6f79c423858dd6a2ea7e1e4658273ed930a78a9acf
     command: mock /spec/openapi.json --host 0.0.0.0
     ports:
       - "4010:4010"
     volumes:
       - ./openapi-spec:/spec:ro
+    # Bounded so a runaway mock cannot take the dev host down (#106 P3.2).
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M

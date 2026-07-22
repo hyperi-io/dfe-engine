@@ -20,3 +20,23 @@
 .mypy_cache
 htmlcov
 .coverage
+
+# Secrets and local env MUST NEVER enter the build context. The real .env and a
+# live ES384 JWT signing key under .secrets/ were both present in the context
+# (verified 2026-07-19, #106 P1.4) - kept out of the image today only by the
+# selective COPY lines, one edit away from a leak. Excluded here so a COPY . .
+# cannot pick them up.
+.env
+.env.*
+.secrets
+
+# Build-context weight (#106 P2.6): tests/ alone was 118 MB of a 129 MB context.
+# None of this belongs in the image.
+tests/
+docs/
+.github
+.tmp
+coverage.xml
+cov.xml
+Dockerfile*
+docker-compose*

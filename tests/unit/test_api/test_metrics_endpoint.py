@@ -1,12 +1,11 @@
-"""The Prometheus scrape endpoint is a deployment contract, so assert it exists.
+"""/metrics must NOT be on the public API port (#106 P1.3).
 
-The charts advertise prometheus.io/scrape + prometheus.io/path: /metrics, and the
-engine answered 404: scalo COLLECTS metrics but leaves mounting the endpoint to the
-app, and nothing mounted it. It looked instrumented -- scalo logged "Metrics
-initialized: backend=prometheus" one line after "Prometheus metrics disabled
-(prometheus_client not installed)" -- while exporting nothing at all.
-
-Nothing asserted the contract, so nothing caught it. This does.
+Phase 1 mounted /metrics on the FastAPI app because scalo collected metrics but
+mounted no endpoint, so scrapes 404'd. Phase 2 moves it to scalo's dedicated
+observability port (9090) via ServiceApp, because on the API port it was an
+UNAUTHENTICATED metrics surface reachable through the ingress. This test locks
+that in: the traffic port must not serve it, so it cannot regress to the
+public-exposure state. The obs-port /metrics is scalo's own, tested in scalo.
 """
 
 from __future__ import annotations
@@ -14,20 +13,13 @@ from __future__ import annotations
 from fastapi.testclient import TestClient
 
 
-class TestMetricsEndpoint:
-    def test_metrics_is_served_in_prometheus_exposition_format(self, client: TestClient) -> None:
+class TestMetricsNotOnTrafficPort:
+    def test_metrics_is_not_served_on_the_api_port(self, client: TestClient) -> None:
+        # 404 (or 405) -- anything but a 200 scrape. The metrics live on 9090.
         resp = client.get("/metrics")
-        assert resp.status_code == 200
-        # Prometheus refuses to scrape anything that is not this content type.
-        assert resp.headers["content-type"].startswith("text/plain")
-
-    def test_metrics_carries_real_process_samples(self, client: TestClient) -> None:
-        # An endpoint that 200s with an empty body would satisfy a naive check while
-        # telling the operator nothing -- assert actual samples are present.
-        body = client.get("/metrics").text
-        assert "python_gc_objects_collected_total" in body
+        assert resp.status_code != 200, (
+            "/metrics must not be exposed on the public API port (#106 P1.3)"
+        )
 
     def test_metrics_is_not_api_surface(self, client: TestClient) -> None:
-        # include_in_schema=False: a scrape endpoint is not part of the published API
-        # contract, and the OpenAPI spec is a committed artefact (openapi-spec/).
         assert "/metrics" not in client.get("/openapi.json").json()["paths"]

@@ -691,7 +691,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics", "opentelemetry"], specifier = ">=2.29.7" },
+    { name = "scalo", extras = ["expression", "http", "metrics", "opentelemetry"], specifier = ">=2.29.10" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -2257,7 +2257,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.29.7"
+version = "2.29.10"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2275,9 +2275,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/45/fa/83b8b64bcdcb30478fa3feb79c056f2e21fb92944aa551d7a7ccd515d191/scalo-2.29.7.tar.gz", hash = "sha256:bfd1c11f487f6bac734f929783fdb715fce4f38f2188ba422d29517c8cbcb1fb", size = 291455, upload-time = "2026-07-12T08:16:31.331Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b5/6e/dddbd7abdeef5b56c08b4b31d174aabf7ac306ef7702db796dd5d8d76f70/scalo-2.29.10.tar.gz", hash = "sha256:56cee718b46cc1c45aeacf03f0ac795d94717b753ce9e1ca2e98bd97dce61e8e", size = 310010, upload-time = "2026-07-20T06:34:05.754Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/34/a5/0b3e14a63054590db875c5bf967c5c24fa3656b1d5a11b84b1dfaf827673/scalo-2.29.7-py3-none-any.whl", hash = "sha256:3d9d7bef339602cfdb8a7dbd0c14800aeac99a418f7a723e20cb4356a5d19945", size = 361211, upload-time = "2026-07-12T08:16:30.136Z" },
+    { url = "https://files.pythonhosted.org/packages/e2/35/6fe6b18acbc1608ace69fd27d82e58dea8622dcd6d62adb3e325061388bf/scalo-2.29.10-py3-none-any.whl", hash = "sha256:4c996b10a2feef4ad230729a8f9941cfb46551f3f5d2cfee2ca4e56d8bedf874", size = 382841, upload-time = "2026-07-20T06:34:04.349Z" },
 ]
 
 [package.optional-dependencies]
