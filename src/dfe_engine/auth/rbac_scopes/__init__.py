@@ -18,11 +18,15 @@ from dfe_engine.auth.rbac_scopes.scope_constants import (
     api_keys_scopes,
     cel_scopes,
     clickhouse_cloud_scopes,
+    config_scopes,
     dashboard_scopes,
     deployment_scopes,
     discovery_scopes,
     fieldmap_scopes,
+    governance_scopes,
+    helmvars_scopes,
     hunt_scopes,
+    lifecycle_scopes,
     oidc_scopes,
     org_scopes,
     pipeline_scopes,
@@ -70,6 +74,10 @@ scopes_dict = {
     **system_scopes,
     **tasks_scopes,
     **transform_scopes,
+    **governance_scopes,
+    **helmvars_scopes,
+    **lifecycle_scopes,
+    **config_scopes,
 }
 
 

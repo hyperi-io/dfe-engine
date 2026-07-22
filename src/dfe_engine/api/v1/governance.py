@@ -10,6 +10,8 @@
 GET  /api/v1/governance/actions                 -> list actions (governance:read)
 GET  /api/v1/governance/actions/{name}          -> get an action (governance:read)
 POST /api/v1/governance/actions/{name}/invoke   -> invoke (per-action required_action)
+GET  /api/v1/governance/policies                -> list policies (governance:read)
+GET  /api/v1/governance/policies/{name}         -> get a policy (governance:read)
 POST/PUT/DELETE /api/v1/governance/admin/actions[/{name}]   -> CRUD defs (governance:write)
 POST/DELETE     /api/v1/governance/admin/policies[/{name}]  -> CRUD policies (governance:write)
 
@@ -27,6 +29,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
 from dfe_engine.gitcrud.routing import ReviewRequiredError, WriteOutcome, route_write
@@ -34,6 +37,7 @@ from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
     ActionStore,
+    PolicyStore,
     ProtectedPolicy,
     ProtectedVarError,
 )
@@ -66,6 +70,10 @@ def _gitcrud(request: Request) -> GitCrud:
 
 def _actions(request: Request) -> ActionStore:
     return ActionStore(_gitcrud(request))
+
+
+def _policies(request: Request) -> PolicyStore:
+    return PolicyStore(_gitcrud(request))
 
 
 def _forge(request: Request):
@@ -120,15 +128,33 @@ def _apply_review_headers(response: Response, outcome: WriteOutcome) -> None:
             response.headers["X-DFE-PR-Url"] = outcome.pr_url
 
 
-@router.get("/actions", dependencies=[Depends(require_action("governance:read"))])
+@router.get("/actions", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
 async def list_actions(user: CurrentUser, request: Request) -> list[str]:
     return _actions(request).list()
 
 
-@router.get("/actions/{name}", dependencies=[Depends(require_action("governance:read"))])
+@router.get(
+    "/actions/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
+)
 async def get_action(name: str, user: CurrentUser, request: Request) -> ActionDef:
     try:
         return _actions(request).get(name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+
+
+@router.get("/policies", dependencies=[Depends(require_action(scopes_dict["governance_read"]))])
+async def list_policies(user: CurrentUser, request: Request) -> list[str]:
+    return _policies(request).list()
+
+
+@router.get(
+    "/policies/{name}", dependencies=[Depends(require_action(scopes_dict["governance_read"]))]
+)
+async def get_policy(name: str, user: CurrentUser, request: Request) -> ProtectedPolicy:
+    _check_name(name)
+    try:
+        return _policies(request).get(name)
     except ResourceNotFoundError as exc:
         raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
 
@@ -222,7 +248,7 @@ async def invoke_action(
 @router.post(
     "/admin/actions",
     status_code=201,
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def create_action(
     body: ActionDef, user: CurrentUser, request: Request, response: Response
@@ -249,7 +275,7 @@ async def create_action(
 @router.delete(
     "/admin/actions/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def delete_action(name: str, user: CurrentUser, request: Request, response: Response) -> None:
     _check_name(name)
@@ -278,7 +304,7 @@ async def delete_action(name: str, user: CurrentUser, request: Request, response
 @router.post(
     "/admin/policies",
     status_code=201,
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def create_policy(
     body: ProtectedPolicy, user: CurrentUser, request: Request, response: Response
@@ -306,7 +332,7 @@ async def create_policy(
 @router.delete(
     "/admin/policies/{name}",
     status_code=204,
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def delete_policy(name: str, user: CurrentUser, request: Request, response: Response) -> None:
     _check_name(name)
@@ -335,7 +361,7 @@ async def delete_policy(name: str, user: CurrentUser, request: Request, response
 
 @router.post(
     "/ch-rbac/reconcile",
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dict[str, Any]:
     """Reconcile CH quota tiers + service roles + per-org row policies into

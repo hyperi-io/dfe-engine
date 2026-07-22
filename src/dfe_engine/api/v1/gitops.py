@@ -22,6 +22,7 @@ from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.auto_merge import AutoMergeState, resolve_state, set_stored
 from dfe_engine.gitcrud.log import LogEntry, UnknownCursorError, group_log, read_log
@@ -69,7 +70,7 @@ def _status(state: AutoMergeState) -> AutoMergeStatus:
 @router.get(
     "/auto-merge",
     response_model=AutoMergeStatus,
-    dependencies=[Depends(require_action("governance:read"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_read"]))],
 )
 async def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus:
     """Auto-merge status for the UI banner: stored flag, gate verdict, net effect."""
@@ -80,7 +81,7 @@ async def get_auto_merge(user: CurrentUser, request: Request) -> AutoMergeStatus
 @router.put(
     "/auto-merge",
     response_model=AutoMergeStatus,
-    dependencies=[Depends(require_action("governance:write"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_write"]))],
 )
 async def put_auto_merge(
     body: AutoMergeRequest, user: CurrentUser, request: Request
@@ -153,7 +154,7 @@ def _entry_model(e: LogEntry) -> LogEntryModel:
 @router.get(
     "/log",
     response_model=LogResponse | GroupedLogResponse,
-    dependencies=[Depends(require_action("governance:read"))],
+    dependencies=[Depends(require_action(scopes_dict["governance_read"]))],
 )
 async def get_log(
     user: CurrentUser,

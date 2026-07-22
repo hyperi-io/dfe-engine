@@ -24,6 +24,7 @@ from pydantic import BaseModel
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.auto_merge import apply_auto_merge, resolve_state
 from dfe_engine.governance.lifecycle import (
@@ -76,7 +77,7 @@ def _current_state(gc: GitCrud, svc: ServiceLifecycle) -> str:
         return "running"  # no dial yet = default running
 
 
-@router.get("", dependencies=[Depends(require_action("lifecycle:read"))])
+@router.get("", dependencies=[Depends(require_action(scopes_dict["lifecycle_read"]))])
 async def list_services(user: CurrentUser, request: Request) -> list[ServiceInfo]:
     """List services with their tier and current lifecycle state."""
     gc = _gitcrud(request)

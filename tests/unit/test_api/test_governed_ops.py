@@ -123,6 +123,29 @@ class TestTier2Actions:
         resp = client.post("/api/v1/governance/actions/nope/invoke", headers=admin_headers)
         assert resp.status_code == 404
 
+    def test_create_then_list_and_get_policy(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        body = {
+            "name": "lock",
+            "description": "lock keda max",
+            "protected": ["helmvars:*:keda.maxReplicas"],
+        }
+        created = client.post("/api/v1/governance/admin/policies", json=body, headers=admin_headers)
+        assert created.status_code == 201, created.text
+
+        listed = client.get("/api/v1/governance/policies", headers=admin_headers)
+        assert listed.status_code == 200
+        assert listed.json() == ["lock"]
+
+        detail = client.get("/api/v1/governance/policies/lock", headers=admin_headers)
+        assert detail.status_code == 200
+        assert detail.json()["protected"] == body["protected"]
+
+    def test_get_missing_policy_404(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        resp = client.get("/api/v1/governance/policies/nope", headers=admin_headers)
+        assert resp.status_code == 404
+
 
 @pytest.mark.parametrize("path", ["/api/v1/governance/actions", "/api/v1/helm/files"])
 def test_governed_ops_requires_auth(client, path):

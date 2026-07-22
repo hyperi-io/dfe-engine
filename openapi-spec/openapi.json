@@ -10407,6 +10407,83 @@
         ]
       }
     },
+    "/api/v1/governance/policies": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "List Policies",
+        "operationId": "list_policies_api_v1_governance_policies_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Policies Api V1 Governance Policies Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/governance/policies/{name}": {
+      "get": {
+        "tags": [
+          "Governed Ops: Actions"
+        ],
+        "summary": "Get Policy",
+        "operationId": "get_policy_api_v1_governance_policies__name__get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProtectedPolicy"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/governance/actions/{name}/invoke": {
       "post": {
         "tags": [

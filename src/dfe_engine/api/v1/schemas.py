@@ -984,7 +984,7 @@ async def get_schema_columns(
         description="Source version id (defaults to deployed_version)",
     ),
     pagination: PaginationParams = Depends(),
-    _auth: None = Depends(require_action("source:read")),
+    _auth: None = Depends(require_action(scopes_dict["source_read"])),
 ) -> SourceSchemaColumnsResponse:
     """Get composed schema columns for a source version (profile + meta/derived/additional).
 
@@ -1060,7 +1060,7 @@ async def build_schema(
         None,
         description="Source version id (defaults to deployed_version)",
     ),
-    _auth: None = Depends(require_action("config:write")),
+    _auth: None = Depends(require_action(scopes_dict["config_write"])),
 ) -> SchemaBuildResult:
     """Build complete schema (DDL) from a source version snapshot.
 
@@ -1463,7 +1463,7 @@ def _resolve_source_version(source, version, source_name):
 @router.get(
     "/{source_name}/json-paths",
     response_model=JsonPathsResponse,
-    dependencies=[Depends(require_action("schema:read"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def discover_json_paths(
     source_name: str,
@@ -1565,7 +1565,7 @@ async def discover_json_paths(
 @router.get(
     "/{source_name}/sample-rows",
     response_model=SampleRowsResponse,
-    dependencies=[Depends(require_action("schema:read"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_read"]))],
 )
 async def sample_source_rows(
     source_name: str,
@@ -1644,7 +1644,7 @@ async def sample_source_rows(
 @router.post(
     "/{source_name}/promote-field",
     response_model=PromoteFieldResponse,
-    dependencies=[Depends(require_action("schema:write"))],
+    dependencies=[Depends(require_action(scopes_dict["schema_write"]))],
 )
 async def promote_field(
     source_name: str,

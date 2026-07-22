@@ -46,8 +46,8 @@ def _seed_bare(tmp_path):
     (seed / "README.md").write_text("seed\n")
     porcelain.add(str(seed), paths=[str(seed / "README.md")])
     porcelain.commit(str(seed), message=b"seed", author=b"t <t@t>", committer=b"t <t@t>")
-    porcelain.branch_create(str(seed), "main")
-    porcelain.push(str(seed), str(bare), b"refs/heads/main:refs/heads/main")
+    branch = porcelain.active_branch(str(seed)).decode()
+    porcelain.push(str(seed), str(bare), f"refs/heads/{branch}:refs/heads/main".encode())
     return bare
 
 

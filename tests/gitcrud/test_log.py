@@ -53,6 +53,13 @@ class TestReadLog:
         assert entries[0].summary == "hand edit, no standard"
         assert entries[0].actor  # falls back to the git author
 
+    def test_deleted_files_listed_in_log(self, crud):
+        crud._repo.publish({"values/x.yaml": "a: 1\n"}, "add x")
+        crud._repo.publish({}, "remove x", deletions=["values/x.yaml"])
+        entries, _ = read_log(crud, limit=1)
+        assert entries[0].summary == "remove x"
+        assert entries[0].files == ["values/x.yaml"]
+
     def test_cursor_pagination(self, crud):
         for i in range(5):
             _commit_var(crud, "receiver-default", "keda.maxReplicas", i, "derek")

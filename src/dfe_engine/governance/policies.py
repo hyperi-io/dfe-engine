@@ -16,6 +16,7 @@ reaches below a class - a policy object, not a per-var ACL.
 
 from __future__ import annotations
 
+import builtins
 from fnmatch import fnmatch
 
 from dfe_engine.gitcrud import GitCrud
@@ -42,12 +43,17 @@ class PolicyStore:
     def __init__(self, crud: GitCrud) -> None:
         self._crud = crud
 
+    def list(self) -> builtins.list[str]:
+        return self._crud.list(_POLICY_CLASS)
+
+    def get(self, name: str) -> ProtectedPolicy:
+        return ProtectedPolicy.model_validate(self._crud.get(_POLICY_CLASS, name))
+
     def all_patterns(self) -> list[str]:
         """Aggregate every protected pattern across all policy docs."""
         patterns: list[str] = []
         for name in self._crud.list(_POLICY_CLASS):
-            policy = ProtectedPolicy.model_validate(self._crud.get(_POLICY_CLASS, name))
-            patterns.extend(policy.protected)
+            patterns.extend(self.get(name).protected)
         return patterns
 
     def matching_pattern(self, cls: str, name: str, path: str) -> str | None:

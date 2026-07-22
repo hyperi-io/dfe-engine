@@ -152,6 +152,24 @@ const transform_scopes = {
   transform_test: "transform:test",
 } as const;
 
+const governance_scopes = {
+  governance_read: "governance:read",
+  governance_write: "governance:write",
+} as const;
+
+const helmvars_scopes = {
+  helmvars_read: "helmvars:read",
+  helmvars_write: "helmvars:write",
+} as const;
+
+const lifecycle_scopes = {
+  lifecycle_read: "lifecycle:read",
+} as const;
+
+const config_scopes = {
+  config_write: "config:write",
+} as const;
+
 export const scopes = {
   ...account_groups_scopes,
   ...accounts_scopes,
@@ -180,6 +198,10 @@ export const scopes = {
   ...system_scopes,
   ...tasks_scopes,
   ...transform_scopes,
+  ...governance_scopes,
+  ...helmvars_scopes,
+  ...lifecycle_scopes,
+  ...config_scopes,
 } as const;
 
 export type RbacScope = (typeof scopes)[keyof typeof scopes];
