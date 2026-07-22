@@ -69,7 +69,11 @@ class _DfeEngineApp:
                 from dfe_engine.settings import load_settings
 
                 settings = load_settings()
-                app = create_app(settings=settings)
+                # Share ServiceApp's OWN HealthManager -- the instance scalo's
+                # observability server serves on 9090 /readyz. Without this the
+                # lifespan sets ready on a DIFFERENT manager and the probe reads
+                # an always-unready one.
+                app = create_app(settings=settings, health_manager=self.health())
                 server = uvicorn.Server(
                     uvicorn.Config(
                         app,

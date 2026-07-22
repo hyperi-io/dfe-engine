@@ -15,10 +15,9 @@ from __future__ import annotations
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.utils import get_openapi
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
@@ -264,12 +263,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 def create_app(
     settings: DFESettings | None = None,
     cors_origins: list[str] | None = None,
+    health_manager: HealthManager | None = None,
 ) -> FastAPI:
     """Create and configure the FastAPI application.
 
     Args:
         settings: DFE settings. Defaults to ``load_settings()``.
         cors_origins: CORS allowed origins. Overrides ``settings.api.cors_origins``.
+        health_manager: the ``HealthManager`` the readiness state lives on. Under
+            the ``dfe-engine`` daemon this is ServiceApp's OWN manager -- the same
+            instance scalo's observability server serves on ``/readyz`` -- so the
+            lifespan's ``set_ready`` and the probe agree. Left ``None`` (standalone
+            ``create_app()`` / tests) a fresh manager is created.
 
     Returns:
         Configured FastAPI application.
@@ -286,7 +291,9 @@ def create_app(
     )
 
     app.state.settings = settings
-    health_manager = HealthManager()
+    # Rebind the local so the health router below and the lifespan's set_ready
+    # act on ONE manager. (Daemon: ServiceApp's own, served on 9090 /readyz.)
+    health_manager = health_manager or HealthManager()
     app.state.health_manager = health_manager
 
     # Core-resource write guard (register before CORS so 409 responses still get CORS headers)
@@ -342,20 +349,12 @@ def create_app(
     # otherwise pull in their JSONResponse stream_item_field.
     app.include_router(create_health_router(health_manager), include_in_schema=False)
 
-    # Prometheus scrape endpoint. scalo COLLECTS metrics but deliberately does not
-    # mount an endpoint (scalo/metrics/prometheus.py documents the app doing it), so
-    # without this the engine served a 404 at /metrics while its chart advertised
-    # prometheus.io/scrape + prometheus.io/path: /metrics.
-    #
-    # Same path + same names as every other DFE service, so one scrape config and one
-    # dashboard cover the stack. The OTLP half of self-monitoring needs no route --
-    # scalo pushes to OTEL_EXPORTER_OTLP_ENDPOINT, which the charts resolve from the
-    # ONE telemetry.mode seam (HyperDX by default).
-    #
-    # include_in_schema=False: a scrape endpoint is not API surface.
-    @app.get("/metrics", include_in_schema=False)
-    def metrics_endpoint() -> Response:
-        return Response(generate_latest(), media_type=CONTENT_TYPE_LATEST)
+    # /metrics is NOT mounted here (#106 P1.3). It was unauthenticated on the
+    # public API port; scalo's ServiceApp now serves it on the dedicated
+    # observability port (9090), off the ingress-exposed 8000. The scrape and
+    # the kubelet probes both target 9090 (see the chart). Health stays mounted
+    # here too, on the SAME shared HealthManager, so 8000 and 9090 never
+    # disagree -- but 9090 is the authoritative probe target.
 
     # Custom OpenAPI schema with Bearer auth
     def custom_openapi():
