@@ -94,12 +94,11 @@ config:
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.
   config_dir: ""
-  # -- scalo.secrets root (DFE_SECRETS_PATH) for the minted ES384 JWT signing key.
-  # Defaults to the image's writable /app/secrets. NOTE (#106 P1.1): that path is
-  # per-pod ephemeral, so a multi-replica deploy mints a DIFFERENT key per pod and
-  # a JWT signed by one pod fails verification against another's JWKS. Fine at
-  # replicaCount 1 (the default); for >1 replica, mount a shared signing key
-  # (Secret/PVC) and point this at it.
+  # -- scalo.secrets root (DFE_SECRETS_PATH) for the ES384 JWT signing key.
+  # Defaults to the image's writable /app/secrets. At replicaCount 1 each pod mints
+  # its own key here (fine for a single pod). For >1 replica, provide a shared key
+  # via jwt.signingKey.existingSecret (mounted read-only at <path>/jwt/signing-key)
+  # so every pod signs + verifies with the SAME key (#106 P1.1, dfe-engine#109).
   secrets:
     path: /app/secrets
 
@@ -126,6 +125,30 @@ jwt:
     secret: jwt-secret
   # -- Change this in production. Min 32 chars recommended.
   secret: "dev-secret-key-change-in-production"
+  # -- Shared ES384 signing key for the JWT authority + JWKS (#106 P1.1,
+  # dfe-engine#109). REQUIRED for replicaCount > 1 (or autoscaling): without it
+  # each pod mints its OWN key on first boot, so a token signed by pod A fails
+  # verification against pod B's JWKS -- intermittent 401s behind the Service.
+  # Provide a Secret holding the PKCS8 PEM private key; it is mounted read-only at
+  # <config.secrets.path>/jwt/signing-key and every pod loads the same key. Leave
+  # empty at replicaCount 1. Generate + create with:
+  #   openssl genpkey -algorithm EC -pkeyopts ec_paramgen_curve:P-384 \
+  #     -outform PEM -out signing-key.pem
+  #   kubectl create secret generic dfe-engine-jwt-signing-key \
+  #     --from-file=signing-key=signing-key.pem
+  signingKey:
+    existingSecret: ""
+    # -- Key within the Secret that holds the PEM.
+    key: signing-key
+
+# -- Container filesystem hardening (#106 P3.4).
+security:
+  # -- Mount the container root filesystem read-only. OPT-IN: enable only when
+  # jwt.signingKey.existingSecret is set (no per-pod key mint to the rootfs) AND
+  # nothing else mints secrets to the local FS at runtime -- i.e. the secrets
+  # provider is external (openbao) OR org/OIDC provisioning is off. Otherwise a
+  # runtime write to DFE_SECRETS_PATH fails. Off by default (deploy-specific).
+  readOnlyRootFilesystem: false
 
 # -- Local auth account passwords (admin / operator / viewer)
 auth:

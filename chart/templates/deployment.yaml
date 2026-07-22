@@ -41,11 +41,15 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Container-level hardening (#106 P3.4). readOnlyRootFilesystem is NOT set
-          # yet: the engine writes the minted JWT key under DFE_SECRETS_PATH on the
-          # image rootfs -- that lands with the shared-signing-key follow-up (P1.1).
+          # Container-level hardening (#106 P3.4). readOnlyRootFilesystem is an
+          # opt-in (security.readOnlyRootFilesystem): safe only with a mounted
+          # jwt.signingKey (no per-pod key mint to the rootfs) AND no runtime
+          # secret minting to the local FS -- see values.yaml (dfe-engine#109).
           securityContext:
             allowPrivilegeEscalation: false
+            {{- if .Values.security.readOnlyRootFilesystem }}
+            readOnlyRootFilesystem: true
+            {{- end }}
             capabilities:
               drop:
                 - ALL
@@ -160,16 +164,41 @@ spec:
             - name: DFE_SECRETS_PATH
               value: {{ .Values.config.secrets.path | quote }}
             {{- end }}
-          {{- if .Values.configVolume.enabled }}
+          {{- if or .Values.configVolume.enabled .Values.jwt.signingKey.existingSecret }}
           volumeMounts:
+            {{- if .Values.configVolume.enabled }}
             - name: config
               mountPath: {{ .Values.configVolume.mountPath }}
+            {{- end }}
+            {{- if .Values.jwt.signingKey.existingSecret }}
+            # Shared ES384 signing key (#106 P1.1, dfe-engine#109), read-only, so
+            # every replica loads the SAME key -> cross-pod JWKS verification holds.
+            # scalo.secrets (file provider) reads it raw at jwt/signing-key. Mounted
+            # as a DIRECTORY (not subPath) to stay readOnlyRootFilesystem-safe: the
+            # mount point's parent (config.secrets.path) exists in the image, so the
+            # runtime never has to mkdir on a read-only rootfs.
+            - name: jwt-signing-key
+              mountPath: {{ .Values.config.secrets.path }}/jwt
+              readOnly: true
+            {{- end }}
           {{- end }}
-      {{- if .Values.configVolume.enabled }}
+      {{- if or .Values.configVolume.enabled .Values.jwt.signingKey.existingSecret }}
       volumes:
+        {{- if .Values.configVolume.enabled }}
         - name: config
           persistentVolumeClaim:
             claimName: {{ if .Values.configVolume.existingClaim }}{{ .Values.configVolume.existingClaim }}{{ else }}{{ include "dfe-engine.fullname" . }}-config{{ end }}
+        {{- end }}
+        {{- if .Values.jwt.signingKey.existingSecret }}
+        - name: jwt-signing-key
+          secret:
+            secretName: {{ .Values.jwt.signingKey.existingSecret }}
+            # The Secret's key ({{ .Values.jwt.signingKey.key }}) is projected to the
+            # file `signing-key` -- what scalo.secrets reads at jwt/signing-key.
+            items:
+              - key: {{ .Values.jwt.signingKey.key }}
+                path: signing-key
+        {{- end }}
       {{- end }}
       {{- with .Values.nodeSelector }}
       nodeSelector:
