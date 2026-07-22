@@ -297,6 +297,22 @@ class ClickHouseManager:
         """
         return self._get_resilience().run(op)
 
+    def ping(self) -> bool:
+        """Fast readiness probe: is ClickHouse reachable right now?
+
+        A SINGLE bounded check (clickhouse-connect's ``/ping``, hard 3s
+        timeout) that DELIBERATELY bypasses :meth:`run_resilient`. A readiness
+        poll must fail fast and must NOT sit inside the reconnect/auto-wake
+        budget: that budget is for real operations, a paused CH Cloud has to
+        read as NOT ready, and a kubelet poll must never trigger a (billable)
+        auto-wake. Never raises - any failure (unreachable, build error) reads
+        as not-ready.
+        """
+        try:
+            return bool(self._live_client().ping())
+        except Exception:
+            return False
+
     def _live_client(self) -> Client:
         """Return the live pooled client, building it if absent (or after a reconnect)."""
         if self._client is None:
