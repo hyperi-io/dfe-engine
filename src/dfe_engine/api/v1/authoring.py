@@ -35,11 +35,12 @@ from dfe_engine.ai import (
     default_ai_registry,
 )
 from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.rule_authoring import build_query_scaffold, strip_hyperdx
 
 router = APIRouter(prefix="/authoring", tags=["Rules: Authoring"])
 
-_READ = Depends(require_action("rules:read"))
+_READ = Depends(require_action(scopes_dict["rule_read"]))
 
 
 def _registry(request: Request):

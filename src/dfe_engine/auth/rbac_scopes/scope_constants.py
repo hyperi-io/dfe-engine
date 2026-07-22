@@ -159,3 +159,21 @@ transform_scopes = {
     "transform_compile": "transform:compile",
     "transform_test": "transform:test",
 }
+
+governance_scopes = {
+    "governance_read": "governance:read",
+    "governance_write": "governance:write",
+}
+
+helmvars_scopes = {
+    "helmvars_read": "helmvars:read",
+    "helmvars_write": "helmvars:write",
+}
+
+lifecycle_scopes = {
+    "lifecycle_read": "lifecycle:read",
+}
+
+config_scopes = {
+    "config_write": "config:write",
+}
