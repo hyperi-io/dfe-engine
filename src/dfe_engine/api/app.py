@@ -251,6 +251,28 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
 
+    # Readiness reflects ClickHouse reachability. The engine's core paths
+    # (ingest, load, hunt, query) all need CH, so a pod that cannot reach it is
+    # not ready to serve: /readyz goes NotReady and k8s pulls it from the
+    # Service until CH recovers. Self-healing, and liveness is untouched - the
+    # pod is never restarted, it stays up for introspection. The probe is a
+    # single bounded ping that BYPASSES the resilience retry/auto-wake budget (a
+    # kubelet poll must fail fast and must never wake a paused CH Cloud).
+    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
+
+    ch_manager = ClickHouseManager.get_instance(
+        {
+            "ch_host": settings.clickhouse.host,
+            "ch_port": settings.clickhouse.port,
+            "ch_username": settings.clickhouse.username,
+            "ch_password": settings.clickhouse.password,
+            "ch_secure": settings.clickhouse.secure,
+            "ch_verify": settings.clickhouse.verify,
+            "ch_ca_cert": settings.clickhouse.ca_cert,
+        }
+    )
+    health.register_ready_check("clickhouse", ch_manager.ping)
+
     health.set_started()
     health.set_ready()
     logger.info(f"DFE Engine API started (port={settings.api.port})")
