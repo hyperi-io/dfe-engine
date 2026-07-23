@@ -1,0 +1,21 @@
+name: receiver-surge
+description: >-
+  Raise the receiver's KEDA ceiling for an ingest surge. The level maps to a
+  curated maxReplicaCount detent (baseline chart default is 10). Revert with
+  receiver-normal.
+required_action: action:invoke:receiver-surge
+params:
+  level:
+    type: enum
+    values: ["2x", "4x"]
+    default: "2x"
+    description: Ceiling multiplier over the baseline max of 10
+changes:
+  - cls: helmvars
+    name: dfe-receiver-default-values
+    path: keda.maxReplicaCount
+    value:
+      $param: level
+      map:
+        "2x": 20
+        "4x": 40

@@ -1,0 +1,7 @@
+name: baseline
+description: >-
+  Locked by default: image references change through stack pins (dfe-stack
+  resolve), never through a var edit or an action. Holders of
+  helmvars:override can still make a deliberate exception.
+protected:
+  - "helmvars:*:image.*"

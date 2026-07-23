@@ -1,0 +1,19 @@
+name: hunts-throttle
+description: >-
+  Set the global cap on concurrent hunt runs (huntRunner.cap, chart default 8)
+  to relieve ClickHouse without stopping hunting. Invoke with a cap value, or
+  take the default of 4.
+required_action: action:invoke:hunts-throttle
+params:
+  cap:
+    type: int
+    min: 1
+    max: 32
+    default: 4
+    description: Maximum concurrent hunt runs across all runner pods
+changes:
+  - cls: helmvars
+    name: dfe-engine-default-values
+    path: huntRunner.cap
+    value:
+      $param: cap
