@@ -25,7 +25,7 @@ from __future__ import annotations
 import json
 import re
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Body, Header, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
@@ -49,6 +49,11 @@ router = APIRouter(prefix="/repository", tags=["Repository"])
 
 _NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$")
 _VALID_SCOPES = ("system", "org", "group", "user")
+
+# The closed set in the CONTRACT (path params render as an enum in OpenAPI so
+# generated clients offer a select, not a text box). Literal keeps the runtime
+# value a plain str; _VALID_SCOPES stays as the guard for direct helper calls.
+RepositoryScope = Literal["system", "org", "group", "user"]
 
 _PREFS_NAMESPACE = "preferences"
 _PREFS_KEY = "default"

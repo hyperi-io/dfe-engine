@@ -135,6 +135,46 @@ A `ProtectedPolicy` is the one thing that reaches below a class -- a list of loc
 `cls:name:path` globs that even Tier-1 must respect unless the caller holds the
 override grant. It is a policy object, not a per-var ACL.
 
+### Constrained params -- a dial with detents, or a bounded knob
+
+An action may declare `params`, and every param carries a CLOSED constraint:
+an enum carries its full value list, a numeric carries both bounds. There is
+deliberately no free-string param type -- an unconstrained param would reopen
+the hole curation closed. A `VarChange.value` references a param as
+`{"$param": "level"}` (whole-value substitution) or with a `map` that turns an
+enum value into a per-var literal -- the admin still curates what each detent
+means. Substitution never reaches `cls`/`name`/`path`, and there is no string
+interpolation, so params add zero injection surface. Wiring errors (dangling
+reference, map not covering the enum) are rejected at DEFINE time; only the
+caller's supplied values can fail an invoke (422 `invalid_params`).
+
+`required_action` is optional: left empty it derives `action:invoke:<name>`,
+the convention the shipped roles grant on (`dfe_operator` and `infra_admin`
+carry `action:invoke:*`).
+
+### The contract exposes the closed sets
+
+Every stringly field on an action is a closed set, so the contract enumerates
+it rather than trusting hand-typed values: `GET /gitops/classes` (the registry,
+with `action_writable` exporting the no-governance-class guard),
+`.../classes/{cls}/resources` and `.../resources/{name}/vars` (each gated by
+that class's own `:read` grant), and `POST /governance/admin/actions/validate`
+returns EVERY violation plus the would-be diff without committing. The schema
+fields carry `x-dfe-enum-source` annotations naming these endpoints, so
+generated clients render selects, not text boxes (the full convention:
+[ui-api-guide.md](ui-api-guide.md)).
+
+### The shipped action library
+
+The deploy-repo template (dfe-deploy `governance/`) ships a standard library
+of dials -- `receiver-surge`/`receiver-normal` (KEDA ceiling detents),
+`hunts-pause`/`hunts-resume`, `hunts-throttle` (bounded concurrent-run cap) --
+plus a `baseline` protected-var policy locking `image.*` (images move through
+stack pins, not dials). Every shipped action's structure is CI-validated in
+that repo (`tools/validate_governance.py`); the chart vars they point at are
+owned by dfe-infra's chart validation. An action's `description` is its
+runbook line -- what it does, and which action reverts it.
+
 Two more governance pieces keep authz itself in git: `rbac_source` loads roles and
 groups FROM the gitops tree, and `auth_sync` mirrors them back INTO it. Accounts and
 API keys hold secret material, so they stay out of git (that is an ESO job).

@@ -12,16 +12,20 @@ with its own RBAC handle; policies lock vars to defaults. Both are YAML in the
 gitops governance class. See docs/architecture.md ("Governed Ops").
 """
 
-from .actions import ActionForbiddenError, ActionStore
-from .models import ActionDef, ProtectedPolicy, VarChange
+from .actions import ActionForbiddenError, ActionStore, InvalidParamsError, resolve_params
+from .models import ActionDef, ParamSpec, ProtectedPolicy, VarChange, param_ref
 from .policies import PolicyStore, ProtectedVarError
 
 __all__ = [
     "ActionDef",
     "ActionForbiddenError",
     "ActionStore",
+    "InvalidParamsError",
+    "ParamSpec",
     "PolicyStore",
     "ProtectedPolicy",
     "ProtectedVarError",
     "VarChange",
+    "param_ref",
+    "resolve_params",
 ]

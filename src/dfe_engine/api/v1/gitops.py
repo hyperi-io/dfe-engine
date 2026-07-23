@@ -5,16 +5,26 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Auto-merge status + toggle (the dfe-ui banner contract), and the audit log.
+"""Auto-merge status + toggle (the dfe-ui banner contract), audit log, and the
+resource-class enumeration the generated clients build their selects from.
 
 GET /api/v1/gitops/auto-merge -> {stored, effective, allowed, reason} (governance:read)
 PUT /api/v1/gitops/auto-merge -> toggle; refuses to enable when the deployment
 gate (dev posture OR DFE_GITOPS_MODE=solo) does not permit (governance:write).
 GET /api/v1/gitops/log -> flat {entries, next_before} or, with ?group_by=,
 {groups} - every gitcrud commit, newest-first (governance:read).
+GET /api/v1/gitops/classes -> registry dump (any authenticated caller)
+GET /api/v1/gitops/classes/{cls}/resources -> names ({cls}'s own :read grant)
+GET /api/v1/gitops/classes/{cls}/resources/{name}/vars -> dot-path vars (ditto)
+
+The enumeration trio exists for the contract rule: if the server will reject
+values outside a set, the contract must expose the set. VarChange's fields
+carry ``x-dfe-enum-source`` annotations pointing here.
 """
 
 from __future__ import annotations
+
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -22,10 +32,15 @@ from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.audit import audit_resource_change
+from dfe_engine.auth.engine import authorize
+from dfe_engine.auth.models import AuthContext
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.gitcrud import GitCrud
+from dfe_engine.gitcrud import GitCrud, ResourceNotFoundError
 from dfe_engine.gitcrud.auto_merge import AutoMergeState, resolve_state, set_stored
+from dfe_engine.gitcrud.commit_policy import CommitPolicyError, validate_name
 from dfe_engine.gitcrud.log import LogEntry, UnknownCursorError, group_log, read_log
+from dfe_engine.gitcrud.models import ResourceClass
+from dfe_engine.gitcrud.registry import UnknownResourceClassError
 
 router = APIRouter(prefix="/gitops", tags=["Governed Ops: Gitops"])
 
@@ -100,6 +115,104 @@ async def put_auto_merge(
         user.user_id, "gitops", "auto-merge", "updated", {"enabled": body.enabled}
     )
     return _status(_state(request, warn=False))
+
+
+class ClassInfo(BaseModel):
+    """One registered resource class - the closed set behind VarChange.cls.
+
+    action_writable exports the escalation guard: a defined action may never
+    change a governance-prefixed class, so a UI can filter its class select
+    to the legal targets instead of discovering the ban at 403-time.
+    """
+
+    name: str
+    rbac_prefix: str
+    directory: str
+    versioned: bool
+    action_writable: bool
+
+
+class VarEntry(BaseModel):
+    """One flattened dot-path var in a resource doc."""
+
+    path: str
+    value: Any = None
+    protected: bool
+
+
+def _resource_class(gc: GitCrud, cls: str) -> ResourceClass:
+    try:
+        return gc.registry.get(cls)
+    except UnknownResourceClassError as exc:
+        raise HTTPException(
+            404, detail={"code": "unknown_class", "message": f"unknown resource class '{cls}'"}
+        ) from exc
+
+
+def _require_class_read(request: Request, user: AuthContext, rc: ResourceClass) -> None:
+    """Gate on the CLASS's own :read grant - never a blanket one."""
+    decision = authorize(user, rc.action("read"), role_config=request.app.state.role_config)
+    if not decision.allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": decision.reason})
+
+
+@router.get("/classes", response_model=list[ClassInfo])
+async def list_classes(user: CurrentUser, request: Request) -> list[ClassInfo]:
+    """The resource-class registry - what VarChange.cls may legally name.
+
+    Registry metadata only (no resource content), so any authenticated caller
+    may read it; the per-class listings below are gated by each class's grant.
+    """
+    gc = _gitcrud(request)
+    return [
+        ClassInfo(
+            name=rc.name,
+            rbac_prefix=rc.rbac_prefix or rc.name,
+            directory=rc.directory,
+            versioned=rc.versioned,
+            action_writable=(rc.rbac_prefix or rc.name) != "governance",
+        )
+        for rc in gc.registry.all()
+    ]
+
+
+@router.get("/classes/{cls}/resources", response_model=list[str])
+async def list_class_resources(cls: str, user: CurrentUser, request: Request) -> list[str]:
+    """Resource names in a class - what VarChange.name may legally name."""
+    gc = _gitcrud(request)
+    rc = _resource_class(gc, cls)
+    _require_class_read(request, user, rc)
+    return gc.list(cls)
+
+
+@router.get("/classes/{cls}/resources/{name}/vars", response_model=list[VarEntry])
+async def list_class_resource_vars(
+    cls: str, name: str, user: CurrentUser, request: Request
+) -> list[VarEntry]:
+    """Flattened dot-path vars of one resource - what VarChange.path may name.
+
+    Values ride along so a select can show the current value beside each path.
+    """
+    gc = _gitcrud(request)
+    rc = _resource_class(gc, cls)
+    _require_class_read(request, user, rc)
+    try:
+        validate_name(name)
+    except CommitPolicyError as exc:
+        raise HTTPException(400, detail={"code": "invalid_name", "message": str(exc)}) from exc
+    policy = getattr(request.app.state, "policy_store", None)
+    try:
+        flat = gc.vars(cls, name)
+    except ResourceNotFoundError as exc:
+        raise HTTPException(404, detail={"code": "not_found", "message": str(exc)}) from exc
+    return [
+        VarEntry(
+            path=path,
+            value=value,
+            protected=bool(policy and policy.is_protected(cls, name, path)),
+        )
+        for path, value in flat.items()
+    ]
 
 
 class LogEntryModel(BaseModel):

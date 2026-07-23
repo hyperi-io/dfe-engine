@@ -43,18 +43,27 @@ roles:
       - "dashboard:read"
       - "org:read"
   infra_admin:
-    description: "Service configs, deployments, helm, Argo CD, orgs, groups"
+    description: "Service configs, deployments, helm, Argo CD, orgs, groups, Governed Ops"
     resource_type: core
     permissions:
       - "config:*"
       - "service:*:config:*"
       - "service:*:metrics:read"
       - "helm:*"
+      - "helmvars:*"
+      - "governance:*"
+      - "action:invoke:*"
       - "deployment:*"
       - "argo:*"
       - "org:*"
       - "group:*"
       - "repository:*"
+  dfe_operator:
+    description: "Curated operational dials - invoke shipped actions, read governed state"
+    resource_type: core
+    permissions:
+      - "governance:read"
+      - "action:invoke:*"
   infra_viewer:
     description: "Infrastructure read-only"
     resource_type: core
