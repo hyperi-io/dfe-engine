@@ -286,6 +286,76 @@ es.addEventListener('complete', (e) => {
 | GET | `/system/version` | API version |
 | GET | `/system/settings` | Current settings |
 
+## Governed Ops (curated actions - the operator dials)
+
+The Governance screen is INVOKE-FIRST: operators see the shipped dials and
+pull them. Defining new dials is rare admin work (`governance:write`), done
+through the guided flow below - never through free-text fields.
+
+### Operator surface (list + invoke)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/governance/actions` | List defined actions (`governance:read`) |
+| GET | `/governance/actions/{name}` | One action def incl `params` + `description` |
+| POST | `/governance/actions/{name}/invoke?dry_run=true` | Preview: resolved diff, no commit |
+| POST | `/governance/actions/{name}/invoke` | Apply (per-action `action:invoke:<name>` grant) |
+
+Invoke body (only when the action declares params):
+`{"params": {"level": "2x"}}`. Each param is CONSTRAINED - enum params carry
+their full `values` list, numerics carry `min`/`max` - so render enum params
+as a select and numerics as a bounded input; never a free text box. A
+violation returns 422 `invalid_params`.
+
+The flow to render: pick action -> fill params from the constraints -> dry-run
+-> show the old/new diff -> confirm -> invoke. On the response, surface
+`review_required`/`pr_url` (production+team routes the change to a review PR)
+as a success-with-review state, not an error. 409 `review_required` means no
+forge is configured to open the PR.
+
+### Admin surface (define - the guided wizard)
+
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/governance/admin/actions/validate` | Check a def: EVERY violation + would-be diff, no commit |
+| POST | `/governance/admin/actions` | Define (`governance:write`); `required_action` optional |
+| DELETE | `/governance/admin/actions/{name}` | Remove a def |
+| GET | `/gitops/classes` | Class select (filter on `action_writable`) |
+| GET | `/gitops/classes/{cls}/resources` | Resource select (gated by that class's `:read`) |
+| GET | `/gitops/classes/{cls}/resources/{name}/vars` | Path select, with current values + `protected` |
+
+Wizard shape: name/description -> per change: class select -> resource select
+-> path select (show the current value beside each path) -> value input ->
+validate (render `errors[]` + `diff[]`) -> save. Leave `required_action`
+empty - the server derives `action:invoke:<name>`; expose an override only
+behind an advanced toggle.
+
+### Closed sets in the contract (`x-dfe-enum-source`)
+
+House rule: if the server will reject values outside a set, the contract
+exposes the set. Three mechanisms, in order of preference:
+
+1. **Static set** - a schema enum (e.g. repository `scope`). Generated types
+   already give a union; render a select.
+2. **Dynamic set** - the schema field carries an `x-dfe-enum-source`
+   annotation naming the endpoint that enumerates its legal values:
+
+   ```json
+   "cls": {"x-dfe-enum-source": {"endpoint": "/api/v1/gitops/classes", "value_key": "name"}}
+   ```
+
+   `params` maps `{placeholder}` segments in the endpoint template to SIBLING
+   fields of the same object (e.g. the `path` field's source depends on the
+   chosen `cls` and `name`). `value_key` names the option field when the
+   endpoint returns objects; absent means the items are plain strings. Build
+   ONE generic hook that resolves an annotated field to a select fed by a
+   TanStack query - every annotated field then renders correctly for free.
+3. **Derived value** - the field is optional and the server fills a documented
+   default (e.g. `required_action`). Show the derived value, do not ask for it.
+
+A free-text input for any of these is a contract bug - report it against the
+engine, not something to paper over in the UI.
+
 ## Repository (UI preferences + small objects)
 
 A scope-aligned small-object store for the UI: preferences (light/dark

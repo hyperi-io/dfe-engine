@@ -12,6 +12,7 @@ GET  /api/v1/governance/actions/{name}          -> get an action (governance:rea
 POST /api/v1/governance/actions/{name}/invoke   -> invoke (per-action required_action)
 GET  /api/v1/governance/policies                -> list policies (governance:read)
 GET  /api/v1/governance/policies/{name}         -> get a policy (governance:read)
+POST /api/v1/governance/admin/actions/validate  -> check a def + diff, no commit
 POST/PUT/DELETE /api/v1/governance/admin/actions[/{name}]   -> CRUD defs (governance:write)
 POST/DELETE     /api/v1/governance/admin/policies[/{name}]  -> CRUD policies (governance:write)
 
@@ -37,6 +38,7 @@ from dfe_engine.governance import (
     ActionDef,
     ActionForbiddenError,
     ActionStore,
+    InvalidParamsError,
     PolicyStore,
     ProtectedPolicy,
     ProtectedVarError,
@@ -45,6 +47,12 @@ from dfe_engine.governance import (
 router = APIRouter(prefix="/governance", tags=["Governed Ops: Actions"])
 
 _POLICY_CLASS = "policies"
+
+
+class InvokeRequest(BaseModel):
+    """Optional invoke body: values for the action's declared params."""
+
+    params: dict[str, Any] = {}
 
 
 class InvokeResponse(BaseModel):
@@ -164,16 +172,20 @@ async def invoke_action(
     name: str,
     user: CurrentUser,
     request: Request,
+    body: InvokeRequest | None = None,
     dry_run: bool = Query(default=False),
 ) -> InvokeResponse:
     """Invoke a defined action - gated on the action's OWN required_action.
 
-    Direct commit in dev/solo; a production+team invoke is routed to a review PR
-    (or 409 ``review_required`` when no forge is configured).
+    ``body.params`` supplies values for the action's declared params (422 on a
+    constraint violation; omitted params take their defaults). Direct commit in
+    dev/solo; a production+team invoke is routed to a review PR (or 409
+    ``review_required`` when no forge is configured).
     """
     _check_name(name)
     store = _actions(request)
     settings = request.app.state.settings
+    params = body.params if body else None
     try:
         action = store.get(name)
     except ResourceNotFoundError as exc:
@@ -190,10 +202,14 @@ async def invoke_action(
     ).allowed
 
     # Validate + build the diff via a dry run first: this surfaces protected-var /
-    # forbidden / policy violations as 403 BEFORE any review-vs-direct routing, so
-    # a bad action never opens a PR (and 403 keeps precedence over 409).
+    # forbidden / policy / param violations BEFORE any review-vs-direct routing,
+    # so a bad invoke never opens a PR (and 4xx keeps precedence over 409).
     try:
-        preview = store.invoke(name, user.user_id, policy=policy, dry_run=True, override=override)
+        preview = store.invoke(
+            name, user.user_id, params=params, policy=policy, dry_run=True, override=override
+        )
+    except InvalidParamsError as exc:
+        raise HTTPException(422, detail={"code": "invalid_params", "message": str(exc)}) from exc
     except ProtectedVarError as exc:
         raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
     except ActionForbiddenError as exc:
@@ -206,7 +222,13 @@ async def invoke_action(
 
     def _write(branch: str):
         return store.invoke(
-            name, user.user_id, policy=policy, dry_run=False, override=override, branch=branch
+            name,
+            user.user_id,
+            params=params,
+            policy=policy,
+            dry_run=False,
+            override=override,
+            branch=branch,
         )
 
     try:
@@ -232,7 +254,7 @@ async def invoke_action(
         "action",
         name,
         "invoked",
-        {"commit": outcome.commit_sha, "pr": outcome.pr_url},
+        {"commit": outcome.commit_sha, "pr": outcome.pr_url, "params": params or {}},
     )
     return InvokeResponse(
         dry_run=False,
@@ -243,6 +265,35 @@ async def invoke_action(
         pr_url=outcome.pr_url,
         diff=preview.diff,
     )
+
+
+class ValidateResponse(BaseModel):
+    """Outcome of checking an action definition without saving or invoking it."""
+
+    valid: bool
+    errors: list[str]
+    diff: list[dict[str, Any]]
+
+
+@router.post(
+    "/admin/actions/validate",
+    response_model=ValidateResponse,
+    dependencies=[Depends(require_action("governance:write"))],
+)
+async def validate_action(body: ActionDef, user: CurrentUser, request: Request) -> ValidateResponse:
+    """Dry-check an action definition: every violation + the would-be diff.
+
+    Nothing is committed - this is the authoring hand-hold, run before the
+    define endpoint so a wizard can show the full diff and every problem in
+    one round trip.
+    """
+    _check_name(body.name)
+    policy = getattr(request.app.state, "policy_store", None)
+    override = authorize(
+        user, "helmvars:override", role_config=request.app.state.role_config
+    ).allowed
+    diff, errors = _actions(request).preview(body, policy=policy, override=override)
+    return ValidateResponse(valid=not errors, errors=errors, diff=diff)
 
 
 @router.post(

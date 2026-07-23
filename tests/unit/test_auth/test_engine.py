@@ -395,9 +395,9 @@ class TestDefaults:
         config = RoleConfig.load_builtin()
         assert "infra_admin" in config.roles
 
-    def test_seven_built_in_roles(self):
+    def test_eight_built_in_roles(self):
         config = RoleConfig.load_builtin()
-        assert len(config.roles) == 7
+        assert len(config.roles) == 8
 
     def test_all_expected_roles_present(self):
         config = RoleConfig.load_builtin()
@@ -409,5 +409,20 @@ class TestDefaults:
             "infra_admin",
             "infra_viewer",
             "customer_viewer",
+            "dfe_operator",
         }
         assert set(config.roles.keys()) == expected
+
+    def test_operator_holds_the_dials_and_nothing_else(self):
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("dfe_operator", "action:invoke:receiver-surge")
+        assert config.has_permission("dfe_operator", "governance:read")
+        assert not config.has_permission("dfe_operator", "governance:write")
+        assert not config.has_permission("dfe_operator", "helmvars:write")
+        assert not config.has_permission("dfe_operator", "helmvars:read")
+
+    def test_infra_admin_covers_governed_ops(self):
+        config = RoleConfig.load_builtin()
+        assert config.has_permission("infra_admin", "helmvars:write")
+        assert config.has_permission("infra_admin", "governance:write")
+        assert config.has_permission("infra_admin", "action:invoke:hunts-pause")
