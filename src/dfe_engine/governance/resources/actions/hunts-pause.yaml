@@ -1,0 +1,12 @@
+name: hunts-pause
+description: >-
+  Stop the hunt runner (huntRunner.enabled=false on the engine instance) to
+  shed ClickHouse load during an incident. Checkpoint watermarks are advanced
+  only on committed runs, so paused hunts resume with no gap. Revert with
+  hunts-resume.
+required_action: action:invoke:hunts-pause
+changes:
+  - cls: helmvars
+    name: dfe-engine-default-values
+    path: huntRunner.enabled
+    value: false
