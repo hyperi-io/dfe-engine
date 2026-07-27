@@ -58,6 +58,20 @@ class TestCreateProvider:
         assert data["groups"]["sync_interval"] == 1800
         assert data["groups"]["tenant_id_env"] == "ENTRA_TENANT_ID"
 
+    def test_create_sets_rp_client_secret_env(self, client, admin_headers):
+        """The RP client_secret_env round-trips - without it a provider created
+        via the API could never complete a login (no secret for the exchange)."""
+        resp = _create_provider(
+            client,
+            admin_headers,
+            name="rp-secret",
+            client_secret_env="OIDC_RP_SECRET",
+        )
+        assert resp.status_code == 201
+        assert resp.json()["client_secret_env"] == "OIDC_RP_SECRET"
+        got = client.get("/api/v1/auth/oidc-providers/rp-secret", headers=admin_headers)
+        assert got.json()["client_secret_env"] == "OIDC_RP_SECRET"
+
     def test_create_duplicate_returns_409(self, client, admin_headers):
         _create_provider(client, admin_headers, name="dup-provider")
         resp = _create_provider(client, admin_headers, name="dup-provider")
@@ -277,4 +291,57 @@ class TestTestProvider:
 
     def test_test_requires_admin(self, client, viewer_headers):
         resp = client.get("/api/v1/auth/oidc-providers/anything/test", headers=viewer_headers)
+        assert resp.status_code == 403
+
+
+class TestVerifyLoginConfig:
+    """GET /api/v1/auth/oidc-providers/{name}/verify-login"""
+
+    def test_reports_missing_client_id(self, client, admin_headers):
+        """An unset client_id env var is flagged, not silently passed."""
+        _create_provider(client, admin_headers, name="vl-missing", client_id_env="OIDC_UNSET_XYZ")
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/vl-missing/verify-login", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is False
+        client_id = next(c for c in data["checks"] if c["name"] == "client_id")
+        assert client_id["ok"] is False
+
+    def test_reports_present_client_id(self, client, admin_headers, monkeypatch):
+        """A resolvable client_id env var passes its check (value never returned)."""
+        monkeypatch.setenv("OIDC_PRESENT_ID", "some-client-id")
+        _create_provider(client, admin_headers, name="vl-present", client_id_env="OIDC_PRESENT_ID")
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/vl-present/verify-login", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        client_id = next(c for c in data["checks"] if c["name"] == "client_id")
+        assert client_id["ok"] is True
+        # The secret value must never appear in the response.
+        assert "some-client-id" not in resp.text
+
+    def test_discovery_failure_is_reported_not_raised(self, client, admin_headers):
+        """An unreachable/invalid discovery URL yields ok=False, not a 500."""
+        _create_provider(
+            client, admin_headers, name="vl-baddisco", issuer="https://accounts.example.com"
+        )
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/vl-baddisco/verify-login", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        discovery = next(c for c in data["checks"] if c["name"] == "discovery")
+        assert discovery["ok"] is False
+
+    def test_verify_login_nonexistent_returns_404(self, client, admin_headers):
+        resp = client.get("/api/v1/auth/oidc-providers/ghost/verify-login", headers=admin_headers)
+        assert resp.status_code == 404
+
+    def test_verify_login_requires_admin(self, client, viewer_headers):
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/anything/verify-login", headers=viewer_headers
+        )
         assert resp.status_code == 403

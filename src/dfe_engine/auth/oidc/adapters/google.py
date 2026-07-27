@@ -78,6 +78,37 @@ class GoogleAdapter(OIDCGroupAdapter):
 
         return {g: lookup.get(g, g) for g in group_ids}
 
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+        """Return the groups a user belongs to via the Directory API.
+
+        Google never puts group membership in the id_token, so this login-time
+        enrichment is the ONLY way to know a Google user's groups. Calls
+        ``groups().list(userKey=...)`` - ``userKey`` accepts the user's primary
+        email or their immutable id, so the RP can pass either.
+
+        Requires the same read-only domain-wide-delegation service account as the
+        other methods (``admin.directory.group.readonly``). Fails open: missing
+        credentials or an API error returns ``[]`` (default deny), never raises.
+        """
+        if not directory_id:
+            return []
+
+        service = self._get_service()
+        if service is None:
+            return []
+
+        try:
+            raw = await asyncio.to_thread(self._fetch_user_groups_sync, service, directory_id)
+        except Exception as exc:
+            logger.warning(
+                "Google Admin SDK resolve_user_groups failed — default deny",
+                provider=self._provider.issuer,
+                error=str(exc),
+            )
+            return []
+
+        return [GroupInfo(id=g["id"], name=g["name"], email=g.get("email", "")) for g in raw]
+
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all groups in the configured Google Workspace domain.
 
@@ -227,6 +258,37 @@ class GoogleAdapter(OIDCGroupAdapter):
             kwargs: dict[str, Any] = {"maxResults": 200}
             if domain:
                 kwargs["domain"] = domain
+            if page_token:
+                kwargs["pageToken"] = page_token
+
+            response = service.groups().list(**kwargs).execute()
+            groups.extend(response.get("groups", []))
+
+            page_token = response.get("nextPageToken")
+            if not page_token:
+                break
+
+        return groups
+
+    def _fetch_user_groups_sync(self, service: Any, user_key: str) -> list[dict[str, Any]]:
+        """Fetch the groups a single user belongs to, handling pagination.
+
+        Uses ``groups().list(userKey=...)``. ``userKey`` and ``domain`` are
+        mutually exclusive in the Directory API, so domain is deliberately NOT
+        passed here.
+
+        Args:
+            service: Google Admin SDK service resource.
+            user_key: The user's primary email or immutable id.
+
+        Returns:
+            List of raw group dicts the user is a member of.
+        """
+        groups: list[dict[str, Any]] = []
+        page_token: str | None = None
+
+        while True:
+            kwargs: dict[str, Any] = {"userKey": user_key, "maxResults": 200}
             if page_token:
                 kwargs["pageToken"] = page_token
 

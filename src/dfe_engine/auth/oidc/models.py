@@ -54,6 +54,36 @@ class GroupResolutionConfig(BaseModel):
     sync_interval: int = 3600
     """Seconds between API-based group sync cycles (used by api mode)."""
 
+    enrich_on_login: bool = False
+    """Fetch the user's groups from the directory API at each login.
+
+    Needed by providers that do NOT put group membership in the token at all -
+    Google Workspace is the case: its id_token carries no groups claim, so the
+    only way to know a user's groups is to ask the Directory API for them at
+    login. When set (with ``mode == "api"``) the RP calls the adapter's
+    ``resolve_user_groups`` and the directory result is authoritative. Entra's
+    >200 overage is handled automatically without this flag (the token's overage
+    marker triggers the same enrichment); a provider that reliably delivers
+    groups in-token (dex, okta) leaves this off."""
+
+    # -- Directory backend selection (test / CI seam) --
+    directory_backend: Literal["live", "mock"] = "live"
+    """Which directory backend api-mode enrichment uses.
+
+    ``live`` hits the real provider API (Graph / Admin SDK / Okta). ``mock``
+    selects the in-process Surface-B directory: a deterministic, offline group
+    directory read from a JSON fixture, so api-mode and the Entra >200 overage
+    path can be exercised in CI without a live tenant. This is a TEST/CI seam and
+    is deliberately NOT settable through the provider admin API - flip it in the
+    provider YAML only. Never ``mock`` in a real deployment."""
+
+    mock_directory_env: str = "DFE_OIDC_MOCK_DIRECTORY"
+    """Env var name whose value is the path to the Surface-B directory JSON fixture.
+
+    Read only when ``directory_backend == 'mock'``. A path is not a secret, but it
+    is still named indirectly via an env var to match the rest of this config and
+    to keep absolute test paths out of committed YAML."""
+
     # -- Google Workspace (api mode) --
     service_account_json_env: str = ""
     """Env var name holding the Google service account JSON credentials."""

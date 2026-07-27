@@ -111,6 +111,69 @@ class EntraAdapter(OIDCGroupAdapter):
 
         return result
 
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+        """Enumerate a user's group memberships via Graph transitiveMemberOf.
+
+        This is the >200 group OVERAGE path: when a user is in too many groups,
+        Entra drops the ``groups`` array from the id_token and emits a
+        ``_claim_names`` pointer instead, so the RP must fetch the membership
+        itself. Pages ``GET /users/{id}/transitiveMemberOf/microsoft.graph.group``
+        (the OData cast returns groups only, never directory roles), following
+        ``@odata.nextLink``.
+
+        ``directory_id`` MUST be the Entra object id (the ``oid`` claim), not the
+        pairwise ``sub`` - Graph keys ``/users/{id}`` on the object id.
+
+        Fails open: no token or an API error returns ``[]`` (default deny), never
+        raises, so an enrichment outage cannot break login or over-grant.
+        """
+        if not directory_id:
+            return []
+
+        token = self._get_token()
+        if token is None:
+            logger.warning(
+                "Entra resolve_user_groups: no token available — returning empty list",
+                provider=self._provider.issuer,
+            )
+            return []
+
+        from scalo.http import AsyncHttpClient
+
+        groups: list[GroupInfo] = []
+        headers = {"Authorization": f"Bearer {token}"}
+        url = (
+            f"{self.GRAPH_BASE}/users/{directory_id}/transitiveMemberOf/microsoft.graph.group"
+            f"?$select=id,displayName,mail,description&$top={self._PAGE_SIZE}"
+        )
+
+        async with AsyncHttpClient() as client:
+            while url:
+                try:
+                    response = await client.get(url, headers=headers)
+                    data = response.json()
+                except Exception as exc:
+                    logger.warning(
+                        "Entra resolve_user_groups: API call failed",
+                        directory_id=directory_id,
+                        error=str(exc),
+                    )
+                    break
+
+                for item in data.get("value", []):
+                    groups.append(
+                        GroupInfo(
+                            id=item.get("id", ""),
+                            name=item.get("displayName", ""),
+                            email=item.get("mail", "") or "",
+                            description=item.get("description", "") or "",
+                        )
+                    )
+
+                url = data.get("@odata.nextLink", "")
+
+        return groups
+
     async def list_all_groups(self) -> list[GroupInfo]:
         """List all groups in the tenant via Graph API.
 

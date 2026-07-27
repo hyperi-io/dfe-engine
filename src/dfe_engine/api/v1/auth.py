@@ -47,6 +47,11 @@ class UserResponse(BaseModel):
     roles: list[str]
     permissions: list[str] = Field(default_factory=list)
     groups: list[str] = Field(default_factory=list)
+    org_ids: list[str] = Field(
+        default_factory=list,
+        description="Orgs this user can browse in the data plane (HyperDX). Empty "
+        "means no org-scoped data access.",
+    )
 
 
 class PermissionsResponse(BaseModel):
@@ -125,6 +130,7 @@ async def get_me(user: CurrentUser, request: Request):
         roles=user.roles,
         permissions=permissions,
         groups=user.groups,
+        org_ids=user.org_ids,
     )
 
 

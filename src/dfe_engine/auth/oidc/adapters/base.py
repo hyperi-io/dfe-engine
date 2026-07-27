@@ -64,3 +64,24 @@ class OIDCGroupAdapter(ABC):
             connection succeeds, False otherwise.  ``message`` provides a
             human-readable status or error description.
         """
+
+    async def resolve_user_groups(self, directory_id: str) -> list[GroupInfo]:
+        """Return the groups *directory_id* belongs to, fetched from the provider.
+
+        This is the enrichment call the Relying Party uses when a token does NOT
+        carry the group membership itself - the classic case being Entra's >200
+        group "overage", where the id_token replaces the ``groups`` array with a
+        ``_claim_names`` pointer at a Graph endpoint. The RP then asks the adapter
+        to enumerate the user's memberships directly.
+
+        ``directory_id`` is the provider's stable object id for the user (Entra
+        ``oid``, not the pairwise ``sub``), because that is what the directory API
+        keys on.
+
+        The default returns an empty list: providers without an admin directory
+        API (generic) or that always deliver groups in-token have nothing to add,
+        and returning ``[]`` fails safe (no groups -> default deny, never an
+        accidental grant). Adapters that CAN enumerate a user's groups override
+        this.
+        """
+        return []

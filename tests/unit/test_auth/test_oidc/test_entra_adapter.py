@@ -190,6 +190,28 @@ class TestResolveGroupsNoCredentials:
 
 
 # ---------------------------------------------------------------------------
+# resolve_user_groups (the >200 overage enrichment) — empty when no credentials
+# ---------------------------------------------------------------------------
+
+
+class TestResolveUserGroupsNoCredentials:
+    async def test_returns_empty_list_when_no_credentials(self, monkeypatch):
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+        monkeypatch.delenv("ENTRA_CLIENT_SECRET", raising=False)
+
+        adapter = EntraAdapter(_make_provider())
+        # Fail-open: no token -> no groups (default deny), never raises.
+        result = await adapter.resolve_user_groups("some-user-oid")
+        assert result == []
+
+    async def test_empty_directory_id_short_circuits(self, monkeypatch):
+        monkeypatch.delenv("ENTRA_CLIENT_ID", raising=False)
+        adapter = EntraAdapter(_make_provider())
+        assert await adapter.resolve_user_groups("") == []
+
+
+# ---------------------------------------------------------------------------
 # list_all_groups — empty list when no credentials
 # ---------------------------------------------------------------------------
 

@@ -117,6 +117,22 @@ class TestGroupStoreList:
         assert groups[0].roles == ["operator"]
 
 
+class TestGroupStoreBySourceId:
+    def test_only_groups_with_source_id_appear(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        store.create("named-only", roles=["admin"])  # no source_id
+        store.create("synced", roles=["data_viewer"])
+        store.update("synced", source_id="guid-123", source_provider="entra")
+        index = store.by_source_id()
+        assert set(index) == {"guid-123"}
+        assert index["guid-123"].name == "synced"
+        assert index["guid-123"].roles == ["data_viewer"]
+
+    def test_empty_store(self, tmp_path):
+        store = GroupStore(tmp_path / "groups")
+        assert store.by_source_id() == {}
+
+
 class TestGroupStoreUpdate:
     def test_update_roles(self, tmp_path):
         store = GroupStore(tmp_path / "groups")

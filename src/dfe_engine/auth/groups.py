@@ -159,6 +159,24 @@ class GroupStore:
                 groups.append(group)
         return groups
 
+    def by_source_id(self) -> dict[str, Group]:
+        """Return groups keyed by their provider ``source_id``.
+
+        Only groups that carry a non-empty ``source_id`` appear. Used to resolve
+        a token that carries opaque provider identifiers (Entra object GUIDs,
+        Google group keys) rather than group names - the sync stores the id on
+        the group file, and this is how login looks it back up.
+
+        When two groups share a source_id (a misconfiguration) the
+        last-by-sorted-name wins; that is deterministic rather than correct, and
+        such a collision is a config error worth avoiding.
+        """
+        index: dict[str, Group] = {}
+        for group in self.list():
+            if group.source_id:
+                index[group.source_id] = group
+        return index
+
     def update(self, name: str, **fields: object) -> Group:
         """Update one or more fields on an existing group and persist.
 

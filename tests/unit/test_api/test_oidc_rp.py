@@ -94,6 +94,44 @@ def test_extract_identity_missing_optional_fields():
     assert identity.subject == "only-sub"
     assert identity.email == ""
     assert identity.groups == []
+    assert identity.groups_overflowed is False
+
+
+# ── group-claim overage detection (Entra >200 groups) ───────────
+
+
+def test_extract_identity_detects_group_overage():
+    """An Entra >200-group overage marker sets the flag and leaves groups empty.
+
+    When a user is in too many groups Entra omits the ``groups`` array and emits
+    a ``_claim_names``/``_claim_sources`` pointer instead. extract_identity must
+    notice that so the RP knows to fetch membership out-of-band, rather than
+    silently treating the user as belonging to no groups.
+    """
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {
+        "sub": "pairwise-sub",
+        "oid": "00000000-user-oid",
+        "email": "big@acme.com",
+        "_claim_names": {"groups": "src1"},
+        "_claim_sources": {
+            "src1": {
+                "endpoint": "https://graph.microsoft.com/v1.0/users/00000000-user-oid/getMemberObjects"
+            }
+        },
+    }
+    identity = extract_identity(provider, claims)
+    assert identity.groups == []
+    assert identity.groups_overflowed is True
+
+
+def test_extract_identity_no_overage_when_groups_present():
+    """A normal groups array is not mistaken for an overage."""
+    provider = OIDCProvider(type="entra_id", issuer="https://login.microsoftonline.com/tid/v2.0")
+    claims = {"sub": "s", "email": "a@b.c", "groups": ["guid-a", "guid-b"]}
+    identity = extract_identity(provider, claims)
+    assert identity.groups == ["guid-a", "guid-b"]
+    assert identity.groups_overflowed is False
 
 
 # ── re-mint: NormalizedIdentity -> engine ES384 token ────────────

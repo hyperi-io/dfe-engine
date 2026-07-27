@@ -1966,6 +1966,54 @@
         ]
       }
     },
+    "/api/v1/auth/oidc-providers/{name}/verify-login": {
+      "get": {
+        "tags": [
+          "OIDC Providers"
+        ],
+        "summary": "Verify Login Config",
+        "description": "Verify a provider's OIDC LOGIN config (admin only).\n\nAnswers \"are the login creds real and is the IdP reachable\" WITHOUT\nattempting an interactive login - the gap ``/{name}/test`` leaves for\ngeneric providers. Checks: the client_id env var resolves, the\nclient_secret env var resolves, and the issuer's discovery document is\nreachable and well-formed.",
+        "operationId": "verify_login_config_api_v1_auth_oidc_providers__name__verify_login_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LoginConfigResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/orgs": {
       "post": {
         "tags": [
@@ -13308,6 +13356,12 @@
             "description": "Env var name for OIDC client ID",
             "default": ""
           },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env",
+            "description": "Env var name for the RP client secret used in the auth-code exchange",
+            "default": ""
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionRequest"
           }
@@ -14002,6 +14056,12 @@
             "description": "Seconds between API sync cycles",
             "default": 3600
           },
+          "enrich_on_login": {
+            "type": "boolean",
+            "title": "Enrich On Login",
+            "description": "Fetch the user's groups from the directory API at each login (needed by providers with no groups claim, e.g. Google Workspace)",
+            "default": false
+          },
           "service_account_json_env": {
             "type": "string",
             "title": "Service Account Json Env",
@@ -14062,6 +14122,10 @@
             "type": "integer",
             "title": "Sync Interval"
           },
+          "enrich_on_login": {
+            "type": "boolean",
+            "title": "Enrich On Login"
+          },
           "service_account_json_env": {
             "type": "string",
             "title": "Service Account Json Env"
@@ -14096,6 +14160,7 @@
           "mode",
           "claim_name",
           "sync_interval",
+          "enrich_on_login",
           "service_account_json_env",
           "admin_email",
           "domain",
@@ -15119,6 +15184,52 @@
           "entries"
         ],
         "title": "LogResponse"
+      },
+      "LoginConfigCheck": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "detail": {
+            "type": "string",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "ok",
+          "detail"
+        ],
+        "title": "LoginConfigCheck",
+        "description": "One check in the login-config verification."
+      },
+      "LoginConfigResponse": {
+        "properties": {
+          "ok": {
+            "type": "boolean",
+            "title": "Ok"
+          },
+          "checks": {
+            "items": {
+              "$ref": "#/components/schemas/LoginConfigCheck"
+            },
+            "type": "array",
+            "title": "Checks"
+          }
+        },
+        "type": "object",
+        "required": [
+          "ok",
+          "checks"
+        ],
+        "title": "LoginConfigResponse",
+        "description": "Result of verifying a provider's OIDC LOGIN configuration.\n\nDistinct from ``/{name}/test``, which verifies the group-DIRECTORY\ncredentials (Graph / Okta / Google) and is a no-op for a generic provider.\nThis verifies the login half: discovery reachable, and the RP client\ncredentials present - the things that make ``/auth/oidc/{name}/login``\nactually work."
       },
       "LoginRequest": {
         "properties": {
@@ -17611,6 +17722,10 @@
             "type": "string",
             "title": "Client Id Env"
           },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env"
+          },
           "groups": {
             "$ref": "#/components/schemas/GroupResolutionResponse"
           },
@@ -17639,6 +17754,7 @@
           "display_name",
           "issuer",
           "client_id_env",
+          "client_secret_env",
           "groups",
           "created_at",
           "last_sync_at",
@@ -21360,6 +21476,18 @@
             "title": "Display Name",
             "description": "Human-readable label"
           },
+          "client_secret_env": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret Env",
+            "description": "Env var name for the RP client secret"
+          },
           "groups": {
             "anyOf": [
               {
@@ -21451,6 +21579,14 @@
             },
             "type": "array",
             "title": "Groups"
+          },
+          "org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Org Ids",
+            "description": "Orgs this user can browse in the data plane (HyperDX). Empty means no org-scoped data access."
           }
         },
         "type": "object",

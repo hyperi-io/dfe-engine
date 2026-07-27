@@ -14,7 +14,8 @@ GET    /api/v1/auth/oidc-providers/{name}                 → Get provider confi
 PUT    /api/v1/auth/oidc-providers/{name}                 → Update provider
 DELETE /api/v1/auth/oidc-providers/{name}                 → Detach provider
 POST   /api/v1/auth/oidc-providers/{name}/sync            → Force group sync
-GET    /api/v1/auth/oidc-providers/{name}/test             → Test connectivity
+GET    /api/v1/auth/oidc-providers/{name}/test             → Test directory connectivity
+GET    /api/v1/auth/oidc-providers/{name}/verify-login      → Verify login config
 
 All endpoints require admin role (org:write).
 Secret env var names are visible but their actual values are never exposed.
@@ -54,6 +55,11 @@ class GroupResolutionRequest(BaseModel):
     )
     claim_name: str = Field(default="groups", description="Token claim name for group IDs")
     sync_interval: int = Field(default=3600, description="Seconds between API sync cycles")
+    enrich_on_login: bool = Field(
+        default=False,
+        description="Fetch the user's groups from the directory API at each login "
+        "(needed by providers with no groups claim, e.g. Google Workspace)",
+    )
     service_account_json_env: str = Field(default="", description="Env var for Google SA JSON")
     admin_email: str = Field(default="", description="Google Workspace admin email")
     domain: str = Field(default="", description="Google Workspace domain")
@@ -71,12 +77,17 @@ class CreateProviderRequest(BaseModel):
     display_name: str = Field(default="", description="Human-readable label")
     issuer: str = Field(default="", description="OIDC issuer URL")
     client_id_env: str = Field(default="", description="Env var name for OIDC client ID")
+    client_secret_env: str = Field(
+        default="",
+        description="Env var name for the RP client secret used in the auth-code exchange",
+    )
     groups: GroupResolutionRequest = Field(default_factory=GroupResolutionRequest)
 
 
 class UpdateProviderRequest(BaseModel):
     enabled: bool | None = Field(None, description="Enable or disable the provider")
     display_name: str | None = Field(None, description="Human-readable label")
+    client_secret_env: str | None = Field(None, description="Env var name for the RP client secret")
     groups: GroupResolutionRequest | None = Field(None, description="Group resolution config")
 
 
@@ -84,6 +95,7 @@ class GroupResolutionResponse(BaseModel):
     mode: str
     claim_name: str
     sync_interval: int
+    enrich_on_login: bool
     service_account_json_env: str
     admin_email: str
     domain: str
@@ -102,6 +114,7 @@ class ProviderResponse(BaseModel):
     display_name: str
     issuer: str
     client_id_env: str
+    client_secret_env: str
     groups: GroupResolutionResponse
     created_at: str
     last_sync_at: str
@@ -133,6 +146,28 @@ class TestResponse(BaseModel):
     message: str
 
 
+class LoginConfigCheck(BaseModel):
+    """One check in the login-config verification."""
+
+    name: str
+    ok: bool
+    detail: str
+
+
+class LoginConfigResponse(BaseModel):
+    """Result of verifying a provider's OIDC LOGIN configuration.
+
+    Distinct from ``/{name}/test``, which verifies the group-DIRECTORY
+    credentials (Graph / Okta / Google) and is a no-op for a generic provider.
+    This verifies the login half: discovery reachable, and the RP client
+    credentials present - the things that make ``/auth/oidc/{name}/login``
+    actually work.
+    """
+
+    ok: bool
+    checks: list[LoginConfigCheck]
+
+
 # ── Helpers ──────────────────────────────────────────────────
 
 
@@ -146,10 +181,12 @@ def _provider_to_response(name: str, provider: OIDCProvider) -> ProviderResponse
         display_name=p.display_name,
         issuer=p.issuer,
         client_id_env=p.client_id_env,
+        client_secret_env=p.client_secret_env,
         groups=GroupResolutionResponse(
             mode=p.groups.mode,
             claim_name=p.groups.claim_name,
             sync_interval=p.groups.sync_interval,
+            enrich_on_login=p.groups.enrich_on_login,
             service_account_json_env=p.groups.service_account_json_env,
             admin_email=p.groups.admin_email,
             domain=p.groups.domain,
@@ -196,6 +233,7 @@ async def create_provider(
         mode=body.groups.mode,
         claim_name=body.groups.claim_name,
         sync_interval=body.groups.sync_interval,
+        enrich_on_login=body.groups.enrich_on_login,
         service_account_json_env=body.groups.service_account_json_env,
         admin_email=body.groups.admin_email,
         domain=body.groups.domain,
@@ -211,6 +249,7 @@ async def create_provider(
         display_name=body.display_name,
         issuer=body.issuer,
         client_id_env=body.client_id_env,
+        client_secret_env=body.client_secret_env,
         groups=groups_config,
         created_at=datetime.now(UTC).isoformat(),
     )
@@ -296,11 +335,14 @@ async def update_provider(
         update_fields["enabled"] = body.enabled
     if body.display_name is not None:
         update_fields["display_name"] = body.display_name
+    if body.client_secret_env is not None:
+        update_fields["client_secret_env"] = body.client_secret_env
     if body.groups is not None:
         update_fields["groups"] = GroupResolutionConfig(
             mode=body.groups.mode,
             claim_name=body.groups.claim_name,
             sync_interval=body.groups.sync_interval,
+            enrich_on_login=body.groups.enrich_on_login,
             service_account_json_env=body.groups.service_account_json_env,
             admin_email=body.groups.admin_email,
             domain=body.groups.domain,
@@ -415,3 +457,82 @@ async def test_provider(
     adapter = get_adapter(provider)
     success, message = await adapter.test_connection()
     return TestResponse(success=success, message=message)
+
+
+@router.get(
+    "/{name}/verify-login",
+    response_model=LoginConfigResponse,
+    dependencies=[Depends(require_action(scopes_dict["oidc_read"]))],
+)
+async def verify_login_config(
+    name: str,
+    user: CurrentUser,
+    request: Request,
+):
+    """Verify a provider's OIDC LOGIN config (admin only).
+
+    Answers "are the login creds real and is the IdP reachable" WITHOUT
+    attempting an interactive login - the gap ``/{name}/test`` leaves for
+    generic providers. Checks: the client_id env var resolves, the
+    client_secret env var resolves, and the issuer's discovery document is
+    reachable and well-formed.
+    """
+    import os
+
+    registry = _get_registry(request)
+    provider = registry.get(name)
+    if provider is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
+        )
+
+    checks: list[LoginConfigCheck] = []
+
+    # Client id / secret are stored as ENV VAR NAMES; resolve and confirm present
+    # without ever putting the value in the response.
+    for label, env_name in (
+        ("client_id", provider.client_id_env),
+        ("client_secret", provider.client_secret_env),
+    ):
+        if not env_name:
+            checks.append(LoginConfigCheck(name=label, ok=False, detail="no env var configured"))
+        elif os.environ.get(env_name):
+            checks.append(LoginConfigCheck(name=label, ok=True, detail=f"{env_name} is set"))
+        else:
+            checks.append(
+                LoginConfigCheck(name=label, ok=False, detail=f"{env_name} is unset or empty")
+            )
+
+    # Discovery document: reachable, JSON, and carries the endpoints Authlib needs.
+    if not provider.issuer:
+        checks.append(LoginConfigCheck(name="discovery", ok=False, detail="no issuer configured"))
+    else:
+        url = f"{provider.issuer.rstrip('/')}/.well-known/openid-configuration"
+        from scalo.http import AsyncHttpClient
+
+        try:
+            async with AsyncHttpClient() as client:
+                response = await client.get(url)
+                data = response.json()
+            missing = [
+                k for k in ("issuer", "authorization_endpoint", "jwks_uri") if not data.get(k)
+            ]
+            if missing:
+                checks.append(
+                    LoginConfigCheck(
+                        name="discovery",
+                        ok=False,
+                        detail=f"discovery reachable but missing {', '.join(missing)}",
+                    )
+                )
+            else:
+                checks.append(
+                    LoginConfigCheck(name="discovery", ok=True, detail="discovery reachable")
+                )
+        except Exception as exc:
+            checks.append(
+                LoginConfigCheck(name="discovery", ok=False, detail=f"discovery failed: {exc}")
+            )
+
+    return LoginConfigResponse(ok=all(c.ok for c in checks), checks=checks)
