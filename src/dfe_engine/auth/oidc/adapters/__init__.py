@@ -41,6 +41,14 @@ def get_adapter(provider: OIDCProvider) -> OIDCGroupAdapter:
     Raises:
         ValueError: If the provider type is not supported.
     """
+    # The Surface-B mock directory is a test/CI backend that stands in for ANY
+    # provider type's directory API, so it is selected by config flag ahead of
+    # the type match rather than being a provider type of its own.
+    if provider.groups.directory_backend == "mock":
+        from dfe_engine.auth.oidc.adapters.mock import MockDirectoryAdapter
+
+        return MockDirectoryAdapter(provider)
+
     match provider.type:
         case "generic":
             from dfe_engine.auth.oidc.adapters.generic import GenericAdapter

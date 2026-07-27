@@ -52,6 +52,27 @@ class NormalizedIdentity(BaseModel):
     groups: list[str] = []
     """Group identifiers pulled from the provider's configured groups claim."""
 
+    groups_overflowed: bool = False
+    """True when the IdP signalled a group-claim overage (Entra >200 groups).
+
+    When set, the ``groups`` list did NOT come from the token (the token carried
+    only a ``_claim_names`` pointer); the RP fills it by calling the directory
+    API. A consumer that only reads ``groups`` need not care - this is a
+    diagnostic flag so the enrichment path is observable in logs and tests."""
+
+
+def _has_group_overage(claims: dict[str, Any], claim_name: str) -> bool:
+    """True when the IdP replaced the groups claim with an overage pointer.
+
+    Entra (and other AAD-shaped IdPs) will not put a large group set in the
+    token. Instead it emits ``_claim_names: {"groups": "src1"}`` alongside a
+    ``_claim_sources`` entry pointing at a Graph endpoint. Detecting the
+    ``_claim_names`` entry for the configured groups claim is enough to know the
+    membership must be fetched out-of-band. Pure - reads the dict only.
+    """
+    names = claims.get("_claim_names")
+    return isinstance(names, dict) and claim_name in names
+
 
 def _coerce_groups(raw: Any) -> list[str]:
     """Normalize a raw groups claim into a list of non-empty strings.
@@ -93,7 +114,10 @@ def extract_identity(
     email = str(userinfo_claims.get("email") or "")
     claim_name = provider.groups.claim_name or "groups"
     groups = _coerce_groups(userinfo_claims.get(claim_name))
-    return NormalizedIdentity(subject=subject, email=email, groups=groups)
+    overflowed = _has_group_overage(userinfo_claims, claim_name)
+    return NormalizedIdentity(
+        subject=subject, email=email, groups=groups, groups_overflowed=overflowed
+    )
 
 
 class OidcRelyingParty:
@@ -178,5 +202,58 @@ class OidcRelyingParty:
         client = self._client(provider_name)
         token = await client.authorize_access_token(request)
         # Authlib parses + validates the id_token and exposes its claims here.
-        userinfo = token.get("userinfo") or {}
-        return extract_identity(provider, dict(userinfo))
+        userinfo = dict(token.get("userinfo") or {})
+        identity = extract_identity(provider, userinfo)
+        # Enrich from the directory API in two cases: an Entra >200 overage (the
+        # token dropped the groups array), or a provider that never puts groups
+        # in the token at all (google-workspace, enrich_on_login).
+        if identity.groups_overflowed or provider.groups.enrich_on_login:
+            identity = await self._enrich_groups_from_directory(provider, identity, userinfo)
+        return identity
+
+    async def _enrich_groups_from_directory(
+        self,
+        provider: OIDCProvider,
+        identity: NormalizedIdentity,
+        userinfo: dict[str, Any],
+    ) -> NormalizedIdentity:
+        """Fetch the user's groups from the provider directory API.
+
+        Runs ONLY after Authlib has validated the id_token, so it never weakens
+        token validation. Handles two shapes with one path:
+          - Entra >200 overage: the token carried a ``_claim_names`` pointer, not
+            the groups; the fetched GUIDs resolve to roles by ``source_id`` just
+            like a normal (<200) Entra login.
+          - Providers with no groups claim (google-workspace): the directory is
+            the only source of membership.
+
+        The directory key is the provider's stable object id where present
+        (Entra ``oid``), falling back to email then ``sub`` (Google's Directory
+        API ``userKey`` accepts email or id, so either works).
+
+        Fails safe: on overage the fetched set is authoritative even when empty
+        (default deny); otherwise a populated token set is NOT stripped by a
+        transient empty fetch.
+        """
+        from dfe_engine.auth.oidc.adapters import get_adapter
+
+        directory_id = str(userinfo.get("oid") or identity.email or identity.subject)
+        try:
+            fetched = await get_adapter(provider).resolve_user_groups(directory_id)
+        except Exception as exc:  # pragma: no cover - defensive; adapters fail open
+            logger.warning(
+                "OIDC RP: directory group enrichment failed",
+                provider=provider.issuer,
+                error=str(exc),
+            )
+            return identity
+        group_ids = [g.id for g in fetched if g.id]
+        logger.info(
+            "OIDC RP: resolved groups via directory",
+            provider=provider.issuer,
+            overflow=identity.groups_overflowed,
+            group_count=len(group_ids),
+        )
+        if identity.groups_overflowed or group_ids or not identity.groups:
+            return identity.model_copy(update={"groups": group_ids})
+        return identity

@@ -35,6 +35,11 @@ from pathlib import Path
 import pytest
 from scalo.logger import logger
 
+# Shared RBAC test fixtures (client_as + the canonical fixture identities).
+# Registered at the root so `client_as` is available wherever the app/api_settings
+# fixtures exist (the API test tree).
+pytest_plugins = ["tests.support.rbac_fixtures"]
+
 # --------------------------------------------------------------------------
 # Test-session guard 1/2: never start a live OTLP metrics/trace/log exporter.
 # There is no OTLP collector at localhost:4317 in CI (or most dev machines); a
