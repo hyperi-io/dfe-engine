@@ -115,7 +115,9 @@ def test_extract_identity_detects_group_overage():
         "email": "big@acme.com",
         "_claim_names": {"groups": "src1"},
         "_claim_sources": {
-            "src1": {"endpoint": "https://graph.microsoft.com/v1.0/users/00000000-user-oid/getMemberObjects"}
+            "src1": {
+                "endpoint": "https://graph.microsoft.com/v1.0/users/00000000-user-oid/getMemberObjects"
+            }
         },
     }
     identity = extract_identity(provider, claims)
