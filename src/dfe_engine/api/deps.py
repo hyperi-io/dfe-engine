@@ -25,7 +25,7 @@ from dfe_engine.auth.audit import (
     audit_login_success,
     audit_permission_denied,
 )
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.roles import RoleConfig
 from dfe_engine.settings import DFESettings
 
@@ -290,20 +290,32 @@ def _resolve_group_grants(
     groups: list[str],
     group_store: GroupStore,
 ) -> GroupResolution:
-    """Resolve roles, org_ids, and scoped grants from a list of group names.
+    """Resolve roles, org_ids, and scoped grants from a list of group identifiers.
 
-    Looks up each group in the GroupStore. Unknown groups are silently
-    skipped (no error — the user just gets fewer roles). A system group's
-    roles bind at system scope; an org-scoped group's roles bind at that
-    org's scope only. org_ids collects the caller's org memberships (the
-    owning org of each org-scoped group, plus each group's org_ids list).
+    Each identifier is looked up by group NAME first, then by provider
+    ``source_id`` (so a token carrying Entra GUIDs or Google group keys resolves
+    against the sync-populated group files). Unknown identifiers are silently
+    skipped (no error — the user just gets fewer roles). A system group's roles
+    bind at system scope; an org-scoped group's roles bind at that org's scope
+    only. org_ids collects the caller's org memberships (the owning org of each
+    org-scoped group, plus each group's org_ids list).
     """
     roles: set[str] = set()
     org_ids: set[str] = set()
     grants: list[ScopedGrant] = []
     seen_grants: set[tuple[str, str]] = set()
+    # Providers that emit opaque group identifiers rather than names (Entra sends
+    # object GUIDs, Google sends group keys) arrive here as those identifiers.
+    # Resolve by name first - the common case, and what dex/okta/local all use -
+    # then fall back to the sync-populated source_id index. The index is built
+    # only when a name misses, so name-only workloads pay nothing for it.
+    source_index: dict[str, Group] | None = None
     for group_name in groups:
         group = group_store.get(group_name)
+        if group is None:
+            if source_index is None:
+                source_index = group_store.by_source_id()
+            group = source_index.get(group_name)
         if group is None:
             continue
         scope_org = group.scope_org

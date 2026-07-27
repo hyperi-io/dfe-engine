@@ -35,6 +35,52 @@ class TestOidcAuthentication:
         assert "admin" in data["roles"]
         assert "dfe-admins" in data["groups"]
 
+    def test_groups_resolve_by_source_id(self, client: TestClient, app):
+        """A provider that sends opaque group ids (Entra GUIDs, Google keys)
+        resolves against the source_id the sync stored on the group file, not
+        just the group name.
+
+        Without this, an Entra login - whose token carries object GUIDs, never
+        names - matches no group file and the user gets zero roles.
+        """
+        group_store = app.state.group_store
+        guid = "0295f72c-e3f8-4962-9183-f95ef939e3b8"
+        # A synced group: friendly name on the file, provider GUID as source_id.
+        group_store.create("entra-admins", roles=["admin"], description="synced")
+        group_store.update("entra-admins", source_provider="entra", source_id=guid)
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={
+                "X-Oidc-Subject": "grace@example.com",
+                # The token carries the GUID, not "entra-admins".
+                "X-Oidc-Groups": guid,
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "admin" in data["roles"]
+
+    def test_source_id_resolution_does_not_shadow_names(self, client: TestClient, app):
+        """The source_id fallback only fires when a name misses - a plain name
+        still resolves the ordinary way and is unaffected by the index."""
+        group_store = app.state.group_store
+        group_store.create("okta-viewers", roles=["data_viewer"], description="synced")
+        group_store.update("okta-viewers", source_provider="okta", source_id="00g-xyz")
+
+        resp = client.get(
+            "/api/v1/auth/me",
+            headers={
+                "X-Oidc-Subject": "heidi@example.com",
+                # dfe-admins matches by NAME; okta-viewers by NAME too (not id).
+                "X-Oidc-Groups": "dfe-admins, okta-viewers",
+            },
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "admin" in data["roles"]
+        assert "data_viewer" in data["roles"]
+
     def test_unknown_groups_no_roles(self, client: TestClient):
         """Unknown groups authenticate but yield no roles."""
         resp = client.get(

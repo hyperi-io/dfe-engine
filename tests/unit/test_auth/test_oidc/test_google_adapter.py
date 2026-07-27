@@ -138,6 +138,25 @@ class TestResolveGroupsMissingCredentials:
 
 
 # ---------------------------------------------------------------------------
+# resolve_user_groups (login enrichment) — missing credentials
+# ---------------------------------------------------------------------------
+
+
+class TestResolveUserGroupsMissingCredentials:
+    async def test_returns_empty_list_when_no_credentials(self) -> None:
+        # Google login enrichment fails open to default deny, never raises.
+        provider = _make_provider(service_account_json_env="")
+        adapter = GoogleAdapter(provider)
+        result = await adapter.resolve_user_groups("user@example.com")
+        assert result == []
+
+    async def test_empty_user_key_short_circuits(self) -> None:
+        provider = _make_provider(service_account_json_env="")
+        adapter = GoogleAdapter(provider)
+        assert await adapter.resolve_user_groups("") == []
+
+
+# ---------------------------------------------------------------------------
 # list_all_groups — missing credentials
 # ---------------------------------------------------------------------------
 

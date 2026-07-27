@@ -144,9 +144,9 @@ it.
 |---|---|
 | [governed-ops-design.md](governed-ops-design.md) | GitCrud + governance layer + curated actions |
 | [gitops-commit-standard.md](gitops-commit-standard.md) | machine-commit conventions for gitops repos |
+| [oidc-rbac-architecture.md](oidc-rbac-architecture.md) | OIDC + RBAC SSoT - auth model, the two RBAC planes, provider registry + adapters, management API, infra requirements, test emulation |
 | [rbac.md](rbac.md) | auth paths, RBAC model, multi-tenant ClickHouse, stores |
-| [oidc-providers.md](oidc-providers.md) | OIDC provider registry design |
-| [oidc-infra-requirements.md](oidc-infra-requirements.md) | what the engine assumes dfe-infra provides for OIDC |
+| [rbac-vocabulary.md](rbac-vocabulary.md) | SSoT for role + group names and terms across engine, ui, infra, deploy, schemas and test envs |
 | [ui-api-guide.md](ui-api-guide.md) | frontend integration guide (endpoint reference) |
 | [type-safety-sync.md](type-safety-sync.md) | OpenAPI + RBAC-scope typegen sync to dfe-ui |
 | [dfe-cli-design.md](dfe-cli-design.md) | the `dfe` client CLI design (AWS CLI v2 model) |
