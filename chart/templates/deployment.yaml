@@ -62,7 +62,9 @@ spec:
             - name: http
               containerPort: {{ .Values.config.api.port }}
               protocol: TCP
-          # Probes hit the observability port (#106 P2.4), not the API port.
+          # Probes hit the observability port (#106 P2.4), not the API port --
+          # kubelet must still get an answer when the API is saturated or not
+          # yet serving.
           livenessProbe:
             httpGet:
               path: /livez

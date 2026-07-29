@@ -34,7 +34,7 @@ git submodule update --init schemas   # schemas -> dfe-schemas (DDL/schema seed)
 uv sync
 ```
 
-Run the API server (health at `/health/live` on port 8000):
+Run the API server (liveness at `/livez` on port 8000):
 
 ```bash
 uv run dfe-engine

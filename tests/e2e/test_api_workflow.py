@@ -360,9 +360,11 @@ class TestCrossRouterConsistency:
 
     def test_health_endpoints_unauthenticated(self, e2e_client):
         """Health probes should work without auth."""
-        for endpoint in ["/livez", "/health/startup"]:
-            resp = e2e_client.get(endpoint)
-            assert resp.status_code == 200, f"Health endpoint {endpoint} failed"
+        # No startup route: k8s suspends the liveness probe until the startup
+        # probe passes, so a startupProbe pointed at /livez covers it and a
+        # third endpoint would only be another thing to keep in sync.
+        resp = e2e_client.get("/livez")
+        assert resp.status_code == 200, "/livez failed"
         # /readyz includes a ClickHouse ping; hermetic e2e has no CH.
         resp = e2e_client.get("/readyz")
         assert resp.status_code in (200, 503), f"/readyz returned {resp.status_code}"
