@@ -12,7 +12,7 @@
 # build from the public PyPI index).
 
 # --- Builder stage (uv venv) ---
-# Base image is a build-arg with a digest-pinned default (#106 P2.3). Trixie both
+# Base image is a build-arg with a digest-pinned default (#106). Trixie both
 # ends so glibc(runtime) >= glibc(builder); pinned so neither tag can float and
 # invert that relationship silently. Re-resolve digests on a bump; Renovate
 # maintains them.
@@ -22,13 +22,13 @@ FROM ${BUILDER_IMAGE} AS builder
 WORKDIR /app
 
 # Compile .pyc at build so the cost is paid once here, not on every cold start
-# (#106 P3.1). ~1s off startup for a larger image; the platform ordering ranks
+# (#106). ~1s off startup for a larger image; the platform ordering ranks
 # startup first, image disk last.
 ENV UV_COMPILE_BYTECODE=1
 
 # Phase 1 -- dependencies only, so a source edit does not reinstall the graph
-# (#106 P2.2). UV_NO_BUILD=1 requires a prebuilt wheel for every third-party dep
-# (#106 P2.1: a silent compile-from-source is the failure mode we most want to be
+# (#106). UV_NO_BUILD=1 requires a prebuilt wheel for every third-party dep
+# (#106: a silent compile-from-source is the failure mode we most want to be
 # loud); scoped to this phase because a blanket ENV breaks uv's own editable
 # self-install (dfe-engine has no wheel of its own). README.md is read during
 # metadata resolution (pyproject sets readme = "README.md").
@@ -41,7 +41,7 @@ RUN uv sync --frozen --no-dev
 
 COPY schemas/ /app/schemas-seed/
 # Writable dirs owned by the runtime UID. /app/secrets is the scalo.secrets root
-# (#106 P1.1): the engine mints an ES384 JWT signing key on first boot and, with
+# (#106): the engine mints an ES384 JWT signing key on first boot and, with
 # no writable secrets dir and no runtime WORKDIR, it defaulted to ./.secrets under
 # / and crash-looped as non-root. COPY --from preserves this ownership into the
 # runtime stage.
@@ -49,7 +49,7 @@ RUN mkdir -p /app/schemas /app/config /app/secrets \
     && chown -R 1000:1000 /app/schemas /app/config /app/secrets
 
 # --- Runtime stage (aligned with hyperi-pylib deployment contract) ---
-# Digest-pinned runtime base (#106 P2.3). python:3.12-slim is already Debian 13
+# Digest-pinned runtime base (#106). python:3.12-slim is already Debian 13
 # trixie. Kept literal (not an ARG) because scalo's validate_dockerfile matches
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a
 # scalo-py change (hyperi-io/scalo-py#4) -- tracked, not worked around by deleting
@@ -80,7 +80,7 @@ LABEL org.opencontainers.image.created="${OCI_CREATED}"
 COPY --from=builder /app /app
 ENV PATH="/app/.venv/bin:$PATH"
 
-# Runtime WORKDIR (#106 P1.1): without it CWD is / and any relative default path
+# Runtime WORKDIR (#106): without it CWD is / and any relative default path
 # (e.g. the secrets root) resolves under /, unwritable by the non-root user.
 WORKDIR /app
 
@@ -94,7 +94,7 @@ USER appuser
 # 9090 = observability (health + /metrics, scalo ServiceApp); 8000 = API traffic.
 EXPOSE 9090 8000
 
-# Probe the observability port (#106 P2.4): health answers on 9090, not 8000.
+# Probe the observability port (#106): health answers on 9090, not 8000.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
     CMD curl -sf http://localhost:9090/health/live > /dev/null || exit 1
 

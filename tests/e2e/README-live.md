@@ -41,7 +41,7 @@ Each var that is missing skips only the tests that need it (the others still run
 
 ## Status
 
-Scaffolded + collection/skip-validated 2026-06-29. NOT yet run green against a
+These tests have NOT been run green against a
 live deployment - that needs the dfe apps actually deployed (blocked on the GHCR
 pull secret on the test cluster + the receiver `/ingest` HTTPS path + the engine
 `/deployments/publish` endpoint name, which should be confirmed against the real

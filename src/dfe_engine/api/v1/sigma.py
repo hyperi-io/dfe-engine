@@ -737,7 +737,7 @@ async def get_sync(task_id: str, request: Request, user: CurrentUser) -> SyncRes
     info = _task_manager(request).get(task_id)
     # Match the EXACT kind (mirroring GET /sigma/propagations). A startswith
     # 'sigma:' also let a 'sigma:propagate' task through, whose result dict then
-    # failed SyncReportModel validation -> 500 instead of the 404 contract (P3.23).
+    # failed SyncReportModel validation -> 500 instead of the 404 contract.
     if info is None or info.kind != "sigma:sync":
         raise HTTPException(404, detail={"code": "not_found", "message": "sync task not found"})
     return _sync_response(info)

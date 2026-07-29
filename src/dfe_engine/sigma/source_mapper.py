@@ -225,8 +225,8 @@ class SigmaSourceMapper:
         A source with NO sigma view has no logsource binding and never matches.
         A source is bound only when the product matches AND every logsource facet
         the source DECLARES also matches - so two same-product sources (e.g.
-        windows_audit vs windows_sysmon) no longer both receive a sysmon-only rule
-        (P2.17). A source with no declared category/service keeps product-only
+        windows_audit vs windows_sysmon) no longer both receive a sysmon-only
+        rule. A source with no declared category/service keeps product-only
         behaviour.
 
         Args:

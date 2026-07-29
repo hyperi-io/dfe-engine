@@ -15,10 +15,9 @@ from dfe_engine.query.models import ExplainStepType
 # Skip all tests in this module if ClickHouse is not available
 pytestmark = [
     pytest.mark.integration,
-    # Pre-existing rot exposed by the convergence: ClickHouseAdapter.execute now returns
-    # (rows, columns) tuples (pyarrow was removed), but this suite still asserts the old
-    # PyArrow Table API (.num_rows / .column / .to_pylist). Skipped until it is rewritten
-    # to the new return shape. Follow-up: modernize the query-adapter integration suite.
+    # ClickHouseAdapter.execute returns (rows, columns) tuples since pyarrow was
+    # removed, but this suite still asserts the old PyArrow Table API (.num_rows /
+    # .column / .to_pylist). Skipped until it is rewritten to the new return shape.
     pytest.mark.skip(
         reason="pyarrow-era suite; adapter returns (rows, columns) now - needs rewrite"
     ),

@@ -516,7 +516,7 @@ class SamplerSettings(BaseModel):
     Two families of mode: cheap "recent"/"random" reads that run inline, and the
     memory-hungry logreducer modes ("smart"/"anomaly") that are gated. logreducer
     is memory-hungry, so its concurrency is capped at ``max_concurrent`` instances,
-    each bounded to ``max_memory_gb`` - both small by default (Derek, 2026-07-01).
+    each bounded to ``max_memory_gb`` - both small by default.
 
     Environment variables (DFE_SAMPLER_ prefix):
     - DFE_SAMPLER_DEFAULT_MODE -> sampler.default_mode

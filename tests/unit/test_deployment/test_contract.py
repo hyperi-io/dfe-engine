@@ -33,7 +33,7 @@ class TestContractWellFormed:
         contract = engine_deployment_contract()
         assert contract.app_name == "dfe-engine"
         assert contract.binary_name == "dfe-engine"
-        # Observability port (#106 P2.4). API traffic moved to the `http` extra
+        # Observability port (#106). API traffic moved to the `http` extra
         # port; scalo serves health + /metrics on 9090, off the public 8000.
         assert contract.metrics_port == 9090
         assert [(p.name, p.port) for p in contract.extra_ports] == [("http", 8000)]
@@ -43,7 +43,7 @@ class TestContractWellFormed:
     def test_contract_health_paths(self) -> None:
         contract = engine_deployment_contract()
         # scalo's health-router paths, which the app serves; /api/v1/system/health
-        # 404s (#106 P1.2). /health/live|ready are k8s.md back-compat aliases.
+        # 404s (#106). /health/live|ready are k8s.md back-compat aliases.
         assert contract.health.liveness_path == "/health/live"
         assert contract.health.readiness_path == "/health/ready"
         assert contract.health.metrics_path == "/metrics"
@@ -85,9 +85,9 @@ class TestArtefactGeneration:
         stage = generate_runtime_stage(contract)
 
         assert f"FROM {contract.base_image}" in stage
-        assert "EXPOSE 9090" in stage  # observability port (#106 P2.4)
+        assert "EXPOSE 9090" in stage  # observability port (#106)
         assert "8000" in stage  # http traffic port, exposed as an extra port
-        assert "/health/live" in stage  # healthcheck path (#106 P1.2)
+        assert "/health/live" in stage  # healthcheck path (#106)
         assert 'org.opencontainers.image.title="dfe-engine"' in stage
 
     def test_container_manifest_is_valid_json(self) -> None:
@@ -97,7 +97,7 @@ class TestArtefactGeneration:
         manifest = json.loads(generate_container_manifest(contract))
         assert manifest["app_name"] == "dfe-engine"
         assert manifest["binary_name"] == "dfe-engine"
-        # metrics/obs port first, then the http traffic extra port (#106 P2.4).
+        # metrics/obs port first, then the http traffic extra port (#106).
         assert manifest["expose_ports"] == [9090, 8000]
         assert manifest["healthcheck"]["path"] == contract.health.liveness_path
         assert manifest["entrypoint"] == [contract.binary()]

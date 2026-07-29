@@ -8,7 +8,7 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     # Observability (health + /metrics on 9090). Primary port -- matches the
-    # deployment contract's metrics_port (#106 P2.4).
+    # deployment contract's metrics_port (#106).
     - port: {{ .Values.service.port }}
       targetPort: obs
       protocol: TCP

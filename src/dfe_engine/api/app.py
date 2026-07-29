@@ -371,7 +371,7 @@ def create_app(
     # otherwise pull in their JSONResponse stream_item_field.
     app.include_router(create_health_router(health_manager), include_in_schema=False)
 
-    # /metrics is NOT mounted here (#106 P1.3). It was unauthenticated on the
+    # /metrics is NOT mounted here (#106). It was unauthenticated on the
     # public API port; scalo's ServiceApp now serves it on the dedicated
     # observability port (9090), off the ingress-exposed 8000. The scrape and
     # the kubelet probes both target 9090 (see the chart). Health stays mounted

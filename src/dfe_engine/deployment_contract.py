@@ -50,7 +50,7 @@ def engine_deployment_contract() -> DeploymentContract:
         app_name="dfe-engine",
         binary_name="dfe-engine",
         description="DFE Engine -- REST API and config control plane for the Data Fusion Engine",
-        # Observability port (#106 P2.4 / P1.3). scalo's ServiceApp binds this and
+        # Observability port (#106). scalo's ServiceApp binds this and
         # serves health + /metrics on it, SEPARATE from the API traffic port -- so
         # the unauthenticated /metrics is no longer on the public 8000. API traffic
         # is the `http` extra port below; the ingress targets that.
@@ -58,7 +58,7 @@ def engine_deployment_contract() -> DeploymentContract:
         extra_ports=[PortContract(name="http", port=8000)],
         health=HealthContract(
             # scalo's obs server serves these as aliases of /healthz + /readyz
-            # (#106 P1.2). They answer on the 9090 observability port now, not 8000.
+            # (#106). They answer on the 9090 observability port now, not 8000.
             liveness_path="/health/live",
             readiness_path="/health/ready",
             metrics_path="/metrics",
@@ -68,7 +68,7 @@ def engine_deployment_contract() -> DeploymentContract:
         config_mount_path="/etc/dfe/config",
         image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.12",
-        # Digest-pinned runtime base (#106 P2.3). python:3.12-slim is already
+        # Digest-pinned runtime base (#106). python:3.12-slim is already
         # Debian 13 trixie; pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Re-resolve on a bump; Renovate maintains it.

@@ -36,7 +36,7 @@ resources:
     cpu: "2"
     memory: 2Gi
 
-# -- Service. Two ports (#106 P2.4): the primary `port` is the observability
+# -- Service. Two ports (#106): the primary `port` is the observability
 # port (health + /metrics, served by scalo's ServiceApp on 9090); `httpPort` is
 # the API traffic port the ingress targets. Consumers reach the API on 8000 as
 # before -- it stays on the Service, just no longer the primary port.
@@ -57,7 +57,7 @@ ingress:
           pathType: Prefix
   tls: []
 
-# -- Gateway API HTTPRoute (#106 P3.3). The Gateway-API alternative to `ingress`
+# -- Gateway API HTTPRoute (#106). The Gateway-API alternative to `ingress`
 # for mesh/Gateway deployments. Routes to the API (http) port, never the
 # observability port. Disabled by default; set parentRefs to your Gateway.
 httpRoute:
@@ -98,7 +98,7 @@ config:
   # Defaults to the image's writable /app/secrets. At replicaCount 1 each pod mints
   # its own key here (fine for a single pod). For >1 replica, provide a shared key
   # via jwt.signingKey.existingSecret (mounted read-only at <path>/jwt/signing-key)
-  # so every pod signs + verifies with the SAME key (#106 P1.1, dfe-engine#109).
+  # so every pod signs + verifies with the SAME key (#106, dfe-engine#109).
   secrets:
     path: /app/secrets
 
@@ -125,7 +125,7 @@ jwt:
     secret: jwt-secret
   # -- Change this in production. Min 32 chars recommended.
   secret: "dev-secret-key-change-in-production"
-  # -- Shared ES384 signing key for the JWT authority + JWKS (#106 P1.1,
+  # -- Shared ES384 signing key for the JWT authority + JWKS (#106,
   # dfe-engine#109). REQUIRED for replicaCount > 1 (or autoscaling): without it
   # each pod mints its OWN key on first boot, so a token signed by pod A fails
   # verification against pod B's JWKS -- intermittent 401s behind the Service.
@@ -141,7 +141,7 @@ jwt:
     # -- Key within the Secret that holds the PEM.
     key: signing-key
 
-# -- Container filesystem hardening (#106 P3.4).
+# -- Container filesystem hardening (#106).
 security:
   # -- Mount the container root filesystem read-only. OPT-IN: enable only when
   # jwt.signingKey.existingSecret is set (no per-pod key mint to the rootfs) AND

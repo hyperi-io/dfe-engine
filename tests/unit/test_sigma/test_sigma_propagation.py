@@ -182,7 +182,7 @@ def test_propagate_binds_one_rule_to_every_matching_source(env):
 
 
 def test_deselect_then_repropagate_reports_stale_binding(env):
-    # P3.24: deselecting a rule then re-propagating leaves its binding behind - the
+    # Deselecting a rule then re-propagating leaves its binding behind - the
     # propagate report must SURFACE it as stale (and list_bindings flag it) so the
     # operator knows to delete it, instead of it silently firing forever.
     _add_windows_source(env)

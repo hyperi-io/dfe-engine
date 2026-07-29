@@ -84,7 +84,7 @@ class TestExceptionHandlers:
 
     def test_health_no_auth(self, client: TestClient):
         """Health endpoints need no auth. Liveness + startup are dependency-free
-        (always 200); readiness is fail-closed on ClickHouse (P2.5), so it is 200
+        (always 200); readiness is fail-closed on ClickHouse, so it is 200
         when CH is reachable and 503 when not - both valid, neither an auth 401."""
         for path in ("/health/live", "/health/startup"):
             resp = client.get(path)
