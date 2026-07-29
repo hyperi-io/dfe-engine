@@ -53,4 +53,4 @@ def test_unknown_query_returns_safe_zero():
 
 
 def test_health_live():
-    assert _client({}).get("/health/live").status_code == 200
+    assert _client({}).get("/livez").status_code == 200

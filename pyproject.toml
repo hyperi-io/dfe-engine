@@ -18,7 +18,7 @@ dependencies = [
     # OTEL_EXPORTER_OTLP_ENDPOINT + prometheus scrape annotations on a process that
     # could not honour either. Self-monitoring is one of the two default E2E
     # acceptance tests, so this is load-bearing, not nice-to-have.
-    "scalo[expression,http,metrics,opentelemetry]>=2.29.10",
+    "scalo[expression,http,metrics,opentelemetry]>=2.29.11",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

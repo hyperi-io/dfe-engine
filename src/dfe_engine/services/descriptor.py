@@ -46,7 +46,7 @@ class ServiceDescriptor:
     metrics_port: int = 9090
     kafka_role: KafkaRole = KafkaRole.NONE
     consumer_group: str = ""
-    liveness_paths: tuple[str, ...] = ("/health/live",)
-    readiness_paths: tuple[str, ...] = ("/health/ready",)
+    liveness_paths: tuple[str, ...] = ("/livez",)
+    readiness_paths: tuple[str, ...] = ("/readyz",)
     description: str = ""
     extra_ports: dict[str, int] = field(default_factory=dict)

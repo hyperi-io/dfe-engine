@@ -19,8 +19,8 @@ descriptor = ServiceDescriptor(
     default_port=8080,
     metrics_port=9090,
     kafka_role=KafkaRole.PRODUCER,
-    liveness_paths=("/health/live",),
-    readiness_paths=("/health/ready",),
+    liveness_paths=("/livez",),
+    readiness_paths=("/readyz",),
     description="HTTP/gRPC ingestion gateway — receives events and routes to Kafka.",
     extra_ports={"grpc": 6000},
 )

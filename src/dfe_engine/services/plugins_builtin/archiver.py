@@ -19,9 +19,13 @@ descriptor = ServiceDescriptor(
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,
     consumer_group="dfe-archiver",
-    # Archiver has no health API — metrics endpoint used as liveness proxy
-    liveness_paths=("/metrics",),
-    readiness_paths=("/metrics",),
+    # Served by scalo's metrics server on metrics_port, same as every other
+    # service. The old note here claimed the archiver had no health API and
+    # probed /metrics as a stand-in; it does have one, and probing the scrape
+    # handler meant a liveness check that passed whenever the exporter answered
+    # and shipped a full metrics payload every period.
+    liveness_paths=("/livez",),
+    readiness_paths=("/readyz",),
     description="Kafka consumer — archives events to S3/file storage.",
 )
 

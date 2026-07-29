@@ -57,10 +57,11 @@ def engine_deployment_contract() -> DeploymentContract:
         metrics_port=9090,
         extra_ports=[PortContract(name="http", port=8000)],
         health=HealthContract(
-            # scalo's obs server serves these as aliases of /healthz + /readyz
-            # (#106 P1.2). They answer on the 9090 observability port now, not 8000.
-            liveness_path="/health/live",
-            readiness_path="/health/ready",
+            # The canonical pair, served on the 9090 observability port rather
+            # than the 8000 API port. There are no aliases: scalo dropped every
+            # other spelling, and a retired path now 404s.
+            liveness_path="/livez",
+            readiness_path="/readyz",
             metrics_path="/metrics",
         ),
         env_prefix="DFE",
