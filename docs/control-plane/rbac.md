@@ -889,7 +889,7 @@ Remaining:
 |----------|-----------|
 | Multi-role user | Highest-privilege connection wins (precedence order) |
 | HyperDX unavailable | Non-fatal. Org CRUD succeeds. Sync retried in background |
-| ClickHouse unavailable | Degraded mode: API serves cached state, `/health/ready` → 503, retry every 60s |
+| ClickHouse unavailable | Degraded mode: API serves cached state, `/readyz` → 503, retry every 60s |
 | Unknown OIDC group | No matching group file → no roles resolved → default deny |
 | OIDC adapter failure | Failsafe: returns empty results, auth continues with available info |
 | Default password in use | Warning logged at startup |

@@ -83,17 +83,26 @@ class TestExceptionHandlers:
         assert "message" in data
 
     def test_health_no_auth(self, client: TestClient):
-        """Health endpoints need no auth. Liveness + startup are dependency-free
-        (always 200); readiness is fail-closed on ClickHouse (P2.5), so it is 200
-        when CH is reachable and 503 when not - both valid, neither an auth 401."""
-        for path in ("/health/live", "/health/startup"):
-            resp = client.get(path)
-            assert resp.status_code == 200, f"{path} returned {resp.status_code}"
-            assert "status" in resp.json()
-
-        resp = client.get("/health/ready")
-        assert resp.status_code in (200, 503), f"/health/ready returned {resp.status_code}"
+        """Health endpoints need no auth. Liveness is dependency-free (always
+        200); readiness is fail-closed on ClickHouse (P2.5), so it is 200 when
+        CH is reachable and 503 when not - both valid, neither an auth 401."""
+        resp = client.get("/livez")
+        assert resp.status_code == 200, f"/livez returned {resp.status_code}"
         assert "status" in resp.json()
+
+        resp = client.get("/readyz")
+        assert resp.status_code in (200, 503), f"/readyz returned {resp.status_code}"
+        assert "status" in resp.json()
+
+    def test_retired_health_paths_are_gone(self, client: TestClient):
+        """The other half of the contract: retired spellings must 404.
+
+        A probe path that quietly keeps answering is how a stale chart passes
+        while pointing at a name the app no longer serves.
+        """
+        for path in ("/healthz", "/health/live", "/health/ready", "/health/startup", "/startupz"):
+            resp = client.get(path)
+            assert resp.status_code == 404, f"{path} still answers ({resp.status_code})"
 
 
 class TestServiceUnavailable:

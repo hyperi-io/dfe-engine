@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 
-# Start ClickHouse service
-docker run --rm -d --name clickhouse -e CLICKHOUSE_SKIP_USER_SETUP=1 -p 9000:9000/tcp clickhouse/clickhouse-server:25.8
+# Start ClickHouse service. Same version the integration conftest and dfe-infra
+# use -- CI testing a different release from the deployed one is how a query
+# passes here and meets a changed default in production.
+#
+# Tag on its own line, separate from the image name, so one Renovate regex
+# covers every language in the fleet.
+# renovate: datasource=docker depName=clickhouse/clickhouse-server
+CH_TAG="26.3"
+
+docker run --rm -d --name clickhouse -e CLICKHOUSE_SKIP_USER_SETUP=1 -p 9000:9000/tcp "clickhouse/clickhouse-server:${CH_TAG}"
 
 # Wait for ClickHouse to be ready
 echo "Waiting for ClickHouse to be ready..."

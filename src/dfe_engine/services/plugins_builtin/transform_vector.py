@@ -20,8 +20,8 @@ descriptor = ServiceDescriptor(
     metrics_port=9090,
     kafka_role=KafkaRole.BOTH,
     consumer_group="dfe-transform-vector",
-    liveness_paths=("/health/live",),
-    readiness_paths=("/health/ready",),
+    liveness_paths=("/livez",),
+    readiness_paths=("/readyz",),
     description="Kafka-to-Kafka transform using vector.dev pipelines. Multi-source with config tree.",
 )
 

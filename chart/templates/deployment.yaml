@@ -62,10 +62,12 @@ spec:
             - name: http
               containerPort: {{ .Values.config.api.port }}
               protocol: TCP
-          # Probes hit the observability port (#106 P2.4), not the API port.
+          # Probes hit the observability port (#106 P2.4), not the API port --
+          # kubelet must still get an answer when the API is saturated or not
+          # yet serving.
           livenessProbe:
             httpGet:
-              path: /health/live
+              path: /livez
               port: obs
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -73,7 +75,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health/ready
+              path: /readyz
               port: obs
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -84,7 +86,7 @@ spec:
           # stays tight and is suspended until this passes.
           startupProbe:
             httpGet:
-              path: /health/live
+              path: /livez
               port: obs
             initialDelaySeconds: 5
             periodSeconds: 5

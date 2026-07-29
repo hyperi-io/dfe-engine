@@ -65,7 +65,7 @@ There IS a `Dockerfile` (dfe-ui) and a Helm chart (`dfe-infra/helm/charts/dfe-ui
 but a deploy will not come up. The concrete blockers:
 
 1. **No health endpoints.** The chart's liveness/readiness probes hit
-   `/health/live` and `/health/ready`, which the app does not implement -> the pod
+   `/livez` and `/readyz`, which the app does not implement -> the pod
    never becomes Ready. (Fix: add two tiny Next.js route handlers.)
 2. **NEXTAUTH_SECRET not wired.** The chart names a secret but the Deployment never
    mounts it -> JWT signing fails, logins break. (Fix: inject it as env from the
@@ -93,7 +93,7 @@ Detailed tasks live in `docs/superpowers/plans/2026-06-30-governed-ops-api.md`
 (Phase 4).
 
 ### Track A - make it deploy (small, mechanical)
-- Add `/health/live` + `/health/ready` route handlers.
+- Add `/livez` + `/readyz` route handlers.
 - Mount `NEXTAUTH_SECRET` from the K8s Secret; add image-pull secret.
 - Publish the image to ghcr.
 - Switch off build-time `NEXT_PUBLIC_*` for the API/HyperDX URLs (next item).

@@ -19,8 +19,8 @@ descriptor = ServiceDescriptor(
     metrics_port=9090,
     kafka_role=KafkaRole.CONSUMER,
     consumer_group="clickhouse-loader",
-    liveness_paths=("/live", "/health"),
-    readiness_paths=("/ready", "/health"),
+    liveness_paths=("/livez",),
+    readiness_paths=("/readyz",),
     description="Kafka consumer or gRPC server -- loads events into ClickHouse.",
     # Bound only when transport is 'grpc': the loader listens for Push RPCs from
     # dfe-receiver. Port 6000 per the dfe-loader GrpcConfig.listen doc example
