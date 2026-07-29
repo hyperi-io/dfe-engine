@@ -44,8 +44,12 @@ import pytest
 # (versions.yaml). LTS ships twice a year with a year of support, so 25.8 is the
 # PREVIOUS one -- testing a release older than production is the wrong direction
 # for a datastore whose defaults move between majors.
+#
+# Tag on its own line, separate from the image name, so one Renovate regex
+# covers every language in the fleet.
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
-_DEFAULT_IMAGE = "clickhouse/clickhouse-server:26.3"
+_CH_TAG = "26.3"
+_DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}"
 
 
 def _truthy(name: str) -> bool:
