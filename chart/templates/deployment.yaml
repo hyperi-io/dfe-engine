@@ -65,7 +65,7 @@ spec:
           # Probes hit the observability port (#106 P2.4), not the API port.
           livenessProbe:
             httpGet:
-              path: /health/live
+              path: /livez
               port: obs
             initialDelaySeconds: 10
             periodSeconds: 30
@@ -73,7 +73,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health/ready
+              path: /readyz
               port: obs
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -84,7 +84,7 @@ spec:
           # stays tight and is suspended until this passes.
           startupProbe:
             httpGet:
-              path: /health/live
+              path: /livez
               port: obs
             initialDelaySeconds: 5
             periodSeconds: 5
