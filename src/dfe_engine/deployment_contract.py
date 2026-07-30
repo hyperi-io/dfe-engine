@@ -50,16 +50,18 @@ def engine_deployment_contract() -> DeploymentContract:
         app_name="dfe-engine",
         binary_name="dfe-engine",
         description="DFE Engine -- REST API and config control plane for the Data Fusion Engine",
-        # Observability port (#106 P2.4 / P1.3). scalo's ServiceApp binds this and
+        # Observability port (#106). scalo's ServiceApp binds this and
         # serves health + /metrics on it, SEPARATE from the API traffic port -- so
         # the unauthenticated /metrics is no longer on the public 8000. API traffic
         # is the `http` extra port below; the ingress targets that.
         metrics_port=9090,
         extra_ports=[PortContract(name="http", port=8000)],
         health=HealthContract(
-            # The canonical pair, served on the 9090 observability port rather
-            # than the 8000 API port. There are no aliases: scalo dropped every
-            # other spelling, and a retired path now 404s.
+            # /livez + /readyz are the WHOLE probe surface scalo's observability
+            # server serves, on the 9090 port rather than the 8000 API port
+            # (#106). The aliases these used to be (/health/live, /health/ready)
+            # were retired in scalo 2.29.12: they 404 now, so a probe still
+            # aimed at one fails liveness and crashloops a healthy pod.
             liveness_path="/livez",
             readiness_path="/readyz",
             metrics_path="/metrics",
@@ -69,7 +71,7 @@ def engine_deployment_contract() -> DeploymentContract:
         config_mount_path="/etc/dfe/config",
         image_registry=os.environ.get("DFE_DEPLOYMENT_IMAGE_REGISTRY") or _DEFAULT_IMAGE_REGISTRY,
         python_version="3.12",
-        # Digest-pinned runtime base (#106 P2.3). python:3.12-slim is already
+        # Digest-pinned runtime base (#106). python:3.12-slim is already
         # Debian 13 trixie; pinned so the tag cannot float. The committed
         # Dockerfile's runtime FROM must match this literal (validate_dockerfile
         # substring check). Re-resolve on a bump; Renovate maintains it.

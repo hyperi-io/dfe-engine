@@ -61,7 +61,7 @@ def _fetch(url: str) -> str:
         pytest.skip(f"live upstream unreachable ({url}): {exc}")
 
 
-@pytest.mark.tuple("name,url", list(_UPSTREAM.items()))
+@pytest.mark.parametrize(("name", "url"), list(_UPSTREAM.items()))
 def test_importer_holds_up_on_live_beats(name: str, url: str) -> None:
     raw = _fetch(url)
     try:

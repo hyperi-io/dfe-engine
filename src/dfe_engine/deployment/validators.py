@@ -97,18 +97,38 @@ def _validate_autoscaling(config, errors: list[str], warnings: list[str]) -> Non
             )
 
 
+# K8s quantity suffixes, longest-first so "Ki" is matched before "K". Both the
+# binary and the decimal SI family are valid in a manifest, so both have to parse
+# here: a suffix this map misses is a quantity the requests-vs-limits comparison
+# below cannot make.
+_QUANTITY_SUFFIXES: dict[str, float] = {
+    "Ki": 1024,
+    "Mi": 1024**2,
+    "Gi": 1024**3,
+    "Ti": 1024**4,
+    "Pi": 1024**5,
+    "Ei": 1024**6,
+    "k": 1000,
+    "K": 1000,
+    "M": 1000**2,
+    "G": 1000**3,
+    "T": 1000**4,
+    "P": 1000**5,
+    "E": 1000**6,
+}
+
+
 def _parse_k8s_quantity(value: str) -> float:
-    """Parse a K8s resource quantity to a comparable float."""
+    """Parse a K8s resource quantity to a comparable float.
+
+    Raises:
+        ValueError: If the quantity cannot be parsed. Callers must treat that
+            as invalid, never as "no opinion" -- see _validate_resources.
+    """
     if m := re.match(r"^(\d+)m$", value):
         return int(m.group(1)) / 1000.0
 
-    suffixes = {
-        "Ki": 1024,
-        "Mi": 1024**2,
-        "Gi": 1024**3,
-        "Ti": 1024**4,
-    }
-    for suffix, multiplier in suffixes.items():
+    for suffix, multiplier in _QUANTITY_SUFFIXES.items():
         if value.endswith(suffix):
             return float(value[: -len(suffix)]) * multiplier
 
@@ -120,6 +140,10 @@ def _validate_resources(config, errors: list[str], warnings: list[str]) -> None:
     if config.resources is None:
         return
 
+    # An unparseable quantity is an ERROR, not a warning: warnings leave
+    # valid=True, and a quantity that does not parse is one the comparison below
+    # cannot make, so a warning here reports a config as valid that K8s rejects
+    # at apply time.
     res = config.resources
     try:
         req_cpu = _parse_k8s_quantity(res.requests.cpu)
@@ -127,7 +151,7 @@ def _validate_resources(config, errors: list[str], warnings: list[str]) -> None:
         if req_cpu > lim_cpu:
             errors.append(f"CPU requests ({res.requests.cpu}) > limits ({res.limits.cpu})")
     except ValueError:
-        warnings.append(
+        errors.append(
             f"Could not parse CPU quantities: requests={res.requests.cpu}, limits={res.limits.cpu}"
         )
 
@@ -137,7 +161,7 @@ def _validate_resources(config, errors: list[str], warnings: list[str]) -> None:
         if req_mem > lim_mem:
             errors.append(f"Memory requests ({res.requests.memory}) > limits ({res.limits.memory})")
     except ValueError:
-        warnings.append(
+        errors.append(
             f"Could not parse memory quantities: requests={res.requests.memory}, "
             f"limits={res.limits.memory}"
         )

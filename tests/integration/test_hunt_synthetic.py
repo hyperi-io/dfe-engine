@@ -14,7 +14,7 @@
 
 Uses the tiered CH harness (cluster / remote docker / local); isolated db, dropped
 after. Time is deterministic via the coordinator's injected clock - no wall-clock
-races (per Derek's "no timing flake" rule).
+races (the no-timing-flake rule).
 """
 
 from __future__ import annotations

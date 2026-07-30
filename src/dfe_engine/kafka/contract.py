@@ -56,7 +56,7 @@ DERIVATION: dict[str, tuple[str, str]] = {
     # Provisioned MSK -- SASL/SCRAM-512 (+ AWS Secrets Manager). PROVISIONED ONLY:
     # MSK Serverless is IAM-only (no SASL/SCRAM, verified 2026-07) -> use msk_iam.
     "msk": _SCRAM,
-    # Redpanda Cloud -- SASL_SSL + SCRAM-SHA-256/512 (confirmed Derek 2026-07-12);
+    # Redpanda Cloud -- SASL_SSL + SCRAM-SHA-256/512 (verified 2026-07);
     # a SCRAM provider like the DFE-owned brokers, not a PLAIN exception.
     "redpanda-cloud": _SCRAM,
     # Confluent Cloud -- SCRAM forbidden by the platform -> API-key PLAIN over TLS.

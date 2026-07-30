@@ -14,8 +14,8 @@ spec:
   template:
     metadata:
       annotations:
-        # Scrape the observability port (#106 P2.4). scalo serves /metrics on
-        # 9090; the API port 8000 no longer exposes it (P1.3).
+        # Scrape the observability port (#106). scalo serves /metrics on
+        # 9090; the API port 8000 no longer exposes it.
         prometheus.io/scrape: "true"
         prometheus.io/port: {{ .Values.service.port | quote }}
         prometheus.io/path: "/metrics"
@@ -41,7 +41,7 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # Container-level hardening (#106 P3.4). readOnlyRootFilesystem is an
+          # Container-level hardening (#106). readOnlyRootFilesystem is an
           # opt-in (security.readOnlyRootFilesystem): safe only with a mounted
           # jwt.signingKey (no per-pod key mint to the rootfs) AND no runtime
           # secret minting to the local FS -- see values.yaml (dfe-engine#109).
@@ -62,9 +62,8 @@ spec:
             - name: http
               containerPort: {{ .Values.config.api.port }}
               protocol: TCP
-          # Probes hit the observability port (#106 P2.4), not the API port --
-          # kubelet must still get an answer when the API is saturated or not
-          # yet serving.
+          # Probes hit the observability port (#106), not the API port -- kubelet
+          # must still get an answer when the API is saturated or not yet serving.
           livenessProbe:
             httpGet:
               path: /livez
@@ -81,7 +80,7 @@ spec:
             periodSeconds: 10
             timeoutSeconds: 3
             failureThreshold: 3
-          # Startup reuses the liveness path -- there is no /startupz (#106 P2.7).
+          # Startup reuses the liveness path -- there is no /startupz (#106).
           # The generous failureThreshold gives the long startup budget; liveness
           # stays tight and is suspended until this passes.
           startupProbe:
@@ -160,7 +159,7 @@ spec:
             - name: DFE_CONFIG_DIR
               value: {{ .Values.configVolume.mountPath | quote }}
             {{- end }}
-            # scalo.secrets root (#106 P1.1). Image default is /app/secrets; set here
+            # scalo.secrets root (#106). Image default is /app/secrets; set here
             # so it is surfaced/overridable (e.g. a shared-key mount for >1 replica).
             {{- if .Values.config.secrets.path }}
             - name: DFE_SECRETS_PATH
@@ -173,7 +172,7 @@ spec:
               mountPath: {{ .Values.configVolume.mountPath }}
             {{- end }}
             {{- if .Values.jwt.signingKey.existingSecret }}
-            # Shared ES384 signing key (#106 P1.1, dfe-engine#109), read-only, so
+            # Shared ES384 signing key (#106, dfe-engine#109), read-only, so
             # every replica loads the SAME key -> cross-pod JWKS verification holds.
             # scalo.secrets (file provider) reads it raw at jwt/signing-key. Mounted
             # as a DIRECTORY (not subPath) to stay readOnlyRootFilesystem-safe: the

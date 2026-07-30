@@ -299,7 +299,7 @@ class TestGetSourcesForLogsource:
         assert "disabled_source" not in names
 
     def test_service_narrowing_excludes_wrong_source(self, type_registry):
-        # P2.17: two same-product sources - a sysmon-service rule must bind ONLY
+        # Two same-product sources - a sysmon-service rule must bind ONLY
         # the sysmon source, not the audit source that declares a different service.
         audit = _make_source(
             "windows_audit",

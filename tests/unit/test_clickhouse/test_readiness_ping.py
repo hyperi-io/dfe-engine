@@ -9,7 +9,7 @@
 fail-closed contribution to readiness.
 
 ``ping`` is the bounded, resilience-BYPASSING reachability check that gates
-``/readyz`` (P2.5): a kubelet poll must fail fast, must never sit inside the
+``/readyz``: a kubelet poll must fail fast, must never sit inside the
 reconnect/auto-wake budget, and must never wake a paused CH Cloud. The only
 double is the clickhouse-connect driver client - the external boundary - so no
 real ClickHouse is touched and nothing internal is mocked. The end-to-end

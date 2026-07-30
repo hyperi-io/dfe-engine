@@ -218,7 +218,7 @@ class PropagationReport:
     failed: list[dict[str, Any]] = field(default_factory=list)  # {sigma_rule_id, error}
     hunts_touched: list[str] = field(default_factory=list)
     # Bindings whose sigma rule is no longer selected - a deselect left them behind
-    # and they keep firing until pruned (P3.24). Surfaced so the operator sees them.
+    # and they keep firing until pruned. Surfaced so the operator sees them.
     stale_bindings: list[dict[str, Any]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -421,7 +421,7 @@ class SigmaPropagator:
 
         # Surface bindings left behind by a deselect: an existing sigma binding
         # whose sigma id is not in the current selection keeps firing but is no
-        # longer wanted. Report it so the operator can DELETE it (P3.24).
+        # longer wanted. Report it so the operator can DELETE it.
         selected_set = set(selected)
         for row in self._rules.list_rules():
             sigma_id = row.get("sigma_rule_id")
@@ -488,7 +488,7 @@ class SigmaPropagator:
                 catalogue_drift = True
 
         # A binding whose sigma rule is no longer selected is STALE - a deselect
-        # left it behind and it keeps firing until pruned (P3.24).
+        # left it behind and it keeps firing until pruned.
         stale = bool(sigma_id) and not self._selection.is_selected(sigma_id)
 
         return {

@@ -341,7 +341,7 @@ class SourceView(BaseModel):
     # Sigma-only logsource binding for rule->source propagation. When set,
     # propagation only binds a rule to this source if the rule's category/service
     # also match; None matches ANY (so a bare-taxonomy source keeps the
-    # product-only behaviour). Ignored for non-sigma standards. See P2.17.
+    # product-only behaviour). Ignored for non-sigma standards.
     taxonomy: str | None = Field(
         default=None, description="Sigma logsource product this source serves (sigma views only)"
     )

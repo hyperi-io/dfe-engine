@@ -24,6 +24,7 @@ def app_with_alerts(tmp_path):
     hunts_dir.mkdir()
 
     settings = DFESettings(
+        env="test",
         config_dir=str(tmp_path),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
@@ -56,7 +57,9 @@ def alert_admin_headers(app_with_alerts):
     from dfe_engine.api.deps import create_access_token
     from dfe_engine.settings import APISettings, DFESettings
 
-    settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
+    settings = DFESettings(
+        env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+    )
     token = create_access_token(
         data={"sub": "admin", "org_id": "test-org", "roles": ["admin"]},
         settings=settings,
@@ -81,7 +84,9 @@ class TestAlertDestinationsBootstrap:
 
         dest_dir = tmp_path / "config" / "alert-destinations"
         assert not dest_dir.exists()
-        settings = DFESettings(hunts=HuntsSettings(alert_destinations_dir=str(dest_dir)))
+        settings = DFESettings(
+            env="test", hunts=HuntsSettings(alert_destinations_dir=str(dest_dir))
+        )
         try:
             bootstrap_registries(settings)
             assert dest_dir.is_dir()
@@ -425,7 +430,9 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.api.deps import create_access_token
         from dfe_engine.settings import APISettings, DFESettings
 
-        settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
+        settings = DFESettings(
+            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+        )
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
@@ -439,7 +446,9 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.api.deps import create_access_token
         from dfe_engine.settings import APISettings, DFESettings
 
-        settings = DFESettings(api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes"))
+        settings = DFESettings(
+            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+        )
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,

@@ -27,7 +27,7 @@ from dfe_engine.auth.audit import (
 )
 from dfe_engine.auth.groups import Group, GroupStore
 from dfe_engine.auth.roles import RoleConfig
-from dfe_engine.settings import DFESettings
+from dfe_engine.settings import DFESettings, is_dev_posture
 
 if TYPE_CHECKING:
     from dfe_engine.auth.jwt_authority import JwtAuthority
@@ -612,7 +612,13 @@ async def get_current_user(request: Request) -> AuthContext:
         )
 
     # ── Path 4: Auth disabled (dev/test) ────────────────────────
-    if not settings.auth.enabled:
+    # Gated on the POSTURE as well as the flag. `auth.enabled` alone handed an
+    # anonymous request roles=["admin"], and `env` defaults to "production" while
+    # `auth.enabled` defaults to False, so the pairing that grants anonymous
+    # admin was the out-of-the-box one. DFESettings rejects it at load now; this
+    # is the second line, for anything holding a settings object that did not
+    # come through that validator.
+    if not settings.auth.enabled and is_dev_posture(settings.env):
         return AuthContext(org_id="default", user_id="dev", roles=["admin"])
 
     audit_login_denied("anonymous", "none", client_ip, "no_credentials")

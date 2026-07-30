@@ -11,7 +11,7 @@ Stands up an ephemeral HTTP server that emulates the ClickHouse Cloud management
 API and points CloudService's own scalo :class:`HttpClient` at it, so the whole
 path is exercised over a real socket: HTTP basic-auth for the control-plane key,
 the GET (status) and PATCH (start/stop) round-trips, JSON parsing and the state
-transitions. Nothing internal is mocked (Derek's no-mocks standard); the only
+transitions. Nothing internal is mocked (the no-mocks standard); the only
 double is the external management API, and that is a genuine HTTP server here,
 not a stubbed object. A fake clock keeps ``wait_running`` instant.
 """

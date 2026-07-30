@@ -29,6 +29,61 @@ class TestParseK8sQuantity:
     def test_memory_ki(self):
         assert _parse_k8s_quantity("1024Ki") == 1024 * 1024
 
+    def test_memory_decimal_si_suffixes(self):
+        """K8s accepts decimal SI suffixes (k/M/G/T/P/E) as well as binary ones.
+
+        Both families have to parse: a quantity the parser cannot read is one the
+        requests-vs-limits comparison cannot make -- see
+        TestUnparseableQuantityIsNotValid below.
+        """
+        assert _parse_k8s_quantity("1k") == 1000
+        assert _parse_k8s_quantity("100M") == 100 * 1000**2
+        assert _parse_k8s_quantity("2G") == 2 * 1000**3
+        assert _parse_k8s_quantity("1T") == 1000**4
+
+    def test_garbage_raises(self):
+        """Unparseable input must raise, so callers cannot mistake it for zero."""
+        with pytest.raises(ValueError):
+            _parse_k8s_quantity("not-a-quantity")
+
+
+class TestUnparseableQuantityIsNotValid:
+    """A quantity the parser cannot read must never come back valid.
+
+    ``valid`` is ``len(errors) == 0``, so reporting an unreadable quantity as a
+    warning leaves the config valid while the requests-vs-limits comparison it
+    blocked never runs -- "cannot determine" presented as "fine". K8s decimal SI
+    suffixes are the realistic trigger.
+    """
+
+    def test_decimal_si_requests_over_limits_is_rejected(self):
+        result = validate_deployment_config(
+            "receiver",
+            {
+                "size": "custom",
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "8G"},
+                    "limits": {"cpu": "1", "memory": "1G"},
+                },
+            },
+        )
+        assert result.valid is False, f"8G requests vs 1G limits validated clean: {result}"
+        assert any("Memory requests" in e for e in result.errors), result.errors
+
+    def test_unparseable_quantity_is_an_error_not_a_warning(self):
+        result = validate_deployment_config(
+            "receiver",
+            {
+                "size": "custom",
+                "resources": {
+                    "requests": {"cpu": "500m", "memory": "eight gigs"},
+                    "limits": {"cpu": "1", "memory": "1Gi"},
+                },
+            },
+        )
+        assert result.valid is False, f"unparseable memory validated clean: {result}"
+        assert any("Could not parse memory" in e for e in result.errors), result.errors
+
 
 class TestValidateDeploymentConfig:
     def test_valid_default_config(self):

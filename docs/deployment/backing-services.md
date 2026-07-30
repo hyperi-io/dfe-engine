@@ -103,7 +103,7 @@ implementation deferred (YAGNI).
 | DNS | external-dns / zone | CoreDNS / devex DNS | Route 53 | Cloud DNS | Azure DNS | /etc/hosts |
 | Observability sink | OTel exporter -> dest | HyperDX + CH | HyperDX (keep) or CloudWatch | HyperDX (keep) or Cloud Monitoring | HyperDX (keep) or Azure Monitor | HyperDX / console |
 
-Priority backing services for the first swap passes (per Derek): secrets, DNS,
+Priority backing services for the first swap passes: secrets, DNS,
 PCA/TLS, k8s, Kafka, ClickHouse. The rest are mostly dfe-infra config with little or
 no engine code.
 

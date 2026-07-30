@@ -56,6 +56,19 @@ for _otel_key, _otel_val in (
 ):
     os.environ.setdefault(_otel_key, _otel_val)
 
+# --------------------------------------------------------------------------
+# Declare the dev posture explicitly. `DFE_ENV` defaults to "production", and
+# under that posture `DFESettings` refuses `auth.enabled: False` -- it would hand
+# an unauthenticated request the admin role. Most tests here construct settings
+# with auth off and want exactly the dev semantics, so say so rather than relying
+# on a default that also has to be safe for a real deployment.
+#
+# setdefault, so a test run that deliberately wants the production posture
+# (test_settings.py's own posture cases construct DFESettings directly) is not
+# overridden.
+os.environ.setdefault("DFE_ENV", "test")
+os.environ.setdefault("DFE_AUTH_ENABLED", "false")
+
 # Load .env file if present (before any other imports that might use settings)
 try:
     from dotenv import load_dotenv

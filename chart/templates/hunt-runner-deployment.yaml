@@ -40,7 +40,7 @@ spec:
         - name: hunt-runner
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          # No probes by design (#106 P3.6, k8s.md exception): a background worker
+          # No probes by design (#106, k8s.md exception): a background worker
           # with no HTTP surface. Liveness is the process (crash -> restart via the
           # Deployment); readiness/startup have no traffic to gate.
           securityContext:

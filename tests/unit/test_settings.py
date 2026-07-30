@@ -5,7 +5,7 @@ import os
 import pytest
 from pydantic import ValidationError
 
-from dfe_engine.settings import DFESettings, load_settings, reset_settings
+from dfe_engine.settings import AuthSettings, DFESettings, load_settings, reset_settings
 
 
 @pytest.fixture(autouse=True)
@@ -24,10 +24,18 @@ def _hermetic_env(monkeypatch):
     (CH host, DFE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
     default / fallback / production-guard assertions here. Strip every DFE_* and
     legacy CLICKHOUSE_* var so each test controls exactly the environment it sets.
+
+    The posture goes back afterwards. With nothing set, the shipped defaults are
+    env "production" and auth on with the placeholder jwt_secret, which
+    ``DFESettings`` rejects by design -- correct for a deployment, useless for the
+    forty-odd tests here that call ``load_settings()`` to check an unrelated field
+    mapping. Tests that DO exercise the posture set DFE_ENV themselves or build
+    ``DFESettings`` directly, and both override this.
     """
     for key in list(os.environ):
         if key.startswith(("DFE_", "CLICKHOUSE_")):
             monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("DFE_ENV", "test")
 
 
 @pytest.fixture
@@ -236,8 +244,11 @@ class TestEnvOverrides:
 
     def test_placeholder_jwt_secret_rejected_in_production(self, monkeypatch):
         # Security guard: auth on + production posture + the known dev secret must
-        # fail fast rather than run with a forgeable token key.
-        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")  # env defaults to production
+        # fail fast rather than run with a forgeable token key. The posture is set
+        # explicitly -- _hermetic_env declares a dev one, which would make this
+        # pass or fail for the wrong reason.
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
         with pytest.raises(ValidationError):
             load_settings()
 
@@ -247,6 +258,7 @@ class TestEnvOverrides:
         assert load_settings().auth.enabled is True
 
     def test_production_accepts_real_jwt_secret(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "production")
         monkeypatch.setenv("DFE_AUTH_ENABLED", "true")
         monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
         assert load_settings().auth.enabled is True
@@ -465,3 +477,65 @@ class TestIsDevPosture:
 
         for env in ("production", "prod", "staging", ""):
             assert is_dev_posture(env) is False
+
+
+class TestProductionPostureCannotShipWithAuthOff:
+    """The production posture must not be satisfiable with authorization off.
+
+    ``DFESettings.env`` defaults to ``"production"`` and its own description calls
+    that "default, secure". ``AuthSettings.enabled`` defaults to ``False``. Under
+    that pair:
+
+    * ``get_current_user`` path 4 (api/deps.py) returns
+      ``AuthContext(user_id="dev", roles=["admin"])`` for a request carrying no
+      credentials at all;
+    * ``authorize(..., enabled=False)`` short-circuits to
+      ``allowed=True, reason="auth_disabled"``, so every ``require_action`` and
+      ``check_action`` on every REST handler passes.
+
+    The weak-jwt-secret guard could never cover this: it is itself gated on
+    ``self.auth.enabled``. Nothing logged and nothing raised, so the deployment
+    looked configured and enforced nothing.
+
+    Closed in two places. ``DFESettings`` refuses to load the pairing, and
+    ``api/deps.py`` path 4 gates its root context on ``is_dev_posture(env)`` as
+    well as the flag, for anything holding a settings object that did not come
+    through the validator.
+
+    The shipped Helm chart sets ``config.auth.enabled: true``, so a chart install
+    was always covered. A plain container was not.
+    """
+
+    def test_production_posture_with_auth_off_refuses_to_load(self):
+        with pytest.raises(ValidationError, match="grants every unauthenticated caller"):
+            DFESettings(env="production", auth=AuthSettings(enabled=False))
+
+    def test_dev_posture_with_auth_off_still_loads(self):
+        # The opt-out has to keep working, or every local dev setup breaks.
+        for env in ("dev", "development", "local", "test", "ci"):
+            settings = DFESettings(env=env, auth=AuthSettings(enabled=False))
+            assert settings.auth.enabled is False
+
+    def test_shipped_defaults_enable_auth(self, monkeypatch):
+        """defaults.yaml is the file a plain container runs on."""
+        monkeypatch.setenv("DFE_ENV", "production")
+        monkeypatch.setenv("DFE_API_JWT_SECRET", "a-real-production-secret-over-32-bytes")
+        assert load_settings().auth.enabled is True
+
+    def test_deps_root_context_condition_excludes_a_production_posture(self):
+        """The second line, for a settings object that skipped the validator.
+
+        ``api/deps.py`` path 4 returns ``AuthContext(user_id="dev",
+        roles=["admin"])`` when ``not auth.enabled and is_dev_posture(env)``. The
+        flag alone was the whole condition, so a production posture reached it.
+        ``model_construct`` is how a settings object gets here without the
+        validator above having run.
+        """
+        from dfe_engine.settings import is_dev_posture
+
+        prod = DFESettings.model_construct(env="production", auth=AuthSettings(enabled=False))
+        assert not (not prod.auth.enabled and is_dev_posture(prod.env))
+
+        dev = DFESettings.model_construct(env="dev", auth=AuthSettings(enabled=False))
+        assert not dev.auth.enabled
+        assert is_dev_posture(dev.env)

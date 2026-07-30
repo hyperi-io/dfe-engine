@@ -39,7 +39,11 @@ def test_help_lists_both_commands():
 def test_ch_params_maps_settings_fields():
     # A field rename (username -> user, secure typo, ...) must fail HERE, not
     # silently at connect time - so pin the exact settings -> get_client kwargs.
-    settings = DFESettings()
+    #
+    # env="test" because a bare DFESettings() defaults to the production posture,
+    # which refuses the dev jwt placeholder. This test is about ClickHouse field
+    # mapping, so it takes a dev posture rather than inventing a secret.
+    settings = DFESettings(env="test")
     settings.clickhouse.host = "ch.internal"
     settings.clickhouse.port = 8123
     settings.clickhouse.username = "dfe"

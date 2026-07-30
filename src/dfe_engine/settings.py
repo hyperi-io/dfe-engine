@@ -516,7 +516,7 @@ class SamplerSettings(BaseModel):
     Two families of mode: cheap "recent"/"random" reads that run inline, and the
     memory-hungry logreducer modes ("smart"/"anomaly") that are gated. logreducer
     is memory-hungry, so its concurrency is capped at ``max_concurrent`` instances,
-    each bounded to ``max_memory_gb`` - both small by default (Derek, 2026-07-01).
+    each bounded to ``max_memory_gb`` - both small by default.
 
     Environment variables (DFE_SAMPLER_ prefix):
     - DFE_SAMPLER_DEFAULT_MODE -> sampler.default_mode
@@ -759,8 +759,14 @@ class AuthSettings(BaseModel):
     """
 
     enabled: bool = Field(
-        default=False,
-        description="Enable authorization (default off for dev/test)",
+        default=True,
+        description=(
+            "Enable authorization. Defaults ON so it matches env's default "
+            "'production' posture -- with it off, api/deps.py hands an "
+            "unauthenticated request the admin role. Dev and test opt out with "
+            "DFE_AUTH_ENABLED=false, which needs DFE_ENV set to a dev posture too "
+            "(see DFESettings._reject_insecure_production_posture)."
+        ),
     )
     auth_dir: str = Field(
         default="",
@@ -854,7 +860,7 @@ class GitopsSettings(BaseModel):
 
 
 # Known placeholder JWT secret - fine for local dev, REJECTED in a production
-# posture when auth is on (see DFESettings._reject_placeholder_secret).
+# posture when auth is on (see DFESettings._reject_insecure_production_posture).
 _DEV_JWT_SECRET = "dev-secret-key-change-in-production"
 
 # Postures that are NOT production; anything else (incl. the default
@@ -1015,12 +1021,31 @@ class DFESettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def _reject_placeholder_secret(self) -> "DFESettings":
-        # Fail fast if a production deployment turns auth on but never overrode
-        # the known dev jwt_secret - otherwise anyone can forge tokens. Local dev
-        # opts out via DFE_ENV. Minimum length is enforced on the field itself.
+    def _reject_insecure_production_posture(self) -> "DFESettings":
+        # Two ways a production posture can enforce nothing. Both are errors here
+        # rather than warnings, because a warning leaves the process running.
         is_prod = not is_dev_posture(self.env)
-        if is_prod and self.auth.enabled and self.api.jwt_secret == _DEV_JWT_SECRET:
+        if not is_prod:
+            return self
+
+        # `auth.enabled: False` is not "no auth configured yet" -- api/deps.py
+        # hands an unauthenticated request roles=["admin"], and authorize()
+        # short-circuits to allowed=True. `env` defaults to "production" and
+        # `auth.enabled` defaults to False, so this pairing was the default one:
+        # anonymous admin, with nothing logged and no other validator covering it
+        # (the jwt_secret check below is itself gated on auth.enabled, so it could
+        # never fire for this case).
+        if not self.auth.enabled:
+            raise ValueError(
+                f"auth.enabled is False but env is '{self.env}': that grants every "
+                "unauthenticated caller the admin role. Set DFE_AUTH_ENABLED=true, "
+                "or DFE_ENV=dev for local development"
+            )
+
+        # A production deployment that turns auth on but never overrode the known
+        # dev jwt_secret lets anyone forge tokens. Minimum length is enforced on
+        # the field itself.
+        if self.api.jwt_secret == _DEV_JWT_SECRET:
             raise ValueError(
                 "api.jwt_secret is the known dev placeholder but env is "
                 f"'{self.env}' with auth enabled; set a strong DFE_API_JWT_SECRET "

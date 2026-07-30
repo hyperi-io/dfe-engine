@@ -11,7 +11,7 @@ The framework defines the contracts; real models live in separate repos and regi
 via ``AIModuleRegistry``. Until migrated, these stubs make the four touch-points
 functional - each returns a COMPLETED result marked ``stub: True``, echoing enough of
 the input that the UI/CLI can round-trip. Migrating a real model = registering a
-concrete implementation (Derek's code) under the same name.
+concrete implementation under the same name.
 
 Touch-points: review a query (QueryOptimiser), create a query from a prompt
 (QueryGenerator), generate VRL from samples / ClickHouse ``_json`` (LogParser), and
