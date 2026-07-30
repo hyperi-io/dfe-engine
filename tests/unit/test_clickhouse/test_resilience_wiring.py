@@ -105,7 +105,7 @@ def _settings(
     wait_max: float = 1.0,
     wait_multiplier: float = 1.0,
 ) -> DFESettings:
-    settings = DFESettings()
+    settings = DFESettings(env="test")
     settings.clickhouse.resilience = ClickHouseResilienceSettings(
         enabled=enabled,
         wait_initial=wait_initial,

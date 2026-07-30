@@ -204,7 +204,8 @@ def test_admin_config_derives_mechanism_from_provider(monkeypatch: pytest.Monkey
         settings_module,
         "get_settings",
         lambda: settings_module.DFESettings(
-            kafka=settings_module.KafkaSettings(provider="redpanda", bootstrap_servers="b:9093")
+            env="test",
+            kafka=settings_module.KafkaSettings(provider="redpanda", bootstrap_servers="b:9093"),
         ),
     )
     conf = kafka_module._admin_config(bootstrap=None, provider=None, username=None, password=None)
