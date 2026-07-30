@@ -8,15 +8,14 @@
 """Resolve a real ClickHouse for integration tests, across a tiered preference.
 
 ClickHouse is DFE's only operational store, so integration tests use real CH (no
-mocks). The harness picks a target in this preference order (per Derek):
+mocks). The harness picks a target in this preference order:
 
   Tier 1 "cluster" - a local-network CH CLUSTER (3+ nodes) configured in .env /
       settings, or an explicit ``DFE_TEST_CH_*`` target. Tests replicated behaviour.
   Tier 2 "remote"  - spin a throwaway CH via docker on a REMOTE host over ssh,
-      named by ``DFE_TEST_DOCKER_HOST`` (e.g. derek@desktop-derek.devex.hyperi.io).
-      The rule: "if I can ssh to it, I can move my docker tests there" - so a
-      resource-constrained laptop (Kay's Mac hits dfe-engine limits) offloads the
-      container to a shared build box.
+      named by ``DFE_TEST_DOCKER_HOST`` (``user@host``). If you can ssh to it you
+      can run the container there, so a machine that cannot spare the resources
+      offloads to a shared build box -- Kay's Mac hits dfe-engine's limits.
   Tier 3 "local"   - spin a throwaway CH via LOCAL docker.
 
 Controls (env):
