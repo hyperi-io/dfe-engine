@@ -190,7 +190,7 @@ class SigmaCatalogStore:
         # lists) wins WHOLESALE over upstream. Without it deep_merge APPENDS, so
         # every re-sync duplicates shared list items (and reinstates ones the
         # operator removed), the merged doc never equals the stored one, and every
-        # poll commits churn. See P1.3.
+        # poll commits churn.
         merged_rule = deep_merge(
             copy.deepcopy(doc.rule), copy.deepcopy(existing_rule), replace_lists=True
         )
@@ -205,7 +205,7 @@ class SigmaCatalogStore:
                 "origin": prev.get("origin", doc.origin),
                 "upstream_modified": new_upstream,
                 "local_edited": True,
-                # STICKY drift (P2.16): once flagged, drift stays set until an
+                # STICKY drift: once flagged, drift stays set until an
                 # operator action clears it (edit_rule / adopt_rule). Recomputing
                 # from scratch each sync would self-clear the flag on the very next
                 # poll (upstream unchanged -> False), erasing the review signal
@@ -284,7 +284,7 @@ class SigmaCatalogStore:
         prov = doc.setdefault("provenance", {})
         prov["local_edited"] = True
         # The operator has acted on the rule -> the catalogue-drift review signal is
-        # resolved (P2.16: sticky drift is cleared only by an operator action).
+        # resolved (sticky drift is cleared only by an operator action).
         prov["drift"] = False
         self._crud.put(RULES_CLASS, rule_id, doc, actor, message=_msg(rule_id[:20], "edit", actor))
         return doc
@@ -297,7 +297,7 @@ class SigmaCatalogStore:
         """
         doc = self._crud.get(RULES_CLASS, rule_id)
         prov = doc.setdefault("provenance", {})
-        # Adopting resolves any pending catalogue-drift review signal (P2.16). Clear
+        # Adopting resolves any pending catalogue-drift review signal. Clear
         # drift even when already local_edited, so an explicit adopt acknowledges it.
         drift_pending = bool(prov.get("drift", False))
         if not prov.get("local_edited", False) or drift_pending:
@@ -449,7 +449,7 @@ async def sync_provider(
     """Fetch from one provider and upsert into the catalogue - the glue for a sync."""
     docs = await provider.fetch(since)
     # import_docs is a SYNC dulwich commit (put_many) - offload it so the sync task
-    # never blocks the event loop, matching the offloaded gitcrud API paths (P2.18).
+    # never blocks the event loop, matching the offloaded gitcrud API paths.
     return await asyncio.to_thread(
         catalog.import_docs, docs, actor, source=provider.name, warnings=provider.last_warnings
     )

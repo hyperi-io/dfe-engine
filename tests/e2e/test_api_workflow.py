@@ -359,12 +359,18 @@ class TestCrossRouterConsistency:
             assert "message" in data, f"Missing 'message' in 404 for {endpoint}"
 
     def test_health_endpoints_unauthenticated(self, e2e_client):
-        """Health probes should work without auth."""
-        # No startup route: k8s suspends the liveness probe until the startup
-        # probe passes, so a startupProbe pointed at /livez covers it and a
-        # third endpoint would only be another thing to keep in sync.
+        """Health probes must answer without auth.
+
+        `/livez` and `/readyz` are the whole probe surface -- the `/health/live`
+        and `/health/startup` aliases this asserted were retired in scalo 2.29.12
+        and now 404, so it was failing on the alias rather than on the probe. See
+        test_errors.py, which pins those paths as 404 on purpose.
+        """
+        # No startup route either: k8s suspends the liveness probe until the
+        # startup probe passes, so a startupProbe pointed at /livez covers it and
+        # a third endpoint would only be another thing to keep in sync.
         resp = e2e_client.get("/livez")
-        assert resp.status_code == 200, "/livez failed"
+        assert resp.status_code == 200, f"/livez returned {resp.status_code}"
         # /readyz includes a ClickHouse ping; hermetic e2e has no CH.
         resp = e2e_client.get("/readyz")
         assert resp.status_code in (200, 503), f"/readyz returned {resp.status_code}"

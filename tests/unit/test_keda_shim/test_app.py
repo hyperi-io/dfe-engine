@@ -28,7 +28,7 @@ class _StubShim:
 
 
 def _client(values: dict[str, int]) -> TestClient:
-    return TestClient(create_app(settings=DFESettings(), shim=_StubShim(values)))
+    return TestClient(create_app(settings=DFESettings(env="test"), shim=_StubShim(values)))
 
 
 def test_pressure_alias():
@@ -53,4 +53,10 @@ def test_unknown_query_returns_safe_zero():
 
 
 def test_health_live():
+    # /livez, not the /health/live alias scalo retired in 2.29.12.
     assert _client({}).get("/livez").status_code == 200
+
+
+def test_retired_health_alias_is_gone():
+    # An alias that keeps answering 200 hides a probe still aimed at it.
+    assert _client({}).get("/health/live").status_code == 404

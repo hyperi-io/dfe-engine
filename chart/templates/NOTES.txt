@@ -1,7 +1,7 @@
 DFE Engine API server deployed.
 
 Access the API on port {{ .Values.service.httpPort }} (the primary Service port
-{{ .Values.service.port }} is observability only - health + /metrics, #106 P2.4):
+{{ .Values.service.port }} is observability only - health + /metrics, #106):
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/readyz

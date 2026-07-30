@@ -21,7 +21,7 @@ from dfe_engine.sigma.providers import ProviderConfig, ProviderKind
 class TestCastTypeHardening:
     def test_legit_types_pass(self):
         # Real parametrised types with balanced parens still pass. (The '=' in an
-        # Enum literal is outside the charset - pre-existing, not my change.)
+        # Enum literal is outside the charset.)
         assert _safe_type("String") == "String"
         assert _safe_type("UInt32") == "UInt32"
         assert _safe_type("Nullable(String)") == "Nullable(String)"

@@ -164,7 +164,7 @@ def _doc_with_lists(rule_id: str = _UUID_A, modified: str = "2023-05-01") -> Sig
 
 
 def test_merge_with_shared_list_key_does_not_grow_and_resync_is_noop(crud):
-    # P1.3: a list shared between upstream and a local edit must NOT be duplicated
+    # A list shared between upstream and a local edit must NOT be duplicated
     # by the local-edit merge, and a second identical re-sync must be a no-op commit.
     store = SigmaCatalogStore(crud)
     store.import_docs([_doc_with_lists(modified="2023-05-01")], actor="a", source="test")
@@ -188,7 +188,7 @@ def test_merge_with_shared_list_key_does_not_grow_and_resync_is_noop(crud):
 
 
 def test_drift_is_sticky_until_operator_action(crud):
-    # P2.16: a recorded drift must survive an unchanged re-sync (visible until the
+    # A recorded drift must survive an unchanged re-sync (visible until the
     # operator reviews it), and be cleared only by an operator action (edit/adopt).
     store = SigmaCatalogStore(crud)
     store.import_docs([_doc(modified="2023-05-01")], actor="a", source="test")

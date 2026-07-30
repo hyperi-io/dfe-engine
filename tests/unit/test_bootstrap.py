@@ -10,7 +10,11 @@ from dfe_engine.settings import DFESettings, SchemasSettings
 
 def make_settings(*, config_dir: Path, schemas_dir: Path) -> DFESettings:
     """Build settings pointing config and schemas at the given directories."""
+    # env="test": DFESettings is a plain BaseModel, so a direct construction never
+    # reads DFE_ENV and `env` falls back to its "production" default, which
+    # requires auth on with a real jwt_secret. Declare the posture the test wants.
     return DFESettings(
+        env="test",
         config_dir=str(config_dir),
         schemas=SchemasSettings(schemas_dir=str(schemas_dir)),
     )
@@ -84,7 +88,7 @@ class TestEnsureStorage:
         assert settings.schemas.schemas_dir == str(schemas_dir)
 
     def test_unset_schemas_dir_skips_schema_bootstrap(self, config_dir, seed_dir):
-        settings = DFESettings(config_dir=str(config_dir))
+        settings = DFESettings(env="test", config_dir=str(config_dir))
         assert settings.schemas.schemas_dir == ""
         ensure_storage(settings=settings)
         assert config_dir.is_dir()

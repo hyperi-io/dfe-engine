@@ -21,7 +21,7 @@ class HuntSpec(BaseModel):
     # Optional target metadata. Empty by default - the query carries its own target,
     # resolved against effective_data_database by config; never hardcode 'dfe' here.
     target_table: str = ""
-    # FIXED watermark field - the always-present common-header column (Derek).
+    # FIXED watermark field - the always-present common-header column.
     timestamp_field: str = "timestamp_load"
 
 

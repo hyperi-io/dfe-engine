@@ -15,7 +15,7 @@ back by the interval.
 
 from __future__ import annotations
 
-# The always-present common-header column - the FIXED watermark field (Derek).
+# The always-present common-header column - the FIXED watermark field.
 TIMESTAMP_FIELD = "timestamp_load"
 
 

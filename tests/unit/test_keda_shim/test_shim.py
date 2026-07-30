@@ -41,7 +41,7 @@ class _FakeClient:
 
 
 def _shim(client: _FakeClient) -> QueryShim:
-    return QueryShim(DFESettings(), client_factory=lambda: client)
+    return QueryShim(DFESettings(env="test"), client_factory=lambda: client)
 
 
 def test_pressure_returns_value():
@@ -56,7 +56,7 @@ def test_pressure_clamped_to_band():
 
 def test_failsafe_holds_last_good():
     client = _FakeClient(rows=[[42]])
-    shim = QueryShim(DFESettings(), client_factory=lambda: client)
+    shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)
     assert shim.run("pressure", {"service": "dfe-receiver"}) == 42  # caches 42
     client.error = RuntimeError("CH down")
     # A failure returns the cached last-good, NOT an error and NOT a scale-up.
@@ -70,7 +70,7 @@ def test_failsafe_cold_hold_when_no_cache():
 
 def test_injection_param_rejected_and_failsafe():
     client = _FakeClient(rows=[[42]])
-    shim = QueryShim(DFESettings(), client_factory=lambda: client)
+    shim = QueryShim(DFESettings(env="test"), client_factory=lambda: client)
     # A malformed service never reaches ClickHouse and degrades to cold_hold.
     assert shim.run("pressure", {"service": "x'; DROP TABLE t--"}) == 0
     assert client.calls == []
