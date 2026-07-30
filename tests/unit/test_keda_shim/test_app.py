@@ -53,4 +53,10 @@ def test_unknown_query_returns_safe_zero():
 
 
 def test_health_live():
-    assert _client({}).get("/health/live").status_code == 200
+    # /livez, not the /health/live alias scalo retired in 2.29.12.
+    assert _client({}).get("/livez").status_code == 200
+
+
+def test_retired_health_alias_is_gone():
+    # An alias that keeps answering 200 hides a probe still aimed at it.
+    assert _client({}).get("/health/live").status_code == 404

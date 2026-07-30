@@ -83,17 +83,29 @@ class TestExceptionHandlers:
         assert "message" in data
 
     def test_health_no_auth(self, client: TestClient):
-        """Health endpoints need no auth. Liveness + startup are dependency-free
-        (always 200); readiness is fail-closed on ClickHouse, so it is 200
-        when CH is reachable and 503 when not - both valid, neither an auth 401."""
-        for path in ("/health/live", "/health/startup"):
-            resp = client.get(path)
-            assert resp.status_code == 200, f"{path} returned {resp.status_code}"
-            assert "status" in resp.json()
-
-        resp = client.get("/health/ready")
-        assert resp.status_code in (200, 503), f"/health/ready returned {resp.status_code}"
+        """Health endpoints need no auth. Liveness is dependency-free (always
+        200); readiness is fail-closed on ClickHouse, so it is 200 when CH is
+        reachable and 503 when not - both valid, neither an auth 401."""
+        resp = client.get("/livez")
+        assert resp.status_code == 200, f"/livez returned {resp.status_code}"
         assert "status" in resp.json()
+
+        resp = client.get("/readyz")
+        assert resp.status_code in (200, 503), f"/readyz returned {resp.status_code}"
+        assert "status" in resp.json()
+
+    def test_retired_health_aliases_are_gone(self, client: TestClient):
+        """The old spellings must 404, not answer.
+
+        scalo 2.29.12 retired them. An alias kept alive still answers 200, so a
+        chart left probing the old name keeps passing and the migration looks
+        finished when it is not - which is how this service's chart probed
+        /health/live against a scalo that had stopped serving it. Asserting the
+        404 is what makes a re-added alias fail a test instead of hiding.
+        """
+        for path in ("/health/live", "/health/ready", "/health/startup", "/healthz", "/startupz"):
+            resp = client.get(path)
+            assert resp.status_code == 404, f"{path} still answers ({resp.status_code})"
 
 
 class TestServiceUnavailable:

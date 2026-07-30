@@ -691,7 +691,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics", "opentelemetry"], specifier = ">=2.29.10" },
+    { name = "scalo", extras = ["expression", "http", "metrics", "opentelemetry"], specifier = ">=2.29.12,<3" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -2257,7 +2257,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.29.10"
+version = "2.29.12"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2275,9 +2275,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b5/6e/dddbd7abdeef5b56c08b4b31d174aabf7ac306ef7702db796dd5d8d76f70/scalo-2.29.10.tar.gz", hash = "sha256:56cee718b46cc1c45aeacf03f0ac795d94717b753ce9e1ca2e98bd97dce61e8e", size = 310010, upload-time = "2026-07-20T06:34:05.754Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2b/e3/8147d3d208651f0b324912622f29030dc0155000f4357a04384b850c2879/scalo-2.29.12.tar.gz", hash = "sha256:677a5a1223b7a34da85199b7636ec2871b9d252a4ad5ac68073dcc25802e3a5b", size = 318581, upload-time = "2026-07-30T03:52:49.23Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e2/35/6fe6b18acbc1608ace69fd27d82e58dea8622dcd6d62adb3e325061388bf/scalo-2.29.10-py3-none-any.whl", hash = "sha256:4c996b10a2feef4ad230729a8f9941cfb46551f3f5d2cfee2ca4e56d8bedf874", size = 382841, upload-time = "2026-07-20T06:34:04.349Z" },
+    { url = "https://files.pythonhosted.org/packages/7c/92/305388899460c260f4dee435866cf04f823aebfddfb35ab0f2f366ea4e42/scalo-2.29.12-py3-none-any.whl", hash = "sha256:00aaf9679964068695dd4b5918405380b88a2f6ebb9f693034c243c2007f2b07", size = 388603, upload-time = "2026-07-30T03:52:47.931Z" },
 ]
 
 [package.optional-dependencies]

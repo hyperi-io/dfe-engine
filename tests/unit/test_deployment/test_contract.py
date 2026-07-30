@@ -43,9 +43,11 @@ class TestContractWellFormed:
     def test_contract_health_paths(self) -> None:
         contract = engine_deployment_contract()
         # scalo's health-router paths, which the app serves; /api/v1/system/health
-        # 404s (#106). /health/live|ready are k8s.md back-compat aliases.
-        assert contract.health.liveness_path == "/health/live"
-        assert contract.health.readiness_path == "/health/ready"
+        # 404s (#106). /livez + /readyz are the whole surface -- the
+        # /health/live|ready aliases were retired in scalo 2.29.12, so a contract
+        # still naming one generates a chart probe that 404s.
+        assert contract.health.liveness_path == "/livez"
+        assert contract.health.readiness_path == "/readyz"
         assert contract.health.metrics_path == "/metrics"
 
     def test_contract_secrets(self) -> None:
@@ -87,7 +89,7 @@ class TestArtefactGeneration:
         assert f"FROM {contract.base_image}" in stage
         assert "EXPOSE 9090" in stage  # observability port (#106)
         assert "8000" in stage  # http traffic port, exposed as an extra port
-        assert "/health/live" in stage  # healthcheck path (#106)
+        assert "/livez" in stage  # healthcheck path (#106)
         assert 'org.opencontainers.image.title="dfe-engine"' in stage
 
     def test_container_manifest_is_valid_json(self) -> None:

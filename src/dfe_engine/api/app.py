@@ -361,7 +361,7 @@ def create_app(
 
     app.include_router(well_known_router)
 
-    # K8s health probes — /health/live, /health/ready, /health/startup
+    # K8s health probes -- /livez and /readyz, the whole surface (no aliases)
     # include_in_schema=False: probes are not API surface, AND scalo's health
     # router returns `-> JSONResponse` (an unresolved ForwardRef under future
     # annotations) that breaks Pydantic OpenAPI generation. These routes nest

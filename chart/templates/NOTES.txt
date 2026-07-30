@@ -4,7 +4,7 @@ Access the API on port {{ .Values.service.httpPort }} (the primary Service port
 {{ .Values.service.port }} is observability only - health + /metrics, #106):
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
-  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/health/ready
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/readyz
 {{- end }}
 {{- else if contains "NodePort" .Values.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[?(@.name=='http')].nodePort}" services {{ include "dfe-engine.fullname" . }})
@@ -19,7 +19,7 @@ Access the API on port {{ .Values.service.httpPort }} (the primary Service port
 {{- end }}
 
 Swagger UI: /docs
-Health check: /health/ready (served on both the API port and the
+Health check: /readyz (served on both the API port and the
 observability port {{ .Values.service.port }}, which is the probe target)
 
 {{- if eq .Values.jwt.secret "dev-secret-key-change-in-production" }}
