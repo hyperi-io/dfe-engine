@@ -366,6 +366,9 @@ class TestCrossRouterConsistency:
         and now 404, so it was failing on the alias rather than on the probe. See
         test_errors.py, which pins those paths as 404 on purpose.
         """
+        # No startup route either: k8s suspends the liveness probe until the
+        # startup probe passes, so a startupProbe pointed at /livez covers it and
+        # a third endpoint would only be another thing to keep in sync.
         resp = e2e_client.get("/livez")
         assert resp.status_code == 200, f"/livez returned {resp.status_code}"
         # /readyz includes a ClickHouse ping; hermetic e2e has no CH.

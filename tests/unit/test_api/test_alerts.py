@@ -84,7 +84,9 @@ class TestAlertDestinationsBootstrap:
 
         dest_dir = tmp_path / "config" / "alert-destinations"
         assert not dest_dir.exists()
-        settings = DFESettings(env="test", hunts=HuntsSettings(alert_destinations_dir=str(dest_dir)))
+        settings = DFESettings(
+            env="test", hunts=HuntsSettings(alert_destinations_dir=str(dest_dir))
+        )
         try:
             bootstrap_registries(settings)
             assert dest_dir.is_dir()
@@ -429,8 +431,8 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.settings import APISettings, DFESettings
 
         settings = DFESettings(
-        env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-    )
+            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+        )
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,
@@ -445,8 +447,8 @@ class TestAlertDestinationsCRUD:
         from dfe_engine.settings import APISettings, DFESettings
 
         settings = DFESettings(
-        env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
-    )
+            env="test", api=APISettings(jwt_secret="test-secret-hmac-key-at-least-32-bytes")
+        )
         token = create_access_token(
             data={"sub": "viewer", "org_id": "test-org", "roles": ["infra_viewer"]},
             settings=settings,

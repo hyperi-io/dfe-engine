@@ -17,9 +17,7 @@ class TestMetricsNotOnTrafficPort:
     def test_metrics_is_not_served_on_the_api_port(self, client: TestClient) -> None:
         # 404 (or 405) -- anything but a 200 scrape. The metrics live on 9090.
         resp = client.get("/metrics")
-        assert resp.status_code != 200, (
-            "/metrics must not be exposed on the public API port (#106)"
-        )
+        assert resp.status_code != 200, "/metrics must not be exposed on the public API port (#106)"
 
     def test_metrics_is_not_api_surface(self, client: TestClient) -> None:
         assert "/metrics" not in client.get("/openapi.json").json()["paths"]

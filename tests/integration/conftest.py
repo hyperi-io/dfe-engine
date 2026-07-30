@@ -46,8 +46,16 @@ import time
 
 import pytest
 
-# Current ClickHouse LTS line (see standards/languages/SQL-CLICKHOUSE.md).
-_DEFAULT_IMAGE = "clickhouse/clickhouse-server:25.8"
+# Current ClickHouse LTS line, and the version dfe-infra actually deploys
+# (versions.yaml). LTS ships twice a year with a year of support, so 25.8 is the
+# PREVIOUS one -- testing a release older than production is the wrong direction
+# for a datastore whose defaults move between majors.
+#
+# Tag on its own line, separate from the image name, so one Renovate regex
+# covers every language in the fleet.
+# renovate: datasource=docker depName=clickhouse/clickhouse-server
+_CH_TAG = "26.3"
+_DEFAULT_IMAGE = f"clickhouse/clickhouse-server:{_CH_TAG}"
 
 
 def _truthy(name: str) -> bool:

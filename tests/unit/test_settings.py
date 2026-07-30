@@ -537,4 +537,5 @@ class TestProductionPostureCannotShipWithAuthOff:
         assert not (not prod.auth.enabled and is_dev_posture(prod.env))
 
         dev = DFESettings.model_construct(env="dev", auth=AuthSettings(enabled=False))
-        assert not dev.auth.enabled and is_dev_posture(dev.env)
+        assert not dev.auth.enabled
+        assert is_dev_posture(dev.env)

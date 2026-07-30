@@ -96,7 +96,7 @@ EXPOSE 9090 8000
 
 # Probe the observability port (#106): health answers on 9090, not 8000.
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD curl -sf http://localhost:9090/health/live > /dev/null || exit 1
+    CMD curl -sf http://localhost:9090/livez > /dev/null || exit 1
 
 ENTRYPOINT ["dfe-engine"]
 CMD ["run"]
