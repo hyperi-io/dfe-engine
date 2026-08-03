@@ -1,3 +1,10 @@
+# Changelog
+
+Rendered by CI and committed back at the end of a release -- do not edit by
+hand. Release notes also appear on the GitHub Releases page, one per tag.
+
+## [1.11.0](https://github.com/hyperi-io/dfe-engine/compare/v1.10.7...v1.11.0) (2026-08-03)
+
 # [1.8.0](https://github.com/hyperi-io/dfe-engine/compare/v1.7.3...v1.8.0) (2026-04-15)
 
 
