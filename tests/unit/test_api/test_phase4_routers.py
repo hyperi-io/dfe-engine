@@ -15,24 +15,32 @@ routers guard against missing infrastructure cleanly.
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.fixture
+def discovery_client(app, client: TestClient) -> TestClient:
+    """Discovery router tests without ClickHouse (hermetic — not host-dependent)."""
+    app.state.connection_registry = None
+    return client
 
 
 class TestDiscoveryRouter:
     """GET /api/v1/discovery endpoints."""
 
-    def test_databases_no_clickhouse_returns_503(self, client, admin_headers):
+    def test_databases_no_clickhouse_returns_503(self, discovery_client, admin_headers):
         """Returns 503 when ClickHouse is not reachable."""
-        resp = client.get("/api/v1/discovery/databases", headers=admin_headers)
+        resp = discovery_client.get("/api/v1/discovery/databases", headers=admin_headers)
         assert resp.status_code == 503
         assert resp.json()["code"] in ("not_configured", "connection_error")
 
-    def test_tables_no_clickhouse_returns_503(self, client, admin_headers):
-        resp = client.get("/api/v1/discovery/tables", headers=admin_headers)
+    def test_tables_no_clickhouse_returns_503(self, discovery_client, admin_headers):
+        resp = discovery_client.get("/api/v1/discovery/tables", headers=admin_headers)
         assert resp.status_code == 503
 
-    def test_columns_no_clickhouse_returns_503(self, client, admin_headers):
-        resp = client.get(
+    def test_columns_no_clickhouse_returns_503(self, discovery_client, admin_headers):
+        resp = discovery_client.get(
             "/api/v1/discovery/tables/my_table/columns",
             headers=admin_headers,
         )

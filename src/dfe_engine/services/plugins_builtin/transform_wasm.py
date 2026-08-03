@@ -49,13 +49,13 @@ _sizing_overrides: dict[str, dict[str, Any]] = {
     "xs": {},
     "small": {},
     "medium": {
-        "memory": {"max_memory_mb": 2048},
+        "memory": {"limit_bytes": 2147483648},
     },
     "large": {
-        "memory": {"max_memory_mb": 4096},
+        "memory": {"limit_bytes": 4294967296},
     },
     "xlarge": {
-        "memory": {"max_memory_mb": 8192},
+        "memory": {"limit_bytes": 8589934592},
     },
 }
 

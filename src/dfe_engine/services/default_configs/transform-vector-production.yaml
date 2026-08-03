@@ -41,7 +41,9 @@ ipc:
   address: ""
 
 memory:
-  max_memory_mb: 2048
+  limit_bytes: 2147483648
+  pressure_threshold: 0.8
+  tracking_enabled: true
 
 metrics:
   enabled: true

@@ -12,16 +12,21 @@ Frontend devs use it for:
 """
 
 import json
+import os
 from pathlib import Path
 
 from dfe_engine.api.app import create_app
+from dfe_engine.settings import load_settings
 
 SPEC_DIR = Path(__file__).parent
 SPEC_FILE = SPEC_DIR / "openapi.json"
 
 
 def main() -> None:
-    app = create_app()
+    # Schema export only — avoid production posture guard on dev JWT placeholder.
+    os.environ["DFE_ENV"] = "dev"
+    settings = load_settings()
+    app = create_app(settings=settings)
 
     # Health probes are excluded from the schema at their include
     # (include_in_schema=False in app.py); nothing to strip here. Clear any
