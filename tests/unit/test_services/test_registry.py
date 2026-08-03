@@ -180,6 +180,30 @@ class TestDeleteConfig:
         """Deleting a non-existent config should not raise."""
         registry.delete_config("receiver", "nonexistent")  # Should not raise
 
+    def test_delete_with_parent_relative_config_dir(self, tmp_path, receiver_yaml):
+        """Delete works when config_directory was given with '..' path segments."""
+        repo_root = tmp_path / "kay-dfe-deploy"
+        services_dir = repo_root / "services"
+        services_dir.mkdir(parents=True)
+        (services_dir / "archiver-default.yaml").write_text(receiver_yaml)
+
+        from dulwich import porcelain as git
+
+        git.init(str(repo_root))
+
+        engine_cwd = tmp_path / "dfe-engine"
+        engine_cwd.mkdir()
+        config_dir = engine_cwd / "../kay-dfe-deploy/services"
+
+        reg = ServiceConfigRegistry(config_directory=config_dir, refresh_interval=0)
+        try:
+            assert reg.list_configs()
+            reg.delete_config("archiver", "default")
+            assert not (services_dir / "archiver-default.yaml").exists()
+            assert not any(e["service"] == "archiver" for e in reg.list_configs())
+        finally:
+            reg.close()
+
 
 # ---------------------------------------------------------------------------
 # list_configs

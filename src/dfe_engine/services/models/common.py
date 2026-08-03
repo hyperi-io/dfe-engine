@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator, model_validator
 
 
 class SaslConfig(BaseModel):
@@ -84,6 +84,21 @@ class MemoryConfig(BaseModel):
     limit_bytes: int = Field(default=0, ge=0, description="0 = auto-detect (67% of available)")
     pressure_threshold: float = Field(default=0.8, ge=0.0, le=1.0)
     tracking_enabled: bool = True
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_max_memory_mb(cls, data: object) -> object:
+        """Accept deprecated ``max_memory_mb`` from older seeded defaults (MB → bytes)."""
+        if not isinstance(data, dict):
+            return data
+        if "limit_bytes" in data or "max_memory_mb" not in data:
+            return data
+        mb = data.pop("max_memory_mb")
+        if mb == 0:
+            data.setdefault("limit_bytes", 0)
+        else:
+            data["limit_bytes"] = int(mb) * 1024 * 1024
+        return data
 
 
 class DlqConfig(BaseModel):

@@ -27,7 +27,9 @@ ipc:
   address: ""
 
 memory:
-  max_memory_mb: 0
+  limit_bytes: 0
+  pressure_threshold: 0.8
+  tracking_enabled: true
 
 metrics:
   enabled: true

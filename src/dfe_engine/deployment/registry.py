@@ -22,7 +22,11 @@ from scalo.logger import logger
 
 from dfe_engine.deployment.sizing import apply_sizing
 from dfe_engine.deployment.validators import ValidationResult, validate_deployment_config
-from dfe_engine.git_identity import COMMITTER_IDENTITY, commit_file
+from dfe_engine.git_identity import (
+    COMMITTER_IDENTITY,
+    commit_file,
+    git_repo_relative_path,
+)
 from dfe_engine.services.plugins import deployment_classes, valid_services
 from dfe_engine.yaml_utils import yaml_dump
 
@@ -63,7 +67,7 @@ class DeploymentConfigRegistry:
         git_push: bool = False,
         refresh_interval: int = 30,
     ) -> None:
-        self._config_directory = Path(config_directory)
+        self._config_directory = Path(config_directory).resolve()
         self._config_directory.mkdir(parents=True, exist_ok=True)
 
         self._store = DirectoryConfigStore(
@@ -194,14 +198,14 @@ class DeploymentConfigRegistry:
             logger.warning(f"Deployment config file does not exist: {yaml_path}")
             return
 
+        resolved_path = yaml_path.resolve(strict=False)
+        resolved_path.unlink(missing_ok=True)
+
         if self._store.is_git and self._store._repo is not None:
             try:
                 from dulwich import porcelain as git
 
-                repo_root = Path(self._store._repo.path)
-                rel_path = str(yaml_path.relative_to(repo_root))
-
-                yaml_path.unlink()
+                rel_path = git_repo_relative_path(self._store._repo.path, resolved_path)
                 git.rm(self._store._repo, paths=[rel_path])
                 git.commit(
                     self._store._repo,
@@ -213,8 +217,6 @@ class DeploymentConfigRegistry:
                     self._store._git_push_remote()
             except Exception as e:
                 logger.error(f"Git delete failed: {e}")
-        else:
-            yaml_path.unlink()
 
         with self._store._lock:
             self._store._cache.pop(table, None)

@@ -50,6 +50,11 @@ COMMITTER_IDENTITY = f"{COMMITTER_NAME} <{COMMITTER_EMAIL}>"
 _INVALID_LOCAL_PART = re.compile(r"[^a-z0-9._-]")
 
 
+def git_repo_relative_path(repo_path: str | Path, file_path: Path) -> str:
+    """Return a repo-root-relative path for dulwich, using resolved absolute paths."""
+    return str(file_path.resolve(strict=False).relative_to(Path(repo_path).resolve()))
+
+
 def _sanitise_local_part(user_id: str) -> str:
     """Reduce a user id to a safe email local-part for placeholder identities."""
     local = _INVALID_LOCAL_PART.sub("-", user_id.lower()).strip("-.")
@@ -82,7 +87,7 @@ def commit_file(
     if repo is None:
         return
     try:
-        rel_path = str(file_path.resolve(strict=False).relative_to(Path(repo.path).resolve()))
+        rel_path = git_repo_relative_path(repo.path, file_path)
         git.add(repo, paths=[rel_path])
         author_bytes = (author or committer).encode("utf-8")
         commit_id = git.commit(
