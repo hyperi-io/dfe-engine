@@ -1,7 +1,7 @@
 [project]
 name = "dfe-engine"
 version = "1.8.0"
-description = "DFE Engine - Core library for Data Fusion Engine"
+description = "Config control plane for the HyperI Data Fusion Engine. Renders operator intent to git as YAML, Helm values and ClickHouse DDL for Argo CD to apply."
 authors = [{ name = "HYPERI PTY LIMITED", email = "engineering@hyperi.com.au" }]
 license = { text = "BUSL-1.1" }
 requires-python = ">=3.12"
