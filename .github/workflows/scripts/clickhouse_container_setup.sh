@@ -7,7 +7,7 @@
 # Tag on its own line, separate from the image name, so one Renovate regex
 # covers every language in the fleet.
 # renovate: datasource=docker depName=clickhouse/clickhouse-server
-CH_TAG="26.3"
+CH_TAG="26.7"
 
 docker run --rm -d --name clickhouse -e CLICKHOUSE_SKIP_USER_SETUP=1 -p 9000:9000/tcp "clickhouse/clickhouse-server:${CH_TAG}"
 
