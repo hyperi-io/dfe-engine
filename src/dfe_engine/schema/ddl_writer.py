@@ -191,6 +191,9 @@ class DDLFileWriter:
         table_name = "detection"
         table_description = "Hunt detection results (profile and hunts.results columns)"
         ttl_days = 365
+        # Resolve so the table comment records the profile version it was built
+        # from, the same as every other profile-composed table.
+        profile_version = profile_version or self._profile_version(profile_name)
 
         hunt_results_path = self._resolve_hunt_results_path(schemas_root_path)
         hunt_results_columns = SchemaLoader.load_columns(
