@@ -177,7 +177,7 @@ class TestBuildInsertSelect:
         schema = HuntResultSchema()
         sql = schema.build_insert_select(
             target_db="acme",
-            target_table="hunt_results",
+            target_table="detection",
             source_db="acme",
             source_table="windows_audit",
             where_clause="process_executable IN ('certutil.exe')",
@@ -186,7 +186,7 @@ class TestBuildInsertSelect:
             hunt_name="windows_detection",
             severity="high",
         )
-        assert "INSERT INTO acme.hunt_results" in sql
+        assert "INSERT INTO acme.detection" in sql
         assert "FROM acme.windows_audit" in sql
         assert "{timestamp_condition}" in sql
         assert "process_executable IN ('certutil.exe')" in sql
