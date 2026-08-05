@@ -517,7 +517,14 @@ class TestPromoteField:
         assert schema["meta_schema"] == SCHEMA_PATH
         assert schema["meta_schema_version"] == "1.1.0"
         assert src.json()["versions"][cur]["header"]["type"] == "common-header/minimal"
-        assert src.json()["versions"][cur]["header"]["version"] == "1.0.0"
+        # Derived, not pinned: the auto-assigned header tracks the profile's
+        # `current`, so a profile revision must not fail this test.
+        from dfe_engine.schema.schema_loader import SchemaLoader, _resolve_profiles_dir
+
+        minimal_current = SchemaLoader.load_version_metadata(
+            _resolve_profiles_dir() / "minimal.yaml"
+        )["current"]
+        assert src.json()["versions"][cur]["header"]["version"] == minimal_current
 
     def test_schema_path_rejected_when_source_has_meta_schema(
         self, client: TestClient, admin_headers
