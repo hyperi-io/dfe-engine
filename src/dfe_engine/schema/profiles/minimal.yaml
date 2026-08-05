@@ -4,10 +4,55 @@
 #
 # Requires: ClickHouse 26.2+ (JSON type GA)
 
-current: "1.0.0"
+current: "1.0.1"
 resource_type: core
 
 versions:
+  "1.0.1":
+    date: "2026-08-05"
+    type: revision
+    summary: "_json not_null - ClickHouse rejects JSON inside Nullable on the 24.8 floor, and a capture column is always written"
+    columns:
+      - name: _timestamp_load
+        type: timestamp
+        default: "now64(3)"
+        order: 0
+        expr: "@generated: now64(3)"
+        comment: "Insertion timestamp (ms precision)"
+        _field_type: base
+
+      - name: _timestamp
+        type: timestamp
+        use_case: range
+        order: 1
+        expr: "@source: timestamp | now()"
+        comment: "Event timestamp from source data"
+        _field_type: base
+
+      - name: _uuid
+        type: uuid
+        default: "generateUUIDv7()"
+        expr: "@generated: generateUUIDv7()"
+        comment: "Time-ordered unique event identifier"
+        _field_type: base
+
+      - name: _org_id
+        type: string
+        attribute: [lowcardinality, not_null]
+        use_case: dimension
+        order: 2
+        expr: "@source: org_id"
+        comment: "Tenant/organisation identifier"
+        _field_type: base
+
+      - name: _json
+        type: json
+        attribute: [not_null]
+        max_dynamic_paths: 2048
+        expr: "@captured: raw_payload as JSON"
+        comment: "Original event payload as structured JSON"
+        _field_type: base
+
   "1.0.0":
     date: "2026-06-10"
     type: model

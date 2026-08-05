@@ -94,9 +94,10 @@ class TestCheckpointTable:
     def test_structure(self, writer):
         ddl = writer.generate_detection_checkpoint_table()
         assert "detection_checkpoint" in ddl
-        # Checkpoint rows are keyed by customer/hunt/rule, not by tenant -- the
-        # schema (hunts/detection_checkpoint.yaml) declares no _org_id.
-        assert "customer_name" in ddl
+        # Checkpoint rows are keyed by org/hunt/rule; customer_name was renamed
+        # to _org_id in dfe-schemas#6.
+        assert "_org_id" in ddl
+        assert "customer_name" not in ddl
         assert "hunt_name" in ddl
         assert "rule_name" in ddl
         assert "query_checkpoint_time" in ddl
@@ -258,9 +259,10 @@ class TestWriteAll:
     def test_creates_files(self, writer, tmp_path):
         written = writer.write_all(tmp_path / "ddl")
         # Pinned, not derived from generate_all(): deriving both sides would let a
-        # regression that silently drops a profile pass. 10 = default x3 profiles +
-        # profiles x3 + detection_checkpoint x1 + hunt_results x3 profiles.
-        assert len(written) == 10
+        # regression that silently drops a profile pass. Every profile version is
+        # emitted, so 19 = default 3x2 + profiles 3x2 + detection_checkpoint 1 +
+        # hunt_results 1x3x2.
+        assert len(written) == 19
         for p in written:
             assert p.exists()
             assert p.suffix == ".sql"
