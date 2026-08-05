@@ -162,6 +162,7 @@ class DDLFileWriter:
         config = DDLConfig(
             db=self._database,
             partition_column="query_checkpoint_time",
+            partition_granularity="month",
             schema_version=detection_checkpoint_version,
             description=table_description,
             ttl_days=ttl_days,
