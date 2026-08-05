@@ -111,6 +111,12 @@ class TestCheckpointTable:
         ddl = writer.generate_detection_checkpoint_table()
         assert "MergeTree()" in ddl
 
+    def test_partitions_monthly(self, writer):
+        # Low row count per day; daily partitions would accumulate a part per
+        # day holding a handful of rows.
+        ddl = writer.generate_detection_checkpoint_table()
+        assert "PARTITION BY toYYYYMM(query_checkpoint_time)" in ddl
+
     def test_uses_db_placeholder(self, writer):
         ddl = writer.generate_detection_checkpoint_table()
         assert "{db}" in ddl
