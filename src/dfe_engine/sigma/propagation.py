@@ -364,7 +364,7 @@ class SigmaPropagator:
         force: bool = False,
         create_hunts: bool = True,
         hunt_cron: str = "*/15 * * * *",
-        hunt_target_table: str = "hunt_results",
+        hunt_target_table: str = "detection",
         hunt_customers: list[str] | None = None,
     ) -> PropagationReport:
         """Generate/refresh bindings + hunts for every SELECTED sigma rule."""

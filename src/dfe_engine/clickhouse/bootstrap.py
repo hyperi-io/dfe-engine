@@ -6,9 +6,9 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Create the DFE database, landing table, and hunt results table in ClickHouse.
+"""Create the DFE databases, landing table, and hunt detection table in ClickHouse.
 
-Runs once at startup. The database name comes from ``clickhouse.effective_data_database`` (default ``dfe``) and the landing table columns from ``clickhouse.default_table_profile`` (default ``timeseries``). Best-effort: a failure is logged and startup continues, so a briefly-unavailable ClickHouse does not crash-loop the app. Disable with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``.
+Runs once at startup. The data database comes from ``clickhouse.effective_data_database`` (default ``dfe``) and the landing table columns from ``clickhouse.default_table_profile`` (default ``timeseries``); hunt output goes to ``clickhouse.hunts_database`` (default ``dfe_hunts``). Best-effort: a failure is logged and startup continues, so a briefly-unavailable ClickHouse does not crash-loop the app. Disable with ``DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false``.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
         return
 
     database = settings.clickhouse.effective_data_database
+    hunts_database = settings.clickhouse.hunts_database
     profile = settings.clickhouse.default_table_profile
 
     try:
@@ -51,17 +52,23 @@ def bootstrap_clickhouse(*, settings: DFESettings) -> None:
         # misread as plain and wrongly get ON CLUSTER.
         writer = DDLFileWriter(resolver=resolver, database=database)
         default_ddl = writer.generate_default_table(profile_name=profile)
-        hunt_results_ddl = writer.generate_hunt_results_table(profile_name=profile)
+        # Hunt output lives in its own database so the hunt-tier roles can be
+        # granted on it without also seeing the landing table.
+        hunts_writer = DDLFileWriter(resolver=resolver, database=hunts_database)
+        detection_ddl = hunts_writer.generate_detection_table(profile_name=profile)
 
         # The database itself must be created cluster-wide too, else the ON CLUSTER
         # table DDL below lands on nodes that have no database to put it in.
         on_cluster = resolver.resolve(parse_engine("MergeTree"), database).on_cluster
         client.execute(f"CREATE DATABASE IF NOT EXISTS {database}{on_cluster}")
         client.execute(default_ddl)
-        client.execute(hunt_results_ddl)
+
+        hunts_on_cluster = resolver.resolve(parse_engine("MergeTree"), hunts_database).on_cluster
+        client.execute(f"CREATE DATABASE IF NOT EXISTS {hunts_database}{hunts_on_cluster}")
+        client.execute(detection_ddl)
         logger.info(
-            f"Bootstrapped ClickHouse database {database!r} "
-            f"(default + hunt_results tables, profile {profile!r})"
+            f"Bootstrapped ClickHouse databases {database!r} (default table) and "
+            f"{hunts_database!r} (detection table), profile {profile!r}"
         )
     except Exception as exc:
         logger.error(f"ClickHouse bootstrap failed for database {database!r}: {exc}")

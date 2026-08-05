@@ -175,15 +175,20 @@ class DDLFileWriter:
             generated_time=None,
         )
 
-    def generate_hunt_results_table(
+    def generate_detection_table(
         self,
         profile_name: str = _DEFAULT_PROFILE,
         profile_version: str | None = None,
         hunt_results_version: str | None = None,
         schemas_root_path: Path | None = None,
     ) -> str:
-        """Generate DDL for the hunt results table."""
-        table_name = "hunt_results"
+        """Generate DDL for the hunt detection table.
+
+        The table is ``detection`` and lives in the hunts database; the columns
+        come from ``hunts/results.yaml`` composed onto the common header, minus
+        whatever that schema's ``profile_exclude`` drops.
+        """
+        table_name = "detection"
         table_description = "Hunt detection results (profile and hunts.results columns)"
         ttl_days = 365
 
@@ -195,7 +200,9 @@ class DDLFileWriter:
             profile_name=profile_name, profile_version=profile_version
         )
         all_columns = SchemaLoader.compose(
-            profile_columns=profile_columns, source_columns=hunt_results_columns
+            profile_columns=profile_columns,
+            source_columns=hunt_results_columns,
+            exclude=SchemaLoader.load_profile_exclude(hunt_results_path, hunt_results_version),
         )
 
         config = DDLConfig(
@@ -249,23 +256,23 @@ class DDLFileWriter:
                 detection_checkpoint_version=detection_checkpoint_version
             )
 
-        files["hunt_results"] = {}
+        files["detection"] = {}
         hunt_results_path = self._resolve_hunt_results_path(schemas_root_path)
         hunt_results_versions = SchemaLoader.load_version_metadata(hunt_results_path)[
             "versions"
         ].keys()
         for hunt_results_version in hunt_results_versions:
-            files["hunt_results"][hunt_results_version] = {}
+            files["detection"][hunt_results_version] = {}
             for profile_name in _PROFILES:
-                files["hunt_results"][hunt_results_version][profile_name] = {}
+                files["detection"][hunt_results_version][profile_name] = {}
                 profile_versions = SchemaLoader.load_version_metadata(profile_path)[
                     "versions"
                 ].keys()
                 for profile_version in profile_versions:
-                    files["hunt_results"][hunt_results_version][profile_name][profile_version] = {}
-                    files["hunt_results"][hunt_results_version][profile_name][profile_version][
-                        "hunt_results.sql"
-                    ] = self.generate_hunt_results_table(
+                    files["detection"][hunt_results_version][profile_name][profile_version] = {}
+                    files["detection"][hunt_results_version][profile_name][profile_version][
+                        "detection.sql"
+                    ] = self.generate_detection_table(
                         profile_name=profile_name,
                         profile_version=profile_version,
                         hunt_results_version=hunt_results_version,

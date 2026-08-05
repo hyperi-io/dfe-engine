@@ -344,7 +344,7 @@ def test_propagate_preserves_existing_hunt_rules_and_overrides(env):
         {
             "display_name": "Windows",
             "cron": "*/10 * * * *",
-            "global_target_table_name": "hunt_results",
+            "global_target_table_name": "detection",
             "customers": ["acme"],
             "rules": [{"rule_name": "operator_rule", "target_table_name": "custom"}],
         },
