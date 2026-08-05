@@ -10,9 +10,15 @@ from dfe_engine.settings import get_clickhouse_config, load_settings
 pytestmark = pytest.mark.integration
 
 
+def _hunts_database(database: str) -> str:
+    """Hunts database for a test run - derived so it is torn down with the data one."""
+    return f"{database}_hunts"
+
+
 def _bootstrap_settings(*, database):
     settings = load_settings()
     settings.clickhouse.data_database = database
+    settings.clickhouse.hunts_database = _hunts_database(database)
     settings.clickhouse.secure = False
     settings.clickhouse.bootstrap_tables = True
     return settings
@@ -21,6 +27,22 @@ def _bootstrap_settings(*, database):
 def _table_names(*, client, database) -> set[str]:
     rows = client.query(f"SELECT name FROM system.tables WHERE database = '{database}'").result_rows
     return {row[0] for row in rows}
+
+
+@pytest.fixture(autouse=True, scope="module")
+def _drop_hunts_database(clickhouse_test_database):
+    """Tear down the hunts database the bootstrap creates.
+
+    The clickhouse_test_database fixture only drops the data one, and the
+    bootstrap now creates a second database beside it.
+    """
+    yield
+    ClickHouseManager.reset_instance()
+    settings = _bootstrap_settings(database=clickhouse_test_database)
+    manager = ClickHouseManager.get_instance(get_clickhouse_config(settings=settings))
+    manager.get_clickhouse_client().command(
+        f"DROP DATABASE IF EXISTS {_hunts_database(clickhouse_test_database)}"
+    )
 
 
 def _bootstrap_and_client(database):
@@ -39,18 +61,21 @@ def _bootstrap_and_client(database):
 
 
 class TestBootstrapClickhouse:
-    def test_creates_default_and_hunt_results_tables(self, clickhouse_test_database):
+    def test_creates_default_and_detection_tables(self, clickhouse_test_database):
         client = _bootstrap_and_client(clickhouse_test_database)
-        names = _table_names(client=client, database=clickhouse_test_database)
-        assert "default" in names
-        assert "hunt_results" in names
+        assert "default" in _table_names(client=client, database=clickhouse_test_database)
+        # Hunt output lands in its own database (dfe-engine#127).
+        assert "detection" in _table_names(
+            client=client, database=_hunts_database(clickhouse_test_database)
+        )
 
     def test_is_idempotent(self, clickhouse_test_database):
         client = _bootstrap_and_client(clickhouse_test_database)
         # A second bootstrap must not error and the tables stay present.
         bootstrap_clickhouse(settings=_bootstrap_settings(database=clickhouse_test_database))
-        assert {"default", "hunt_results"} <= _table_names(
-            client=client, database=clickhouse_test_database
+        assert "default" in _table_names(client=client, database=clickhouse_test_database)
+        assert "detection" in _table_names(
+            client=client, database=_hunts_database(clickhouse_test_database)
         )
 
 

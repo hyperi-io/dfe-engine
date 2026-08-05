@@ -207,6 +207,16 @@ class ClickHouseSettings(BaseModel):
             "another -- read it via `effective_data_database`, never directly."
         ),
     )
+    hunts_database: str = Field(
+        default="dfe_hunts",
+        description=(
+            "Database holding hunt output (the `detection` table), from "
+            "DFE_CLICKHOUSE_HUNTS_DATABASE (default `dfe_hunts`). Separate from the "
+            "data database so the hunt-tier ClickHouse roles can be granted on it "
+            "alone -- a role granted on the data database would also see every "
+            "landing row."
+        ),
+    )
     landing_table: str = Field(
         default="default",
         description="Catch-all table where un-split source data lands (db.landing_table)",
@@ -217,7 +227,7 @@ class ClickHouseSettings(BaseModel):
     )
     bootstrap_tables: bool = Field(
         default=True,
-        description="Create the DFE database, landing table, and hunt results table on startup",
+        description="Create the DFE databases, landing table, and hunt detection table on startup",
     )
     secure: bool = Field(default=True)
     verify: bool | None = Field(

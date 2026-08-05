@@ -678,7 +678,7 @@ class TestBuildInsertSelect:
         schema = HuntResultSchema()
         sql = schema.build_insert_select(
             target_db="acme",
-            target_table="hunt_results",
+            target_table="detection",
             source_db="acme",
             source_table="payment_events",
             where_clause=rule.where_clause,
@@ -687,7 +687,7 @@ class TestBuildInsertSelect:
             hunt_name="payment_hunt",
             severity=rule.severity,
         )
-        assert "INSERT INTO acme.hunt_results" in sql
+        assert "INSERT INTO acme.detection" in sql
         assert "FROM acme.payment_events" in sql
         assert "severity = 'critical'" in sql
         assert "amount > 10000" in sql
@@ -705,7 +705,7 @@ class TestBuildInsertSelect:
         schema = HuntResultSchema()
         sql = schema.build_insert_select(
             target_db="acme",
-            target_table="hunt_results",
+            target_table="detection",
             source_db="acme",
             source_table="events",
             where_clause=rule.where_clause,

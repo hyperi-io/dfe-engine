@@ -895,7 +895,7 @@ class PropagateRequest(BaseModel):
         default="*/15 * * * *", description="Cron for a newly-created per-source hunt"
     )
     hunt_target_table: str = Field(
-        default="hunt_results", description="global_target_table_name for a new hunt"
+        default="detection", description="global_target_table_name for a new hunt"
     )
     hunt_customers: list[str] = Field(
         default_factory=lambda: ["default"],

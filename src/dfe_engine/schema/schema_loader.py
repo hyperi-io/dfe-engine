@@ -370,6 +370,24 @@ class SchemaLoader:
         return result
 
     @staticmethod
+    def load_profile_exclude(source: str | Path, version: str | None = None) -> list[str]:
+        """Read a version's ``profile_exclude`` - header columns it drops.
+
+        A schema composed onto a common header can declare columns of that
+        header it does not want (``hunts/results.yaml`` drops ``_raw`` and
+        ``_tags``). Returns an empty list when the field is absent.
+
+        Raises:
+            SchemaLoadError: If file missing or unparseable.
+        """
+        meta = SchemaLoader.load_version_metadata(source)
+        versions = meta.get("versions") or {}
+        entry = versions.get(version or meta.get("current")) or {}
+        if not isinstance(entry, dict):
+            return []
+        return list(entry.get("profile_exclude") or [])
+
+    @staticmethod
     def load_profile(
         profile_name: str,
         profiles_dir: str | Path | None = None,
@@ -467,6 +485,8 @@ class SchemaLoader:
     def compose(
         profile_columns: list[SchemaColumn],
         source_columns: list[SchemaColumn],
+        *,
+        exclude: list[str] | None = None,
     ) -> list[SchemaColumn]:
         """Compose a full schema: profile header + source-specific columns.
 
@@ -476,10 +496,17 @@ class SchemaLoader:
         Args:
             profile_columns: Common header columns from the profile.
             source_columns: Source-specific schema columns.
+            exclude: Header column names to drop (the schema's
+                ``profile_exclude``). A name the profile does not have is
+                ignored - a schema must compose onto any profile.
 
         Returns:
             Complete ordered list of SchemaColumn models.
         """
+        if exclude:
+            dropped = set(exclude)
+            profile_columns = [col for col in profile_columns if col.name not in dropped]
+
         profile_names = {col.name for col in profile_columns}
         duplicates = [col.name for col in source_columns if col.name in profile_names]
 

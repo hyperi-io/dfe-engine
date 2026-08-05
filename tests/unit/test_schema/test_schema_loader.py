@@ -296,6 +296,29 @@ class TestCompose:
         assert result[0].type == "string"  # profile value wins
         assert result[1].name == "data"
 
+    def test_exclude_drops_profile_columns(self):
+        profile = [
+            SchemaColumn(name="_ts", type="timestamp"),
+            SchemaColumn(name="_raw", type="text"),
+            SchemaColumn(name="_tags", type="json"),
+        ]
+        source = [SchemaColumn(name="rule_id", type="string")]
+        result = SchemaLoader.compose(profile, source, exclude=["_raw", "_tags"])
+        assert [c.name for c in result] == ["_ts", "rule_id"]
+
+    def test_exclude_of_absent_column_is_a_no_op(self):
+        # A schema must compose onto any profile; `minimal` has no _raw.
+        profile = [SchemaColumn(name="_ts", type="timestamp")]
+        source = [SchemaColumn(name="rule_id", type="string")]
+        result = SchemaLoader.compose(profile, source, exclude=["_raw"])
+        assert [c.name for c in result] == ["_ts", "rule_id"]
+
+    def test_exclude_does_not_touch_source_columns(self):
+        profile = [SchemaColumn(name="_ts", type="timestamp")]
+        source = [SchemaColumn(name="severity", type="string")]
+        result = SchemaLoader.compose(profile, source, exclude=["severity"])
+        assert [c.name for c in result] == ["_ts", "severity"]
+
 
 # ── validate_columns ────────────────────────────────────────────────
 
@@ -779,3 +802,55 @@ class TestLoadVersionMetadata:
     def test_file_not_found(self):
         with pytest.raises(SchemaLoadError, match="not found"):
             SchemaLoader.load_version_metadata("/nonexistent/path.yaml")
+
+
+# ── load_profile_exclude ────────────────────────────────────────────
+
+
+class TestLoadProfileExclude:
+    def _schema(self, tmp_versioned_schema, exclude=None):
+        entry = {
+            "date": "2026-08-05",
+            "type": "revision",
+            "summary": "s",
+            "columns": [{"name": "a", "type": "string"}],
+        }
+        if exclude is not None:
+            entry["profile_exclude"] = exclude
+        return tmp_versioned_schema({"current": "1.0.1", "versions": {"1.0.1": entry}})
+
+    def test_reads_current_version(self, tmp_versioned_schema):
+        path = self._schema(tmp_versioned_schema, ["_raw", "_tags"])
+        assert SchemaLoader.load_profile_exclude(path) == ["_raw", "_tags"]
+
+    def test_absent_field_is_empty(self, tmp_versioned_schema):
+        path = self._schema(tmp_versioned_schema)
+        assert SchemaLoader.load_profile_exclude(path) == []
+
+    def test_explicit_version(self, tmp_versioned_schema):
+        path = tmp_versioned_schema(
+            {
+                "current": "1.0.1",
+                "versions": {
+                    "1.0.0": {
+                        "date": "2026-06-10",
+                        "type": "model",
+                        "summary": "s",
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                    "1.0.1": {
+                        "date": "2026-08-05",
+                        "type": "revision",
+                        "summary": "s",
+                        "profile_exclude": ["_raw"],
+                        "columns": [{"name": "a", "type": "string"}],
+                    },
+                },
+            }
+        )
+        assert SchemaLoader.load_profile_exclude(path, "1.0.0") == []
+        assert SchemaLoader.load_profile_exclude(path, "1.0.1") == ["_raw"]
+
+    def test_unversioned_file_is_empty(self, tmp_schema):
+        path = tmp_schema([{"name": "x", "type": "string"}])
+        assert SchemaLoader.load_profile_exclude(path) == []
