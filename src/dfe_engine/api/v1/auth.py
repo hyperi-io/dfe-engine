@@ -1,9 +1,10 @@
 """Auth router — login, token refresh, user info, permissions.
 
-POST /api/v1/auth/login      → JWT token (LocalAuthProvider)
-POST /api/v1/auth/refresh     → Refreshed JWT token
-GET  /api/v1/auth/me          → Current user info
-GET  /api/v1/auth/permissions → Resolved permissions for current user's roles
+POST /api/v1/auth/login           → JWT token (LocalAuthProvider)
+POST /api/v1/auth/refresh         → Refreshed JWT token
+GET  /api/v1/auth/me              → Current user info
+GET  /api/v1/auth/permissions     → Resolved permissions for current user's roles
+GET  /api/v1/auth/setup-status    → Initial setup required? (public, pre-login)
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from dfe_engine.api.deps import (
     resolve_live_roles_for_user,
 )
 from dfe_engine.auth.local_provider import LocalAuthProvider
+from dfe_engine.auth.setup_status import InitialSetupStatus, evaluate_initial_setup
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -144,6 +146,12 @@ async def get_permissions(user: CurrentUser, request: Request):
         roles=user.roles,
         permissions=sorted(all_perms),
     )
+
+
+@router.get("/setup-status", response_model=InitialSetupStatus)
+async def get_setup_status(request: Request) -> InitialSetupStatus:
+    """Report whether first-run setup is still required (no auth — pre-log in UI)."""
+    return evaluate_initial_setup(request)
 
 
 # ── Helpers ──────────────────────────────────────────────────
