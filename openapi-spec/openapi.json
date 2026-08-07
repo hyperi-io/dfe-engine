@@ -167,7 +167,7 @@
           "OIDC Login"
         ],
         "summary": "Oidc Login",
-        "description": "Redirect the user agent to the IdP to begin the OIDC auth-code flow.",
+        "description": "Begin OIDC auth-code flow: 302 to the IdP, or JSON authorize URL for SPAs.",
         "operationId": "oidc_login_api_v1_auth_oidc__provider__login_get",
         "parameters": [
           {
@@ -178,6 +178,18 @@
               "type": "string",
               "title": "Provider"
             }
+          },
+          {
+            "name": "redirect",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "description": "When false, return JSON with authorization_url for SPA clients (use credentials: include, then window.location.assign the URL).",
+              "default": true,
+              "title": "Redirect"
+            },
+            "description": "When false, return JSON with authorization_url for SPA clients (use credentials: include, then window.location.assign the URL)."
           }
         ],
         "responses": {
@@ -14847,7 +14859,15 @@
             },
             "type": "array",
             "title": "Pending Steps",
-            "description": "Machine-readable reasons setup is incomplete: default_admin_password, no_organisations, no_oidc_provider."
+            "description": "Setup step ids still required (subset of evaluated steps)."
+          },
+          "completed_steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Completed Steps",
+            "description": "Setup step ids already satisfied (subset of evaluated steps)."
           }
         },
         "type": "object",
