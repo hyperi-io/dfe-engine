@@ -309,6 +309,23 @@ class TestVerifyLoginConfig:
         client_id = next(c for c in data["checks"] if c["name"] == "client_id")
         assert client_id["ok"] is False
 
+    def test_reports_literal_client_id_as_misconfiguration(self, client, admin_headers):
+        """YAML that stores the client id value instead of an env var name is flagged."""
+        _create_provider(
+            client,
+            admin_headers,
+            name="vl-literal-id",
+            client_id_env="0oa15mxzztuHEzwr7698",
+        )
+        resp = client.get(
+            "/api/v1/auth/oidc-providers/vl-literal-id/verify-login", headers=admin_headers
+        )
+        assert resp.status_code == 200
+        client_id = next(c for c in resp.json()["checks"] if c["name"] == "client_id")
+        assert client_id["ok"] is False
+        assert "environment variable name" in client_id["detail"]
+        assert "0oa" not in client_id["detail"]
+
     def test_reports_present_client_id(self, client, admin_headers, monkeypatch):
         """A resolvable client_id env var passes its check (value never returned)."""
         monkeypatch.setenv("OIDC_PRESENT_ID", "some-client-id")

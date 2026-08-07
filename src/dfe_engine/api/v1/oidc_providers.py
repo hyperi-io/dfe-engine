@@ -477,8 +477,6 @@ async def verify_login_config(
     client_secret env var resolves, and the issuer's discovery document is
     reachable and well-formed.
     """
-    import os
-
     registry = _get_registry(request)
     provider = registry.get(name)
     if provider is None:
@@ -486,6 +484,8 @@ async def verify_login_config(
             status_code=404,
             detail={"code": "not_found", "message": f"OIDC provider '{name}' not found"},
         )
+
+    from dfe_engine.auth.oidc.credential_env import credential_env_check
 
     checks: list[LoginConfigCheck] = []
 
@@ -495,14 +495,8 @@ async def verify_login_config(
         ("client_id", provider.client_id_env),
         ("client_secret", provider.client_secret_env),
     ):
-        if not env_name:
-            checks.append(LoginConfigCheck(name=label, ok=False, detail="no env var configured"))
-        elif os.environ.get(env_name):
-            checks.append(LoginConfigCheck(name=label, ok=True, detail=f"{env_name} is set"))
-        else:
-            checks.append(
-                LoginConfigCheck(name=label, ok=False, detail=f"{env_name} is unset or empty")
-            )
+        ok, detail = credential_env_check(label, env_name)
+        checks.append(LoginConfigCheck(name=label, ok=ok, detail=detail))
 
     # Discovery document: reachable, JSON, and carries the endpoints Authlib needs.
     if not provider.issuer:
