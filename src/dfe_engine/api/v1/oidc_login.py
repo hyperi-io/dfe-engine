@@ -9,6 +9,7 @@
 """OIDC relying-party login endpoints.
 
 GET /api/v1/auth/oidc/{provider}/login     -> 302 to the IdP authorize endpoint
+GET /api/v1/auth/oidc/{provider}/login?redirect=false -> JSON {authorization_url}
 GET /api/v1/auth/oidc/{provider}/callback  -> exchange code, RE-MINT engine token
 
 The engine is the RP and the SINGLE token issuer: on callback it validates the
@@ -23,8 +24,9 @@ or disabled providers return 404.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
+from pydantic import BaseModel, Field
 from scalo.logger import logger
 
 from dfe_engine.api.deps import Settings, jwt_authority_for
@@ -33,6 +35,12 @@ router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 
 # Name of the cookie carrying the re-minted engine token to a browser client.
 _TOKEN_COOKIE = "dfe_token"
+
+
+class OidcLoginUrlResponse(BaseModel):
+    authorization_url: str = Field(
+        description="IdP authorize URL; navigate the browser here (not fetch redirect: follow).",
+    )
 
 
 def _rp_or_404(request: Request, provider: str):
@@ -50,12 +58,23 @@ def _rp_or_404(request: Request, provider: str):
 
 
 @router.get("/{provider}/login")
-async def oidc_login(provider: str, request: Request):
-    """Redirect the user agent to the IdP to begin the OIDC auth-code flow."""
+async def oidc_login(
+    provider: str,
+    request: Request,
+    redirect: bool = Query(
+        True,
+        description="When false, return JSON with authorization_url for SPA clients "
+        "(use credentials: include, then window.location.assign the URL).",
+    ),
+):
+    """Begin OIDC auth-code flow: 302 to the IdP, or JSON authorize URL for SPAs."""
     rp = _rp_or_404(request, provider)
     # Callback URL is built from this request's base URL so it works behind any
     # ingress without a hardcoded host. Must match a redirect URI the IdP allows.
     redirect_uri = str(request.url_for("oidc_callback", provider=provider))
+    if not redirect:
+        url = await rp.login_authorization_url(provider, request, redirect_uri)
+        return OidcLoginUrlResponse(authorization_url=url)
     return await rp.login_redirect(provider, request, redirect_uri)
 
 
