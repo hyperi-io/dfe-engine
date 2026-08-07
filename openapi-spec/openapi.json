@@ -197,9 +197,14 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OidcLoginResponse"
+                }
               }
             }
+          },
+          "302": {
+            "description": "Redirect to the IdP authorize URL (redirect=true, default)."
           },
           "422": {
             "description": "Validation Error",
@@ -243,7 +248,9 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/OidcCallbackResponse"
+                }
               }
             }
           },
@@ -15838,6 +15845,66 @@
         ],
         "title": "ObjectMetadata",
         "description": "Metadata for a stored object (PUT response)."
+      },
+      "OidcCallbackResponse": {
+        "properties": {
+          "access_token": {
+            "type": "string",
+            "title": "Access Token",
+            "description": "Engine JWT Bearer token"
+          },
+          "token_type": {
+            "type": "string",
+            "const": "bearer",
+            "title": "Token Type",
+            "default": "bearer"
+          },
+          "subject": {
+            "type": "string",
+            "title": "Subject",
+            "description": "IdP subject (sub)"
+          },
+          "email": {
+            "type": "string",
+            "title": "Email",
+            "description": "Email from the IdP, if asserted",
+            "default": ""
+          },
+          "groups": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Groups",
+            "description": "Resolved group identifiers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "access_token",
+          "subject"
+        ],
+        "title": "OidcCallbackResponse",
+        "description": "Engine token minted after a successful IdP callback."
+      },
+      "OidcLoginResponse": {
+        "properties": {
+          "authorization_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Authorization Url",
+            "description": "IdP authorize URL for SPA clients (redirect=false). Omitted when redirect=true (302 to the IdP instead)."
+          }
+        },
+        "type": "object",
+        "title": "OidcLoginResponse",
+        "description": "JSON body for GET .../login when ``redirect=false``."
       },
       "OrgResponse": {
         "properties": {

@@ -24,8 +24,10 @@ or disabled providers return 404.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
@@ -37,10 +39,24 @@ router = APIRouter(prefix="/auth/oidc", tags=["OIDC Login"])
 _TOKEN_COOKIE = "dfe_token"
 
 
-class OidcLoginUrlResponse(BaseModel):
-    authorization_url: str = Field(
-        description="IdP authorize URL; navigate the browser here (not fetch redirect: follow).",
+class OidcLoginResponse(BaseModel):
+    """JSON body for GET .../login when ``redirect=false``."""
+
+    authorization_url: str | None = Field(
+        default=None,
+        description="IdP authorize URL for SPA clients (redirect=false). Omitted when "
+        "redirect=true (302 to the IdP instead).",
     )
+
+
+class OidcCallbackResponse(BaseModel):
+    """Engine token minted after a successful IdP callback."""
+
+    access_token: str = Field(description="Engine JWT Bearer token")
+    token_type: Literal["bearer"] = "bearer"
+    subject: str = Field(description="IdP subject (sub)")
+    email: str = Field(default="", description="Email from the IdP, if asserted")
+    groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
 
 
 def _rp_or_404(request: Request, provider: str):
@@ -57,7 +73,12 @@ def _rp_or_404(request: Request, provider: str):
     return rp
 
 
-@router.get("/{provider}/login")
+@router.get(
+    "/{provider}/login",
+    response_model=OidcLoginResponse,
+    response_model_exclude_none=True,
+    responses={302: {"description": "Redirect to the IdP authorize URL (redirect=true, default)."}},
+)
 async def oidc_login(
     provider: str,
     request: Request,
@@ -66,7 +87,7 @@ async def oidc_login(
         description="When false, return JSON with authorization_url for SPA clients "
         "(use credentials: include, then window.location.assign the URL).",
     ),
-):
+) -> RedirectResponse | OidcLoginResponse:
     """Begin OIDC auth-code flow: 302 to the IdP, or JSON authorize URL for SPAs."""
     rp = _rp_or_404(request, provider)
     # Callback URL is built from this request's base URL so it works behind any
@@ -74,12 +95,18 @@ async def oidc_login(
     redirect_uri = str(request.url_for("oidc_callback", provider=provider))
     if not redirect:
         url = await rp.login_authorization_url(provider, request, redirect_uri)
-        return OidcLoginUrlResponse(authorization_url=url)
+        return OidcLoginResponse(authorization_url=url)
     return await rp.login_redirect(provider, request, redirect_uri)
 
 
-@router.get("/{provider}/callback", name="oidc_callback")
-async def oidc_callback(provider: str, request: Request, settings: Settings):
+@router.get(
+    "/{provider}/callback",
+    name="oidc_callback",
+    response_model=OidcCallbackResponse,
+)
+async def oidc_callback(
+    provider: str, request: Request, settings: Settings
+) -> JSONResponse:
     """Complete the OIDC flow and re-mint the engine token (single issuer)."""
     rp = _rp_or_404(request, provider)
 
@@ -116,15 +143,13 @@ async def oidc_callback(provider: str, request: Request, settings: Settings):
         group_count=len(identity.groups),
     )
 
-    response = JSONResponse(
-        {
-            "access_token": token,
-            "token_type": "bearer",
-            "subject": identity.subject,
-            "email": identity.email,
-            "groups": identity.groups,
-        }
+    payload = OidcCallbackResponse(
+        access_token=token,
+        subject=identity.subject,
+        email=identity.email,
+        groups=identity.groups,
     )
+    response = JSONResponse(payload.model_dump())
     response.set_cookie(
         _TOKEN_COOKIE,
         token,
