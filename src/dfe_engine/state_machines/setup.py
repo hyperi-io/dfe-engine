@@ -19,6 +19,13 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
     first_user       required   create a real user (NOT the break-glass admin)
     admin_password   required   rotate the seeded break-glass admin password
 
+A step applies when the thing it configures actually exists — not when a
+settings toggle says so. ``app.py`` bootstraps the account store and seeds the
+break-glass admin unconditionally, and ``POST /auth/login`` authenticates
+against it with neither ``auth.enabled`` nor ``auth.local.enabled`` consulted.
+So the seeded ``changeme`` credential is live even in a deployment that
+believes auth is off, and the wizard has to say so.
+
 ``first_user`` may be satisfied by a local account or by an OIDC identity that
 JIT-provisioned at first login — hence OIDC comes first, so an operator who
 wants IdP-only users can configure it before creating anyone.
@@ -65,10 +72,13 @@ STEP_ADMIN_PASSWORD = "admin_password"
 
 @dataclass(frozen=True)
 class SetupContext:
-    """Everything the machine needs to evaluate a step, and nothing more."""
+    """Everything the machine needs to evaluate a step, and nothing more.
 
-    auth_enabled: bool = False
-    local_auth_enabled: bool = False
+    Deliberately no ``auth.enabled`` / ``auth.local.enabled``: neither toggle
+    gates the login path, so neither one can tell you whether a setup step
+    matters. The stores themselves can.
+    """
+
     account_store: AccountStore | None = None
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
@@ -86,11 +96,7 @@ class SetupContext:
         Returns:
             A context describing the live deployment.
         """
-        settings = getattr(state, "settings", None)
-        auth = getattr(settings, "auth", None)
         return cls(
-            auth_enabled=bool(getattr(auth, "enabled", False)),
-            local_auth_enabled=bool(getattr(getattr(auth, "local", None), "enabled", False)),
             account_store=getattr(state, "account_store", None),
             org_registry=getattr(state, "org_registry", None),
             oidc_registry=getattr(state, "oidc_provider_registry", None),
@@ -211,8 +217,23 @@ def _has_real_user(ctx: SetupContext) -> bool:
     )
 
 
+def _has_break_glass_account(ctx: SetupContext) -> bool:
+    """True when the bootstrap-seeded admin account is on disk.
+
+    ``bootstrap_auth`` seeds it on every startup, so this is the honest test
+    of whether there is a shared emergency credential to rotate.
+    """
+    if ctx.account_store is None:
+        return False
+    return ctx.account_store.get(BREAK_GLASS_ACCOUNT) is not None
+
+
 def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     """True once the seeded admin no longer answers to the default password.
+
+    Tests the *default* password specifically: an operator who set
+    DFE_AUTH_LOCAL_ADMIN_PASSWORD at bootstrap never had a shared secret to
+    rotate, so the step is already satisfied.
 
     Costs one bcrypt verify per call on an unauthenticated endpoint. There is
     no cheaper honest test — a changed ``updated_at`` also fires for an
@@ -221,9 +242,6 @@ def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     """
     if ctx.account_store is None:
         return False
-    if ctx.account_store.get(BREAK_GLASS_ACCOUNT) is None:
-        # No seeded break-glass account at all — nothing left to rotate.
-        return True
     return not ctx.account_store.verify_password(BREAK_GLASS_ACCOUNT, _DEFAULT_PASSWORD)
 
 
@@ -233,12 +251,10 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         title="Connect an identity provider",
         description=(
             "Register an OIDC provider so users sign in with your IdP. "
-            "Optional unless local accounts are disabled, in which case it is "
-            "the only way anyone can log in."
+            "Optional — local accounts work without it."
         ),
-        applies=lambda ctx: ctx.auth_enabled,
-        # Local login off means OIDC is the only door into the deployment.
-        required=lambda ctx: not ctx.local_auth_enabled,
+        applies=lambda ctx: ctx.oidc_registry is not None,
+        required=lambda _ctx: False,
         complete=_has_enabled_oidc_provider,
     ),
     StepDefinition(
@@ -259,7 +275,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
             "Add a real user — local or from your IdP — separate from the "
             "break-glass admin account, so day-to-day work is attributable."
         ),
-        applies=lambda ctx: ctx.auth_enabled and ctx.account_store is not None,
+        applies=lambda ctx: ctx.account_store is not None,
         required=lambda _ctx: True,
         complete=_has_real_user,
     ),
@@ -270,7 +286,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
             "The bootstrapped admin account still uses its default password. "
             "Change it — it is the emergency credential for this deployment."
         ),
-        applies=lambda ctx: ctx.auth_enabled and ctx.local_auth_enabled,
+        applies=_has_break_glass_account,
         required=lambda _ctx: True,
         complete=_break_glass_password_rotated,
     ),

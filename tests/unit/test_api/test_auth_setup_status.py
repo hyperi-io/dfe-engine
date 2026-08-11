@@ -50,6 +50,12 @@ def _settings(tmp_path: Path) -> DFESettings:
     )
 
 
+def _settings_auth_disabled(tmp_path: Path) -> DFESettings:
+    """The local dev posture: DFE_AUTH_ENABLED=false, local auth left unset."""
+    settings = _settings(tmp_path)
+    return settings.model_copy(update={"auth": settings.auth.model_copy(update={"enabled": False})})
+
+
 def _complete_setup(app) -> None:
     """Satisfy every required step: org, real user, rotated break-glass password."""
     app.state.org_registry.create("acme", display_name="Acme")
@@ -75,6 +81,30 @@ def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
             assert setup["pending_steps"] == ["organisations", "first_user", "admin_password"]
             assert setup["completed_steps"] == []
             assert setup["current_step"] == "organisations"
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_reports_auth_steps_even_when_auth_is_disabled(tmp_path):
+    """DFE_AUTH_ENABLED=false does not stop bootstrap seeding a live admin/changeme.
+
+    ``bootstrap_auth`` runs unconditionally and ``POST /auth/login`` never
+    checks the toggle, so the wizard must still call for the rotation and the
+    first real user.
+    """
+    app = create_app(settings=_settings_auth_disabled(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            setup = client.get("/api/v1/auth/setup-status").json()["initial_setup"]
+
+            assert setup["steps"] == [
+                "oidc_provider",
+                "organisations",
+                "first_user",
+                "admin_password",
+            ]
+            assert setup["pending_steps"] == ["organisations", "first_user", "admin_password"]
+            assert setup["complete"] is False
     finally:
         _registries.clear()
 

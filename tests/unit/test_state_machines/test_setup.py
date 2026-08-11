@@ -32,8 +32,6 @@ def ctx(tmp_path: Path) -> SetupContext:
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("admin", "changeme", groups=["dfe-admins"])
     return SetupContext(
-        auth_enabled=True,
-        local_auth_enabled=True,
         account_store=accounts,
         org_registry=OrgRegistry(tmp_path / "orgs"),
         oidc_registry=OIDCProviderRegistry(tmp_path / "oidc"),
@@ -62,22 +60,31 @@ def test_optional_oidc_never_blocks_completion(ctx):
     assert STEP_OIDC_PROVIDER not in state.completed_steps
 
 
-def test_oidc_becomes_required_when_local_login_is_disabled(ctx):
-    idp_only = SetupContext(
-        auth_enabled=True,
-        local_auth_enabled=False,
-        account_store=ctx.account_store,
-        org_registry=ctx.org_registry,
-        oidc_registry=ctx.oidc_registry,
+def test_steps_do_not_depend_on_the_auth_settings_toggles(ctx):
+    """The seeded admin logs in whether or not auth.enabled is set.
+
+    ``bootstrap_auth`` seeds it unconditionally and ``POST /auth/login`` never
+    consults auth.enabled / auth.local.enabled, so gating these steps on those
+    toggles would hide a live default credential. The context does not carry
+    them at all — this test pins that.
+    """
+    state = SETUP_MACHINE.evaluate(ctx)
+
+    assert STEP_FIRST_USER in state.steps
+    assert STEP_ADMIN_PASSWORD in state.steps
+    assert not hasattr(ctx, "auth_enabled")
+
+
+def test_admin_password_step_drops_when_there_is_no_break_glass_account(tmp_path):
+    no_admin = SetupContext(
+        account_store=AccountStore(tmp_path / "accounts"),
+        org_registry=OrgRegistry(tmp_path / "orgs"),
     )
 
-    state = SETUP_MACHINE.evaluate(idp_only)
+    state = SETUP_MACHINE.evaluate(no_admin)
 
-    # No local login means OIDC is the only door in, and there is no
-    # break-glass password to rotate.
-    assert STEP_OIDC_PROVIDER in state.pending_steps
-    assert state.current_step == STEP_OIDC_PROVIDER
     assert STEP_ADMIN_PASSWORD not in state.steps
+    assert STEP_FIRST_USER in state.steps
 
 
 def test_disabled_oidc_provider_does_not_satisfy_the_step(ctx):
@@ -120,10 +127,8 @@ def test_admin_password_step_clears_only_after_rotation(ctx):
     assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
-def test_auth_disabled_leaves_only_the_organisation_step(tmp_path):
-    state = SETUP_MACHINE.evaluate(
-        SetupContext(auth_enabled=False, org_registry=OrgRegistry(tmp_path / "orgs"))
-    )
+def test_only_bootstrapped_stores_contribute_steps(tmp_path):
+    state = SETUP_MACHINE.evaluate(SetupContext(org_registry=OrgRegistry(tmp_path / "orgs")))
 
     assert state.steps == [STEP_ORGANISATIONS]
     assert state.pending_steps == [STEP_ORGANISATIONS]
