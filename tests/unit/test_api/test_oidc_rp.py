@@ -223,3 +223,34 @@ def test_callback_unknown_provider_404(client):
     """The callback route is mounted and 404s for an unregistered provider."""
     resp = client.get("/api/v1/auth/oidc/nonexistent/callback", follow_redirects=False)
     assert resp.status_code == 404
+
+
+class _FakeOidcRp:
+    """Minimal RP stub for login route tests (no live IdP)."""
+
+    def has_provider(self, name: str) -> bool:
+        return name == "stub"
+
+    async def login_redirect(self, provider: str, request, redirect_uri: str):
+        from starlette.responses import RedirectResponse
+
+        return RedirectResponse("https://idp.example/authorize", status_code=302)
+
+    async def login_authorization_url(self, provider: str, request, redirect_uri: str) -> str:
+        assert provider == "stub"
+        assert redirect_uri.endswith("/api/v1/auth/oidc/stub/callback")
+        return "https://idp.example/authorize?state=test"
+
+
+def test_login_redirect_mode_302(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get("/api/v1/auth/oidc/stub/login", follow_redirects=False)
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "https://idp.example/authorize"
+
+
+def test_login_json_mode_returns_authorization_url(client, app):
+    app.state.oidc_rp = _FakeOidcRp()
+    resp = client.get("/api/v1/auth/oidc/stub/login?redirect=false")
+    assert resp.status_code == 200
+    assert resp.json() == {"authorization_url": "https://idp.example/authorize?state=test"}
