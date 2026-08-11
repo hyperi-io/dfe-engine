@@ -1531,6 +1531,12 @@ def load_settings(config_file: str | None = None) -> DFESettings:
     Returns:
         DFESettings: Validated settings object
     """
+    from dfe_engine.env_files import load_env_files
+    from dfe_engine.ssl_ca import ensure_platform_ssl_ca_bundle
+
+    load_env_files()
+    ensure_platform_ssl_ca_bundle()
+
     # Start with defaults
     config = _load_defaults()
 

@@ -175,6 +175,23 @@ class OidcRelyingParty:
             raise KeyError(f"OIDC provider '{provider_name}' has no Authlib client")
         return client
 
+    async def login_authorization_url(
+        self,
+        provider_name: str,
+        request: Request,
+        redirect_uri: str,
+    ) -> str:
+        """Begin the auth-code flow and return the IdP authorize URL (SPA-friendly).
+
+        Same session state as ``login_redirect`` (state + nonce in
+        ``request.session``), but returns the URL for the browser to navigate
+        explicitly—``fetch()`` cannot reliably follow a 302 to a cross-origin IdP.
+        """
+        client = self._client(provider_name)
+        rv = await client.create_authorization_url(redirect_uri)
+        await client.save_authorize_data(request, redirect_uri=redirect_uri, **rv)
+        return str(rv["url"])
+
     async def login_redirect(
         self,
         provider_name: str,
