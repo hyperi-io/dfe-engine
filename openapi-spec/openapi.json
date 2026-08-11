@@ -140,7 +140,7 @@
           "Auth"
         ],
         "summary": "Get Setup Status",
-        "description": "Report whether first-run setup is still required (no auth \u2014 pre-log in UI).",
+        "description": "Report first-run setup state and what is configured (no auth \u2014 pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders \u2014 OIDC providers and organisations \u2014 are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nAccounts are never returned; the ``first_user`` step reports whether a\nreal (non break-glass) user exists.",
         "operationId": "get_setup_status_api_v1_auth_setup_status_get",
         "responses": {
           "200": {
@@ -148,7 +148,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InitialSetupStatus"
+                  "$ref": "#/components/schemas/SetupStatus"
                 }
               }
             }
@@ -14077,6 +14077,87 @@
         ],
         "title": "FromHyperdxRequest"
       },
+      "GroupResolutionConfig": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "manual",
+              "token_claim",
+              "api"
+            ],
+            "title": "Mode",
+            "default": "manual"
+          },
+          "claim_name": {
+            "type": "string",
+            "title": "Claim Name",
+            "default": "groups"
+          },
+          "sync_interval": {
+            "type": "integer",
+            "title": "Sync Interval",
+            "default": 3600
+          },
+          "enrich_on_login": {
+            "type": "boolean",
+            "title": "Enrich On Login",
+            "default": false
+          },
+          "directory_backend": {
+            "type": "string",
+            "enum": [
+              "live",
+              "mock"
+            ],
+            "title": "Directory Backend",
+            "default": "live"
+          },
+          "mock_directory_env": {
+            "type": "string",
+            "title": "Mock Directory Env",
+            "default": "DFE_OIDC_MOCK_DIRECTORY"
+          },
+          "service_account_json_env": {
+            "type": "string",
+            "title": "Service Account Json Env",
+            "default": ""
+          },
+          "admin_email": {
+            "type": "string",
+            "title": "Admin Email",
+            "default": ""
+          },
+          "domain": {
+            "type": "string",
+            "title": "Domain",
+            "default": ""
+          },
+          "tenant_id_env": {
+            "type": "string",
+            "title": "Tenant Id Env",
+            "default": ""
+          },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env",
+            "default": ""
+          },
+          "api_token_env": {
+            "type": "string",
+            "title": "Api Token Env",
+            "default": ""
+          },
+          "okta_domain": {
+            "type": "string",
+            "title": "Okta Domain",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "title": "GroupResolutionConfig",
+        "description": "Configuration for how group membership is resolved from a provider.\n\nFields that are provider-specific are only relevant when the matching\nprovider type is active.  They are stored in the same model for\nsimplicity \u2014 unused fields default to empty strings."
+      },
       "GroupResolutionRequest": {
         "properties": {
           "mode": {
@@ -14848,17 +14929,32 @@
         "type": "object",
         "title": "HyperDXConfig"
       },
-      "InitialSetupStatus": {
+      "InitialSetupState": {
         "properties": {
-          "setup_complete": {
+          "complete": {
             "type": "boolean",
-            "title": "Setup Complete",
-            "description": "True when mandatory first-run steps appear done."
+            "title": "Complete",
+            "description": "True when every required step is satisfied."
           },
-          "initial_setup_required": {
-            "type": "boolean",
-            "title": "Initial Setup Required",
-            "description": "True when the UI should show the initial setup flow."
+          "current_step": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Step",
+            "description": "First unsatisfied required step id \u2014 the screen to land on. None once setup is complete."
+          },
+          "steps": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Steps",
+            "description": "All applicable step ids in wizard order (required and optional)."
           },
           "pending_steps": {
             "items": {
@@ -14866,7 +14962,7 @@
             },
             "type": "array",
             "title": "Pending Steps",
-            "description": "Setup step ids still required (subset of evaluated steps)."
+            "description": "Required step ids still outstanding, in wizard order."
           },
           "completed_steps": {
             "items": {
@@ -14874,16 +14970,23 @@
             },
             "type": "array",
             "title": "Completed Steps",
-            "description": "Setup step ids already satisfied (subset of evaluated steps)."
+            "description": "Satisfied step ids (required and optional), in wizard order."
+          },
+          "step_details": {
+            "items": {
+              "$ref": "#/components/schemas/SetupStep"
+            },
+            "type": "array",
+            "title": "Step Details",
+            "description": "Per-step title, description, required and complete flags."
           }
         },
         "type": "object",
         "required": [
-          "setup_complete",
-          "initial_setup_required"
+          "complete"
         ],
-        "title": "InitialSetupStatus",
-        "description": "Whether the deployment still needs first-run configuration."
+        "title": "InitialSetupState",
+        "description": "The machine's verdict on where first-run setup stands."
       },
       "InvokeRequest": {
         "properties": {
@@ -15751,6 +15854,85 @@
         },
         "type": "array"
       },
+      "OIDCProviderSummary": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "generic",
+              "google",
+              "entra_id",
+              "okta"
+            ],
+            "title": "Type",
+            "default": "generic"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "issuer": {
+            "type": "string",
+            "title": "Issuer",
+            "default": ""
+          },
+          "client_id_env": {
+            "type": "string",
+            "title": "Client Id Env",
+            "default": ""
+          },
+          "client_secret_env": {
+            "type": "string",
+            "title": "Client Secret Env",
+            "default": ""
+          },
+          "scopes": {
+            "type": "string",
+            "title": "Scopes",
+            "default": "openid email profile groups"
+          },
+          "groups": {
+            "$ref": "#/components/schemas/GroupResolutionConfig"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "default": ""
+          },
+          "last_sync_at": {
+            "type": "string",
+            "title": "Last Sync At",
+            "default": ""
+          },
+          "last_sync_status": {
+            "type": "string",
+            "title": "Last Sync Status",
+            "default": ""
+          },
+          "sync_error": {
+            "type": "string",
+            "title": "Sync Error",
+            "default": ""
+          },
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Registry name (the provider YAML filename stem)."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "OIDCProviderSummary",
+        "description": "A registry OIDC provider, with its registry name folded in.\n\n``OIDCProvider`` holds env var *names* rather than secret values, so the\nwhole model is safe to return."
+      },
       "ObjectEntry": {
         "properties": {
           "key": {
@@ -15905,6 +16087,62 @@
         "type": "object",
         "title": "OidcLoginResponse",
         "description": "JSON body for GET .../login when ``redirect=false``."
+      },
+      "Org": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "org_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Org Ids"
+          },
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "default": true
+          },
+          "hyperdx_team_id": {
+            "type": "string",
+            "title": "Hyperdx Team Id",
+            "default": ""
+          },
+          "hyperdx_team_api_key_env": {
+            "type": "string",
+            "title": "Hyperdx Team Api Key Env",
+            "default": ""
+          },
+          "ch_password_env": {
+            "type": "string",
+            "title": "Ch Password Env",
+            "default": ""
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At",
+            "default": ""
+          },
+          "updated_at": {
+            "type": "string",
+            "title": "Updated At",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "Org",
+        "description": "A customer organisation.\n\nAttributes:\n    name: Primary identifier (filename stem).\n    display_name: Human-readable label for UI display.\n    org_ids: Tenant IDs used for ClickHouse row-level security filters.\n    enabled: Whether this org is active.\n    hyperdx_team_id: HyperDX team ID for this org's connection sync.\n    hyperdx_team_api_key_env: Environment variable name holding the org's HyperDX team API key.\n    ch_password_env: Environment variable name holding the ClickHouse password.\n    created_at: ISO 8601 timestamp of creation.\n    updated_at: ISO 8601 timestamp of last update."
       },
       "OrgResponse": {
         "properties": {
@@ -19706,6 +19944,75 @@
         ],
         "title": "SettingsSummary",
         "description": "Redacted settings \u2014 no secrets."
+      },
+      "SetupStatus": {
+        "properties": {
+          "initial_setup": {
+            "$ref": "#/components/schemas/InitialSetupState",
+            "description": "Wizard state \u2014 completion, current step and per-step detail."
+          },
+          "oidc_providers": {
+            "items": {
+              "$ref": "#/components/schemas/OIDCProviderSummary"
+            },
+            "type": "array",
+            "title": "Oidc Providers",
+            "description": "The OIDC provider registry. Empty once setup is complete."
+          },
+          "organisations": {
+            "items": {
+              "$ref": "#/components/schemas/Org"
+            },
+            "type": "array",
+            "title": "Organisations",
+            "description": "The organisation registry. Empty once setup is complete."
+          }
+        },
+        "type": "object",
+        "required": [
+          "initial_setup"
+        ],
+        "title": "SetupStatus",
+        "description": "Pre-login setup snapshot: the wizard state plus what is configured.\n\nAccounts are deliberately absent. Whether a real user exists is reported\nthrough the ``first_user`` step; the account list itself is never served\nto an unauthenticated caller."
+      },
+      "SetupStep": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Stable step id (see STEP_* constants)."
+          },
+          "title": {
+            "type": "string",
+            "title": "Title",
+            "description": "Short label for the wizard screen."
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "What the operator has to do in this step."
+          },
+          "required": {
+            "type": "boolean",
+            "title": "Required",
+            "description": "False for steps the operator may skip."
+          },
+          "complete": {
+            "type": "boolean",
+            "title": "Complete",
+            "description": "True when this step is already satisfied."
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "title",
+          "description",
+          "required",
+          "complete"
+        ],
+        "title": "SetupStep",
+        "description": "One step of the first-run wizard."
       },
       "SigmaViewColumn": {
         "properties": {

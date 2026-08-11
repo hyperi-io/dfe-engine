@@ -104,9 +104,7 @@ async def oidc_login(
     name="oidc_callback",
     response_model=OidcCallbackResponse,
 )
-async def oidc_callback(
-    provider: str, request: Request, settings: Settings
-) -> JSONResponse:
+async def oidc_callback(provider: str, request: Request, settings: Settings) -> JSONResponse:
     """Complete the OIDC flow and re-mint the engine token (single issuer)."""
     rp = _rp_or_404(request, provider)
 

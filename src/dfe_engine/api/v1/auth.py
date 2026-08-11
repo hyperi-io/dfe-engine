@@ -22,7 +22,7 @@ from dfe_engine.api.deps import (
     resolve_live_roles_for_user,
 )
 from dfe_engine.auth.local_provider import LocalAuthProvider
-from dfe_engine.auth.setup_status import InitialSetupStatus, evaluate_initial_setup
+from dfe_engine.auth.setup_status import SetupStatus, evaluate_initial_setup
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
@@ -148,9 +148,17 @@ async def get_permissions(user: CurrentUser, request: Request):
     )
 
 
-@router.get("/setup-status", response_model=InitialSetupStatus)
-async def get_setup_status(request: Request) -> InitialSetupStatus:
-    """Report whether first-run setup is still required (no auth — pre-log in UI)."""
+@router.get("/setup-status", response_model=SetupStatus)
+async def get_setup_status(request: Request) -> SetupStatus:
+    """Report first-run setup state and what is configured (no auth — pre-login UI).
+
+    Driven by the setup state machine (``state_machines/setup.py``). The
+    registries the wizard renders — OIDC providers and organisations — are
+    returned while setup is outstanding and dropped once it completes, so a
+    configured deployment does not serve its inventory to anonymous callers.
+    Accounts are never returned; the ``first_user`` step reports whether a
+    real (non break-glass) user exists.
+    """
     return evaluate_initial_setup(request)
 
 
