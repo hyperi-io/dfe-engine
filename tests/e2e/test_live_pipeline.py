@@ -34,8 +34,15 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
     require(e2e, "receiver_url", "ch_host")
 
     # A unique marker so we can find exactly our event in the shared table.
+    #
+    # NO `_source` ON THE EVENT, deliberately. The receiver's shipped routing rule
+    # is `_source` / key_value_use: an event carrying `_source: x` is routed to
+    # topic `x_land` and lands in table `dfe.x`, not `dfe.default`. Setting it here
+    # sent the event to a per-source table that does not exist, so the loader
+    # DLQ'd it on schema_pending_timeout while this test polled `dfe.default` and
+    # timed out - looking like a broken data path when the path was working.
     marker = f"e2e-{uuid.uuid4().hex}"
-    event = {"_source": "e2e-https", "message": marker, "severity": "info"}
+    event = {"message": marker, "severity": "info"}
 
     headers = {"Content-Type": "application/json"}
     if e2e.receiver_token:
@@ -71,8 +78,9 @@ def test_https_ingest_lands_in_clickhouse(e2e: E2EConfig, ch_client) -> None:
 def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
     require(e2e, "receiver_url", "ch_host", "hyperdx_url")
 
+    # No `_source` - see the note in the ingest test above.
     marker = f"e2e-hdx-{uuid.uuid4().hex}"
-    event = {"_source": "e2e-hyperdx", "message": marker, "severity": "warning"}
+    event = {"message": marker, "severity": "warning"}
     headers = {"Content-Type": "application/json"}
     if e2e.receiver_token:
         headers["Authorization"] = f"Bearer {e2e.receiver_token}"
@@ -128,9 +136,15 @@ def test_ingested_data_visible_in_hyperdx(e2e: E2EConfig, ch_client) -> None:
 def _clone_deploy_repo(e2e: E2EConfig, dest: Path) -> Path:
     """Clone the deploy repo via HTTPS creds so we can assert the engine's writes."""
     url = e2e.deploy_repo_url
-    if e2e.deploy_repo_token and url.startswith("https://"):
-        # embed creds: https://user:token@host/...
-        url = url.replace("https://", f"https://{e2e.deploy_repo_user}:{e2e.deploy_repo_token}@", 1)
+    # Embed creds as <scheme>://user:token@host/... for EITHER scheme. Keying this
+    # on https alone silently cloned anonymously whenever the repo was plain http
+    # - an in-cluster forgejo, or any run reaching it through a port-forward - and
+    # the resulting auth failure surfaced only as `git clone` exit 128.
+    for scheme in ("https://", "http://"):
+        if e2e.deploy_repo_token and url.startswith(scheme):
+            creds = f"{e2e.deploy_repo_user}:{e2e.deploy_repo_token}@"
+            url = url.replace(scheme, f"{scheme}{creds}", 1)
+            break
     subprocess.run(
         ["git", "clone", "--depth", "1", url, str(dest)], check=True, capture_output=True
     )
@@ -153,29 +167,40 @@ def test_ui_deploys_infra_change_via_git(e2e: E2EConfig) -> None:
     headers = _engine_headers(e2e)
     svc, inst = "receiver", "production"
 
+    # The service/instance is a TWO-SEGMENT path, not a `{svc}-{inst}` slug. The
+    # slug form 404s, which reads as "no such deployment" rather than "wrong URL".
+    dep_url = f"{base}/api/v1/deployments/{svc}/{inst}"
+
+    # A deployment only exists once the built-in set has been seeded. Seeding is
+    # non-destructive (it never overwrites an existing config), so an already-
+    # seeded deployment is unaffected.
+    httpx.post(f"{base}/api/v1/deployments/seed", headers=headers, verify=e2e.verify, timeout=60.0)
+
     # READ current deployment config (what the UI shows).
-    cur = httpx.get(
-        f"{base}/api/v1/deployments/{svc}-{inst}", headers=headers, verify=e2e.verify, timeout=15.0
-    )
+    cur = httpx.get(dep_url, headers=headers, verify=e2e.verify, timeout=15.0)
     assert cur.status_code == 200, f"read deployment failed: {cur.status_code} {cur.text}"
 
     # CHANGE a Helm var (resources.requests.cpu) to a unique sentinel value.
+    #
+    # PUT, not PATCH - the endpoint serves get/put/delete and a PATCH is a 405.
+    # It is a whole-document write, so send the config we just read with the one
+    # field changed rather than a sparse patch, which would blank the rest.
     sentinel = "137m"
-    patch = {"resources": {"requests": {"cpu": sentinel}}}
-    upd = httpx.patch(
-        f"{base}/api/v1/deployments/{svc}-{inst}",
+    config = cur.json()
+    config.setdefault("resources", {}).setdefault("requests", {})["cpu"] = sentinel
+    upd = httpx.put(
+        dep_url,
         headers=headers,
-        content=json.dumps(patch),
+        content=json.dumps(config),
         verify=e2e.verify,
         timeout=15.0,
     )
     assert upd.status_code in (200, 202), f"update failed: {upd.status_code} {upd.text}"
 
-    # DEPLOY: trigger the gitops publish so the engine writes the overlay to git.
-    pub = httpx.post(
-        f"{base}/api/v1/deployments/publish", headers=headers, verify=e2e.verify, timeout=60.0
-    )
-    assert pub.status_code in (200, 202), f"publish failed: {pub.status_code} {pub.text}"
+    # NO PUBLISH CALL. There is no `/deployments/publish` endpoint - the engine
+    # publishes to the deploy repo as part of the write itself (the gitops
+    # survivability model: every mutation IS a commit). The old call 404'd, and
+    # the assertion on it hid the fact that the write below had already worked.
 
     # VERIFY the change reached the deploy repo (the GitOps hand-off surface).
     def _committed():
@@ -196,9 +221,13 @@ def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
     headers = _engine_headers(e2e)
 
     # CREATE a meta-schema / source via the engine API (what the UI does).
+    # The create contract is `source` (not `name`) and `match` is REQUIRED - it is
+    # the routing predicate that binds incoming events to this source, so a source
+    # without one could never match anything.
     source_name = f"e2e_src_{uuid.uuid4().hex[:8]}"
     body = {
-        "name": source_name,
+        "source": source_name,
+        "match": {"field": "_source", "operator": "equals", "value": source_name},
         "schema": {
             "profile": "timeseries",
             "additional": [{"name": "e2e_marker", "type": "String"}],
@@ -215,11 +244,7 @@ def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
         f"create source failed: {create.status_code} {create.text}"
     )
 
-    # DEPLOY: publish -> the engine compiles DDL and writes it to the deploy repo.
-    pub = httpx.post(
-        f"{base}/api/v1/deployments/publish", headers=headers, verify=e2e.verify, timeout=60.0
-    )
-    assert pub.status_code in (200, 202), f"publish failed: {pub.status_code} {pub.text}"
+    # No publish call - see the note in the infra test above.
 
     # VERIFY the generated DDL landed in the deploy repo (ddl/<table>.sql), and
     # that it carries our additional column.
