@@ -187,21 +187,37 @@ def _complete(ctx: SetupContext) -> None:
     ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
 
 
-def test_completed_setup_keeps_oidc_provider_names_only(ctx):
-    """The login screen still needs to know which IdPs to offer — nothing more."""
+def test_completed_setup_keeps_oidc_login_options_only(ctx):
+    """The login screen still needs the IdPs it can offer, and their labels."""
     ctx.oidc_registry.create(
         "entra",
-        OIDCProvider(enabled=True, issuer="https://idp", client_secret_env="ENTRA_SECRET"),
+        OIDCProvider(
+            enabled=True,
+            display_name="Microsoft Entra",
+            issuer="https://idp",
+            client_secret_env="ENTRA_SECRET",
+        ),
     )
     _complete(ctx)
 
     status = SETUP_MACHINE.status(ctx)
 
     assert status.initial_setup.complete is True
-    assert [p.name for p in status.oidc_providers] == ["entra"]
-    # Name and nothing else: no issuer, no env var names, no type.
-    assert [p.model_dump() for p in status.oidc_providers] == [{"name": "entra"}]
+    # Name and display name, and nothing else: no issuer, no env vars, no type.
+    assert [p.model_dump() for p in status.oidc_providers] == [
+        {"name": "entra", "display_name": "Microsoft Entra"},
+    ]
     assert "ENTRA_SECRET" not in status.model_dump_json()
+
+
+def test_completed_setup_leaves_an_unset_display_name_empty(ctx):
+    """No invented label — ``name`` is right there for the UI to fall back to."""
+    ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
+    _complete(ctx)
+
+    assert [p.model_dump() for p in SETUP_MACHINE.status(ctx).oidc_providers] == [
+        {"name": "entra", "display_name": ""},
+    ]
 
 
 def test_completed_setup_drops_disabled_oidc_providers(ctx):

@@ -140,7 +140,7 @@
           "Auth"
         ],
         "summary": "Get Setup Status",
-        "description": "Report first-run setup state and what is configured (no auth \u2014 pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders \u2014 OIDC providers and organisations \u2014 are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the *name* of each enabled OIDC provider, which stays\n(name only, no configuration) because the login screen needs to know which\nIdPs to offer. Accounts are never returned; the ``first_user`` step reports\nwhether a real (non break-glass) user exists.",
+        "description": "Report first-run setup state and what is configured (no auth \u2014 pre-login UI).\n\nDriven by the setup state machine (``state_machines/setup.py``). The\nregistries the wizard renders \u2014 OIDC providers and organisations \u2014 are\nreturned while setup is outstanding and dropped once it completes, so a\nconfigured deployment does not serve its inventory to anonymous callers.\nThe exception is the name and display name of each enabled OIDC provider,\nwhich stay (no configuration) because the login screen needs to know which\nIdPs to offer and what to call them. Accounts are never returned; the\n``first_user`` step reports whether a real (non break-glass) user exists.",
         "operationId": "get_setup_status_api_v1_auth_setup_status_get",
         "responses": {
           "200": {
@@ -16443,20 +16443,26 @@
         },
         "type": "array"
       },
-      "OIDCProviderName": {
+      "OIDCProviderLoginOption": {
         "properties": {
           "name": {
             "type": "string",
             "title": "Name",
             "description": "Registry name (the provider YAML filename stem)."
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "description": "Human-readable label for the login button. Empty when the provider does not set one \u2014 fall back to ``name``.",
+            "default": ""
           }
         },
         "type": "object",
         "required": [
           "name"
         ],
-        "title": "OIDCProviderName",
-        "description": "An OIDC provider by registry name alone.\n\nWhat a completed deployment serves: enough for the login screen to offer\nthe provider, and nothing about how it is configured."
+        "title": "OIDCProviderLoginOption",
+        "description": "An OIDC provider reduced to what a login button needs.\n\nWhat a completed deployment serves: enough for the login screen to offer\nthe provider, and nothing about how it is configured."
       },
       "OIDCProviderSummary": {
         "properties": {
@@ -20601,13 +20607,13 @@
                   "$ref": "#/components/schemas/OIDCProviderSummary"
                 },
                 {
-                  "$ref": "#/components/schemas/OIDCProviderName"
+                  "$ref": "#/components/schemas/OIDCProviderLoginOption"
                 }
               ]
             },
             "type": "array",
             "title": "Oidc Providers",
-            "description": "The OIDC provider registry: full entries while setup is outstanding, then name-only entries for the enabled providers once it is complete, so the login screen can still offer them."
+            "description": "The OIDC provider registry: full entries while setup is outstanding, then name and display name only for the enabled providers once it is complete, so the login screen can still offer them."
           },
           "organisations": {
             "items": {

@@ -145,14 +145,19 @@ class InitialSetupState(BaseModel):
     )
 
 
-class OIDCProviderName(BaseModel):
-    """An OIDC provider by registry name alone.
+class OIDCProviderLoginOption(BaseModel):
+    """An OIDC provider reduced to what a login button needs.
 
     What a completed deployment serves: enough for the login screen to offer
     the provider, and nothing about how it is configured.
     """
 
     name: str = Field(description="Registry name (the provider YAML filename stem).")
+    display_name: str = Field(
+        default="",
+        description="Human-readable label for the login button. Empty when the "
+        "provider does not set one — fall back to ``name``.",
+    )
 
 
 class OIDCProviderSummary(OIDCProvider):
@@ -176,11 +181,11 @@ class SetupStatus(BaseModel):
     initial_setup: InitialSetupState = Field(
         description="Wizard state — completion, current step and per-step detail.",
     )
-    oidc_providers: list[OIDCProviderSummary | OIDCProviderName] = Field(
+    oidc_providers: list[OIDCProviderSummary | OIDCProviderLoginOption] = Field(
         default_factory=list,
         description="The OIDC provider registry: full entries while setup is "
-        "outstanding, then name-only entries for the enabled providers once it "
-        "is complete, so the login screen can still offer them.",
+        "outstanding, then name and display name only for the enabled providers "
+        "once it is complete, so the login screen can still offer them.",
     )
     organisations: list[Org] = Field(
         default_factory=list,
@@ -356,11 +361,11 @@ class SetupStateMachine:
         inventory to anonymous callers. Accounts are never included at all —
         the ``first_user`` step reports whether one exists.
 
-        The one thing that survives completion is the *name* of each enabled
-        OIDC provider: the login screen has to know which IdPs to offer, and a
-        name alone discloses no configuration. Disabled providers drop out —
-        they cannot be logged in with, so listing them would be inventory
-        disclosure with nothing to render.
+        What survives completion is the name and display name of each enabled
+        OIDC provider: the login screen has to know which IdPs to offer and
+        what to call them, and neither discloses any configuration. Disabled
+        providers drop out — they cannot be logged in with, so listing them
+        would be inventory disclosure with nothing to render.
 
         Args:
             ctx: Live deployment state.
@@ -374,7 +379,7 @@ class SetupStateMachine:
         if redact_when_complete and state.complete:
             return SetupStatus(
                 initial_setup=state,
-                oidc_providers=self._enabled_oidc_provider_names(ctx),
+                oidc_providers=self._enabled_oidc_login_options(ctx),
             )
 
         return SetupStatus(
@@ -397,11 +402,11 @@ class SetupStateMachine:
         ]
 
     @staticmethod
-    def _enabled_oidc_provider_names(ctx: SetupContext) -> list[OIDCProviderName]:
+    def _enabled_oidc_login_options(ctx: SetupContext) -> list[OIDCProviderLoginOption]:
         if ctx.oidc_registry is None:
             return []
         return [
-            OIDCProviderName(name=name)
+            OIDCProviderLoginOption(name=name, display_name=provider.display_name)
             for name, provider in ctx.oidc_registry.list()
             if provider.enabled
         ]

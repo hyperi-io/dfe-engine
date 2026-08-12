@@ -205,14 +205,19 @@ def test_setup_status_withholds_registries_once_complete(tmp_path):
         _registries.clear()
 
 
-def test_setup_status_keeps_oidc_provider_names_once_complete(tmp_path):
-    """Post-setup the login screen still gets the enabled IdP names — names only."""
+def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
+    """Post-setup the login screen still gets the enabled IdPs — name + label only."""
     app = create_app(settings=_settings(tmp_path))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             app.state.oidc_provider_registry.create(
                 "entra",
-                OIDCProvider(enabled=True, issuer="https://idp", client_secret_env="ENTRA_SECRET"),
+                OIDCProvider(
+                    enabled=True,
+                    display_name="Microsoft Entra",
+                    issuer="https://idp",
+                    client_secret_env="ENTRA_SECRET",
+                ),
             )
             app.state.oidc_provider_registry.create(
                 "okta",
@@ -223,7 +228,9 @@ def test_setup_status_keeps_oidc_provider_names_once_complete(tmp_path):
             body = client.get("/api/v1/auth/setup-status").json()
 
             assert body["initial_setup"]["complete"] is True
-            assert body["oidc_providers"] == [{"name": "entra"}]
+            assert body["oidc_providers"] == [
+                {"name": "entra", "display_name": "Microsoft Entra"},
+            ]
             assert "https://idp" not in json.dumps(body)
     finally:
         _registries.clear()
