@@ -156,8 +156,10 @@ async def get_setup_status(request: Request) -> SetupStatus:
     registries the wizard renders — OIDC providers and organisations — are
     returned while setup is outstanding and dropped once it completes, so a
     configured deployment does not serve its inventory to anonymous callers.
-    Accounts are never returned; the ``first_user`` step reports whether a
-    real (non break-glass) user exists.
+    The exception is the *name* of each enabled OIDC provider, which stays
+    (name only, no configuration) because the login screen needs to know which
+    IdPs to offer. Accounts are never returned; the ``first_user`` step reports
+    whether a real (non break-glass) user exists.
     """
     return evaluate_initial_setup(request)
 

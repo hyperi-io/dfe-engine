@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -200,5 +201,29 @@ def test_setup_status_withholds_registries_once_complete(tmp_path):
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
             assert body["oidc_providers"] == []
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_keeps_oidc_provider_names_once_complete(tmp_path):
+    """Post-setup the login screen still gets the enabled IdP names — names only."""
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.oidc_provider_registry.create(
+                "entra",
+                OIDCProvider(enabled=True, issuer="https://idp", client_secret_env="ENTRA_SECRET"),
+            )
+            app.state.oidc_provider_registry.create(
+                "okta",
+                OIDCProvider(enabled=False, issuer="https://okta"),
+            )
+            _complete_setup(app)
+
+            body = client.get("/api/v1/auth/setup-status").json()
+
+            assert body["initial_setup"]["complete"] is True
+            assert body["oidc_providers"] == [{"name": "entra"}]
+            assert "https://idp" not in json.dumps(body)
     finally:
         _registries.clear()

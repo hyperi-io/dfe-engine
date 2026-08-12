@@ -179,3 +179,45 @@ def test_status_withholds_registries_once_setup_is_complete(ctx):
     # ...unless the caller opts in (an authenticated admin view, say).
     unredacted = SETUP_MACHINE.status(ctx, redact_when_complete=False)
     assert [o.name for o in unredacted.organisations] == ["acme"]
+
+
+def _complete(ctx: SetupContext) -> None:
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+
+
+def test_completed_setup_keeps_oidc_provider_names_only(ctx):
+    """The login screen still needs to know which IdPs to offer — nothing more."""
+    ctx.oidc_registry.create(
+        "entra",
+        OIDCProvider(enabled=True, issuer="https://idp", client_secret_env="ENTRA_SECRET"),
+    )
+    _complete(ctx)
+
+    status = SETUP_MACHINE.status(ctx)
+
+    assert status.initial_setup.complete is True
+    assert [p.name for p in status.oidc_providers] == ["entra"]
+    # Name and nothing else: no issuer, no env var names, no type.
+    assert [p.model_dump() for p in status.oidc_providers] == [{"name": "entra"}]
+    assert "ENTRA_SECRET" not in status.model_dump_json()
+
+
+def test_completed_setup_drops_disabled_oidc_providers(ctx):
+    """A disabled provider cannot be logged in with, so it is pure inventory."""
+    ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
+    ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
+    _complete(ctx)
+
+    assert [p.name for p in SETUP_MACHINE.status(ctx).oidc_providers] == ["entra"]
+
+
+def test_incomplete_setup_still_returns_full_oidc_providers(ctx):
+    """The wizard edits providers, so it gets the whole record — disabled included."""
+    ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
+
+    providers = SETUP_MACHINE.status(ctx).oidc_providers
+
+    assert [p.name for p in providers] == ["okta"]
+    assert providers[0].issuer == "https://okta"

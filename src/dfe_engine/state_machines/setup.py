@@ -145,6 +145,16 @@ class InitialSetupState(BaseModel):
     )
 
 
+class OIDCProviderName(BaseModel):
+    """An OIDC provider by registry name alone.
+
+    What a completed deployment serves: enough for the login screen to offer
+    the provider, and nothing about how it is configured.
+    """
+
+    name: str = Field(description="Registry name (the provider YAML filename stem).")
+
+
 class OIDCProviderSummary(OIDCProvider):
     """A registry OIDC provider, with its registry name folded in.
 
@@ -166,9 +176,11 @@ class SetupStatus(BaseModel):
     initial_setup: InitialSetupState = Field(
         description="Wizard state — completion, current step and per-step detail.",
     )
-    oidc_providers: list[OIDCProviderSummary] = Field(
+    oidc_providers: list[OIDCProviderSummary | OIDCProviderName] = Field(
         default_factory=list,
-        description="The OIDC provider registry. Empty once setup is complete.",
+        description="The OIDC provider registry: full entries while setup is "
+        "outstanding, then name-only entries for the enabled providers once it "
+        "is complete, so the login screen can still offer them.",
     )
     organisations: list[Org] = Field(
         default_factory=list,
@@ -338,23 +350,32 @@ class SetupStateMachine:
 
         The org and OIDC registries are what the wizard renders, and this
         endpoint is unauthenticated. With ``redact_when_complete`` they are
-        returned only while setup is still outstanding (a fresh deployment,
-        where there is nothing yet to disclose) and dropped once it is done,
-        so a configured deployment does not serve its org and IdP inventory to
-        anonymous callers. Accounts are never included at all — the
-        ``first_user`` step reports whether one exists.
+        returned in full only while setup is still outstanding (a fresh
+        deployment, where there is nothing yet to disclose) and cut back once
+        it is done, so a configured deployment does not serve its org and IdP
+        inventory to anonymous callers. Accounts are never included at all —
+        the ``first_user`` step reports whether one exists.
+
+        The one thing that survives completion is the *name* of each enabled
+        OIDC provider: the login screen has to know which IdPs to offer, and a
+        name alone discloses no configuration. Disabled providers drop out —
+        they cannot be logged in with, so listing them would be inventory
+        disclosure with nothing to render.
 
         Args:
             ctx: Live deployment state.
-            redact_when_complete: Omit the registries once setup is complete.
-                Set False to always include them.
+            redact_when_complete: Reduce the registries once setup is complete.
+                Set False to always include them in full.
 
         Returns:
             The snapshot the ``/auth/setup-status`` endpoint returns.
         """
         state = self.evaluate(ctx)
         if redact_when_complete and state.complete:
-            return SetupStatus(initial_setup=state)
+            return SetupStatus(
+                initial_setup=state,
+                oidc_providers=self._enabled_oidc_provider_names(ctx),
+            )
 
         return SetupStatus(
             initial_setup=state,
@@ -373,6 +394,16 @@ class SetupStateMachine:
         return [
             OIDCProviderSummary(name=name, **provider.model_dump())
             for name, provider in ctx.oidc_registry.list()
+        ]
+
+    @staticmethod
+    def _enabled_oidc_provider_names(ctx: SetupContext) -> list[OIDCProviderName]:
+        if ctx.oidc_registry is None:
+            return []
+        return [
+            OIDCProviderName(name=name)
+            for name, provider in ctx.oidc_registry.list()
+            if provider.enabled
         ]
 
     @staticmethod
