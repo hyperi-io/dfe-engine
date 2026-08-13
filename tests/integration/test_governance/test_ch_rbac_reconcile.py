@@ -36,7 +36,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     (gitops stays the source of truth), so it is left in place.
     """
     from dfe_engine.governance.ch.bindings import derive_group_bindings
-    from dfe_engine.governance.ch.models import ChTier, tenant_policy_name
+    from dfe_engine.governance.ch.models import ChTier
     from dfe_engine.governance.ch.reconciler import ChRbacReconciler
     from dfe_engine.secrets import build_secrets
     from dfe_engine.settings import SecretsSettings
