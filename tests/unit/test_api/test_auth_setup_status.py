@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.auth.bootstrap import admin_account_name
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.settings import (
     APISettings,
@@ -61,7 +62,7 @@ def _complete_setup(app) -> None:
     """Satisfy every required step: org, real user, rotated break-glass password."""
     app.state.org_registry.create("acme", display_name="Acme")
     app.state.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
-    app.state.account_store.reset_password("admin", "a-strong-local-admin-password")
+    app.state.account_store.reset_password(admin_account_name(), "a-strong-local-admin-password")
 
 
 def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):

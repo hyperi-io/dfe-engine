@@ -23,7 +23,7 @@ A step applies when the thing it configures actually exists — not when a
 settings toggle says so. ``app.py`` bootstraps the account store and seeds the
 break-glass admin unconditionally, and ``POST /auth/login`` authenticates
 against it with neither ``auth.enabled`` nor ``auth.local.enabled`` consulted.
-So the seeded ``changeme`` credential is live even in a deployment that
+So the seeded break-glass credential is live even in a deployment that
 believes auth is off, and the wizard has to say so.
 
 ``first_user`` may be satisfied by a local account or by an OIDC identity that
@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth.bootstrap import _DEFAULT_PASSWORD, admin_account_name
+from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.orgs.models import Org
 
@@ -55,9 +55,10 @@ if TYPE_CHECKING:
     from dfe_engine.orgs.registry import OrgRegistry
 
 # The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin).
-# It does not count as the "first user" — the whole point of that step is to
-# get off the shared emergency credential and onto a real identity.
-BREAK_GLASS_ACCOUNT = admin_account_name()
+# Username and password come from DFE_AUTH_LOCAL_ADMIN_NAME / _PASSWORD at
+# evaluation time (not import time) so the wizard follows the live env.
+# It does not count as the "first user" — that step is about getting off the
+# emergency credential and onto a real identity.
 
 # Stable step ids. These are an API contract: the UI keys its wizard screens
 # off them, so treat a rename as a breaking change.
@@ -229,7 +230,7 @@ def _has_real_user(ctx: SetupContext) -> bool:
     if ctx.account_store is None:
         return False
     return any(
-        account.enabled and account.username != BREAK_GLASS_ACCOUNT
+        account.enabled and account.username != admin_account_name()
         for account in ctx.account_store.list()
     )
 
@@ -242,24 +243,24 @@ def _has_break_glass_account(ctx: SetupContext) -> bool:
     """
     if ctx.account_store is None:
         return False
-    return ctx.account_store.get(BREAK_GLASS_ACCOUNT) is not None
+    return ctx.account_store.get(admin_account_name()) is not None
 
 
 def _break_glass_password_rotated(ctx: SetupContext) -> bool:
-    """True once the seeded admin no longer answers to the default password.
+    """True once the seeded admin no longer answers to the bootstrap password.
 
-    Tests the *default* password specifically: an operator who set
-    DFE_AUTH_LOCAL_ADMIN_PASSWORD at bootstrap never had a shared secret to
-    rotate, so the step is already satisfied.
+    The baseline is ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` (falling back to
+    ``changeme``). Setting the env var does not skip this step — the operator
+    still has to rotate off the value that was seeded.
 
     Costs one bcrypt verify per call on an unauthenticated endpoint. There is
     no cheaper honest test — a changed ``updated_at`` also fires for an
     enabled/groups edit, which would report the rotation as done while the
-    default password still worked.
+    bootstrap password still worked.
     """
     if ctx.account_store is None:
         return False
-    return not ctx.account_store.verify_password(BREAK_GLASS_ACCOUNT, _DEFAULT_PASSWORD)
+    return not ctx.account_store.verify_password(admin_account_name(), admin_account_password())
 
 
 SETUP_STEPS: tuple[StepDefinition, ...] = (
@@ -300,7 +301,7 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         id=STEP_ADMIN_PASSWORD,
         title="Rotate the break-glass admin password",
         description=(
-            "The bootstrapped admin account still uses its default password. "
+            "The bootstrapped admin account still uses its bootstrap password. "
             "Change it — it is the emergency credential for this deployment."
         ),
         applies=_has_break_glass_account,

@@ -41,6 +41,7 @@ _DEFAULT_ADMIN_NAME = "admin"
 # Default break-glass password; overridden by DFE_AUTH_LOCAL_ADMIN_PASSWORD.
 _DEFAULT_PASSWORD = "changeme"
 
+
 def admin_account_name(override: str = "") -> str:
     """Break-glass admin username: override, else ``DFE_AUTH_LOCAL_ADMIN_NAME``, else ``admin``.
 

@@ -27,8 +27,10 @@ from dfe_engine.state_machines.setup import (
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> SetupContext:
+def ctx(tmp_path: Path, monkeypatch) -> SetupContext:
     """A freshly bootstrapped deployment: seeded admin, nothing else configured."""
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("admin", "changeme", groups=["dfe-admins"])
     return SetupContext(
@@ -107,6 +109,7 @@ def test_break_glass_admin_does_not_count_as_the_first_user(ctx):
 
 def test_custom_dfe_admin_name_is_the_break_glass_account(tmp_path, monkeypatch):
     monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "alt-admin")
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("alt-admin", "changeme", groups=["dfe-admins"])
     ctx = SetupContext(
@@ -140,6 +143,24 @@ def test_admin_password_step_clears_only_after_rotation(ctx):
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
     ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_admin_password_step_uses_env_password_as_rotation_baseline(tmp_path, monkeypatch):
+    """The wizard must detect rotation from DFE_AUTH_LOCAL_ADMIN_PASSWORD, not only changeme."""
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "new-admin")
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "test")
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("new-admin", "test", groups=["dfe-admins"])
+    ctx = SetupContext(
+        account_store=accounts,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+    )
+
+    assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+    accounts.reset_password("new-admin", "a-strong-local-admin-password")
     assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
