@@ -13,6 +13,10 @@ That "no policy applies -> see ALL" behaviour is a specific ClickHouse property
 actual `render_org_role` DDL end to end. Everything is created under a unique
 `uid` suffix and dropped in teardown, so it is safe on a shared cluster.
 
+These build their DDL by hand, so they prove ClickHouse's behaviour rather than
+the engine's. That the engine actually GRANTS an org role is proven separately,
+in `test_ch_rbac_reconcile.py`.
+
 No mocks (project policy): a real CH, real users, real row policies.
 """
 
@@ -26,6 +30,8 @@ import pytest
 from dfe_engine.governance.ch.models import org_policy_name, org_role_name
 from dfe_engine.governance.ch.render import render_org_role
 
+from .conftest import count_as, drop_safely
+
 pytestmark = pytest.mark.integration
 
 _PW = "Rbac_Test_Pw_9f3b2c"  # nosec - throwaway test-user password on a PET cluster
@@ -33,47 +39,8 @@ _PW_HASH = hashlib.sha256(_PW.encode()).hexdigest()
 
 
 def _count_as(params: dict, user: str, table_fqn: str) -> int:
-    """Connect to CH as ``user`` and return ``count()`` of the visible rows."""
-    import clickhouse_connect
-
-    client = clickhouse_connect.get_client(
-        host=params["host"],
-        port=params["port"],
-        username=user,
-        password=_PW,
-        secure=params["secure"],
-    )
-    try:
-        return int(client.query(f"SELECT count() FROM {table_fqn}").result_rows[0][0])
-    finally:
-        client.close()
-
-
-@pytest.fixture(scope="module")
-def conn_params():
-    """Module-scoped CH connection params from settings (.env cluster tier)."""
-    from dfe_engine.settings import get_settings
-
-    s = get_settings().clickhouse
-    if not s.host or s.host in ("localhost", "127.0.0.1"):
-        pytest.skip("CH-RBAC isolation needs a configured cluster (.env DFE_CLICKHOUSE_*)")
-    return {
-        "host": s.host,
-        "port": s.port,
-        "username": s.username,
-        "password": s.password,
-        "secure": s.secure,
-    }
-
-
-@pytest.fixture(scope="module")
-def admin_client(conn_params):
-    """A module-scoped admin CH client (raw clickhouse_connect, has command())."""
-    import clickhouse_connect
-
-    client = clickhouse_connect.get_client(**conn_params)
-    yield client
-    client.close()
+    """Row count for a hand-built test user, which all share one password."""
+    return count_as(params, user, _PW, table_fqn)
 
 
 @pytest.fixture(scope="module")
@@ -81,8 +48,7 @@ def rbac_world(admin_client, conn_params):
     """Build a table + two org roles/policies + three users on the real cluster.
 
     Yields the handles the tests need. Tears everything down in a finally so a
-    failed assertion never leaves objects on a shared cluster. Skips (never
-    errors) if the admin user lacks access-management privileges.
+    failed assertion never leaves objects on a shared cluster.
     """
     ch_client = admin_client
     ch_params = conn_params
@@ -105,12 +71,12 @@ def rbac_world(admin_client, conn_params):
 
     def _drop_all() -> None:
         for u in users:
-            _safe(ch_client, f"DROP USER IF EXISTS {u}")
+            drop_safely(ch_client, f"DROP USER IF EXISTS {u}")
         for policy, tgt in policies:
-            _safe(ch_client, f"DROP ROW POLICY IF EXISTS {policy} ON {tgt}")
+            drop_safely(ch_client, f"DROP ROW POLICY IF EXISTS {policy} ON {tgt}")
         for r in roles:
-            _safe(ch_client, f"DROP ROLE IF EXISTS {r}")
-        _safe(ch_client, f"DROP DATABASE IF EXISTS {db}")
+            drop_safely(ch_client, f"DROP ROLE IF EXISTS {r}")
+        drop_safely(ch_client, f"DROP DATABASE IF EXISTS {db}")
 
     try:
         try:
@@ -146,9 +112,11 @@ def rbac_world(admin_client, conn_params):
             # row policy that targets the role would not apply).
             for u in (u_scoped, u_double):
                 ch_client.command(f"ALTER USER {u} DEFAULT ROLE ALL")
-        except Exception as exc:  # e.g. admin user lacks ACCESS MANAGEMENT
+        except Exception:
+            # A provisioning failure is a real break: skipping here reported the
+            # isolation invariant as proven when nothing had been created.
             _drop_all()
-            pytest.skip(f"cannot provision CH RBAC objects (privileges?): {exc}")
+            raise
 
         yield {
             "params": ch_params,
@@ -159,13 +127,6 @@ def rbac_world(admin_client, conn_params):
         }
     finally:
         _drop_all()
-
-
-def _safe(ch_client, stmt: str) -> None:
-    try:
-        ch_client.command(stmt)
-    except Exception:  # teardown is best-effort; keep dropping the rest
-        pass
 
 
 class TestRestrictiveOnlyIsolation:

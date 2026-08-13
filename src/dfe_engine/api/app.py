@@ -191,31 +191,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Org ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
     # Reconciles the seeded quota tiers + service roles + per-org roles/row
-    # policies on _org_id into ClickHouse. Default-off so startup is unaffected;
-    # fully non-fatal. Group bindings + user secret-minting are a follow-on
-    # (reconcile via the CLI / governance API with a secrets store configured).
+    # policies on _org_id into ClickHouse, plus one CH user per RBAC group
+    # holding that group's org role. Default-off so startup is unaffected;
+    # fully non-fatal.
     if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
         try:
-            from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-            from dfe_engine.governance.ch import reconcile_ch_rbac
-            from dfe_engine.secrets import build_secrets
+            from dfe_engine.governance.ch import ch_admin_client, reconcile_from_stores
 
-            ch_cfg = {
-                "ch_host": settings.clickhouse.host,
-                "ch_port": settings.clickhouse.port,
-                "ch_username": settings.clickhouse.username,
-                "ch_password": settings.clickhouse.password,
-                "ch_secure": settings.clickhouse.secure,
-                "ch_verify": settings.clickhouse.verify,
-                "ch_ca_cert": settings.clickhouse.ca_cert,
-            }
-            admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
-            # The secrets store mints the loader / query_reader service users;
-            # without it only tiers, roles and org row policies reconcile.
-            reconcile_ch_rbac(
-                admin_client,
-                secrets_store=build_secrets(settings.secrets),
-                orgs=app.state.org_registry.list(),
+            reconcile_from_stores(
+                ch_admin_client(settings),
+                settings=settings,
+                org_registry=app.state.org_registry,
+                group_store=group_store,
             )
             logger.info("CH RBAC reconcile complete")
         except Exception:

@@ -419,35 +419,23 @@ async def reconcile_ch_rbac_endpoint(user: CurrentUser, request: Request) -> dic
     ClickHouse, minting the service-user secrets via the secrets seam. Idempotent.
     governance:write.
     """
-    from dfe_engine.clickhouse.clickhouse_manager import ClickHouseManager
-    from dfe_engine.governance.ch import reconcile_ch_rbac
-    from dfe_engine.secrets import build_secrets
+    from dfe_engine.governance.ch import ch_admin_client, reconcile_from_stores
     from dfe_engine.settings import load_settings
 
     settings = load_settings()
-    ch_cfg = {
-        "ch_host": settings.clickhouse.host,
-        "ch_port": settings.clickhouse.port,
-        "ch_username": settings.clickhouse.username,
-        "ch_password": settings.clickhouse.password,
-        "ch_secure": settings.clickhouse.secure,
-        "ch_verify": settings.clickhouse.verify,
-        "ch_ca_cert": settings.clickhouse.ca_cert,
-    }
     try:
-        admin_client = ClickHouseManager.get_instance(ch_cfg).get_clickhouse_client()._client
+        admin_client = ch_admin_client(settings)
     except Exception as exc:
         raise HTTPException(
             status_code=503,
             detail={"code": "clickhouse_unavailable", "message": str(exc)},
         ) from exc
 
-    org_registry = getattr(request.app.state, "org_registry", None)
-    orgs = org_registry.list() if org_registry is not None else []
-    result = reconcile_ch_rbac(
+    result = reconcile_from_stores(
         admin_client,
-        secrets_store=build_secrets(settings.secrets),
-        orgs=orgs,
+        settings=settings,
+        org_registry=getattr(request.app.state, "org_registry", None),
+        group_store=getattr(request.app.state, "group_store", None),
     )
     return {
         "statements": len(result.statements),
