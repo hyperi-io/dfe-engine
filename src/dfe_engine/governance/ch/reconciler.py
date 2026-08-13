@@ -245,10 +245,11 @@ def reconcile_ch_rbac(
     """The one entry point to reconcile the CH-RBAC config into ClickHouse.
 
     Defaults to the SEEDED tiers + service roles; pass explicit lists to override
-    (e.g. once tiers/bindings load from gitcrud). ``secrets_store`` (the
+    (e.g. once tiers load from gitcrud). ``bindings`` come from
+    ``derive_group_bindings`` over the RBAC group store. ``secrets_store`` (the
     scalo.secrets seam) enables minting the service/group USERS - without it only
-    tiers, roles and org row policies reconcile. Used by app.py startup, the
-    ``reconcile-ch-rbac`` CLI command, and the governance API endpoint.
+    tiers, roles and org row policies reconcile. Used by app.py startup and the
+    governance API endpoint.
     """
     return ChRbacReconciler(admin_client, secrets_store=secrets_store).reconcile(
         tiers=tiers if tiers is not None else DEFAULT_TIERS,

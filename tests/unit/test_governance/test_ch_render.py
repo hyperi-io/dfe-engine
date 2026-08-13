@@ -60,11 +60,12 @@ class TestRenderTier:
         )
         stmts = render_tier(t)
         s = _joined(stmts)
-        # profile is rendered before the role is altered to carry it
-        assert stmts[0].startswith(
+        # the role comes first; the profile then precedes the ALTER that carries it
+        assert stmts[0] == "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`"
+        assert stmts[1].startswith(
             "CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_analyst_tier_2_profile`"
         )
-        assert "readonly = 1" in stmts[0]
+        assert "readonly = 1" in stmts[1]
         assert "CREATE QUOTA IF NOT EXISTS `dfe_analyst_tier_2_quota` FOR INTERVAL 1 hour MAX" in s
         assert "queries = 1000" in s
         assert "errors = 100" in s
@@ -85,6 +86,18 @@ class TestRenderTier:
         assert "CREATE QUOTA" not in s
         assert "ALTER ROLE" not in s
         assert "CREATE ROLE IF NOT EXISTS `dfe_bare_role`" in s
+
+    def test_role_precedes_the_quota_assigned_to_it(self):
+        """ClickHouse rejects a quota naming a role that does not exist yet.
+
+        The failure is UNKNOWN_ROLE at reconcile time, and only on a cluster where
+        the role was not already present - so a cluster that has run before hides
+        it. Membership assertions cannot catch an ordering fault; this can.
+        """
+        stmts = render_tier(ChTier(name="t", quota={"interval": "1 hour", "queries": 1}))
+        role_at = next(i for i, s in enumerate(stmts) if s.startswith("CREATE ROLE"))
+        quota_at = next(i for i, s in enumerate(stmts) if s.startswith("CREATE QUOTA"))
+        assert role_at < quota_at
 
     def test_quota_maxima_excludes_interval(self):
         t = ChTier(name="x", quota={"interval": "1 day", "queries": 5})

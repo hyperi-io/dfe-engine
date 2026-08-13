@@ -45,13 +45,16 @@ def _settings_kv(settings: dict[str, int]) -> str:
 
 
 def render_tier(tier: ChTier) -> list[str]:
-    """DDL for a quota tier: settings profile -> quota -> role -> grants -> attach.
+    """DDL for a quota tier: role -> settings profile -> quota -> grants -> attach.
 
-    Order matters (spec 7 step 1): the profile + quota must exist before the role
-    is altered to carry them. Every statement is idempotent.
+    Order matters (spec 7 step 1). The role comes FIRST because the quota is
+    assigned ``TO`` it, and ClickHouse rejects a quota naming a role that does not
+    exist yet (UNKNOWN_ROLE) - which only shows up against a cluster where the
+    role was not already present. The profile and quota in turn precede the
+    ``ALTER ROLE`` that attaches them. Every statement is idempotent.
     """
     role = _bq(tier.role())
-    stmts: list[str] = []
+    stmts: list[str] = [f"CREATE ROLE IF NOT EXISTS {role}"]
 
     if tier.settings:
         prof = _bq(tier.profile())
@@ -67,7 +70,6 @@ def render_tier(tier: ChTier) -> list[str]:
             f"FOR INTERVAL {tier.quota_interval()} MAX {maxima} TO {role}"
         )
 
-    stmts.append(f"CREATE ROLE IF NOT EXISTS {role}")
     for grant in tier.grants:
         stmts.append(f"GRANT {grant} TO {role}")
     if tier.settings:

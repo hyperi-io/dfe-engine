@@ -17,6 +17,8 @@ The catalogue is gitcrud config, not code; the reconciler renders whatever tiers
 + orgs exist into idempotent ClickHouse DDL.
 """
 
+from .bindings import derive_group_bindings
+from .bootstrap import ch_admin_client, reconcile_from_stores
 from .models import (
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
@@ -41,13 +43,16 @@ __all__ = [
     "DEFAULT_TIERS",
     "ChRbacReconciler",
     "ChServiceRole",
+    "ch_admin_client",
     "ChTier",
     "GroupChBinding",
     "ReconcileResult",
     "compute_drops",
+    "derive_group_bindings",
     "org_policy_name",
     "org_role_name",
     "reconcile_ch_rbac",
+    "reconcile_from_stores",
     "render_group_user",
     "render_materialise",
     "render_org_role",
