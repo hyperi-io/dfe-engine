@@ -24,10 +24,14 @@ def _org(name: str, ids: list[str] | None = None) -> SimpleNamespace:
 
 
 def _group(
-    name: str, *, scope: str = "system", org_ids: list[str] | None = None
+    name: str,
+    *,
+    scope: str = "system",
+    org_ids: list[str] | None = None,
+    roles: list[str] | None = None,
 ) -> SimpleNamespace:
     scope_org = scope[len("org:") :] if scope.startswith("org:") else ""
-    return SimpleNamespace(name=name, scope_org=scope_org, org_ids=org_ids or [])
+    return SimpleNamespace(name=name, scope_org=scope_org, org_ids=org_ids or [], roles=roles or [])
 
 
 class TestOrgScopedGroups:
@@ -56,9 +60,27 @@ class TestOrgScopedGroups:
 
 class TestUnrestrictedGroups:
     def test_group_claiming_no_org_is_unrestricted(self):
-        """The platform team: no org role, so no row policy targets it."""
+        """The platform team: no tenant role, so no row policy targets it."""
         bindings = derive_group_bindings([_group("platform")], [_org("acme")])
         assert [(b.group, b.org) for b in bindings] == [("platform", "")]
+
+    def test_platform_role_beats_org_markers(self):
+        """An analyst matched by a domain rule stays unrestricted - the org
+        filter fences tenants in, never the platform's own people out."""
+        group = _group("analysts", org_ids=["acme"], roles=["data_analyst"])
+        bindings = derive_group_bindings([group], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("analysts", "")]
+
+    def test_customer_role_alone_keeps_the_pin(self):
+        group = _group("acme-view", org_ids=["acme"], roles=["customer_viewer"])
+        bindings = derive_group_bindings([group], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("acme-view", "acme")]
+
+    def test_mixed_roles_go_unrestricted(self):
+        """customer_viewer plus any platform role resolves platform-wards."""
+        group = _group("odd", org_ids=["acme"], roles=["customer_viewer", "data_viewer"])
+        bindings = derive_group_bindings([group], [_org("acme")])
+        assert [(b.group, b.org) for b in bindings] == [("odd", "")]
 
 
 class TestFailsClosed:

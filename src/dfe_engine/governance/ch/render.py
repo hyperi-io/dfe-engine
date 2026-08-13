@@ -21,7 +21,7 @@ from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 
-from .models import ChServiceRole, ChTier, org_policy_name, org_role_name
+from .models import TENANT_ROLE, TENANT_SETTING, ChServiceRole, ChTier, tenant_policy_name
 
 
 def _bq(identifier: str) -> str:
@@ -116,28 +116,25 @@ def render_service_user(role_def: ChServiceRole, pw_hash: str) -> list[str]:
     return stmts
 
 
-def _org_predicate(org_ids: list[str]) -> str:
-    """``_org_id = 'x'`` for a single id, ``_org_id IN ('a', 'b')`` for many."""
-    if len(org_ids) == 1:
-        return f"_org_id = {_sq(org_ids[0])}"
-    return f"_org_id IN ({', '.join(_sq(i) for i in org_ids)})"
+def render_tenant_axis(tables: list[tuple[str, str]]) -> list[str]:
+    """DDL for the SHARED tenant axis: one role, one RESTRICTIVE policy per table.
 
+    The predicate reads the caller's pinned ``SQL_current_tenant_id`` (comma-joined
+    tenant ids), so ONE policy set serves every org - adding an org adds a pinned
+    user and nothing here. ``tables`` is the list of ``(db, table)`` that actually
+    carry ``_org_id`` (discovered from ``system.columns``).
 
-def render_org_role(org: str, org_ids: list[str], tables: list[tuple[str, str]]) -> list[str]:
-    """DDL for an org's visibility axis: a role + one RESTRICTIVE row policy per
-    ``_org_id``-bearing table.
-
-    ``tables`` is the list of ``(db, table)`` that actually carry ``_org_id`` (the
-    reconciler discovers these from ``system.columns``). RESTRICTIVE-only is
-    load-bearing (spec 5.2): a user holding no org role is targeted by no policy
-    and therefore sees ALL rows; a user holding this role sees only matching rows.
-    NEVER emit a PERMISSIVE policy here - it would flip the table to default-deny.
+    RESTRICTIVE-only is load-bearing (spec 5.2): a user not holding
+    ``dfe_tenant_role`` is targeted by no policy and reads ALL rows; a holder reads
+    only its pinned ids. NEVER emit a PERMISSIVE policy here - it would flip the
+    table to default-deny. ``getSetting`` on a holder with NO pin throws, so a
+    misconfigured grant fails closed and loudly rather than leaking.
     """
-    role = _bq(org_role_name(org))
+    role = _bq(TENANT_ROLE)
+    predicate = f"has(splitByChar(',', getSetting('{TENANT_SETTING}')), _org_id)"
     stmts: list[str] = [f"CREATE ROLE IF NOT EXISTS {role}"]
-    predicate = _org_predicate(org_ids)
     for db, table in tables:
-        policy = _bq(org_policy_name(org, db, table))
+        policy = _bq(tenant_policy_name(db, table))
         target = f"{_bq(db)}.{_bq(table)}"
         stmts.append(
             f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} "
@@ -146,23 +143,31 @@ def render_org_role(org: str, org_ids: list[str], tables: list[tuple[str, str]])
     return stmts
 
 
-def render_group_user(
-    user: str, pw_hash: str, *, tier_role: str, org_role: str | None = None
-) -> list[str]:
-    """DDL for a group's CH user: create it, then grant the tier + (optional) org
-    role.
+def render_pinned_user(user: str, pw_hash: str, *, tier_role: str, org_ids: list[str]) -> list[str]:
+    """DDL for a tenant-scoped (or unrestricted) CH user.
 
-    ``tier_role`` / ``org_role`` are the RESOLVED CH role names (the reconciler
-    resolves an empty tier to the default and an empty org to unrestricted). An
-    unrestricted user simply gets no org grant.
+    With ``org_ids``: grant the shared tenant role and PIN the tenant setting
+    READONLY - the pin is what makes an attacker-authored ``SETTINGS`` override a
+    hard 452 instead of a cross-tenant read. Empty ``org_ids`` is the unrestricted
+    shape (universal analysts): tier only, no tenant role, no pin.
+
+    The ALTER re-runs every reconcile, so the pin tracks org_ids changes even
+    though ``CREATE USER IF NOT EXISTS`` never touches an existing user.
     """
     qu = _bq(user)
     stmts = [
         f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
         f"GRANT {_bq(tier_role)} TO {qu}",
     ]
-    if org_role:
-        stmts.append(f"GRANT {_bq(org_role)} TO {qu}")
+    if org_ids:
+        # The pin is comma-joined, so a comma inside an id would silently split
+        # into fragments that match nothing.
+        bad = [i for i in org_ids if "," in i]
+        if bad:
+            raise ValueError(f"org ids must not contain commas: {bad}")
+        stmts.append(f"GRANT {_bq(TENANT_ROLE)} TO {qu}")
+        pin = _sq(",".join(org_ids))
+        stmts.append(f"ALTER USER {qu} SETTINGS {TENANT_SETTING} = {pin} READONLY")
     return stmts
 
 

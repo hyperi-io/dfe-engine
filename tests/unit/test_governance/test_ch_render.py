@@ -11,20 +11,22 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from dfe_engine.governance.ch.models import (
     DEFAULT_SERVICE_ROLES,
     DEFAULT_TIERS,
     ChServiceRole,
     ChTier,
     GroupChBinding,
-    org_policy_name,
-    org_role_name,
+    org_user_name,
+    tenant_policy_name,
 )
 from dfe_engine.governance.ch.render import (
-    render_group_user,
     render_materialise,
-    render_org_role,
+    render_pinned_user,
     render_service_role,
+    render_tenant_axis,
     render_tier,
 )
 
@@ -40,9 +42,9 @@ class TestNaming:
         assert t.profile() == "dfe_analyst_tier_2_profile"
         assert t.quota_name() == "dfe_analyst_tier_2_quota"
 
-    def test_org_names(self):
-        assert org_role_name("acme") == "dfe_org_acme_role"
-        assert org_policy_name("acme", "dfe", "events") == "dfe_rowpol_acme_dfe_events"
+    def test_tenant_names(self):
+        assert org_user_name("acme") == "dfe_org_acme"
+        assert tenant_policy_name("dfe", "events") == "dfe_rowpol_tenant_dfe_events"
 
     def test_group_user_default_and_override(self):
         assert GroupChBinding(group="soc-ro").user() == "dfe_grp_soc-ro"
@@ -122,53 +124,69 @@ class TestRenderServiceRole:
         assert r.user() == "dfe_loader"
 
 
-class TestRenderOrgRole:
-    def test_single_org_id_uses_equals(self):
-        s = _joined(render_org_role("acme", ["acme"], [("dfe", "events")]))
-        assert "CREATE ROLE IF NOT EXISTS `dfe_org_acme_role`" in s
-        assert "AS RESTRICTIVE FOR SELECT USING _org_id = 'acme'" in s
-        assert "`dfe_rowpol_acme_dfe_events` ON `dfe`.`events`" in s
+class TestRenderTenantAxis:
+    def test_shared_role_and_getsetting_policy(self):
+        s = _joined(render_tenant_axis([("dfe", "events")]))
+        assert "CREATE ROLE IF NOT EXISTS `dfe_tenant_role`" in s
+        assert (
+            "AS RESTRICTIVE FOR SELECT USING "
+            "has(splitByChar(',', getSetting('SQL_current_tenant_id')), _org_id)" in s
+        )
+        assert "`dfe_rowpol_tenant_dfe_events` ON `dfe`.`events`" in s
         assert "PERMISSIVE" not in s  # HARD CONSTRAINT: restrictive-only
 
-    def test_multi_org_id_uses_in(self):
-        s = _joined(render_org_role("grp", ["a", "b"], [("dfe", "events")]))
-        assert "USING _org_id IN ('a', 'b')" in s
-
     def test_policy_per_table(self):
-        stmts = render_org_role("acme", ["acme"], [("dfe", "events"), ("dfe_hunts", "results")])
+        stmts = render_tenant_axis([("dfe", "events"), ("dfe_hunts", "results")])
         s = _joined(stmts)
         assert s.count("CREATE ROW POLICY") == 2
         assert "`dfe_hunts`.`results`" in s
 
     def test_no_tables_just_role(self):
-        stmts = render_org_role("acme", ["acme"], [])
-        assert stmts == ["CREATE ROLE IF NOT EXISTS `dfe_org_acme_role`"]
+        assert render_tenant_axis([]) == ["CREATE ROLE IF NOT EXISTS `dfe_tenant_role`"]
 
-    def test_org_id_escaping(self):
-        s = _joined(render_org_role("x", ["o'brien"], [("dfe", "t")]))
-        assert "_org_id = 'o''brien'" in s
+    def test_no_per_org_objects(self):
+        """The whole point of the shared axis: org count never changes it."""
+        s = _joined(render_tenant_axis([("dfe", "events")]))
+        assert "acme" not in s
 
 
-class TestRenderGroupUser:
-    def test_org_scoped_user(self):
+class TestRenderPinnedUser:
+    def test_org_tied_user_pins_and_holds_the_tenant_role(self):
         s = _joined(
-            render_group_user(
-                "dfe_grp_soc",
-                "abc123",
-                tier_role="dfe_analyst_tier_2_role",
-                org_role="dfe_org_acme_role",
+            render_pinned_user(
+                "dfe_org_acme", "abc123", tier_role="dfe_analyst_tier_2_role", org_ids=["acme"]
             )
         )
         assert (
-            "CREATE USER IF NOT EXISTS `dfe_grp_soc` IDENTIFIED WITH sha256_hash BY 'abc123'" in s
+            "CREATE USER IF NOT EXISTS `dfe_org_acme` IDENTIFIED WITH sha256_hash BY 'abc123'" in s
         )
-        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_soc`" in s
-        assert "GRANT `dfe_org_acme_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        # READONLY is the enforcement: an attacker SETTINGS override is a 452.
+        assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
 
-    def test_unrestricted_user_no_org_grant(self):
-        s = _joined(render_group_user("dfe_grp_admin", "h", tier_role="dfe_analyst_tier_1_role"))
-        assert "GRANT `dfe_analyst_tier_1_role`" in s
-        assert "dfe_org_" not in s  # unrestricted => no org role
+    def test_multi_org_ids_join_into_one_pin(self):
+        s = _joined(
+            render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["a", "b"])
+        )
+        assert "SETTINGS SQL_current_tenant_id = 'a,b' READONLY" in s
+
+    def test_unrestricted_user_gets_no_pin_and_no_tenant_role(self):
+        s = _joined(render_pinned_user("dfe_grp_admin", "h", tier_role="dfe_t_role", org_ids=[]))
+        assert "GRANT `dfe_t_role`" in s
+        assert "dfe_tenant_role" not in s
+        assert "SQL_current_tenant_id" not in s
+
+    def test_pin_escaping(self):
+        s = _joined(
+            render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["o'brien"])
+        )
+        assert "SQL_current_tenant_id = 'o''brien'" in s
+
+    def test_comma_in_org_id_is_rejected(self):
+        """A comma would split into fragments that match nothing - refuse it."""
+        with pytest.raises(ValueError):
+            render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["a,b"])
 
 
 class TestDefaultTiers:

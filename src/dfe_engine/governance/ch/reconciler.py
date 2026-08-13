@@ -23,14 +23,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from .models import DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_policy_name, org_role_name
+from .models import DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_user_name, tenant_policy_name
 from .render import (
     _bq,
-    render_group_user,
     render_materialise,
-    render_org_role,
+    render_pinned_user,
     render_service_role,
     render_service_user,
+    render_tenant_axis,
     render_tier,
 )
 
@@ -59,24 +59,36 @@ def _default_tier_name(tiers: list[Any], kind: str) -> str:
 def compute_drops(
     existing_org_roles: set[str],
     existing_policies: list[tuple[str, str, str]],
+    existing_org_users: set[str],
     orgs: list[Any],
     org_tables: list[tuple[str, str]],
 ) -> list[str]:
-    """Pure diff: DROP DDL for org roles/policies with no config Org behind them.
+    """Pure diff: DROP DDL for tenant objects with no config behind them.
 
-    Policies are dropped before roles (a policy targets a role). Only touches
-    ``dfe_org_`` / ``dfe_rowpol_`` objects, so hand-made CH objects are safe.
+    Three sweeps, each prefix-scoped so hand-made CH objects are safe:
+
+    - ``dfe_rowpol_*`` policies not in the desired tenant set. This also retires
+      the pre-pinned design's per-org literal policies on upgrade.
+    - ``dfe_org_*`` roles - ALL of them: the pinned design has no per-org roles,
+      so any survivor is the old design's leftover.
+    - ``dfe_org_*`` users for orgs no longer registered. An offboarded org whose
+      credential stays live is still a tenant of the platform; the drop is the
+      revocation.
+
     ``existing_policies`` is ``(short_name, db, table)`` from system.row_policies.
     """
-    desired_roles = {org_role_name(o.name) for o in orgs}
-    desired_policies = {org_policy_name(o.name, db, t) for o in orgs for (db, t) in org_tables}
+    desired_policies = {tenant_policy_name(db, t) for (db, t) in org_tables}
+    desired_users = {org_user_name(o.name) for o in orgs}
     drops: list[str] = []
     for short_name, db, table in existing_policies:
         if short_name.startswith("dfe_rowpol_") and short_name not in desired_policies:
             drops.append(f"DROP ROW POLICY IF EXISTS {_bq(short_name)} ON {_bq(db)}.{_bq(table)}")
     for role in sorted(existing_org_roles):
-        if role.startswith("dfe_org_") and role not in desired_roles:
+        if role.startswith("dfe_org_") and role.endswith("_role"):
             drops.append(f"DROP ROLE IF EXISTS {_bq(role)}")
+    for user in sorted(existing_org_users):
+        if user.startswith("dfe_org_") and user not in desired_users:
+            drops.append(f"DROP USER IF EXISTS {_bq(user)}")
     return drops
 
 
@@ -108,6 +120,12 @@ class ChRbacReconciler:
     def _existing_org_roles(self) -> set[str]:
         rows = self._client.query(
             "SELECT name FROM system.roles WHERE name LIKE 'dfe_org_%'"
+        ).result_rows
+        return {r[0] for r in rows}
+
+    def _existing_org_users(self) -> set[str]:
+        rows = self._client.query(
+            "SELECT name FROM system.users WHERE name LIKE 'dfe_org_%'"
         ).result_rows
         return {r[0] for r in rows}
 
@@ -146,9 +164,11 @@ class ChRbacReconciler:
         org_tables: list[tuple[str, str]],
         service_hashes: dict[str, str],
         group_hashes: dict[str, str],
+        org_hashes: dict[str, str],
     ) -> list[str]:
-        """Full ordered DDL (spec 7): tiers -> service roles -> org roles -> group
-        users. Pure given the discovered ``org_tables`` and the minted ``*_hashes``.
+        """Full ordered DDL (spec 7): tiers -> service roles -> tenant axis ->
+        org users -> group users. Pure given the discovered ``org_tables`` and the
+        minted ``*_hashes``.
         """
         stmts: list[str] = []
         for t in tiers:
@@ -157,18 +177,28 @@ class ChRbacReconciler:
             stmts += render_service_role(r)
             if r.mint_user and r.name in service_hashes:
                 stmts += render_service_user(r, service_hashes[r.name])
-        for o in orgs:
-            stmts += render_org_role(o.name, list(o.org_ids) or [o.name], org_tables)
         default_analyst = _default_tier_name(tiers, "analyst")
-        org_names = {o.name for o in orgs}
+        default_tier_role = f"dfe_{default_analyst}_role"
+        stmts += render_tenant_axis(org_tables)
+        # The org's pinned user: the identity its hyperdx team connects as.
+        orgs_by_name = {o.name: o for o in orgs}
+        for o in orgs:
+            if o.name not in org_hashes:
+                continue  # no minted secret (no secrets store) -> skip the user
+            stmts += render_pinned_user(
+                org_user_name(o.name),
+                org_hashes[o.name],
+                tier_role=default_tier_role,
+                org_ids=list(o.org_ids) or [o.name],
+            )
         for b in bindings:
             if b.group not in group_hashes:
-                continue  # no minted secret (no secrets store) -> skip the user
-            tier_name = b.tier or default_analyst
-            tier_role = f"dfe_{tier_name}_role"
-            org_role = org_role_name(b.org) if (b.org and b.org in org_names) else None
-            stmts += render_group_user(
-                b.user(), group_hashes[b.group], tier_role=tier_role, org_role=org_role
+                continue
+            tier_role = f"dfe_{b.tier or default_analyst}_role"
+            org = orgs_by_name.get(b.org) if b.org else None
+            org_ids = (list(org.org_ids) or [org.name]) if org is not None else []
+            stmts += render_pinned_user(
+                b.user(), group_hashes[b.group], tier_role=tier_role, org_ids=org_ids
             )
         return stmts
 
@@ -188,11 +218,15 @@ class ChRbacReconciler:
 
         service_hashes: dict[str, str] = {}
         group_hashes: dict[str, str] = {}
+        org_hashes: dict[str, str] = {}
         if self._secrets is not None:
             for r in service_roles:
                 if r.mint_user:
                     service_hashes[r.name] = self._hash_for(f"ch/service/{r.name}")
                     result.minted.append(f"service/{r.name}")
+            for o in orgs:
+                org_hashes[o.name] = self._hash_for(f"ch/orgs/{o.name}")
+                result.minted.append(f"org/{o.name}")
             for b in bindings:
                 group_hashes[b.group] = self._hash_for(f"ch/groups/{b.group}")
                 result.minted.append(f"group/{b.group}")
@@ -205,9 +239,14 @@ class ChRbacReconciler:
             org_tables=org_tables,
             service_hashes=service_hashes,
             group_hashes=group_hashes,
+            org_hashes=org_hashes,
         )
         drops = compute_drops(
-            self._existing_org_roles(), self._existing_row_policies(), orgs, org_tables
+            self._existing_org_roles(),
+            self._existing_row_policies(),
+            self._existing_org_users(),
+            orgs,
+            org_tables,
         )
         materialise = render_materialise(orgs, tiers)
 
