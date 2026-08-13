@@ -55,7 +55,9 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         if r[0].startswith("dfe_org_") and uid not in r[0]
     ]
     if foreign:
-        pytest.skip(f"refusing to reconcile: cluster carries org roles we did not create: {foreign}")
+        pytest.skip(
+            f"refusing to reconcile: cluster carries org roles we did not create: {foreign}"
+        )
 
     g_scoped = f"grp-scoped-{uid}"  # org-tied -> sees only org_a
     g_open = f"grp-open-{uid}"  # no org -> unrestricted
