@@ -10,8 +10,8 @@
 A TIER is "how much you can consume + what you can do" (grants + settings profile
 + quota). A SERVICE ROLE is a fixed identity (loader/query_reader/hunt_runner). A
 GROUP BINDING ties an RBAC group's CH user to one tier axis + at most one org
-axis. Org roles are NOT modelled here - they are derived from the Org registry by
-the reconciler (one role + row policy set per Org).
+axis. The tenant axis is one SHARED role plus a per-user pinned setting; per-org
+users are derived from the Org registry by the reconciler.
 
 CH object naming (spec 5.1): a tier ``analyst_tier_2`` yields role
 ``dfe_analyst_tier_2_role``, profile ``dfe_analyst_tier_2_profile``, quota
@@ -29,14 +29,32 @@ from pydantic import BaseModel, Field
 _GiB = 1024**3
 
 
-def org_role_name(org: str) -> str:
-    """CH role that carries an org's restrictive row policies."""
-    return f"dfe_org_{org}_role"
+TENANT_ROLE = "dfe_tenant_role"
+"""The ONE shared role the tenant row policies target.
+
+Held by every org-pinned user and by nothing else. A user holding it reads only
+the ``_org_id`` values named by its own pinned ``SQL_current_tenant_id`` setting;
+a user without it is targeted by no policy and reads unrestricted.
+"""
+
+TENANT_SETTING = "SQL_current_tenant_id"
+"""Custom setting carrying a user's tenant ids (comma-joined), pinned READONLY.
+
+The pin is the enforcement: a READONLY user setting rejects any override -
+including a ``SETTINGS`` clause inside attacker-authored query text - with
+SETTING_CONSTRAINT_VIOLATION (code 452). The server must allow the ``SQL_``
+custom-settings prefix (the clickhouse-cluster chart does).
+"""
 
 
-def org_policy_name(org: str, db: str, table: str) -> str:
-    """Deterministic row-policy name for (org, table) - lets the reconciler diff."""
-    return f"dfe_rowpol_{org}_{db}_{table}"
+def tenant_policy_name(db: str, table: str) -> str:
+    """Deterministic name for the shared tenant policy on one table."""
+    return f"dfe_rowpol_tenant_{db}_{table}"
+
+
+def org_user_name(org: str) -> str:
+    """The org's pinned CH user - the identity a hyperdx team connects as."""
+    return f"dfe_org_{org}"
 
 
 # ---- Config models --------------------------------------------------------
@@ -102,13 +120,13 @@ class GroupChBinding(BaseModel):
 
     Inline grants/settings/quota are GONE (they moved to tiers, spec 6.4): a
     binding is just a group -> (tier, org) pointer. Empty ``tier`` resolves to the
-    default analyst tier; empty ``org`` means unrestricted (no org role granted).
+    default analyst tier; empty ``org`` means unrestricted (no tenant pin).
     """
 
     group: str
     ch_user: str = ""  # defaults to dfe_grp_{group}
     tier: str = ""  # -> dfe_{tier}_role (empty = the default analyst tier)
-    org: str = ""  # -> dfe_org_{org}_role (empty = unrestricted)
+    org: str = ""  # -> tenant pin with that org's org_ids (empty = unrestricted)
 
     def user(self) -> str:
         return self.ch_user or f"dfe_grp_{self.group}"

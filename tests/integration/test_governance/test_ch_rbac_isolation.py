@@ -1,21 +1,24 @@
-"""Live-ClickHouse tests for the load-bearing org-isolation invariant (spec 5.2).
+"""Live-ClickHouse tests for the pinned-setting tenant-isolation invariant.
 
-The whole two-axis RBAC design rests on RESTRICTIVE-ONLY row policies:
+The tenant axis is ONE shared role and one RESTRICTIVE row policy per table whose
+predicate reads the caller's pinned ``SQL_current_tenant_id``:
 
-  | user's roles on the table        | must see        |
-  |----------------------------------|-----------------|
-  | none (unrestricted)              | ALL rows        |
-  | one org role                     | only that org   |
-  | two org roles (accidental)       | 0 (fails closed)|
+  | user                              | must see                  |
+  |-----------------------------------|---------------------------|
+  | no tenant role (platform)         | ALL rows                  |
+  | pinned to one org                 | only that org             |
+  | pinned to two orgs                | both orgs, nothing else   |
+  | pin override in query text        | hard error (code 452)     |
+  | tenant role but NO pin            | hard error (fails closed) |
 
-That "no policy applies -> see ALL" behaviour is a specific ClickHouse property
-(PR #34596); it cannot be checked without a real cluster, so this exercises the
-actual `render_org_role` DDL end to end. Everything is created under a unique
-`uid` suffix and dropped in teardown, so it is safe on a shared cluster.
+The first row is a specific ClickHouse property (restrictive-only policies,
+PR #34596) and the 452 is a settings-constraint behaviour - neither can be
+checked without a real server, so this exercises the actual render DDL end to
+end. Everything is created under a unique ``uid`` suffix and dropped in
+teardown, so it is safe on a shared cluster.
 
-These build their DDL by hand, so they prove ClickHouse's behaviour rather than
-the engine's. That the engine actually GRANTS an org role is proven separately,
-in `test_ch_rbac_reconcile.py`.
+Requires the server to allow the ``SQL_`` custom-settings prefix
+(``custom_settings_prefixes``); the fixture skips where it cannot tell.
 
 No mocks (project policy): a real CH, real users, real row policies.
 """
@@ -27,8 +30,8 @@ import uuid
 
 import pytest
 
-from dfe_engine.governance.ch.models import org_policy_name, org_role_name
-from dfe_engine.governance.ch.render import render_org_role
+from dfe_engine.governance.ch.models import TENANT_ROLE, tenant_policy_name
+from dfe_engine.governance.ch.render import render_pinned_user, render_tenant_axis
 
 from .conftest import count_as, drop_safely
 
@@ -38,45 +41,52 @@ _PW = "Rbac_Test_Pw_9f3b2c"  # nosec - throwaway test-user password on a PET clu
 _PW_HASH = hashlib.sha256(_PW.encode()).hexdigest()
 
 
-def _count_as(params: dict, user: str, table_fqn: str) -> int:
-    """Row count for a hand-built test user, which all share one password."""
-    return count_as(params, user, _PW, table_fqn)
+def _prefix_allowed(ch_client) -> bool:
+    """Whether the server accepts SQL_-prefixed custom settings."""
+    try:
+        ch_client.command("SET SQL_current_tenant_id = 'probe'")
+        return True
+    except Exception:
+        return False
 
 
 @pytest.fixture(scope="module")
-def rbac_world(admin_client, conn_params):
-    """Build a table + two org roles/policies + three users on the real cluster.
+def tenant_world(admin_client, conn_params):
+    """Build a table + the shared tenant axis + four pinned-shape users.
 
-    Yields the handles the tests need. Tears everything down in a finally so a
-    failed assertion never leaves objects on a shared cluster.
+    The tenant role and policies are SHARED objects with fixed names, so this
+    fixture must not run concurrently with another instance of itself; the
+    uid-scoped db keeps the data isolated regardless.
     """
     ch_client = admin_client
-    ch_params = conn_params
+    if not _prefix_allowed(ch_client):
+        pytest.skip("server does not allow the SQL_ custom-settings prefix")
+
     uid = uuid.uuid4().hex[:10]
-    db = f"dfe_test_rbac_{uid}"
+    db = f"dfe_test_pin_{uid}"
     table = "events"
     table_fqn = f"{db}.{table}"
-    org_a = f"orga{uid}"  # org id value == org name (unique -> unique CH objects)
+    org_a = f"orga{uid}"
     org_b = f"orgb{uid}"
-    u_scoped = f"dfe_test_scoped_{uid}"  # holds org_a role only
-    u_open = f"dfe_test_open_{uid}"  # no org role -> unrestricted
-    u_double = f"dfe_test_double_{uid}"  # holds BOTH org roles -> fails closed
 
-    users = [u_scoped, u_open, u_double]
-    roles = [org_role_name(org_a), org_role_name(org_b)]
-    policies = [
-        (org_policy_name(org_a, db, table), table_fqn),
-        (org_policy_name(org_b, db, table), table_fqn),
-    ]
+    u_pinned = f"dfe_test_pinned_{uid}"  # pinned to org_a
+    u_open = f"dfe_test_open_{uid}"  # no tenant role -> unrestricted
+    u_multi = f"dfe_test_multi_{uid}"  # pinned to BOTH orgs
+    u_nopin = f"dfe_test_nopin_{uid}"  # tenant role but no pin -> must error
+    users = [u_pinned, u_open, u_multi, u_nopin]
+    tier_role = f"dfe_test_tier_{uid}_role"
 
     def _drop_all() -> None:
         for u in users:
             drop_safely(ch_client, f"DROP USER IF EXISTS {u}")
-        for policy, tgt in policies:
-            drop_safely(ch_client, f"DROP ROW POLICY IF EXISTS {policy} ON {tgt}")
-        for r in roles:
-            drop_safely(ch_client, f"DROP ROLE IF EXISTS {r}")
+        drop_safely(
+            ch_client,
+            f"DROP ROW POLICY IF EXISTS {tenant_policy_name(db, table)} ON {table_fqn}",
+        )
+        drop_safely(ch_client, f"DROP ROLE IF EXISTS {tier_role}")
         drop_safely(ch_client, f"DROP DATABASE IF EXISTS {db}")
+        # The shared tenant role is left in place: a real deployment owns it, and
+        # only the uid-scoped policy created here referenced it.
 
     try:
         try:
@@ -93,61 +103,109 @@ def rbac_world(admin_client, conn_params):
                 f"('{org_b}','b1'),('{org_b}','b2')"
             )
 
-            # Real code under test: role + RESTRICTIVE row policy per org.
-            for stmt in render_org_role(org_a, [org_a], [(db, table)]):
-                ch_client.command(stmt)
-            for stmt in render_org_role(org_b, [org_b], [(db, table)]):
-                ch_client.command(stmt)
+            ch_client.command(f"CREATE ROLE IF NOT EXISTS {tier_role}")
+            ch_client.command(f"GRANT SELECT ON {table_fqn} TO {tier_role}")
 
-            # Users: all can SELECT the table; org roles decide visibility.
-            for u in users:
-                ch_client.command(
-                    f"CREATE USER IF NOT EXISTS {u} IDENTIFIED WITH sha256_hash BY '{_PW_HASH}'"
-                )
-                ch_client.command(f"GRANT SELECT ON {table_fqn} TO {u}")
-            ch_client.command(f"GRANT {org_role_name(org_a)} TO {u_scoped}")
-            ch_client.command(f"GRANT {org_role_name(org_a)} TO {u_double}")
-            ch_client.command(f"GRANT {org_role_name(org_b)} TO {u_double}")
+            # Real code under test: the shared axis + the pinned-user shapes.
+            for stmt in render_tenant_axis([(db, table)]):
+                ch_client.command(stmt)
+            for stmt in render_pinned_user(
+                u_pinned, _PW_HASH, tier_role=tier_role, org_ids=[org_a]
+            ):
+                ch_client.command(stmt)
+            for stmt in render_pinned_user(u_open, _PW_HASH, tier_role=tier_role, org_ids=[]):
+                ch_client.command(stmt)
+            for stmt in render_pinned_user(
+                u_multi, _PW_HASH, tier_role=tier_role, org_ids=[org_a, org_b]
+            ):
+                ch_client.command(stmt)
+            for stmt in render_pinned_user(u_nopin, _PW_HASH, tier_role=tier_role, org_ids=[]):
+                ch_client.command(stmt)
+            # The misconfiguration case: tenant role granted, no pin.
+            ch_client.command(f"GRANT {TENANT_ROLE} TO {u_nopin}")
             # Granted roles must be DEFAULT so they are active on login (else the
             # row policy that targets the role would not apply).
-            for u in (u_scoped, u_double):
+            for u in users:
                 ch_client.command(f"ALTER USER {u} DEFAULT ROLE ALL")
         except Exception:
-            # A provisioning failure is a real break: skipping here reported the
-            # isolation invariant as proven when nothing had been created.
+            # A provisioning failure is a real break: skipping here would report
+            # the isolation invariant as proven when nothing had been created.
             _drop_all()
             raise
 
         yield {
-            "params": ch_params,
+            "params": conn_params,
             "table_fqn": table_fqn,
-            "u_scoped": u_scoped,
+            "u_pinned": u_pinned,
             "u_open": u_open,
-            "u_double": u_double,
+            "u_multi": u_multi,
+            "u_nopin": u_nopin,
+            "org_b": org_b,
         }
     finally:
         _drop_all()
 
 
-class TestRestrictiveOnlyIsolation:
-    def test_org_scoped_user_sees_only_its_rows(self, rbac_world):
-        """A user holding one org role sees only that org's rows (3 of 5)."""
-        n = _count_as(rbac_world["params"], rbac_world["u_scoped"], rbac_world["table_fqn"])
-        assert n == 3
+class TestPinnedTenantIsolation:
+    def test_pinned_user_sees_only_its_org(self, tenant_world):
+        w = tenant_world
+        assert count_as(w["params"], w["u_pinned"], _PW, w["table_fqn"]) == 3
 
-    def test_unrestricted_user_sees_all_rows(self, rbac_world):
-        """A user with NO org role is targeted by no policy -> sees ALL rows.
+    def test_unrestricted_user_sees_all_rows(self, tenant_world):
+        """No tenant role -> no policy applies -> ALL rows.
 
-        This is the exact restrictive-only property the whole design relies on;
+        This is the exact restrictive-only property the platform axis relies on;
         if CH flipped to default-deny this would be 0 and the test would fail.
         """
-        n = _count_as(rbac_world["params"], rbac_world["u_open"], rbac_world["table_fqn"])
-        assert n == 5
+        w = tenant_world
+        assert count_as(w["params"], w["u_open"], _PW, w["table_fqn"]) == 5
 
-    def test_double_org_grant_fails_closed(self, rbac_world):
-        """Two restrictive policies AND together -> an impossible predicate -> 0.
+    def test_multi_org_pin_sees_both_orgs(self, tenant_world):
+        """A comma-joined pin spans orgs - the double-grant zero-rows trap of the
+        per-org-role design cannot occur here."""
+        w = tenant_world
+        assert count_as(w["params"], w["u_multi"], _PW, w["table_fqn"]) == 5
 
-        Proves an accidental double-org grant leaks nothing (fails closed).
+    def test_text_override_is_a_hard_error(self, tenant_world):
+        """THE attack: the SQL author pins a different tenant in query text.
+
+        The READONLY user setting rejects the whole query (code 452,
+        SETTING_CONSTRAINT_VIOLATION) rather than returning the other org's rows.
         """
-        n = _count_as(rbac_world["params"], rbac_world["u_double"], rbac_world["table_fqn"])
-        assert n == 0
+        import clickhouse_connect
+
+        w = tenant_world
+        client = clickhouse_connect.get_client(
+            host=w["params"]["host"],
+            port=w["params"]["port"],
+            username=w["u_pinned"],
+            password=_PW,
+            secure=w["params"]["secure"],
+        )
+        try:
+            with pytest.raises(Exception, match=r"SETTING_CONSTRAINT_VIOLATION|452"):
+                client.query(
+                    f"SELECT count() FROM {w['table_fqn']} "
+                    f"SETTINGS SQL_current_tenant_id = '{w['org_b']}'"
+                )
+        finally:
+            client.close()
+
+    def test_tenant_role_without_pin_fails_closed(self, tenant_world):
+        """A holder with no pin errors on read - misconfiguration is loud, and it
+        never degrades to unrestricted."""
+        import clickhouse_connect
+
+        w = tenant_world
+        client = clickhouse_connect.get_client(
+            host=w["params"]["host"],
+            port=w["params"]["port"],
+            username=w["u_nopin"],
+            password=_PW,
+            secure=w["params"]["secure"],
+        )
+        try:
+            with pytest.raises(Exception):
+                client.query(f"SELECT count() FROM {w['table_fqn']}")
+        finally:
+            client.close()
