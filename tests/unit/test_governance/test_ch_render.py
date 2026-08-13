@@ -64,11 +64,12 @@ class TestRenderTier:
         s = _joined(stmts)
         # the role comes first; the profile then precedes the ALTER that carries it
         assert stmts[0] == "CREATE ROLE IF NOT EXISTS `dfe_analyst_tier_2_role`"
-        assert stmts[1].startswith(
-            "CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_analyst_tier_2_profile`"
-        )
-        assert "readonly = 1" in stmts[1]
-        assert "CREATE QUOTA IF NOT EXISTS `dfe_analyst_tier_2_quota` FOR INTERVAL 1 hour MAX" in s
+        assert stmts[1] == ("CREATE SETTINGS PROFILE IF NOT EXISTS `dfe_analyst_tier_2_profile`")
+        # the ALTER carries the settings so edits reach an existing profile
+        assert "ALTER SETTINGS PROFILE `dfe_analyst_tier_2_profile` SETTINGS" in stmts[2]
+        assert "readonly = 1" in stmts[2]
+        assert "CREATE QUOTA IF NOT EXISTS `dfe_analyst_tier_2_quota` TO" in s
+        assert "ALTER QUOTA `dfe_analyst_tier_2_quota` FOR INTERVAL 1 hour MAX" in s
         assert "queries = 1000" in s
         assert "errors = 100" in s
         assert "interval = " not in s  # interval is not a per-interval maximum
@@ -216,7 +217,7 @@ class TestDefaultTiers:
 
     def test_analyst_readonly_hunt_not(self):
         by_name = {t.name: t for t in DEFAULT_TIERS}
-        assert by_name["analyst_tier_2"].settings.get("readonly") == 1
+        assert by_name["analyst_tier_2"].settings.get("readonly") == 2
         assert "readonly" not in by_name["hunt_tier_2"].settings
 
     def test_hunt_has_insert_grant_analyst_not(self):
