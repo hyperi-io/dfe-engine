@@ -84,7 +84,9 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         kind="analyst",
         default=True,
         grants=[f"SELECT ON {db}.*"],
-        settings={"readonly": 1},
+        # Mirrors the seeded analyst tiers: readonly=2 keeps queries read-only
+        # while BI clients can still set per-query output settings.
+        settings={"readonly": 2},
         quota={"interval": "1 hour", "queries": 1000},
     )
     users = [org_user_name(org_a), org_user_name(org_b)] + [
@@ -213,9 +215,10 @@ class TestReconcilerPinsTheTenant:
     def test_text_override_is_a_hard_error(self, reconciled_world):
         """The attack, against the reconciler's own minted identity.
 
-        Two independent walls, either is fatal: the analyst tier's ``readonly=1``
-        profile rejects any settings change (code 164), and the READONLY pin
-        rejects this one specifically (code 452).
+        The analyst tier runs ``readonly=2`` so BI clients can set per-query
+        output settings, which means the READONLY pin on the tenant setting is
+        the wall that stops this (code 452). ``readonly=1`` (code 164) stays in
+        the match for tiers that forbid all settings changes.
         """
         import clickhouse_connect
 
@@ -233,6 +236,27 @@ class TestReconcilerPinsTheTenant:
                     f"SELECT count() FROM {w['table_fqn']} "
                     f"SETTINGS SQL_current_tenant_id = '{w['org_b']}'"
                 )
+        finally:
+            client.close()
+
+    def test_benign_query_settings_stay_usable(self, reconciled_world):
+        """BI clients send output settings with every query; the tier must not
+        reject them (readonly=2, not 1) or every hyperdx UI query 500s."""
+        import clickhouse_connect
+
+        w = reconciled_world
+        client = clickhouse_connect.get_client(
+            host=w["params"]["host"],
+            port=w["params"]["port"],
+            username=org_user_name(w["org_a"]),
+            password=_org_password(w["store"], w["org_a"]),
+            secure=w["params"]["secure"],
+        )
+        try:
+            n = client.query(
+                f"SELECT count() FROM {w['table_fqn']} SETTINGS date_time_output_format = 'iso'"
+            ).result_rows[0][0]
+            assert n == 3
         finally:
             client.close()
 

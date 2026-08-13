@@ -12,7 +12,9 @@ unit-testable without a cluster (spec section 7). The reconciler executes these 
 also writes them as gitops ``.sql`` artifacts so CH can be rebuilt from git.
 
 Identifiers are backtick-quoted so names with hyphens (e.g. an org ``soc-ap``)
-stay valid. All statements are idempotent (``IF NOT EXISTS``).
+stay valid. All statements are convergent: ``IF NOT EXISTS`` creates, and an
+``ALTER`` re-asserts mutable state (settings, quotas, pins) so edits reach
+objects that already exist.
 """
 
 from __future__ import annotations
@@ -58,16 +60,18 @@ def render_tier(tier: ChTier) -> list[str]:
 
     if tier.settings:
         prof = _bq(tier.profile())
-        stmts.append(
-            f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof} SETTINGS {_settings_kv(tier.settings)}"
-        )
+        kv = _settings_kv(tier.settings)
+        # Create-then-alter so edits to an existing profile converge; a bare
+        # IF NOT EXISTS silently ignores changed settings forever.
+        stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof}")
+        stmts.append(f"ALTER SETTINGS PROFILE {prof} SETTINGS {kv}")
 
     if tier.quota:
         qn = _bq(tier.quota_name())
         maxima = _settings_kv(tier.quota_maxima())
+        stmts.append(f"CREATE QUOTA IF NOT EXISTS {qn} TO {role}")
         stmts.append(
-            f"CREATE QUOTA IF NOT EXISTS {qn} "
-            f"FOR INTERVAL {tier.quota_interval()} MAX {maxima} TO {role}"
+            f"ALTER QUOTA {qn} FOR INTERVAL {tier.quota_interval()} MAX {maxima} TO {role}"
         )
 
     for grant in tier.grants:
@@ -88,9 +92,8 @@ def render_service_role(role_def: ChServiceRole) -> list[str]:
 
     if role_def.settings:
         prof = _bq(role_def.profile())
-        stmts.append(
-            f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof} SETTINGS {_settings_kv(role_def.settings)}"
-        )
+        stmts.append(f"CREATE SETTINGS PROFILE IF NOT EXISTS {prof}")
+        stmts.append(f"ALTER SETTINGS PROFILE {prof} SETTINGS {_settings_kv(role_def.settings)}")
 
     stmts.append(f"CREATE ROLE IF NOT EXISTS {role}")
     for grant in role_def.grants:

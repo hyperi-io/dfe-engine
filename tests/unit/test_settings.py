@@ -17,13 +17,17 @@ def _clean_settings():
 
 
 @pytest.fixture(autouse=True)
-def _hermetic_env(monkeypatch):
+def _hermetic_env(monkeypatch, tmp_path):
     """Isolate settings tests from a populated developer .env.
 
     tests/conftest.py loads the project .env with override=True, so a real .env
     (CH host, DFE_ENV=dev, a jwt secret, ...) leaks into os.environ and breaks the
     default / fallback / production-guard assertions here. Strip every DFE_* and
     legacy CLICKHOUSE_* var so each test controls exactly the environment it sets.
+
+    Scrubbing os.environ alone is not enough: ``load_settings()`` calls
+    ``load_env_files()``, which re-reads ``./.env`` from the cwd on every call
+    and repopulates what was just deleted -- so also run from an empty dir.
 
     The posture goes back afterwards. With nothing set, the shipped defaults are
     env "production" and auth on with the placeholder jwt_secret, which
@@ -36,6 +40,7 @@ def _hermetic_env(monkeypatch):
         if key.startswith(("DFE_", "CLICKHOUSE_")):
             monkeypatch.delenv(key, raising=False)
     monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture

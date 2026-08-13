@@ -147,7 +147,10 @@ def _analyst_tier(name: str, mem: int, secs: int, queries: int, *, default: bool
         default=default,
         grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
         settings={
-            "readonly": 1,
+            # readonly=2: queries only, but per-query output settings stay
+            # changeable -- BI clients (hyperdx) send those with every query.
+            # Pinned settings keep their own READONLY constraint regardless.
+            "readonly": 2,
             "max_memory_usage": mem,
             "max_execution_time": secs,
             "max_rows_to_read": 0,  # 0 = unset
@@ -155,8 +158,10 @@ def _analyst_tier(name: str, mem: int, secs: int, queries: int, *, default: bool
         quota={
             "interval": "1 hour",
             "queries": queries,
+            # BI clients probe speculatively and bad user SQL is routine; a
+            # tight errors cap locks the whole org out for the interval.
+            "errors": 1000,
             "result_rows": 1_000_000_000,
-            "errors": 100,
         },
     )
 
@@ -179,9 +184,11 @@ def _hunt_tier(name: str, mem: int, secs: int, queries: int, *, default: bool = 
 
 
 DEFAULT_TIERS: list[ChTier] = [
-    _analyst_tier("analyst_tier_1", 16 * _GiB, 600, 5000),
-    _analyst_tier("analyst_tier_2", 4 * _GiB, 300, 1000, default=True),
-    _analyst_tier("analyst_tier_3", 1 * _GiB, 2, 200),
+    # A whole org shares ONE pinned CH user, and a BI page fires several
+    # queries per view -- size the hourly caps for that, not for one human.
+    _analyst_tier("analyst_tier_1", 16 * _GiB, 600, 50_000),
+    _analyst_tier("analyst_tier_2", 4 * _GiB, 300, 20_000, default=True),
+    _analyst_tier("analyst_tier_3", 1 * _GiB, 2, 2_000),
     _hunt_tier("hunt_tier_1", 16 * _GiB, 600, 10000),
     _hunt_tier("hunt_tier_2", 4 * _GiB, 120, 5000, default=True),
     _hunt_tier("hunt_tier_3", 1 * _GiB, 15, 1000),
