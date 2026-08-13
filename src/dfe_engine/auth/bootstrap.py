@@ -23,6 +23,7 @@ Usage::
 from __future__ import annotations
 
 import importlib.resources
+import os
 import shutil
 from pathlib import Path
 
@@ -34,8 +35,34 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 
+# Default break-glass username; overridden by DFE_AUTH_LOCAL_ADMIN_NAME.
+_DEFAULT_ADMIN_NAME = "admin"
 # Default password that triggers a startup warning
+# Default break-glass password; overridden by DFE_AUTH_LOCAL_ADMIN_PASSWORD.
 _DEFAULT_PASSWORD = "changeme"
+
+def admin_account_name(override: str = "") -> str:
+    """Break-glass admin username: override, else ``DFE_AUTH_LOCAL_ADMIN_NAME``, else ``admin``.
+
+    The default ``admin`` is not treated as an override, so a configured
+    ``DFE_AUTH_LOCAL_ADMIN_NAME`` still wins when callers pass the default through.
+    """
+    if override and override != _DEFAULT_ADMIN_NAME:
+        return override
+    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_NAME") or _DEFAULT_ADMIN_NAME
+
+
+def admin_account_password(override: str = "") -> str:
+    """Break-glass admin password: override, else ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, else ``changeme``.
+
+    The well-known ``changeme`` default is not treated as an override, so a
+    configured ``DFE_AUTH_LOCAL_ADMIN_PASSWORD`` still wins when callers pass the
+    default through (``defaults.yaml`` / ``settings.auth.local.admin_password``).
+    """
+    if override and override != _DEFAULT_PASSWORD:
+        return override
+    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_PASSWORD") or _DEFAULT_PASSWORD
+
 
 # Default group definitions: name -> (roles, description)
 _DEFAULT_GROUPS: dict[str, tuple[list[str], str]] = {
@@ -48,7 +75,8 @@ _DEFAULT_GROUPS: dict[str, tuple[list[str], str]] = {
 
 def bootstrap_auth(
     auth_dir: Path,
-    default_admin_password: str = _DEFAULT_PASSWORD,
+    default_admin_password: str = "",
+    default_admin_name: str = "",
 ) -> tuple[AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
     """Bootstrap auth stores with sensible defaults.
 
@@ -57,7 +85,10 @@ def bootstrap_auth(
 
     Args:
         auth_dir: Root directory for auth config files.
-        default_admin_password: Password for the seeded admin account.
+        default_admin_password: Password for the seeded admin account. Empty
+            falls through to ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, then ``changeme``.
+        default_admin_name: Username for the seeded admin account. Empty falls
+            through to ``DFE_AUTH_LOCAL_ADMIN_NAME``, then ``admin``.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
@@ -93,8 +124,14 @@ def bootstrap_auth(
 
     # Seed admin account if accounts dir is empty
     if not list(accounts_dir.glob("*.yaml")):
-        _seed_admin(account_store, group_store, default_admin_password)
-        if default_admin_password == _DEFAULT_PASSWORD:
+        password = admin_account_password(default_admin_password)
+        _seed_admin(
+            account_store,
+            group_store,
+            password,
+            admin_account_name(default_admin_name),
+        )
+        if password == _DEFAULT_PASSWORD:
             logger.warning(
                 "Admin account seeded with default password '%s'"
                 " — change in production (set DFE_AUTH_LOCAL_ADMIN_PASSWORD)",
@@ -122,8 +159,9 @@ def _seed_admin(
     account_store: AccountStore,
     group_store: GroupStore,
     password: str,
+    name: str,
 ) -> None:
     """Create default admin account and add to dfe-admins group."""
-    account_store.create("admin", password, groups=["dfe-admins"])
+    account_store.create(name, password, groups=["dfe-admins"])
     # Also register admin as a member of the dfe-admins group
-    group_store.add_member("dfe-admins", "admin")
+    group_store.add_member("dfe-admins", name)

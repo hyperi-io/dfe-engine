@@ -80,6 +80,7 @@ Schemas:
 
 Auth (local):
 - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
+- DFE_AUTH_LOCAL_ADMIN_NAME -> auth.local.admin_name
 - DFE_AUTH_LOCAL_ADMIN_PASSWORD -> auth.local.admin_password
 - DFE_AUTH_LOCAL_OPERATOR_PASSWORD -> auth.local.operator_password
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
@@ -813,6 +814,7 @@ class LocalAuthSettings(BaseModel):
 
     enabled: bool = Field(default=False, description="Seed built-in local accounts")
     org_id: str = Field(default="default", description="Org id for the seeded accounts")
+    admin_name: str = Field(default="", description="Bootstrap admin username")
     admin_password: str = Field(default="", description="Bootstrap admin password")
     operator_password: str = Field(default="", description="Bootstrap operator password")
     viewer_password: str = Field(default="", description="Bootstrap viewer password")
@@ -1471,6 +1473,8 @@ def _get_env_overrides() -> dict:
     # Local auth settings (nested under auth.local)
     if val := _get_env("DFE_AUTH_LOCAL_ENABLED"):
         overrides["auth"].setdefault("local", {})["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_AUTH_LOCAL_ADMIN_NAME"):
+        overrides["auth"].setdefault("local", {})["admin_name"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ADMIN_PASSWORD"):
         overrides["auth"].setdefault("local", {})["admin_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_OPERATOR_PASSWORD"):

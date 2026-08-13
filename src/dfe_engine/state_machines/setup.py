@@ -45,7 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
-from dfe_engine.auth.bootstrap import _DEFAULT_PASSWORD
+from dfe_engine.auth.bootstrap import _DEFAULT_PASSWORD, admin_account_name
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.orgs.models import Org
 
@@ -57,7 +57,7 @@ if TYPE_CHECKING:
 # The bootstrap-seeded break-glass admin (see auth/bootstrap.py::_seed_admin).
 # It does not count as the "first user" — the whole point of that step is to
 # get off the shared emergency credential and onto a real identity.
-BREAK_GLASS_ACCOUNT = "admin"
+BREAK_GLASS_ACCOUNT = admin_account_name()
 
 # Stable step ids. These are an API contract: the UI keys its wizard screens
 # off them, so treat a rename as a breaking change.

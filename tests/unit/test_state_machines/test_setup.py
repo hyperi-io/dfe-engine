@@ -105,6 +105,22 @@ def test_break_glass_admin_does_not_count_as_the_first_user(ctx):
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
+def test_custom_dfe_admin_name_is_the_break_glass_account(tmp_path, monkeypatch):
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "alt-admin")
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("alt-admin", "changeme", groups=["dfe-admins"])
+    ctx = SetupContext(
+        account_store=accounts,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+    )
+
+    state = SETUP_MACHINE.evaluate(ctx)
+
+    assert STEP_FIRST_USER not in state.completed_steps
+    assert STEP_ADMIN_PASSWORD in state.steps
+    assert STEP_ADMIN_PASSWORD not in state.completed_steps
+
+
 def test_disabled_account_does_not_count_as_the_first_user(ctx):
     ctx.account_store.create("alice", "a-strong-user-password")
     ctx.account_store.update("alice", enabled=False)
