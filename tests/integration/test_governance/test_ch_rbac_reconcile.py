@@ -1,14 +1,14 @@
-"""Live-ClickHouse proof that a reconcile alone isolates an org-tied group.
+"""Live-ClickHouse proof that a reconcile alone isolates an org's identity.
 
-`test_ch_rbac_isolation.py` builds its users and GRANTs by hand, so it would pass
-even if the engine granted nothing. This drives the real path instead - group
-store -> `derive_group_bindings` -> `reconcile` - and connects as the user the
+`test_ch_rbac_isolation.py` builds its DDL by hand, so it would pass even if the
+engine rendered nothing. This drives the real path instead - org registry + group
+store -> `derive_group_bindings` -> `reconcile` - and connects as the users the
 reconciler itself minted.
 
-RUN THIS SERIALLY (`-n 0`). A reconcile is cluster-global: it DROPS every
-`dfe_org_*` role with no Org behind it, so two concurrent workers delete each
-other's roles. The fixture refuses to run where that would destroy roles it did
-not create.
+RUN THIS SERIALLY (`-n 0`). A reconcile is cluster-global: it sweeps stale
+`dfe_org_*` users and `dfe_rowpol_*` policies, so two concurrent workers delete
+each other's objects. The fixture refuses to run where that would destroy
+objects it did not create.
 
 No mocks (project policy): a real CH, a real file-backed secrets store.
 """
@@ -20,7 +20,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from dfe_engine.governance.ch.models import org_role_name
+from dfe_engine.governance.ch.models import TENANT_ROLE, org_user_name
 
 from .conftest import count_as, drop_safely
 
@@ -42,6 +42,11 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     from dfe_engine.settings import SecretsSettings
 
     ch_client = admin_client
+    try:
+        ch_client.command("SET SQL_current_tenant_id = 'probe'")
+    except Exception:
+        pytest.skip("server does not allow the SQL_ custom-settings prefix")
+
     uid = uuid.uuid4().hex[:10]
     db = f"dfe_test_rec_{uid}"
     table = "events"
@@ -51,29 +56,29 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
 
     foreign = [
         r[0]
-        for r in ch_client.query("SELECT name FROM system.roles").result_rows
-        if r[0].startswith("dfe_org_") and uid not in r[0]
+        for r in ch_client.query("SELECT name FROM system.users").result_rows
+        if r[0].startswith(("dfe_org_", "dfe_grp_")) and uid not in r[0]
     ]
     if foreign:
         pytest.skip(
-            f"refusing to reconcile: cluster carries org roles we did not create: {foreign}"
+            f"refusing to reconcile: cluster carries tenant users we did not create: {foreign}"
         )
 
-    g_scoped = f"grp-scoped-{uid}"  # org-tied -> sees only org_a
+    g_scoped = f"grp-scoped-{uid}"  # customer's-customer group -> pinned
     g_open = f"grp-open-{uid}"  # no org -> unrestricted
-    g_multi = f"grp-multi-{uid}"  # two orgs -> inexpressible, gets no user
+    g_analyst = f"grp-analyst-{uid}"  # platform role + org markers -> unrestricted
 
     orgs = [
         SimpleNamespace(name=org_a, org_ids=[org_a]),
         SimpleNamespace(name=org_b, org_ids=[org_b]),
     ]
     groups = [
-        SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[]),
-        SimpleNamespace(name=g_open, scope_org="", org_ids=[]),
-        SimpleNamespace(name=g_multi, scope_org="", org_ids=[org_a, org_b]),
+        SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[], roles=["customer_viewer"]),
+        SimpleNamespace(name=g_open, scope_org="", org_ids=[], roles=[]),
+        SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
     ]
-    # A uid-scoped tier so the group users can read the test table; the seeded
-    # tiers grant SELECT on dfe.* only, and their names are not uid-scoped.
+    # A uid-scoped tier so the users can read the test table; the seeded tiers
+    # grant SELECT on dfe.* only, and their names are not uid-scoped.
     tier = ChTier(
         name=f"test{uid}",
         kind="analyst",
@@ -82,18 +87,20 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         settings={"readonly": 1},
         quota={"interval": "1 hour", "queries": 1000},
     )
-    users = [f"dfe_grp_{g}" for g in (g_scoped, g_open, g_multi)]
+    users = [org_user_name(org_a), org_user_name(org_b)] + [
+        f"dfe_grp_{g}" for g in (g_scoped, g_open, g_analyst)
+    ]
 
     def _drop_all() -> None:
         for u in users:
             drop_safely(ch_client, f"DROP USER IF EXISTS `{u}`")
-        # The reconciler discovers _org_id tables cluster-wide, so it policies far
-        # more than this test's own table; drop by what actually exists.
+        # The reconcile policies every _org_id table it discovers, cluster-wide,
+        # not just this test's own db - sweep them ALL. Safe because the fixture
+        # refuses to run at all where foreign tenant users exist.
         try:
             existing = ch_client.query(
                 "SELECT short_name, database, table FROM system.row_policies "
-                "WHERE short_name LIKE %(a)s OR short_name LIKE %(b)s",
-                parameters={"a": f"dfe_rowpol_{org_a}%", "b": f"dfe_rowpol_{org_b}%"},
+                "WHERE short_name LIKE 'dfe_rowpol_tenant_%'"
             ).result_rows
         except Exception:
             existing = []
@@ -101,8 +108,6 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
             drop_safely(
                 ch_client, f"DROP ROW POLICY IF EXISTS `{short_name}` ON `{pdb}`.`{ptable}`"
             )
-        for org in (org_a, org_b):
-            drop_safely(ch_client, f"DROP ROLE IF EXISTS {org_role_name(org)}")
         drop_safely(ch_client, f"DROP ROLE IF EXISTS {tier.role()}")
         drop_safely(ch_client, f"DROP SETTINGS PROFILE IF EXISTS {tier.profile()}")
         drop_safely(ch_client, f"DROP QUOTA IF EXISTS {tier.quota_name()}")
@@ -133,57 +138,114 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
             "params": conn_params,
             "table_fqn": table_fqn,
             "store": store,
-            "bindings": bindings,
+            "org_a": org_a,
+            "org_b": org_b,
             "g_scoped": g_scoped,
             "g_open": g_open,
-            "g_multi": g_multi,
+            "g_analyst": g_analyst,
         }
     finally:
         _drop_all()
 
 
-def _password_for(store, group: str) -> str:
-    """The plaintext the reconciler minted for a group's CH user."""
+def _org_password(store, org: str) -> str:
+    """The plaintext the reconciler minted for an org's CH user."""
+    return store.get(f"ch/orgs/{org}")
+
+
+def _group_password(store, group: str) -> str:
     return store.get(f"ch/groups/{group}")
 
 
-class TestReconcilerGrantsTheOrgRole:
-    def test_org_tied_group_sees_only_its_org(self, reconciled_world):
-        """The whole point: a reconcile alone restricts an org-tied group.
+class TestReconcilerPinsTheTenant:
+    def test_each_org_user_sees_only_its_org(self, reconciled_world):
+        """The whole point: a reconcile alone yields per-org isolated identities.
 
-        Nothing here creates a user or writes a GRANT - the reconciler did both,
-        from the group's scope.
+        Nothing here creates a user, grants a role or pins a setting - the
+        reconciler did all three from the org registry.
         """
+        w = reconciled_world
+        a = count_as(
+            w["params"],
+            org_user_name(w["org_a"]),
+            _org_password(w["store"], w["org_a"]),
+            w["table_fqn"],
+        )
+        b = count_as(
+            w["params"],
+            org_user_name(w["org_b"]),
+            _org_password(w["store"], w["org_b"]),
+            w["table_fqn"],
+        )
+        assert (a, b) == (3, 2)
+
+    def test_customer_group_is_pinned(self, reconciled_world):
         w = reconciled_world
         n = count_as(
             w["params"],
             f"dfe_grp_{w['g_scoped']}",
-            _password_for(w["store"], w["g_scoped"]),
+            _group_password(w["store"], w["g_scoped"]),
             w["table_fqn"],
         )
         assert n == 3
 
-    def test_group_with_no_org_is_unrestricted(self, reconciled_world):
-        """The platform axis: tier-limited, but not row-filtered."""
+    def test_unrestricted_group_sees_all_rows(self, reconciled_world):
         w = reconciled_world
         n = count_as(
             w["params"],
             f"dfe_grp_{w['g_open']}",
-            _password_for(w["store"], w["g_open"]),
+            _group_password(w["store"], w["g_open"]),
             w["table_fqn"],
         )
         assert n == 5
 
-    def test_inexpressible_group_gets_no_user_at_all(self, reconciled_world, admin_client):
-        """A multi-org group is skipped, not emitted unrestricted.
-
-        Emitting it would hold no org role and therefore read every org's rows,
-        so the absence of the user IS the isolation guarantee.
-        """
+    def test_platform_role_beats_org_markers(self, reconciled_world):
+        """An analyst group matched by a domain rule still reads across orgs."""
         w = reconciled_world
-        assert w["g_multi"] not in {b.group for b in w["bindings"]}
+        n = count_as(
+            w["params"],
+            f"dfe_grp_{w['g_analyst']}",
+            _group_password(w["store"], w["g_analyst"]),
+            w["table_fqn"],
+        )
+        assert n == 5
+
+    def test_text_override_is_a_hard_error(self, reconciled_world):
+        """The attack, against the reconciler's own minted identity.
+
+        Two independent walls, either is fatal: the analyst tier's ``readonly=1``
+        profile rejects any settings change (code 164), and the READONLY pin
+        rejects this one specifically (code 452).
+        """
+        import clickhouse_connect
+
+        w = reconciled_world
+        client = clickhouse_connect.get_client(
+            host=w["params"]["host"],
+            port=w["params"]["port"],
+            username=org_user_name(w["org_a"]),
+            password=_org_password(w["store"], w["org_a"]),
+            secure=w["params"]["secure"],
+        )
+        try:
+            with pytest.raises(Exception, match=r"SETTING_CONSTRAINT_VIOLATION|452|READONLY|164"):
+                client.query(
+                    f"SELECT count() FROM {w['table_fqn']} "
+                    f"SETTINGS SQL_current_tenant_id = '{w['org_b']}'"
+                )
+        finally:
+            client.close()
+
+    def test_old_design_leftovers_are_swept(self, reconciled_world, admin_client):
+        """Upgrade path: no per-org roles survive a reconcile."""
         rows = admin_client.query(
-            "SELECT count() FROM system.users WHERE name = %(u)s",
-            parameters={"u": f"dfe_grp_{w['g_multi']}"},
+            "SELECT name FROM system.roles WHERE name LIKE 'dfe_org_%'"
         ).result_rows
-        assert rows[0][0] == 0
+        assert rows == []
+        assert (
+            admin_client.query(
+                "SELECT count() FROM system.roles WHERE name = %(r)s",
+                parameters={"r": TENANT_ROLE},
+            ).result_rows[0][0]
+            == 1
+        )

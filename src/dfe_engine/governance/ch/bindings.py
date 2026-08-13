@@ -5,24 +5,20 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""Derive the CH bindings the reconciler grants org roles from.
+"""Derive the CH bindings the reconciler renders group users from.
 
-A binding is what turns an RBAC group into a ClickHouse identity: without one the
-reconciler creates org roles and row policies that nothing ever holds, so every
-account keeps seeing every org's rows. Groups already carry the org axis
-(``scope: org:<name>`` plus ``org_ids``), so bindings are DERIVED rather than
-configured separately - one source of truth, and an org-scoped group cannot drift
-from its ClickHouse user.
+Groups already carry the org axis (``scope: org:<name>`` plus ``org_ids``), so
+bindings are DERIVED rather than configured separately - one source of truth, and
+an org-scoped group cannot drift from its ClickHouse user.
 
-An org's visibility is one RESTRICTIVE row policy per table, and ClickHouse ANDs
-the restrictive policies that apply to a user. Two org roles therefore yield
-``_org_id = 'a' AND _org_id = 'b'`` and the user sees NOTHING, so a group may
-resolve to at most one org. Access spanning several tenant ids is modelled as an
-ORG carrying several ``org_ids``, which renders a single ``IN`` predicate.
+Platform roles win: a group holding any role other than the customer's-customer
+role reads UNRESTRICTED, even when a domain rule or ``org_ids`` tie it to an org.
+The org filter exists to fence tenants in, not to fence the platform's own
+analysts out.
 
-Both unresolvable cases fail closed - the group is skipped and gets no ClickHouse
-user at all, because the alternative is a user with no org role, and a user
-holding no org role is targeted by no policy and sees EVERY org's rows.
+A group claiming an org that is not registered fails closed - it is skipped and
+gets no ClickHouse user at all, because the alternative is an unrestricted user,
+and an unrestricted user reads EVERY org's rows.
 """
 
 from __future__ import annotations
@@ -32,6 +28,10 @@ from typing import Any
 from scalo.logger import logger
 
 from .models import GroupChBinding
+
+# The one role whose holders get the tenant pin. Platform roles (admin,
+# data_analyst, ...) are never org-filtered, whatever the group's org markers say.
+CUSTOMER_ROLE = "customer_viewer"
 
 
 def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBinding]:
@@ -51,8 +51,17 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
     for group in groups:
         scoped = {group.scope_org} if group.scope_org else set()
         claimed = scoped | set(group.org_ids)
-        resolved = claimed & org_names
 
+        roles = set(getattr(group, "roles", []) or [])
+        if claimed and roles - {CUSTOMER_ROLE}:
+            logger.info(
+                "group holds platform roles; its CH user is unrestricted despite org markers",
+                group=group.name,
+                roles=sorted(roles),
+            )
+            claimed = set()
+
+        resolved = claimed & org_names
         if claimed and not resolved:
             logger.error(
                 "group claims orgs that are not registered; skipping its CH user",
@@ -63,8 +72,8 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
 
         if len(resolved) > 1:
             logger.error(
-                "group resolves to several orgs, which ClickHouse cannot express; "
-                "skipping its CH user - model the span as one org with many org_ids",
+                "group resolves to several orgs; skipping its CH user - "
+                "model the span as one org with many org_ids",
                 group=group.name,
                 orgs=sorted(resolved),
             )

@@ -120,20 +120,26 @@ class TestRenderAll:
             org_tables=[("dfe", "events")],
             service_hashes={"loader": "svchash"},
             group_hashes={"soc": "sochash", "admin": "adminhash"},  # 'nohash' absent
+            org_hashes={"acme": "orghash"},
         )
         s = "\n".join(stmts)
-        # ordering: tier role -> org role -> group user
-        assert s.index("dfe_analyst_tier_2_role") < s.index("dfe_org_acme_role")
-        assert s.index("dfe_org_acme_role") < s.index("dfe_grp_soc")
+        # ordering: tier role -> tenant axis -> org user -> group user
+        assert s.index("dfe_analyst_tier_2_role") < s.index("dfe_tenant_role")
+        assert s.index("dfe_rowpol_tenant_dfe_events") < s.index("dfe_org_acme")
+        assert s.index("CREATE USER IF NOT EXISTS `dfe_org_acme`") < s.index("dfe_grp_soc")
         # minted service user rendered
         assert "CREATE USER IF NOT EXISTS `dfe_loader`" in s
         assert "GRANT `dfe_loader_role` TO `dfe_loader`" in s
-        # org-scoped user: default analyst tier + org role
+        # the org's pinned user: tier + tenant role + READONLY pin
+        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
+        # org-scoped group user: same pinned shape
         assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_soc`" in s
-        assert "GRANT `dfe_org_acme_role` TO `dfe_grp_soc`" in s
-        # unrestricted user: tier only, no org grant
+        assert "ALTER USER `dfe_grp_soc` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
+        # unrestricted user: tier only, no tenant role, no pin
         assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_admin`" in s
-        assert "GRANT `dfe_org_acme_role` TO `dfe_grp_admin`" not in s
+        assert "GRANT `dfe_tenant_role` TO `dfe_grp_admin`" not in s
+        assert "ALTER USER `dfe_grp_admin` SETTINGS SQL_current_tenant_id" not in s
         # binding without a minted secret is skipped
         assert "dfe_grp_nohash" not in s
 
@@ -148,10 +154,13 @@ class TestRenderAll:
             org_tables=[],
             service_hashes={},
             group_hashes={"hunter": "h"},
+            org_hashes={},
         )
         assert "GRANT `dfe_hunt_tier_2_role` TO `dfe_grp_hunter`" in "\n".join(stmts)
 
-    def test_org_role_skipped_if_org_unknown(self):
+    def test_binding_org_unknown_renders_unrestricted_group_user(self):
+        """derive_group_bindings skips unknown orgs upstream; render_all's own
+        guard degrades an unknown binding org to no pin rather than crashing."""
         tiers, _service, _orgs, _b = self._inputs()
         b = [GroupChBinding(group="x", org="ghost")]  # no Org 'ghost' exists
         stmts = _rec().render_all(
@@ -162,8 +171,25 @@ class TestRenderAll:
             org_tables=[],
             service_hashes={},
             group_hashes={"x": "h"},
+            org_hashes={},
         )
-        assert "dfe_org_ghost_role" not in "\n".join(stmts)
+        s = "\n".join(stmts)
+        assert "CREATE USER IF NOT EXISTS `dfe_grp_x`" in s
+        assert "SQL_current_tenant_id" not in s
+
+    def test_org_without_minted_secret_gets_no_user(self):
+        tiers, _service, _orgs, _b = self._inputs()
+        stmts = _rec().render_all(
+            tiers=tiers,
+            service_roles=[],
+            orgs=[_org("acme", ["acme"])],
+            bindings=[],
+            org_tables=[],
+            service_hashes={},
+            group_hashes={},
+            org_hashes={},  # no secrets store
+        )
+        assert "dfe_org_acme" not in "\n".join(stmts)
 
     def test_non_mint_service_role_no_user(self):
         r = [ChServiceRole(name="query_reader", grants=["SELECT ON dfe.*"])]
@@ -175,6 +201,7 @@ class TestRenderAll:
             org_tables=[],
             service_hashes={},
             group_hashes={},
+            org_hashes={},
         )
         s = "\n".join(stmts)
         assert "CREATE ROLE IF NOT EXISTS `dfe_query_reader_role`" in s
@@ -182,32 +209,46 @@ class TestRenderAll:
 
 
 class TestComputeDrops:
-    def test_stale_role_and_policy_dropped_policies_first(self):
+    def test_old_design_leftovers_swept_policies_first(self):
+        """Upgrade path: per-org roles and literal policies all drop."""
         existing_roles = {"dfe_org_acme_role", "dfe_org_gone_role"}
         existing_policies = [
             ("dfe_rowpol_acme_dfe_events", "dfe", "events"),
             ("dfe_rowpol_gone_dfe_events", "dfe", "events"),
         ]
         orgs = [_org("acme", ["acme"])]
-        drops = compute_drops(existing_roles, existing_policies, orgs, [("dfe", "events")])
+        drops = compute_drops(existing_roles, existing_policies, set(), orgs, [("dfe", "events")])
+        assert any("DROP ROW POLICY IF EXISTS `dfe_rowpol_acme_dfe_events`" in d for d in drops)
         assert any("DROP ROW POLICY IF EXISTS `dfe_rowpol_gone_dfe_events`" in d for d in drops)
+        assert any("DROP ROLE IF EXISTS `dfe_org_acme_role`" in d for d in drops)
         assert any("DROP ROLE IF EXISTS `dfe_org_gone_role`" in d for d in drops)
-        assert all("acme" not in d for d in drops)  # the live org is untouched
         # policies drop before roles (a policy targets a role)
         pol_i = next(i for i, d in enumerate(drops) if "ROW POLICY" in d)
         role_i = next(i for i, d in enumerate(drops) if "DROP ROLE" in d)
         assert pol_i < role_i
 
     def test_no_drops_when_all_desired(self):
-        existing_roles = {"dfe_org_acme_role"}
-        existing_policies = [("dfe_rowpol_acme_dfe_events", "dfe", "events")]
+        existing_policies = [("dfe_rowpol_tenant_dfe_events", "dfe", "events")]
+        existing_users = {"dfe_org_acme"}
         orgs = [_org("acme", ["acme"])]
-        assert compute_drops(existing_roles, existing_policies, orgs, [("dfe", "events")]) == []
+        assert (
+            compute_drops(set(), existing_policies, existing_users, orgs, [("dfe", "events")]) == []
+        )
+
+    def test_offboarded_org_user_dropped(self):
+        """Deleting the org revokes the credential - the drop IS the offboarding."""
+        existing_users = {"dfe_org_acme", "dfe_org_gone"}
+        orgs = [_org("acme", ["acme"])]
+        drops = compute_drops(set(), [], existing_users, orgs, [])
+        assert drops == ["DROP USER IF EXISTS `dfe_org_gone`"]
 
     def test_ignores_non_dfe_objects(self):
         existing_roles = {"some_other_role", "dfe_org_gone_role"}
         existing_policies = [("handmade_policy", "dfe", "events")]
-        drops = compute_drops(existing_roles, existing_policies, [], [])
+        existing_users = {"analyst_bob", "dfe_grp_soc"}
+        drops = compute_drops(existing_roles, existing_policies, existing_users, [], [])
         assert all("some_other_role" not in d for d in drops)
         assert all("handmade_policy" not in d for d in drops)
+        assert all("analyst_bob" not in d for d in drops)
+        assert all("dfe_grp_soc" not in d for d in drops)
         assert any("dfe_org_gone_role" in d for d in drops)
