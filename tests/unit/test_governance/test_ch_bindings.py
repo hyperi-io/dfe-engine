@@ -82,6 +82,22 @@ class TestUnrestrictedGroups:
         bindings = derive_group_bindings([group], [_org("acme")])
         assert [(b.group, b.org) for b in bindings] == [("odd", "")]
 
+    def test_admin_groups_compose_the_otel_reader(self):
+        """Admins and infra admins read platform telemetry; nobody else does."""
+        groups = [
+            _group("admins", roles=["admin"]),
+            _group("infra", roles=["infra_admin"]),
+            _group("analysts", roles=["data_analyst"]),
+            _group("acme-view", org_ids=["acme"], roles=["customer_viewer"]),
+        ]
+        bindings = derive_group_bindings(groups, [_org("acme")])
+        assert {b.group: b.ch_roles for b in bindings} == {
+            "admins": ["otel_reader"],
+            "infra": ["otel_reader"],
+            "analysts": [],
+            "acme-view": [],
+        }
+
 
 class TestFailsClosed:
     def test_group_resolving_to_several_orgs_is_skipped(self):

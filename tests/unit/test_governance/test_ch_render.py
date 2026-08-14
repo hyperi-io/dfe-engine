@@ -166,6 +166,19 @@ class TestRenderPinnedUser:
         # READONLY is the enforcement: an attacker SETTINGS override is a 452.
         assert "ALTER USER `dfe_org_acme` SETTINGS SQL_current_tenant_id = 'acme' READONLY" in s
 
+    def test_extra_roles_compose_onto_the_tier(self):
+        s = _joined(
+            render_pinned_user(
+                "dfe_grp_admins",
+                "h",
+                tier_role="dfe_t_role",
+                org_ids=[],
+                extra_roles=["dfe_otel_reader_role"],
+            )
+        )
+        assert "GRANT `dfe_t_role` TO `dfe_grp_admins`" in s
+        assert "GRANT `dfe_otel_reader_role` TO `dfe_grp_admins`" in s
+
     def test_multi_org_ids_join_into_one_pin(self):
         s = _joined(
             render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["a", "b"])
@@ -234,15 +247,26 @@ class TestDefaultTiers:
 
 
 class TestDefaultServiceRoles:
-    def test_three_service_roles(self):
-        assert {r.name for r in DEFAULT_SERVICE_ROLES} == {"loader", "query_reader", "hunt_runner"}
+    def test_seeded_service_roles(self):
+        assert {r.name for r in DEFAULT_SERVICE_ROLES} == {
+            "loader",
+            "query_reader",
+            "hunt_runner",
+            "otel_reader",
+        }
 
     def test_mint_user_flags(self):
         by_name = {r.name: r for r in DEFAULT_SERVICE_ROLES}
         assert by_name["loader"].mint_user is True
         assert by_name["query_reader"].mint_user is True
-        # hunt_runner is granted to hunt users alongside a tier, not its own user
+        # hunt_runner and otel_reader are granted alongside a tier, never
+        # minted users of their own
         assert by_name["hunt_runner"].mint_user is False
+        assert by_name["otel_reader"].mint_user is False
+
+    def test_otel_reader_reads_otel_only(self):
+        otel = {r.name: r for r in DEFAULT_SERVICE_ROLES}["otel_reader"]
+        assert otel.grants == ["SELECT ON otel.*"]
 
     def test_query_reader_readonly_no_ddl_select_only(self):
         qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]

@@ -127,6 +127,9 @@ class GroupChBinding(BaseModel):
     ch_user: str = ""  # defaults to dfe_grp_{group}
     tier: str = ""  # -> dfe_{tier}_role (empty = the default analyst tier)
     org: str = ""  # -> tenant pin with that org's org_ids (empty = unrestricted)
+    # Extra service-role names composed onto the tier (e.g. otel_reader);
+    # quotas and settings still come from the tier alone.
+    ch_roles: list[str] = Field(default_factory=list)
 
     def user(self) -> str:
         return self.ch_user or f"dfe_grp_{self.group}"
@@ -231,5 +234,12 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
         name="hunt_runner",
         mint_user=False,
         grants=["SELECT ON dfe_hunts.*", "INSERT ON dfe_hunts.*"],
+    ),
+    # Observability telemetry is platform-internal: composed onto admin and
+    # infra-admin group users at bind time, never part of an analyst tier.
+    ChServiceRole(
+        name="otel_reader",
+        mint_user=False,
+        grants=["SELECT ON otel.*"],
     ),
 ]

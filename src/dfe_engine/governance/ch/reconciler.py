@@ -198,7 +198,11 @@ class ChRbacReconciler:
             org = orgs_by_name.get(b.org) if b.org else None
             org_ids = (list(org.org_ids) or [org.name]) if org is not None else []
             stmts += render_pinned_user(
-                b.user(), group_hashes[b.group], tier_role=tier_role, org_ids=org_ids
+                b.user(),
+                group_hashes[b.group],
+                tier_role=tier_role,
+                org_ids=org_ids,
+                extra_roles=[f"dfe_{r}_role" for r in getattr(b, "ch_roles", [])],
             )
         return stmts
 
