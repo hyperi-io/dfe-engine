@@ -36,7 +36,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     (gitops stays the source of truth), so it is left in place.
     """
     from dfe_engine.governance.ch.bindings import derive_group_bindings
-    from dfe_engine.governance.ch.models import ChTier
+    from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, ChTier
     from dfe_engine.governance.ch.reconciler import ChRbacReconciler
     from dfe_engine.secrets import build_secrets
     from dfe_engine.settings import SecretsSettings
@@ -67,6 +67,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     g_scoped = f"grp-scoped-{uid}"  # customer's-customer group -> pinned
     g_open = f"grp-open-{uid}"  # no org -> unrestricted
     g_analyst = f"grp-analyst-{uid}"  # platform role + org markers -> unrestricted
+    g_admin = f"grp-admin-{uid}"  # admin -> unrestricted + otel_reader composed
 
     orgs = [
         SimpleNamespace(name=org_a, org_ids=[org_a]),
@@ -76,6 +77,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[], roles=["customer_viewer"]),
         SimpleNamespace(name=g_open, scope_org="", org_ids=[], roles=[]),
         SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
+        SimpleNamespace(name=g_admin, scope_org="", org_ids=[], roles=["admin"]),
     ]
     # A uid-scoped tier so the users can read the test table; the seeded tiers
     # grant SELECT on dfe.* only, and their names are not uid-scoped.
@@ -90,8 +92,9 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         quota={"interval": "1 hour", "queries": 1000},
     )
     users = [org_user_name(org_a), org_user_name(org_b)] + [
-        f"dfe_grp_{g}" for g in (g_scoped, g_open, g_analyst)
+        f"dfe_grp_{g}" for g in (g_scoped, g_open, g_analyst, g_admin)
     ]
+    otel_table = f"otel.probe_{uid}"
 
     def _drop_all() -> None:
         for u in users:
@@ -114,7 +117,16 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         drop_safely(ch_client, f"DROP SETTINGS PROFILE IF EXISTS {tier.profile()}")
         drop_safely(ch_client, f"DROP QUOTA IF EXISTS {tier.quota_name()}")
         drop_safely(ch_client, f"DROP DATABASE IF EXISTS {db}")
+        drop_safely(ch_client, f"DROP TABLE IF EXISTS {otel_table}")
+        drop_safely(ch_client, "DROP ROLE IF EXISTS dfe_otel_reader_role")
+        if not had_otel:
+            drop_safely(ch_client, "DROP DATABASE IF EXISTS otel")
 
+    had_otel = bool(
+        ch_client.query("SELECT count() FROM system.databases WHERE name = 'otel'").result_rows[0][
+            0
+        ]
+    )
     try:
         ch_client.command(f"CREATE DATABASE IF NOT EXISTS {db}")
         ch_client.command(
@@ -127,24 +139,30 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
             f"('{org_a}','a1'),('{org_a}','a2'),('{org_a}','a3'),"
             f"('{org_b}','b1'),('{org_b}','b2')"
         )
+        ch_client.command("CREATE DATABASE IF NOT EXISTS otel")
+        ch_client.command(f"CREATE TABLE {otel_table} (x UInt8) ENGINE = MergeTree() ORDER BY x")
+        ch_client.command(f"INSERT INTO {otel_table} VALUES (1)")
 
         secrets_dir = tmp_path_factory.mktemp("ch-secrets")
         store = build_secrets(SecretsSettings(provider="file", path=str(secrets_dir)))
         bindings = derive_group_bindings(groups, orgs)
+        otel_role = [r for r in DEFAULT_SERVICE_ROLES if r.name == "otel_reader"]
         result = ChRbacReconciler(ch_client, secrets_store=store).reconcile(
-            tiers=[tier], service_roles=[], orgs=orgs, bindings=bindings
+            tiers=[tier], service_roles=otel_role, orgs=orgs, bindings=bindings
         )
         assert not result.errors, f"reconcile emitted errors: {result.errors}"
 
         yield {
             "params": conn_params,
             "table_fqn": table_fqn,
+            "otel_table": otel_table,
             "store": store,
             "org_a": org_a,
             "org_b": org_b,
             "g_scoped": g_scoped,
             "g_open": g_open,
             "g_analyst": g_analyst,
+            "g_admin": g_admin,
         }
     finally:
         _drop_all()
@@ -259,6 +277,38 @@ class TestReconcilerPinsTheTenant:
             assert n == 3
         finally:
             client.close()
+
+    def test_admin_group_reads_otel(self, reconciled_world):
+        """The composed otel_reader role: admins see platform telemetry."""
+        w = reconciled_world
+        n = count_as(
+            w["params"],
+            f"dfe_grp_{w['g_admin']}",
+            _group_password(w["store"], w["g_admin"]),
+            w["otel_table"],
+        )
+        assert n == 1
+
+    def test_analyst_group_is_denied_otel(self, reconciled_world):
+        """Analysts read every org's data but never platform telemetry."""
+        w = reconciled_world
+        with pytest.raises(Exception, match=r"ACCESS_DENIED|Not enough privileges|497"):
+            count_as(
+                w["params"],
+                f"dfe_grp_{w['g_analyst']}",
+                _group_password(w["store"], w["g_analyst"]),
+                w["otel_table"],
+            )
+
+    def test_org_scoped_group_is_denied_otel(self, reconciled_world):
+        w = reconciled_world
+        with pytest.raises(Exception, match=r"ACCESS_DENIED|Not enough privileges|497"):
+            count_as(
+                w["params"],
+                f"dfe_grp_{w['g_scoped']}",
+                _group_password(w["store"], w["g_scoped"]),
+                w["otel_table"],
+            )
 
     def test_old_design_leftovers_are_swept(self, reconciled_world, admin_client):
         """Upgrade path: no per-org roles survive a reconcile."""
