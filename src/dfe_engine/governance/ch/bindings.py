@@ -33,6 +33,10 @@ from .models import GroupChBinding
 # data_analyst, ...) are never org-filtered, whatever the group's org markers say.
 CUSTOMER_ROLE = "customer_viewer"
 
+# Engine roles whose groups also read the otel database (platform telemetry);
+# analysts and org-scoped viewers never do.
+OTEL_READER_ROLES = {"admin", "infra_admin"}
+
 
 def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBinding]:
     """Map RBAC groups onto CH bindings, dropping any that cannot be expressed.
@@ -79,6 +83,12 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
             )
             continue
 
-        bindings.append(GroupChBinding(group=group.name, org=next(iter(resolved), "")))
+        bindings.append(
+            GroupChBinding(
+                group=group.name,
+                org=next(iter(resolved), ""),
+                ch_roles=["otel_reader"] if roles & OTEL_READER_ROLES else [],
+            )
+        )
 
     return bindings

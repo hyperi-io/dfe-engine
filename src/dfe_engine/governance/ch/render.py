@@ -146,13 +146,22 @@ def render_tenant_axis(tables: list[tuple[str, str]]) -> list[str]:
     return stmts
 
 
-def render_pinned_user(user: str, pw_hash: str, *, tier_role: str, org_ids: list[str]) -> list[str]:
+def render_pinned_user(
+    user: str,
+    pw_hash: str,
+    *,
+    tier_role: str,
+    org_ids: list[str],
+    extra_roles: list[str] | None = None,
+) -> list[str]:
     """DDL for a tenant-scoped (or unrestricted) CH user.
 
     With ``org_ids``: grant the shared tenant role and PIN the tenant setting
     READONLY - the pin is what makes an attacker-authored ``SETTINGS`` override a
     hard 452 instead of a cross-tenant read. Empty ``org_ids`` is the unrestricted
     shape (universal analysts): tier only, no tenant role, no pin.
+    ``extra_roles`` compose additional grant roles (e.g. otel_reader) onto the
+    tier; quotas and settings still come from the tier alone.
 
     The ALTER re-runs every reconcile, so the pin tracks org_ids changes even
     though ``CREATE USER IF NOT EXISTS`` never touches an existing user.
@@ -162,6 +171,8 @@ def render_pinned_user(user: str, pw_hash: str, *, tier_role: str, org_ids: list
         f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
         f"GRANT {_bq(tier_role)} TO {qu}",
     ]
+    for role in extra_roles or []:
+        stmts.append(f"GRANT {_bq(role)} TO {qu}")
     if org_ids:
         # The pin is comma-joined, so a comma inside an id would silently split
         # into fragments that match nothing.
