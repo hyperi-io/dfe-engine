@@ -89,36 +89,53 @@ class HttpPostSink:
         self.sent = 0
         self.failed = 0
         self._buffer: list[dict[str, Any]] = []
+        self._client: Any = None
 
     async def __call__(self, event: dict[str, Any]) -> None:
         self._buffer.append(event)
         if len(self._buffer) >= self.batch_max:
             await self.flush()
 
+    async def _get_client(self) -> Any:
+        # One client for the sink's lifetime - a long demo stream must not
+        # rebuild a connection pool per batch.
+        if self._client is None:
+            from scalo.http import AsyncHttpClient
+
+            self._client = AsyncHttpClient(timeout=self.timeout)
+            await self._client.__aenter__()
+        return self._client
+
     async def flush(self) -> None:
         """POST the buffered batch; failures are counted, never fatal."""
         if not self._buffer:
             return
         batch, self._buffer = self._buffer, []
-        from scalo.http import AsyncHttpClient
-
         try:
-            async with AsyncHttpClient(base_url=self.url, timeout=self.timeout) as client:
-                if self.ndjson:
-                    payload = "\n".join(json.dumps(e, default=str) for e in batch)
-                    headers = {**self.headers, "Content-Type": "application/x-ndjson"}
-                    response = await client.post("", content=payload, headers=headers)
-                else:
-                    body: Any = batch[0] if len(batch) == 1 else batch
-                    response = await client.post("", json=body, headers=self.headers)
-                response.raise_for_status()
-                self.sent += len(batch)
+            client = await self._get_client()
+            # The URL is passed whole: a base_url + "" join appends a trailing
+            # slash and 404s on exact-path ingest routes.
+            if self.ndjson:
+                payload = "\n".join(json.dumps(e, default=str) for e in batch)
+                headers = {**self.headers, "Content-Type": "application/x-ndjson"}
+                response = await client.post(self.url, content=payload, headers=headers)
+            else:
+                body: Any = batch[0] if len(batch) == 1 else batch
+                response = await client.post(self.url, json=body, headers=self.headers)
+            response.raise_for_status()
+            self.sent += len(batch)
         except Exception as exc:
             # A demo stream must degrade, not die: count it and stream on.
             self.failed += len(batch)
             logger.warning(
                 "synthetic data POST failed", url=self.url, batch=len(batch), error=str(exc)
             )
+
+    async def aclose(self) -> None:
+        """Release the HTTP client after the final flush."""
+        if self._client is not None:
+            client, self._client = self._client, None
+            await client.__aexit__(None, None, None)
 
 
 async def stream_events(
@@ -170,6 +187,9 @@ async def stream_events(
                 break
         await asyncio.sleep(min(delay, remaining) if remaining is not None else delay)
     await sink.flush()
+    aclose = getattr(sink, "aclose", None)
+    if aclose is not None:
+        await aclose()
     logger.info(
         "synthetic data stream complete",
         events=emitted,

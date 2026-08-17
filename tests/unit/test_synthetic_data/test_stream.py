@@ -55,6 +55,35 @@ class TestStreamBounds:
 
 
 class TestHttpPostSink:
+    async def test_posts_to_the_exact_path(self):
+        # A real local HTTP server captures the request line - the receiver's
+        # ingest route is exact-path, so /ingest must never become /ingest/.
+        import asyncio
+
+        seen: list[str] = []
+
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            request_line = (await reader.readline()).decode()
+            seen.append(request_line.split(" ")[1])
+            while (await reader.readline()) not in (b"\r\n", b""):
+                pass
+            writer.write(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            sink = HttpPostSink(f"http://127.0.0.1:{port}/ingest", batch_max=1, timeout=5.0)
+            await sink({"probe": 1})
+            await sink.flush()
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert seen == ["/ingest"]
+        assert sink.sent == 1
+        assert sink.failed == 0
+
     async def test_unreachable_endpoint_degrades_not_dies(self):
         # Port 9 (discard) is closed on any sane host - a real connection
         # failure with no service to mock.

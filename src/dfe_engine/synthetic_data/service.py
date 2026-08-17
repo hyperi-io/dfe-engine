@@ -210,6 +210,9 @@ class _ProgressSink:
     async def flush(self) -> None:
         await self._base.flush()
 
+    async def aclose(self) -> None:
+        await self._base.aclose()
+
 
 def _progress(emitted: int, started: float, req: StreamRequest) -> int:
     if req.count:
