@@ -362,3 +362,46 @@ class TestVerifyLoginConfig:
             "/api/v1/auth/oidc-providers/anything/verify-login", headers=viewer_headers
         )
         assert resp.status_code == 403
+
+
+class TestRelyingPartyStaysInSync:
+    """Every write to the registry takes effect on the login routes immediately.
+
+    The relying party snapshots the enabled providers when it is built, so a
+    write that does not rebuild it leaves ``/auth/oidc/{name}/login`` serving the
+    provider set from process start until the engine restarts.
+    """
+
+    def test_create_makes_the_provider_loginable(self, client, app, admin_headers):
+        assert not app.state.oidc_rp.has_provider("fresh")
+        _create_provider(client, admin_headers, name="fresh")
+        assert app.state.oidc_rp.has_provider("fresh")
+
+    def test_disable_stops_serving_logins(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="toggled")
+        assert app.state.oidc_rp.has_provider("toggled")
+
+        client.put(
+            "/api/v1/auth/oidc-providers/toggled", json={"enabled": False}, headers=admin_headers
+        )
+        assert not app.state.oidc_rp.has_provider("toggled")
+
+        client.put(
+            "/api/v1/auth/oidc-providers/toggled", json={"enabled": True}, headers=admin_headers
+        )
+        assert app.state.oidc_rp.has_provider("toggled")
+
+    def test_delete_stops_serving_logins(self, client, app, admin_headers):
+        _create_provider(client, admin_headers, name="detached")
+        assert app.state.oidc_rp.has_provider("detached")
+
+        client.delete("/api/v1/auth/oidc-providers/detached", headers=admin_headers)
+        assert not app.state.oidc_rp.has_provider("detached")
+
+    def test_provider_with_no_issuer_does_not_break_the_write(self, client, app, admin_headers):
+        """An unregisterable provider is skipped, and the others still register."""
+        _create_provider(client, admin_headers, name="good")
+        resp = _create_provider(client, admin_headers, name="no-issuer", issuer="")
+        assert resp.status_code == 201
+        assert app.state.oidc_rp.has_provider("good")
+        assert not app.state.oidc_rp.has_provider("no-issuer")
