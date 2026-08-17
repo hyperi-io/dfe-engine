@@ -279,6 +279,98 @@ class TestDisconnectedShortCircuit:
 
 
 # ---------------------------------------------------------------------------
+# Breaker timing: fast failure, finite re-probe window
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, payload):
+        self._payload = payload
+        self.content = b"{}"
+
+    def raise_for_status(self):
+        return None
+
+    def json(self):
+        return self._payload
+
+
+class _FakeAsyncHttpClient:
+    """Stands in for scalo.http.AsyncHttpClient; records constructor kwargs."""
+
+    last_kwargs: dict | None = None
+    payload: dict = {"_id": "team-1"}
+    fail = False
+
+    def __init__(self, **kwargs):
+        type(self).last_kwargs = kwargs
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *exc):
+        return False
+
+    async def get(self, path, **kwargs):
+        if type(self).fail:
+            raise ConnectionError("boom")
+        return _FakeResponse(type(self).payload)
+
+
+class TestBreakerTiming:
+    @pytest.fixture(autouse=True)
+    def _patch_http(self, monkeypatch):
+        import scalo.http
+
+        _FakeAsyncHttpClient.fail = False
+        _FakeAsyncHttpClient.last_kwargs = None
+        monkeypatch.setattr(scalo.http, "AsyncHttpClient", _FakeAsyncHttpClient)
+
+    @pytest.mark.asyncio
+    async def test_request_uses_short_timeout_and_retries(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        assert await client.get_team() == {"_id": "team-1"}
+        kwargs = _FakeAsyncHttpClient.last_kwargs
+        assert kwargs["timeout"] == 5.0
+        assert kwargs["retries"] == 1
+
+    @pytest.mark.asyncio
+    async def test_failure_sets_finite_reprobe_deadline(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        _FakeAsyncHttpClient.fail = True
+        assert await client.get_team() is None
+        assert client._connected is False
+        assert client._retry_at != float("inf")
+
+    @pytest.mark.asyncio
+    async def test_skips_within_window_reprobes_after(self):
+        import time as _time
+
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        _FakeAsyncHttpClient.fail = True
+        await client.get_team()
+
+        # Within the window: short-circuits without touching HTTP.
+        _FakeAsyncHttpClient.last_kwargs = None
+        assert await client.get_team() is None
+        assert _FakeAsyncHttpClient.last_kwargs is None
+
+        # Window elapsed: re-probes and recovers.
+        _FakeAsyncHttpClient.fail = False
+        client._retry_at = _time.monotonic() - 1
+        assert await client.get_team() == {"_id": "team-1"}
+        assert client._connected is True
+
+    @pytest.mark.asyncio
+    async def test_manual_latch_never_reprobes(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        _FakeAsyncHttpClient.last_kwargs = None
+        assert await client.get_team() is None
+        assert _FakeAsyncHttpClient.last_kwargs is None
+
+
+# ---------------------------------------------------------------------------
 # ensure_connection dedupe branch (collaborators overridden, no HTTP)
 # ---------------------------------------------------------------------------
 
