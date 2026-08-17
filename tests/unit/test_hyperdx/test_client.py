@@ -6,11 +6,11 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Tests for HyperDXClient.
+"""Tests for HyperDXClient against the dfe-hyperdx fork's REAL API shape.
 
 Tests that require a running HyperDX instance are marked with
-``pytest.mark.skip``.  Only pure-logic methods (JSON generation,
-SyncResult) are tested here.
+``pytest.mark.skip``.  Only pure-logic methods (URL folding, JSON
+generation, dedupe branching, SyncResult) are tested here.
 """
 
 from __future__ import annotations
@@ -21,7 +21,11 @@ import pytest
 
 from dfe_engine.connections.config import ConnectionConfig
 from dfe_engine.connections.models import ClickHouseConnection
-from dfe_engine.hyperdx.client import HyperDXClient, SyncResult
+from dfe_engine.hyperdx.client import (
+    HyperDXClient,
+    SyncResult,
+    _connection_host_url,
+)
 
 # ---------------------------------------------------------------------------
 # SyncResult
@@ -51,7 +55,7 @@ class TestSyncResult:
 
 
 # ---------------------------------------------------------------------------
-# HyperDXClient construction
+# HyperDXClient construction + headers
 # ---------------------------------------------------------------------------
 
 
@@ -91,7 +95,25 @@ class TestClientConstruction:
 
 
 # ---------------------------------------------------------------------------
-# generate_default_connections_json (pure logic, no HTTP)
+# _connection_host_url (the fork's Connection.host is ONE URL field)
+# ---------------------------------------------------------------------------
+
+
+class TestConnectionHostUrl:
+    def test_bare_host_and_port_fold_into_url(self):
+        assert _connection_host_url("clickhouse", 8123) == "http://clickhouse:8123"
+
+    def test_bare_host_without_port(self):
+        assert _connection_host_url("clickhouse", None) == "http://clickhouse"
+
+    def test_existing_url_passes_through_untouched(self):
+        assert _connection_host_url("https://ch.example.com:8443", 8123) == (
+            "https://ch.example.com:8443"
+        )
+
+
+# ---------------------------------------------------------------------------
+# generate_default_connections_json (fork setupDefaults contract, #145)
 # ---------------------------------------------------------------------------
 
 
@@ -102,7 +124,7 @@ class TestGenerateDefaultConnectionsJson:
         result = client.generate_default_connections_json(config)
         assert json.loads(result) == []
 
-    def test_single_connection(self, monkeypatch):
+    def test_single_connection_matches_fork_schema(self, monkeypatch):
         monkeypatch.setenv("CH_PASSWORD", "secret123")
         client = HyperDXClient(base_url="http://x", api_key="k")
         conn = ClickHouseConnection(
@@ -119,12 +141,14 @@ class TestGenerateDefaultConnectionsJson:
         )
         result = json.loads(client.generate_default_connections_json(config))
         assert len(result) == 1
-        assert result[0]["name"] == "default"
-        assert result[0]["host"] == "ch.example.com"
-        assert result[0]["port"] == 8123
-        assert result[0]["database"] == "dfe"
-        assert result[0]["user"] == "admin"
-        assert result[0]["password"] == "secret123"
+        # exact fork Connection shape: username (NOT user), single URL host,
+        # no port/database keys - the #145 silent-credential-drop contract
+        assert result[0] == {
+            "name": "default",
+            "host": "http://ch.example.com:8123",
+            "username": "admin",
+            "password": "secret123",
+        }
 
     def test_multiple_connections(self, monkeypatch):
         monkeypatch.setenv("PW1", "pass1")
@@ -140,7 +164,7 @@ class TestGenerateDefaultConnectionsJson:
         result = json.loads(client.generate_default_connections_json(config))
         assert len(result) == 2
         hosts = {c["host"] for c in result}
-        assert hosts == {"h1", "h2"}
+        assert hosts == {"http://h1:8123", "http://h2:8123"}
 
     def test_missing_env_var_uses_empty_string(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
@@ -161,7 +185,7 @@ class TestGenerateDefaultConnectionsJson:
 
 
 # ---------------------------------------------------------------------------
-# HTTP-dependent tests (skipped — requires running HyperDX)
+# Disconnected short-circuit (no HTTP attempted once _connected=False)
 # ---------------------------------------------------------------------------
 
 
@@ -169,141 +193,172 @@ class TestDisconnectedShortCircuit:
     """When _connected=False, all async methods return immediately."""
 
     @pytest.mark.asyncio
-    async def test_create_team_returns_none_when_disconnected(self):
+    async def test_get_team_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
         client._connected = False
-        result = await client.create_team("team-1")
-        assert result is None
+        assert await client.get_team() is None
+
+    @pytest.mark.asyncio
+    async def test_get_team_api_key_returns_none_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        assert await client.get_team_api_key() is None
+
+    @pytest.mark.asyncio
+    async def test_invite_member_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        assert await client.invite_member("user@corp.com") is False
+
+    @pytest.mark.asyncio
+    async def test_list_connections_returns_none_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        assert await client.list_connections() is None
 
     @pytest.mark.asyncio
     async def test_create_connection_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
         client._connected = False
         result = await client.create_connection(
-            team_id="t1",
-            name="conn",
-            host="h",
-            port=8123,
-            database="db",
-            user="u",
-            password="p",
+            name="conn", host="h", username="u", password="p", port=8123
         )
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_delete_connection_returns_false_when_disconnected(self):
+    async def test_ensure_connection_returns_none_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
         client._connected = False
-        result = await client.delete_connection(team_id="t1", conn_id="c1")
-        assert result is False
-
-    @pytest.mark.asyncio
-    async def test_delete_team_returns_false_when_disconnected(self):
-        client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
-        result = await client.delete_team(team_id="t1")
-        assert result is False
+        result = await client.ensure_connection(name="conn", host="h", username="u")
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_update_connection_returns_false_when_disconnected(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
         client._connected = False
-        result = await client.update_connection(
-            team_id="t1",
-            connection_id="c1",
-            host="newhost",
-            port=8123,
-        )
-        assert result is False
+        ok = await client.update_connection("c1", {"name": "n", "host": "h", "username": "u"})
+        assert ok is False
+
+    @pytest.mark.asyncio
+    async def test_delete_connection_returns_false_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        assert await client.delete_connection("c1") is False
+
+    @pytest.mark.asyncio
+    async def test_source_methods_when_disconnected(self):
+        client = HyperDXClient(base_url="http://x", api_key="k")
+        client._connected = False
+        assert await client.list_sources() is None
+        assert await client.create_source({"name": "s"}) is None
+        assert await client.update_source("s1", {"name": "s"}) is False
+        assert await client.delete_source("s1") is False
 
     @pytest.mark.asyncio
     async def test_sync_no_tenant_reader_returns_empty(self):
         """sync_connections returns empty result if no tenant_reader connection."""
-        from dfe_engine.orgs.models import Org
-
         client = HyperDXClient(base_url="http://x", api_key="k")
         config = ConnectionConfig(connections={}, role_connections={})
-        result = await client.sync_connections(
-            orgs=[Org(name="acme", org_ids=["acme"])],
-            conn_config=config,
-        )
+        result = await client.sync_connections(config)
         assert result.teams_created == []
         assert result.connections_created == 0
 
-
-class TestInviteMember:
     @pytest.mark.asyncio
-    async def test_invite_member_returns_false_when_disconnected(self):
+    async def test_sync_disconnected_records_team_failure(self):
         client = HyperDXClient(base_url="http://x", api_key="k")
         client._connected = False
-        result = await client.invite_member(team_api_key="team-key", email="user@corp.com")
-        assert result is False
+        config = ConnectionConfig(
+            connections={
+                "tenant_reader": ClickHouseConnection(name="tenant_reader", host="h"),
+            },
+            role_connections={},
+        )
+        result = await client.sync_connections(config)
+        assert result.teams_failed == ["default"]
+        assert result.connections_created == 0
 
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_invite_member_success(self):
-        pass
+
+# ---------------------------------------------------------------------------
+# ensure_connection dedupe branch (collaborators overridden, no HTTP)
+# ---------------------------------------------------------------------------
 
 
-class TestGetTeamApiKey:
+class _CannedClient(HyperDXClient):
+    """Overrides the two HTTP collaborators so the dedupe branch runs offline."""
+
+    def __init__(self, listing):
+        super().__init__(base_url="http://x", api_key="k")
+        self._listing = listing
+        self.created: list[str] = []
+
+    async def list_connections(self):
+        return self._listing
+
+    async def create_connection(self, *, name, host, username, password="", port=None):
+        self.created.append(name)
+        return "new-conn-id"
+
+
+class TestEnsureConnectionDedupe:
     @pytest.mark.asyncio
-    async def test_get_team_api_key_returns_none_when_disconnected(self):
-        client = HyperDXClient(base_url="http://x", api_key="k")
-        client._connected = False
-        result = await client.get_team_api_key(team_id="t1")
-        assert result is None
+    async def test_existing_name_returns_its_id_without_create(self):
+        client = _CannedClient([{"id": "abc123", "name": "tenant_reader"}])
+        conn_id = await client.ensure_connection(name="tenant_reader", host="h", username="u")
+        assert conn_id == "abc123"
+        assert client.created == []
 
+    @pytest.mark.asyncio
+    async def test_missing_name_creates(self):
+        client = _CannedClient([{"id": "abc123", "name": "other"}])
+        conn_id = await client.ensure_connection(name="tenant_reader", host="h", username="u")
+        assert conn_id == "new-conn-id"
+        assert client.created == ["tenant_reader"]
+
+    @pytest.mark.asyncio
+    async def test_mongo_style_underscore_id_accepted(self):
+        client = _CannedClient([{"_id": "abc123", "name": "tenant_reader"}])
+        conn_id = await client.ensure_connection(name="tenant_reader", host="h", username="u")
+        assert conn_id == "abc123"
+
+
+# ---------------------------------------------------------------------------
+# HTTP-dependent tests (skipped — requires running HyperDX)
+# ---------------------------------------------------------------------------
+
+
+class TestGetTeam:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_get_team_api_key_success(self):
+    async def test_get_team_jit_creates_default_team(self):
         pass
 
 
-class TestCreateTeam:
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_create_team_success(self):
-        pass
-
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_create_team_failure_sets_disconnected(self):
-        pass
-
-
-class TestCreateConnection:
+class TestConnectionsHttp:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_create_connection_success(self):
         pass
 
-
-class TestDeleteConnection:
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_delete_connection_success(self):
-        pass
-
-
-class TestDeleteTeam:
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_delete_team_success(self):
-        pass
-
-    @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_delete_team_failure_sets_disconnected(self):
-        pass
-
-
-class TestUpdateConnection:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
     async def test_update_connection_success(self):
         pass
 
     @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_update_connection_failure_sets_disconnected(self):
+    async def test_delete_connection_success(self):
         pass
 
 
-class TestSyncConnections:
+class TestSourcesHttp:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_sync_creates_teams_for_enabled_orgs(self):
+    async def test_create_source_success(self):
         pass
 
+
+class TestInviteMemberHttp:
     @pytest.mark.skip(reason="Requires running HyperDX instance")
-    async def test_sync_skips_disabled_orgs(self):
+    async def test_invite_member_success(self):
+        pass
+
+
+class TestSyncConnectionsHttp:
+    @pytest.mark.skip(reason="Requires running HyperDX instance")
+    async def test_sync_ensures_default_team_and_tenant_reader(self):
         pass

@@ -157,10 +157,22 @@ def test_machine_token_verifies_against_published_jwks(tmp_path):
     assert pyjwt.get_unverified_header(token)["kid"] == jwk["kid"]
 
 
+def _decode_via_jwks(a: JwtAuthority, token: str, audience: str) -> dict:
+    """Decode a token the way a peer does - through the published JWKS."""
+    jwk = a.jwks()["keys"][0]
+    return pyjwt.decode(
+        token,
+        pyjwt.PyJWK(jwk).key,
+        algorithms=["ES384"],
+        audience=audience,
+        issuer=ISS,
+    )
+
+
 def test_machine_token_ttl_capped_at_300(tmp_path):
     a = _authority(tmp_path)
     token = a.mint_machine_token(audience=HYPERDX_AUDIENCE)
-    claims = a.verify(token)
+    claims = _decode_via_jwks(a, token, HYPERDX_AUDIENCE)
     assert claims["exp"] - claims["iat"] <= MACHINE_TOKEN_TTL_SECONDS
 
 
@@ -199,6 +211,20 @@ def test_machine_token_source_caches_and_refreshes_near_expiry(tmp_path):
 def test_machine_token_source_token_is_valid(tmp_path):
     a = _authority(tmp_path)
     src = MachineTokenSource(a, audience=HYPERDX_AUDIENCE)
-    claims = a.verify(src.token())
+    claims = _decode_via_jwks(a, src.token(), HYPERDX_AUDIENCE)
     assert claims["sub"] == MACHINE_SUBJECT
     assert claims["aud"] == HYPERDX_AUDIENCE
+
+
+def test_machine_token_rejected_by_engine_verify(tmp_path):
+    # a peer-audience token must never authenticate against the engine itself
+    a = _authority(tmp_path)
+    token = a.mint_machine_token(audience=HYPERDX_AUDIENCE)
+    with pytest.raises(InvalidTokenError):
+        a.verify(token)
+
+
+def test_verify_still_accepts_identity_tokens_without_aud(tmp_path):
+    a = _authority(tmp_path)
+    token = a.sign({"sub": "alice@acme", "groups": ["soc"]})
+    assert a.verify(token)["sub"] == "alice@acme"

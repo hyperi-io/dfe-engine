@@ -78,11 +78,11 @@ class OrgLifecycleManager:
         display_name: str = "",
         admin_id: str,
     ) -> Org:
-        """Create a new org and provision its HyperDX team.
+        """Create a new org and link it to the fork's default HyperDX team.
 
-        Creates the org in the registry and creates a HyperDX team (non-fatal).
-        Per-org ClickHouse row-policy isolation is reconciled from the registry
-        by the CH RBAC reconciler, not here.
+        Creates the org in the registry and records the shared default team
+        (non-fatal). Per-org ClickHouse row-policy isolation is reconciled from
+        the registry by the CH RBAC reconciler, not here.
 
         Args:
             name: Unique org name.
@@ -102,11 +102,11 @@ class OrgLifecycleManager:
         return org
 
     async def delete_org(self, name: str, *, admin_id: str) -> None:
-        """Delete an org and its HyperDX team.
+        """Delete an org from the registry.
 
-        Deletes the HyperDX team (if any) before removing the org from the
-        registry. HyperDX failures are non-fatal. The CH RBAC reconciler drops
-        the org's role + row policies on its next run.
+        The dfe-hyperdx fork exposes no team-deletion endpoint, so the shared
+        default team is untouched. The CH RBAC reconciler drops the org's role
+        + row policies on its next run.
 
         Args:
             name: Org to delete.
@@ -119,9 +119,6 @@ class OrgLifecycleManager:
         if org is None:
             raise KeyError(name)
 
-        if org.hyperdx_team_id and self._hdx is not None:
-            await self._hdx.delete_team(org.hyperdx_team_id)
-
         self._registry.delete(name)
         audit_org_change(admin_id=admin_id, org_name=name, change="deleted")
 
@@ -130,9 +127,12 @@ class OrgLifecycleManager:
     # ------------------------------------------------------------------
 
     async def _provision_hyperdx(self, org: Org) -> Org:
-        """Create a HyperDX team for the org and persist the team ID.
+        """Confirm the fork's default team and persist its ID on the org.
 
-        Non-fatal: if HyperDX is unavailable, the org record is unchanged.
+        The fork exposes no per-org team creation; every org shares the
+        deployment's default team (JIT-created on first contact) until the
+        per-team credential seam (dfe-engine#124) lands. Non-fatal: if HyperDX
+        is unavailable, the org record is unchanged.
 
         Args:
             org: The org to provision.
@@ -144,30 +144,28 @@ class OrgLifecycleManager:
             return org
 
         try:
-            team_id = await self._hdx.create_team(f"customer-{org.name}")
+            team = await self._hdx.get_team()
         except Exception as exc:
             audit_org_hyperdx_failed(org_name=org.name, error=str(exc))
             return org
 
+        team_id = str(team.get("_id", "")) if team else ""
         if team_id:
             audit_org_hyperdx_provisioned(org_name=org.name, team_id=team_id)
-            update_kwargs: dict[str, object] = {"hyperdx_team_id": team_id}
 
-            # Attach the tenant_reader ClickHouse connection to the new team so
-            # the org's HyperDX can query its data (non-fatal).
+            # Ensure the tenant_reader ClickHouse connection exists on the team
+            # (idempotent - the fork does not dedupe connections by name).
             if self._conn_config is not None:
                 conn = self._conn_config.connections.get("tenant_reader")
                 if conn is not None:
                     import os
 
                     try:
-                        await self._hdx.create_connection(
-                            team_id=team_id,
+                        await self._hdx.ensure_connection(
                             name="tenant_reader",
                             host=conn.host,
                             port=conn.port,
-                            database=conn.database,
-                            user=conn.user,
+                            username=conn.user,
                             password=os.environ.get(conn.password_env, ""),
                         )
                     except Exception as exc:
@@ -177,22 +175,7 @@ class OrgLifecycleManager:
                             error=str(exc),
                         )
 
-            # Retrieve the team's own API key so we can invite members later.
-            # The env var name follows the same convention as ch_password_env.
-            team_api_key = await self._hdx.get_team_api_key(team_id)
-            if team_api_key:
-                env_var = f"HYPERDX_TEAM_API_KEY_{org.name.upper().replace('-', '_')}"
-                import os
+            return self._registry.update(org.name, hyperdx_team_id=team_id)
 
-                os.environ[env_var] = team_api_key
-                update_kwargs["hyperdx_team_api_key_env"] = env_var
-                logger.info(
-                    "HyperDX team API key stored",
-                    org_name=org.name,
-                    env_var=env_var,
-                )
-
-            return self._registry.update(org.name, **update_kwargs)
-
-        audit_org_hyperdx_failed(org_name=org.name, error="create_team returned None")
+        audit_org_hyperdx_failed(org_name=org.name, error="get_team returned no team")
         return org

@@ -24,7 +24,6 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
-from scalo.logger import logger
 
 from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
 from dfe_engine.api.pagination import (
@@ -253,21 +252,3 @@ def _org_response(org: Org) -> OrgResponse:
         created_at=org.created_at,
         updated_at=org.updated_at,
     )
-
-
-# -- Background helpers (kept for reference; HyperDX now handled by lifecycle) --
-
-
-async def _create_hyperdx_team(hdx_client: object, org_name: str) -> None:
-    """Fire-and-forget HyperDX team creation.  Logs warning on failure."""
-    try:
-        from dfe_engine.hyperdx.client import HyperDXClient
-
-        if isinstance(hdx_client, HyperDXClient):
-            await hdx_client.create_team(f"customer-{org_name}")
-    except Exception as exc:
-        logger.warning(
-            "Background HyperDX team creation failed (non-fatal)",
-            org=org_name,
-            error=str(exc),
-        )

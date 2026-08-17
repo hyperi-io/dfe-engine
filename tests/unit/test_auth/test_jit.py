@@ -86,8 +86,8 @@ class TestEnsureAccountHdxInvite:
         account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         assert account is not None
 
-    def test_first_login_hdx_client_no_org_registry_does_not_crash(self, stores):
-        """invite path skips gracefully when org_registry is None."""
+    def test_first_login_with_disconnected_hdx_client_does_not_crash(self, stores):
+        """invite path is fire-and-forget and never breaks account creation."""
         accounts, groups = stores
 
         class _FakeHdx:
@@ -97,49 +97,10 @@ class TestEnsureAccountHdxInvite:
             account_store=accounts,
             group_store=groups,
             hyperdx_client=_FakeHdx(),
-            org_registry=None,
         )
         # Should not raise even with a fake (disconnected) hdx client
         account = jit.ensure_account("jane@corp.com", ["acme-viewers"], "entra")
         assert account is not None
-
-
-class TestResolveTeamApiKey:
-    def test_returns_empty_without_org_registry(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups, org_registry=None)
-        assert jit._resolve_team_api_key("customer-acme") == ""
-
-    def test_returns_empty_for_broad_team(self, stores):
-        _, groups = stores
-        jit = JitProvisioner(account_store=None, group_store=groups, org_registry=None)
-        assert jit._resolve_team_api_key("dfe-admin") == ""
-
-    def test_returns_empty_when_env_var_unset(self, stores, tmp_path):
-        accounts, groups = stores
-        from dfe_engine.orgs.registry import OrgRegistry
-
-        org_registry = OrgRegistry(tmp_path / "orgs")
-        org_registry.create("acme", org_ids=["acme"])
-        org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_ACME")
-
-        jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)
-        # Env var not set → empty string
-        result = jit._resolve_team_api_key("customer-acme")
-        assert result == ""
-
-    def test_returns_key_when_env_var_set(self, stores, tmp_path, monkeypatch):
-        accounts, groups = stores
-        from dfe_engine.orgs.registry import OrgRegistry
-
-        monkeypatch.setenv("HYPERDX_TEAM_API_KEY_ACME", "team-secret-key")
-        org_registry = OrgRegistry(tmp_path / "orgs")
-        org_registry.create("acme", org_ids=["acme"])
-        org_registry.update("acme", hyperdx_team_api_key_env="HYPERDX_TEAM_API_KEY_ACME")
-
-        jit = JitProvisioner(account_store=accounts, group_store=groups, org_registry=org_registry)
-        result = jit._resolve_team_api_key("customer-acme")
-        assert result == "team-secret-key"
 
 
 class TestResolveHyperdxTeam:
