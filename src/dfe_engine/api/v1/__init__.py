@@ -17,6 +17,7 @@ from dfe_engine.api.v1.gitops import router as gitops_router
 from dfe_engine.api.v1.governance import router as governance_router
 from dfe_engine.api.v1.helm import router as helm_router
 from dfe_engine.api.v1.hunts import router as hunts_router
+from dfe_engine.api.v1.hyperdx import router as hyperdx_router
 from dfe_engine.api.v1.lifecycle import router as lifecycle_router
 from dfe_engine.api.v1.oidc_login import router as oidc_login_router
 from dfe_engine.api.v1.oidc_providers import router as oidc_providers_router
@@ -95,6 +96,8 @@ v1_router.include_router(lifecycle_router)
 v1_router.include_router(authoring_router)
 # Runtime client-config bootstrap for the UI (public, no secrets)
 v1_router.include_router(config_router)
+# Per-org ClickHouse connection material the HyperDX fork seeds a team with
+v1_router.include_router(hyperdx_router)
 v1_router.include_router(repository_router)
 
 __all__ = ["v1_router"]
