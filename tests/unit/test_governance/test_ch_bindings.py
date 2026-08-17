@@ -72,13 +72,13 @@ class TestUnrestrictedGroups:
         assert [(b.group, b.org) for b in bindings] == [("analysts", "")]
 
     def test_customer_role_alone_keeps_the_pin(self):
-        group = _group("acme-view", org_ids=["acme"], roles=["customer_viewer"])
+        group = _group("acme-view", org_ids=["acme"], roles=["org_viewer"])
         bindings = derive_group_bindings([group], [_org("acme")])
         assert [(b.group, b.org) for b in bindings] == [("acme-view", "acme")]
 
     def test_mixed_roles_go_unrestricted(self):
-        """customer_viewer plus any platform role resolves platform-wards."""
-        group = _group("odd", org_ids=["acme"], roles=["customer_viewer", "data_viewer"])
+        """org_viewer plus any platform role resolves platform-wards."""
+        group = _group("odd", org_ids=["acme"], roles=["org_viewer", "data_viewer"])
         bindings = derive_group_bindings([group], [_org("acme")])
         assert [(b.group, b.org) for b in bindings] == [("odd", "")]
 
@@ -88,7 +88,7 @@ class TestUnrestrictedGroups:
             _group("admins", roles=["admin"]),
             _group("infra", roles=["infra_admin"]),
             _group("analysts", roles=["data_analyst"]),
-            _group("acme-view", org_ids=["acme"], roles=["customer_viewer"]),
+            _group("acme-view", org_ids=["acme"], roles=["org_viewer"]),
         ]
         bindings = derive_group_bindings(groups, [_org("acme")])
         assert {b.group: b.ch_roles for b in bindings} == {

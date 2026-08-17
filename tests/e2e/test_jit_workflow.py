@@ -52,7 +52,7 @@ def jit_client(jit_settings):
     with TestClient(app, raise_server_exceptions=False) as client:
         # Create a group with org_ids for testing
         group_store = app.state.group_store
-        group_store.create("test-org-viewers", roles=["customer_viewer"])
+        group_store.create("test-org-viewers", roles=["org_viewer"])
         group_store.update("test-org-viewers", org_ids=["test-org"])
         yield client
     _registries.clear()

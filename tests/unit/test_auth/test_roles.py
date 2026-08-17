@@ -302,7 +302,7 @@ roles:
       - "config:read"
       - "source:read"
     scoped: false
-  customer_viewer:
+  org_viewer:
     description: "Scoped viewer"
     permissions:
       - "query:execute"
@@ -315,7 +315,7 @@ roles:
 
         assert "admin" in config.roles
         assert "viewer" in config.roles
-        assert "customer_viewer" in config.roles
+        assert "org_viewer" in config.roles
 
     def test_load_parses_role_definitions(self, tmp_path):
         yaml_content = """
@@ -393,7 +393,7 @@ class TestLoadBuiltin:
             "data_viewer",
             "infra_admin",
             "infra_viewer",
-            "customer_viewer",
+            "org_viewer",
             "dfe_operator",
         }
         assert set(config.roles.keys()) == expected_roles
@@ -418,9 +418,9 @@ class TestLoadBuiltin:
         assert config.has_permission("infra_viewer", "service:dfe-loader:config:read") is True
         assert config.has_permission("infra_viewer", "service:dfe-loader:config:write") is False
 
-    def test_builtin_customer_viewer_is_scoped(self):
+    def test_builtin_org_viewer_is_scoped(self):
         config = RoleConfig.load_builtin()
-        assert config.roles["customer_viewer"].scoped is True
+        assert config.roles["org_viewer"].scoped is True
 
     def test_builtin_data_analyst_grants_hunt(self):
         config = RoleConfig.load_builtin()

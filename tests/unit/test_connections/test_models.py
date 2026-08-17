@@ -69,7 +69,7 @@ class TestConnectionConfig:
                 "default": ClickHouseConnection(name="default"),
                 "tenant": ClickHouseConnection(name="tenant", user="tenant_user"),
             },
-            role_connections={"admin": "default", "customer_viewer": "tenant"},
+            role_connections={"admin": "default", "org_viewer": "tenant"},
         )
         assert len(config.connections) == 2
         assert config.role_connections["admin"] == "default"
