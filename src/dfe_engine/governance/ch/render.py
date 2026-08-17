@@ -119,13 +119,22 @@ def render_service_user(role_def: ChServiceRole, pw_hash: str) -> list[str]:
     return stmts
 
 
-def render_tenant_axis(tables: list[tuple[str, str]]) -> list[str]:
+def render_tenant_axis(
+    tables: list[tuple[str, str]],
+    deny_tables: list[tuple[str, str]] | None = None,
+) -> list[str]:
     """DDL for the SHARED tenant axis: one role, one RESTRICTIVE policy per table.
 
     The predicate reads the caller's pinned ``SQL_current_tenant_id`` (comma-joined
     tenant ids), so ONE policy set serves every org - adding an org adds a pinned
     user and nothing here. ``tables`` is the list of ``(db, table)`` that actually
     carry ``_org_id`` (discovered from ``system.columns``).
+
+    ``deny_tables`` are tenant-reachable tables that carry NO ``_org_id``. The
+    row policies only cover ``_org_id`` tables, but the analyst tier grants
+    ``SELECT ON <db>.*``, so an un-annotated table in a granted db is read in full
+    by every org (the hunt orchestration tables are this class). Each gets a
+    RESTRICTIVE ``USING 0`` policy so a tenant reads nothing from it.
 
     RESTRICTIVE-only is load-bearing (spec 5.2): a user not holding
     ``dfe_tenant_role`` is targeted by no policy and reads ALL rows; a holder reads
@@ -142,6 +151,13 @@ def render_tenant_axis(tables: list[tuple[str, str]]) -> list[str]:
         stmts.append(
             f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} "
             f"AS RESTRICTIVE FOR SELECT USING {predicate} TO {role}"
+        )
+    for db, table in deny_tables or []:
+        policy = _bq(tenant_policy_name(db, table))
+        target = f"{_bq(db)}.{_bq(table)}"
+        stmts.append(
+            f"CREATE ROW POLICY IF NOT EXISTS {policy} ON {target} "
+            f"AS RESTRICTIVE FOR SELECT USING 0 TO {role}"
         )
     return stmts
 
