@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_datagen/test_reference_packs.py
+#  File:         tests/unit/test_synthetic_data/test_reference_packs.py
 #  Purpose:      Shipped reference sets (syslog/otel/beats) generate coherent streams
 #  Language:     Python
 #
@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.datagen.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
 
 FIXED_END = datetime(2026, 8, 18, 12, 0, 0, tzinfo=UTC)
 

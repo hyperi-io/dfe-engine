@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/entities.py
+#  File:         synthetic_data/entities.py
 #  Purpose:      Seeded entity pool - coherent hosts/users/accounts across events
 #  Language:     Python
 #

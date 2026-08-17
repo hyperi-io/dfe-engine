@@ -580,6 +580,34 @@ class SamplerSettings(BaseModel):
     )
 
 
+class SyntheticDataSettings(BaseModel):
+    """Synthetic reference-data generation (the /synthetic-data API + demo streams).
+
+    Synthetic data is a demo/test stream, never a load generator: every knob here is a
+    ceiling that keeps a fat-fingered request modest. Rates are Poisson-paced
+    events per second; streams are bounded by count and/or duration.
+
+    Environment variables (DFE_SYNTHETIC_DATA_ prefix):
+    - DFE_SYNTHETIC_DATA_MAX_COUNT -> synthetic_data.max_count
+    - DFE_SYNTHETIC_DATA_MAX_RATE_EPS -> synthetic_data.max_rate_eps
+    - DFE_SYNTHETIC_DATA_MAX_STREAM_SECONDS -> synthetic_data.max_stream_seconds
+    - DFE_SYNTHETIC_DATA_DEFAULT_RATE_EPS -> synthetic_data.default_rate_eps
+    """
+
+    max_count: int = Field(
+        default=10_000, ge=1, description="Hard cap on events per inline generate call"
+    )
+    max_rate_eps: float = Field(
+        default=200.0, gt=0, description="Hard cap on stream rate (events/second)"
+    )
+    max_stream_seconds: float = Field(
+        default=28_800.0, gt=0, description="Hard cap on a stream task's duration (default 8h)"
+    )
+    default_rate_eps: float = Field(
+        default=5.0, gt=0, description="Stream rate when the caller does not set one"
+    )
+
+
 class KedaShimSettings(BaseModel):
     """dfe-keda-shim settings - the KEDA metrics-api -> ClickHouse query adapter.
 
@@ -1008,6 +1036,7 @@ class DFESettings(BaseModel):
     query: QuerySettings = Field(default_factory=QuerySettings)
     query_views: QueryViewSettings = Field(default_factory=QueryViewSettings)
     sampler: SamplerSettings = Field(default_factory=SamplerSettings)
+    synthetic_data: SyntheticDataSettings = Field(default_factory=SyntheticDataSettings)
     keda_shim: KedaShimSettings = Field(default_factory=KedaShimSettings)
     schemas: SchemasSettings = Field(default_factory=SchemasSettings)
     source: SourceSettings = Field(default_factory=SourceSettings)

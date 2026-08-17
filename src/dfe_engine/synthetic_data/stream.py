@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/stream.py
+#  File:         synthetic_data/stream.py
 #  Purpose:      Live-tail cadence + delivery sinks for generated events
 #  Language:     Python
 #
@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Live-tail streaming of generated events.
 
-Datagen is a demo/test stream, never a load generator: pacing is a Poisson
+Synthetic data is a demo/test stream, never a load generator: pacing is a Poisson
 process at a modest configured rate (interarrival = expovariate draw), which
 reads as live telemetry in a tail view - bursts and gaps, no metronome.
 
@@ -26,8 +26,8 @@ from typing import Any, Protocol
 
 from scalo.logger import logger
 
-from dfe_engine.datagen.models import DatagenError
-from dfe_engine.datagen.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
 
 # A stream is a demo artefact - cap the rate defensively so a fat-fingered
 # config cannot turn it into a load test.
@@ -80,7 +80,7 @@ class HttpPostSink:
         timeout: float = 10.0,
     ) -> None:
         if batch_max < 1:
-            raise DatagenError("batch_max must be >= 1")
+            raise SyntheticDataError("batch_max must be >= 1")
         self.url = url
         self.headers = headers or {}
         self.batch_max = batch_max
@@ -116,7 +116,9 @@ class HttpPostSink:
         except Exception as exc:
             # A demo stream must degrade, not die: count it and stream on.
             self.failed += len(batch)
-            logger.warning("datagen POST failed", url=self.url, batch=len(batch), error=str(exc))
+            logger.warning(
+                "synthetic data POST failed", url=self.url, batch=len(batch), error=str(exc)
+            )
 
 
 async def stream_events(
@@ -141,13 +143,13 @@ async def stream_events(
         Events emitted.
 
     Raises:
-        DatagenError: If neither ``count`` nor ``duration_s`` bounds the run,
+        SyntheticDataError: If neither ``count`` nor ``duration_s`` bounds the run,
             or the rate is not positive.
     """
     if count is None and duration_s is None:
-        raise DatagenError("stream needs a bound: count and/or duration_s")
+        raise SyntheticDataError("stream needs a bound: count and/or duration_s")
     if rate_eps <= 0:
-        raise DatagenError("rate_eps must be positive")
+        raise SyntheticDataError("rate_eps must be positive")
     rate = min(rate_eps, MAX_RATE_EPS)
 
     emitted = 0
@@ -169,7 +171,7 @@ async def stream_events(
         await asyncio.sleep(min(delay, remaining) if remaining is not None else delay)
     await sink.flush()
     logger.info(
-        "datagen stream complete",
+        "synthetic data stream complete",
         events=emitted,
         seconds=round(time.monotonic() - started, 1),
         rate_eps=rate,

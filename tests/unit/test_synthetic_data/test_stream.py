@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_datagen/test_stream.py
+#  File:         tests/unit/test_synthetic_data/test_stream.py
 #  Purpose:      Cadence bounds, sink behaviour, degrade-not-die delivery
 #  Language:     Python
 #
@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from dfe_engine.datagen.models import DatagenError
-from dfe_engine.datagen.schema_source import SchemaEventFactory
-from dfe_engine.datagen.stream import CollectSink, HttpPostSink, stream_events
 from dfe_engine.source.models import SchemaColumn
+from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.stream import CollectSink, HttpPostSink, stream_events
 
 
 def make_factory(seed: int = 1) -> SchemaEventFactory:
@@ -46,11 +46,11 @@ class TestStreamBounds:
         assert emitted == 20
 
     async def test_missing_bound_rejected(self):
-        with pytest.raises(DatagenError, match="bound"):
+        with pytest.raises(SyntheticDataError, match="bound"):
             await stream_events(make_factory(), CollectSink(), rate_eps=5.0)
 
     async def test_bad_rate_rejected(self):
-        with pytest.raises(DatagenError, match="rate"):
+        with pytest.raises(SyntheticDataError, match="rate"):
             await stream_events(make_factory(), CollectSink(), rate_eps=0, count=1)
 
 
@@ -65,5 +65,5 @@ class TestHttpPostSink:
         assert sink.sent == 0
 
     def test_bad_batch_max_rejected(self):
-        with pytest.raises(DatagenError, match="batch_max"):
+        with pytest.raises(SyntheticDataError, match="batch_max"):
             HttpPostSink("http://127.0.0.1:9/", batch_max=0)

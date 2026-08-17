@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/schema_source.py
+#  File:         synthetic_data/schema_source.py
 #  Purpose:      Meta-schema-driven event factory (reference packs)
 #  Language:     Python
 #
@@ -11,7 +11,7 @@ Inverts a dfe-schemas meta schema: each column's ``@source:`` expr names where
 the value lives in the SOURCE JSON (the shape dfe-receiver ingests), so the
 factory builds events by writing a generated value at every ``@source`` path.
 Column semantics come from the heuristic classifier, overridden per column by
-optional ``datagen:`` hints authored in the schema YAML.
+optional ``synthetic:`` hints authored in the schema YAML.
 
 Every event is marked ``tags.synthetic: true`` by default (the common header
 maps ``first(tags/_tags/...)`` into ``_tags``), so synthetic data is always
@@ -33,11 +33,17 @@ from typing import Any
 
 from scalo.logger import logger
 
-from dfe_engine.datagen.entities import EntityPool
-from dfe_engine.datagen.models import ColumnHints, DatagenError, Scenario
-from dfe_engine.datagen.values import EventContext, Inference, classify, generate, render_timestamp
 from dfe_engine.schema.schema_loader import SchemaLoader
 from dfe_engine.source.models import SchemaColumn
+from dfe_engine.synthetic_data.entities import EntityPool
+from dfe_engine.synthetic_data.models import ColumnHints, Scenario, SyntheticDataError
+from dfe_engine.synthetic_data.values import (
+    EventContext,
+    Inference,
+    classify,
+    generate,
+    render_timestamp,
+)
 
 _SOURCE_PREFIX = "@source:"
 _SEGMENT_RE = re.compile(r"^(?P<key>[^\[\]]+)(?:\[(?P<idx>\d+)\])?$")
@@ -57,7 +63,7 @@ def parse_source_path(expr: str | None) -> list[_PathSegment] | None:
     spelling is listed first in the schemas.
 
     Raises:
-        DatagenError: If the expr is ``@source`` but the path is malformed.
+        SyntheticDataError: If the expr is ``@source`` but the path is malformed.
     """
     if not expr or not expr.strip().startswith(_SOURCE_PREFIX):
         return None
@@ -68,11 +74,11 @@ def parse_source_path(expr: str | None) -> list[_PathSegment] | None:
     for raw in path.split("."):
         m = _SEGMENT_RE.match(raw.strip())
         if not m or not m.group("key").strip():
-            raise DatagenError(f"Unparseable @source path segment {raw!r} in {expr!r}")
+            raise SyntheticDataError(f"Unparseable @source path segment {raw!r} in {expr!r}")
         idx = m.group("idx")
         segments.append(_PathSegment(m.group("key").strip(), int(idx) if idx else None))
     if not segments:
-        raise DatagenError(f"Empty @source path in {expr!r}")
+        raise SyntheticDataError(f"Empty @source path in {expr!r}")
     return segments
 
 
@@ -96,10 +102,10 @@ def set_path(event: dict[str, Any], segments: list[_PathSegment], value: Any) ->
                 node = arr[seg.index]
 
 
-def load_datagen_hints(
+def load_synthetic_hints(
     schema_path: str | Path, *, version: str | None = None
 ) -> dict[str, ColumnHints]:
-    """Read per-column ``datagen:`` hints from a schema YAML.
+    """Read per-column ``synthetic:`` hints from a schema YAML.
 
     The schema loader's ``SchemaColumn`` model ignores unknown keys, so hints
     ride in the same file without affecting DDL or validation. Returns a map
@@ -107,37 +113,39 @@ def load_datagen_hints(
     """
     hints: dict[str, ColumnHints] = {}
     for raw in SchemaLoader.load_raw_columns(schema_path, version=version):
-        block = raw.get("datagen")
+        block = raw.get("synthetic")
         if block is None:
             continue
         name = raw.get("name", "?")
         try:
             hints[name] = ColumnHints.model_validate(block)
         except Exception as e:
-            raise DatagenError(
-                f"Invalid datagen hints on column {name!r} in {schema_path}: {e}"
+            raise SyntheticDataError(
+                f"Invalid synthetic data hints on column {name!r} in {schema_path}: {e}"
             ) from e
     return hints
 
 
-def load_datagen_scenarios(
+def load_synthetic_scenarios(
     schema_path: str | Path, *, version: str | None = None
 ) -> list[Scenario]:
-    """Read schema-level ``datagen.scenarios`` from a schema YAML version entry.
+    """Read schema-level ``synthetic.scenarios`` from a schema YAML version entry.
 
     Scenarios live beside ``columns`` in the version entry and keep
     correlated columns coherent (one weighted draw per event). Returns an
     empty list when the schema declares none.
     """
     entry = SchemaLoader.load_version_entry(schema_path, version=version)
-    block = entry.get("datagen") or {}
+    block = entry.get("synthetic") or {}
     scenarios = block.get("scenarios") or []
     result: list[Scenario] = []
     for i, raw in enumerate(scenarios):
         try:
             result.append(Scenario.model_validate(raw))
         except Exception as e:
-            raise DatagenError(f"Invalid datagen scenario {i} in {schema_path}: {e}") from e
+            raise SyntheticDataError(
+                f"Invalid synthetic data scenario {i} in {schema_path}: {e}"
+            ) from e
     return result
 
 
@@ -157,8 +165,8 @@ class SchemaEventFactory:
         seed: Determinism seed; identical seed => identical events.
         pool: Entity pool to draw from (built from ``seed`` when omitted).
         provider: Cloud provider vocabulary hint (``aws``/``azure``/``gcp``).
-        hints: Per-column ``datagen:`` hints (``load_datagen_hints`` output).
-        scenarios: Schema-level coherent shapes (``load_datagen_scenarios``
+        hints: Per-column ``synthetic:`` hints (``load_synthetic_hints`` output).
+        scenarios: Schema-level coherent shapes (``load_synthetic_scenarios``
             output); one is drawn per event and overrides hints for the
             columns it names.
         tags: Extra tags merged into the event's ``tags`` object.
@@ -191,7 +199,7 @@ class SchemaEventFactory:
                 continue
             self._plan.append((col, segments, classify(col, provider=provider)))
         if not self._plan:
-            raise DatagenError("Schema has no @source columns - nothing to generate")
+            raise SyntheticDataError("Schema has no @source columns - nothing to generate")
 
     @classmethod
     def from_schema(
@@ -211,8 +219,8 @@ class SchemaEventFactory:
             seed=seed,
             pool=pool,
             provider=_provider_from_path(schema_path),
-            hints=load_datagen_hints(schema_path, version=version),
-            scenarios=load_datagen_scenarios(schema_path, version=version),
+            hints=load_synthetic_hints(schema_path, version=version),
+            scenarios=load_synthetic_scenarios(schema_path, version=version),
             tags=tags,
             mark_synthetic=mark_synthetic,
         )
@@ -258,7 +266,7 @@ class SchemaEventFactory:
         like a stream that has been running.
         """
         if count < 1:
-            raise DatagenError("count must be >= 1")
+            raise SyntheticDataError("count must be >= 1")
         end = end or datetime.now(UTC)
         offsets = [0.0]
         for _ in range(count - 1):
@@ -291,7 +299,7 @@ class SchemaEventFactory:
         if hint.provider is not None:
             method = getattr(ctx.pool.fake, hint.provider, None)
             if method is None:
-                raise DatagenError(
+                raise SyntheticDataError(
                     f"Unknown faker provider {hint.provider!r} on column {col.name!r}"
                 )
             return method()
@@ -303,7 +311,9 @@ class SchemaEventFactory:
             return round(ctx.pool.rng.uniform(low, high), 2)
         if hint.format is not None:
             return render_timestamp(ctx.when, hint.format)
-        logger.warning(f"datagen hints on column {col.name!r} set nothing usable - falling back")
+        logger.warning(
+            f"synthetic data hints on column {col.name!r} set nothing usable - falling back"
+        )
         return generate(inference, ctx)
 
     @staticmethod
@@ -311,4 +321,6 @@ class SchemaEventFactory:
         try:
             return template.format_map(ctx.template_map())
         except KeyError as e:
-            raise DatagenError(f"Unknown template placeholder {e} on column {column_name!r}") from e
+            raise SyntheticDataError(
+                f"Unknown template placeholder {e} on column {column_name!r}"
+            ) from e
