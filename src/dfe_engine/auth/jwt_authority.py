@@ -24,6 +24,8 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import time
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -54,6 +56,12 @@ _CURVE_FOR_ALG: dict[str, type[ec.EllipticCurve]] = {
 _CRV_NAME = {"ES256": "P-256", "ES384": "P-384", "ES512": "P-521"}
 _COORD_BYTES = {"ES256": 32, "ES384": 48, "ES512": 66}
 _CLOCK_SKEW_SECONDS = 30
+
+# Machine-token identity for engine -> dfe-hyperdx control calls (dfe-engine#149).
+MACHINE_SUBJECT = "svc:dfe-engine"
+HYPERDX_AUDIENCE = "dfe-hyperdx"
+MACHINE_TOKEN_TTL_SECONDS = 300
+_MACHINE_REFRESH_MARGIN_SECONDS = 30
 
 
 def _b64url(data: bytes) -> str:
@@ -163,6 +171,35 @@ class JwtAuthority:
             headers={"kid": self._active_kid},
         )
 
+    def mint_machine_token(
+        self,
+        *,
+        audience: str,
+        subject: str = MACHINE_SUBJECT,
+        ttl_seconds: int = MACHINE_TOKEN_TTL_SECONDS,
+    ) -> str:
+        """Mint a short-lived service token for engine-to-peer control calls.
+
+        Args:
+            audience: The accepting peer's audience claim (e.g. ``dfe-hyperdx``).
+            subject: Service subject identifying the caller.
+            ttl_seconds: Token lifetime, hard-capped at ``MACHINE_TOKEN_TTL_SECONDS``.
+
+        Returns:
+            Signed JWT string, verifiable against the published JWKS.
+
+        Raises:
+            ValueError: If ``ttl_seconds`` is outside ``(0, MACHINE_TOKEN_TTL_SECONDS]``.
+        """
+        if not 0 < ttl_seconds <= MACHINE_TOKEN_TTL_SECONDS:
+            raise ValueError(
+                f"machine-token TTL must be in (0, {MACHINE_TOKEN_TTL_SECONDS}]s, got {ttl_seconds}"
+            )
+        return self.sign(
+            {"sub": subject, "aud": audience},
+            expires_delta=timedelta(seconds=ttl_seconds),
+        )
+
     def verify(self, token: str) -> dict[str, Any]:
         """Verify signature + issuer + expiry. Raises ``InvalidTokenError`` on any failure."""
         header = jwt.get_unverified_header(token)
@@ -191,3 +228,42 @@ class JwtAuthority:
         kid = _public_jwk(pub, self._alg)["kid"]
         self._verify_keys[kid] = pub
         return kid
+
+
+class MachineTokenSource:
+    """Caching supplier of machine tokens: re-mints ~30s before expiry.
+
+    Attributes are private; call :meth:`token` for a token guaranteed valid for
+    at least ``_MACHINE_REFRESH_MARGIN_SECONDS``.
+    """
+
+    def __init__(
+        self,
+        authority: JwtAuthority,
+        *,
+        audience: str,
+        subject: str = MACHINE_SUBJECT,
+        ttl_seconds: int = MACHINE_TOKEN_TTL_SECONDS,
+        now: Callable[[], float] | None = None,
+    ) -> None:
+        self._authority = authority
+        self._audience = audience
+        self._subject = subject
+        self._ttl = ttl_seconds
+        # Injectable clock so cache-expiry behaviour is testable without sleeping.
+        self._now = now or time.time
+        self._token: str | None = None
+        self._expires_at = 0.0
+
+    def token(self) -> str:
+        """Return a cached machine token, re-minting inside the refresh margin."""
+        refresh_at = self._expires_at - _MACHINE_REFRESH_MARGIN_SECONDS
+        if self._token is None or self._now() >= refresh_at:
+            minted_at = self._now()
+            self._token = self._authority.mint_machine_token(
+                audience=self._audience,
+                subject=self._subject,
+                ttl_seconds=self._ttl,
+            )
+            self._expires_at = minted_at + self._ttl
+        return self._token

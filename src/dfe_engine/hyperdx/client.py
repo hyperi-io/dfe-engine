@@ -17,7 +17,10 @@ Usage::
 
     from dfe_engine.hyperdx.client import HyperDXClient
 
-    client = HyperDXClient(base_url="http://hyperdx:8080", api_key="secret")
+    client = HyperDXClient(
+        base_url="http://hyperdx:8080",
+        token_provider=machine_token_source.token,
+    )
     team_id = await client.create_team("customer-acme")
     if team_id:
         await client.create_connection(team_id, "default", ...)
@@ -27,6 +30,7 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from scalo.logger import logger
@@ -59,9 +63,16 @@ class HyperDXClient:
     warning and return gracefully.  Callers should not depend on success.
     """
 
-    def __init__(self, base_url: str, api_key: str) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str = "",
+        token_provider: Callable[[], str] | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
+        # Engine-minted machine JWT supplier; wins over any static api_key.
+        self._token_provider = token_provider
         self._connected = True  # Optimistic; set False on first failure
 
     async def create_team(self, name: str) -> str | None:
@@ -459,7 +470,9 @@ class HyperDXClient:
 
     def _headers(self) -> dict[str, str]:
         """Return authorization headers for HyperDX API calls."""
+        # Called per request, so a caching token_provider re-mints before expiry.
+        bearer = self._token_provider() if self._token_provider else self._api_key
         return {
-            "Authorization": f"Bearer {self._api_key}",
+            "Authorization": f"Bearer {bearer}",
             "Content-Type": "application/json",
         }
