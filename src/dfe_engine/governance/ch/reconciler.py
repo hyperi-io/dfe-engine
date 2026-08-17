@@ -56,12 +56,32 @@ def _default_tier_name(tiers: list[Any], kind: str) -> str:
     return of_kind[0].name if of_kind else ""
 
 
+def _tenant_granted_dbs(tiers: list[Any]) -> list[str]:
+    """Databases a tenant (pinned) user can SELECT, from the analyst-tier grants.
+
+    Pinned users hold an analyst tier whose grants are ``SELECT ON <db>.*``. A
+    table in one of those dbs that carries no ``_org_id`` gets no row policy, so
+    the tenant reads it in full - this list bounds where that class can hide, and
+    feeds the deny policies rendered by ``render_tenant_axis``.
+    """
+    dbs: set[str] = set()
+    for t in tiers:
+        if getattr(t, "kind", "analyst") != "analyst":
+            continue
+        for grant in getattr(t, "grants", []):
+            head, _sep, target = grant.partition(" ON ")
+            if head.strip().upper().startswith("SELECT") and target.endswith(".*"):
+                dbs.add(target[:-2].strip())
+    return sorted(dbs)
+
+
 def compute_drops(
     existing_org_roles: set[str],
     existing_policies: list[tuple[str, str, str]],
     existing_org_users: set[str],
     orgs: list[Any],
     org_tables: list[tuple[str, str]],
+    deny_tables: list[tuple[str, str]] | None = None,
 ) -> list[str]:
     """Pure diff: DROP DDL for tenant objects with no config behind them.
 
@@ -78,6 +98,7 @@ def compute_drops(
     ``existing_policies`` is ``(short_name, db, table)`` from system.row_policies.
     """
     desired_policies = {tenant_policy_name(db, t) for (db, t) in org_tables}
+    desired_policies |= {tenant_policy_name(db, t) for (db, t) in (deny_tables or [])}
     desired_users = {org_user_name(o.name) for o in orgs}
     drops: list[str] = []
     for short_name, db, table in existing_policies:
@@ -114,6 +135,25 @@ class ChRbacReconciler:
             "WHERE name = '_org_id' AND database NOT IN {skip:Array(String)} "
             "GROUP BY database, table ORDER BY database, table",
             parameters={"skip": _SKIP_DBS},
+        ).result_rows
+        return [(r[0], r[1]) for r in rows]
+
+    def discover_tenant_reachable_tables(self, dbs: list[str]) -> list[tuple[str, str]]:
+        """(db, table) for policy-applicable tables in the tenant-granted dbs.
+
+        Excludes views, dictionaries, temporaries and MV inner tables - a row
+        policy only attaches to a real table. The caller deny-policies whichever
+        of these carry no ``_org_id``.
+        """
+        if not dbs:
+            return []
+        rows = self._client.query(
+            "SELECT database, name FROM system.tables "
+            "WHERE database IN {dbs:Array(String)} "
+            "AND engine NOT LIKE '%View%' AND engine != 'Dictionary' "
+            "AND is_temporary = 0 AND name NOT LIKE '.inner%' "
+            "ORDER BY database, name",
+            parameters={"dbs": dbs},
         ).result_rows
         return [(r[0], r[1]) for r in rows]
 
@@ -165,6 +205,7 @@ class ChRbacReconciler:
         service_hashes: dict[str, str],
         group_hashes: dict[str, str],
         org_hashes: dict[str, str],
+        deny_tables: list[tuple[str, str]] | None = None,
     ) -> list[str]:
         """Full ordered DDL (spec 7): tiers -> service roles -> tenant axis ->
         org users -> group users. Pure given the discovered ``org_tables`` and the
@@ -179,7 +220,7 @@ class ChRbacReconciler:
                 stmts += render_service_user(r, service_hashes[r.name])
         default_analyst = _default_tier_name(tiers, "analyst")
         default_tier_role = f"dfe_{default_analyst}_role"
-        stmts += render_tenant_axis(org_tables)
+        stmts += render_tenant_axis(org_tables, deny_tables)
         # The org's pinned user: the identity its hyperdx team connects as.
         orgs_by_name = {o.name: o for o in orgs}
         for o in orgs:
@@ -219,6 +260,17 @@ class ChRbacReconciler:
         """Discover, mint, render, apply, and drop-stale, idempotently."""
         result = ReconcileResult()
         org_tables = self.discover_org_id_tables()
+        org_set = set(org_tables)
+        deny_tables = [
+            t
+            for t in self.discover_tenant_reachable_tables(_tenant_granted_dbs(tiers))
+            if t not in org_set
+        ]
+        if deny_tables:
+            logger.info(
+                "tenant deny-policy over non-_org_id tables in granted dbs",
+                count=len(deny_tables),
+            )
 
         service_hashes: dict[str, str] = {}
         group_hashes: dict[str, str] = {}
@@ -244,6 +296,7 @@ class ChRbacReconciler:
             service_hashes=service_hashes,
             group_hashes=group_hashes,
             org_hashes=org_hashes,
+            deny_tables=deny_tables,
         )
         drops = compute_drops(
             self._existing_org_roles(),
@@ -251,6 +304,7 @@ class ChRbacReconciler:
             self._existing_org_users(),
             orgs,
             org_tables,
+            deny_tables,
         )
         materialise = render_materialise(orgs, tiers)
 

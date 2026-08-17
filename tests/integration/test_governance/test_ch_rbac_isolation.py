@@ -66,6 +66,8 @@ def tenant_world(admin_client, conn_params):
     db = f"dfe_test_pin_{uid}"
     table = "events"
     table_fqn = f"{db}.{table}"
+    ops_table = "ops"  # tenant-reachable table with NO _org_id (the deny class)
+    ops_fqn = f"{db}.{ops_table}"
     org_a = f"orga{uid}"
     org_b = f"orgb{uid}"
 
@@ -82,6 +84,10 @@ def tenant_world(admin_client, conn_params):
         drop_safely(
             ch_client,
             f"DROP ROW POLICY IF EXISTS {tenant_policy_name(db, table)} ON {table_fqn}",
+        )
+        drop_safely(
+            ch_client,
+            f"DROP ROW POLICY IF EXISTS {tenant_policy_name(db, ops_table)} ON {ops_fqn}",
         )
         drop_safely(ch_client, f"DROP ROLE IF EXISTS {tier_role}")
         drop_safely(ch_client, f"DROP DATABASE IF EXISTS {db}")
@@ -103,11 +109,20 @@ def tenant_world(admin_client, conn_params):
                 f"('{org_b}','b1'),('{org_b}','b2')"
             )
 
+            ch_client.command(
+                f"CREATE TABLE {ops_fqn} (id UInt32, note String) ENGINE = MergeTree() ORDER BY id"
+            )
+            ch_client.command(f"INSERT INTO {ops_fqn} (id, note) VALUES (1,'x'),(2,'y')")
+
             ch_client.command(f"CREATE ROLE IF NOT EXISTS {tier_role}")
             ch_client.command(f"GRANT SELECT ON {table_fqn} TO {tier_role}")
+            # The tier can read the non-_org_id table too (mirrors SELECT ON dfe.*),
+            # so only the deny policy stops the pinned user reading it.
+            ch_client.command(f"GRANT SELECT ON {ops_fqn} TO {tier_role}")
 
-            # Real code under test: the shared axis + the pinned-user shapes.
-            for stmt in render_tenant_axis([(db, table)]):
+            # Real code under test: the shared axis (with a deny policy for the
+            # non-_org_id table) + the pinned-user shapes.
+            for stmt in render_tenant_axis([(db, table)], deny_tables=[(db, ops_table)]):
                 ch_client.command(stmt)
             for stmt in render_pinned_user(
                 u_pinned, _PW_HASH, tier_role=tier_role, org_ids=[org_a]
@@ -141,6 +156,7 @@ def tenant_world(admin_client, conn_params):
             "u_multi": u_multi,
             "u_nopin": u_nopin,
             "org_b": org_b,
+            "ops_fqn": ops_fqn,
         }
     finally:
         _drop_all()
@@ -209,3 +225,14 @@ class TestPinnedTenantIsolation:
                 client.query(f"SELECT count() FROM {w['table_fqn']}")
         finally:
             client.close()
+
+    def test_pinned_user_denied_a_non_org_id_table(self, tenant_world):
+        """A tenant-reachable table with no _org_id is default-deny (USING 0), not
+        read in full - the hunt-orchestration-table class (dfe-engine#157)."""
+        w = tenant_world
+        assert count_as(w["params"], w["u_pinned"], _PW, w["ops_fqn"]) == 0
+
+    def test_unrestricted_user_still_reads_the_non_org_id_table(self, tenant_world):
+        """The deny targets the tenant role only - a platform user is untouched."""
+        w = tenant_world
+        assert count_as(w["params"], w["u_open"], _PW, w["ops_fqn"]) == 2
