@@ -207,7 +207,7 @@ class JwtAuthority:
         key = self._verify_keys.get(kid) if kid else None
         if key is None:
             raise InvalidTokenError(f"unknown or missing key id (kid={kid!r})")
-        return jwt.decode(
+        claims = jwt.decode(
             token,
             key,
             algorithms=[self._alg],
@@ -215,6 +215,11 @@ class JwtAuthority:
             leeway=_CLOCK_SKEW_SECONDS,
             options={"require": ["exp", "iss"], "verify_aud": False},
         )
+        # Engine identity tokens carry no aud; an aud claim marks a token minted
+        # for a peer service (e.g. dfe-hyperdx) and must not authenticate here.
+        if "aud" in claims:
+            raise InvalidTokenError(f"token audience {claims['aud']!r} is not for this issuer")
+        return claims
 
     def jwks(self) -> dict[str, list[dict[str, str]]]:
         """The public JWK Set for ``/.well-known/jwks.json`` (public halves only)."""

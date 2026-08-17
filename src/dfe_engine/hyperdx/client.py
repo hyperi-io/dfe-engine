@@ -1,17 +1,28 @@
 #  Project:      dfe-engine
 #  File:         hyperdx/client.py
-#  Purpose:      HyperDX internal API client for team and connection management
+#  Purpose:      HyperDX control-API client shaped to the dfe-hyperdx fork's surface
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""HyperDX internal API client.
+"""HyperDX control-API client, shaped to the dfe-hyperdx fork's REAL surface.
 
-Manages HyperDX teams and ClickHouse connections via the HyperDX
-internal API.  All operations are **non-fatal**: if HyperDX is
-unreachable, failures are logged as warnings and the caller proceeds
-normally.
+The fork's control API is session-scoped: every call acts on the team of the
+authenticated principal. The engine authenticates as its machine identity
+(``svc:dfe-engine``), which the fork maps to the deployment's default team and
+JIT-creates on first contact. There are NO ``/api/v1/teams`` routes and no team
+create/delete endpoints; the reachable surface is::
+
+    GET  /team                    the caller's team (JIT-creates the default team)
+    POST /team/invitation         invite an email to the caller's team
+    GET/POST /connections         ClickHouse connections on the caller's team
+    PUT/DELETE /connections/:id
+    GET/POST /sources             telemetry sources on the caller's team
+    PUT/DELETE /sources/:id
+
+All operations are **non-fatal**: if HyperDX is unreachable, failures are
+logged as warnings and the caller proceeds normally.
 
 Usage::
 
@@ -21,9 +32,14 @@ Usage::
         base_url="http://hyperdx:8080",
         token_provider=machine_token_source.token,
     )
-    team_id = await client.create_team("customer-acme")
-    if team_id:
-        await client.create_connection(team_id, "default", ...)
+    team = await client.get_team()
+    conn_id = await client.ensure_connection(
+        name="tenant_reader",
+        host="clickhouse",
+        port=8123,
+        username="tenant_reader",
+        password="secret",
+    )
 """
 
 from __future__ import annotations
@@ -32,21 +48,30 @@ import json
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import Any
 
 from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
-from dfe_engine.orgs.models import Org
+
+
+def _connection_host_url(host: str, port: int | None) -> str:
+    """Collapse engine host+port into the fork's single URL ``host`` field."""
+    if "://" in host:
+        return host
+    if port:
+        return f"http://{host}:{port}"
+    return f"http://{host}"
 
 
 @dataclass
 class SyncResult:
-    """Result of a full HyperDX reconciliation pass.
+    """Result of a HyperDX reconciliation pass.
 
     Attributes:
-        teams_created: Names of teams that were created.
-        teams_failed: Names of teams that failed to create.
-        connections_created: Number of connections created.
+        teams_created: Names of teams confirmed present (JIT-created or existing).
+        teams_failed: Team lookups that failed.
+        connections_created: Number of connections confirmed or created.
         connections_failed: Number of connections that failed.
     """
 
@@ -57,7 +82,7 @@ class SyncResult:
 
 
 class HyperDXClient:
-    """Manage HyperDX teams and connections via internal API.
+    """Manage the fork's session-scoped team, connections and sources.
 
     All operations are non-fatal: if HyperDX is unreachable, log a
     warning and return gracefully.  Callers should not depend on success.
@@ -75,251 +100,224 @@ class HyperDXClient:
         self._token_provider = token_provider
         self._connected = True  # Optimistic; set False on first failure
 
-    async def create_team(self, name: str) -> str | None:
-        """Create a HyperDX team.
+    # ------------------------------------------------------------------
+    # Team (the fork exposes ONE team per authenticated principal)
+    # ------------------------------------------------------------------
 
-        Args:
-            name: Team name (e.g. "customer-acme").
+    async def get_team(self) -> dict[str, Any] | None:
+        """Fetch the caller's team; the fork JIT-creates the default team here.
 
         Returns:
-            Team ID string on success, None on failure.
+            Team dict (``_id``, ``name``, ``apiKey``, ...) or None on failure.
         """
-        if not self._connected:
-            logger.warning("HyperDX unreachable, skipping create_team", team=name)
-            return None
+        data = await self._request("get", "/team", op="get_team")
+        return data if isinstance(data, dict) else None
 
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.post(
-                    "/api/v1/teams",
-                    json={"name": name},
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                data = response.json()
-                team_id = data.get("id", "")
-                logger.info("HyperDX team created", team=name, team_id=team_id)
-                return team_id
-        except Exception as exc:
-            self._connected = False
-            logger.warning(
-                "HyperDX create_team failed (non-fatal)",
-                team=name,
-                error=str(exc),
-            )
+    async def get_team_api_key(self) -> str | None:
+        """Return the caller's team API key, or None on failure."""
+        team = await self.get_team()
+        if not team:
             return None
+        return team.get("apiKey") or None
+
+    async def invite_member(self, email: str) -> bool:
+        """Invite a user to the caller's team via ``POST /team/invitation``.
+
+        Args:
+            email: Email address to invite.
+
+        Returns:
+            True on success, False on failure (non-fatal).
+        """
+        data = await self._request(
+            "post",
+            "/team/invitation",
+            json_body={"email": email},
+            op="invite_member",
+            email=email,
+        )
+        if data is None:
+            return False
+        logger.info("HyperDX member invited", email=email)
+        return True
+
+    # ------------------------------------------------------------------
+    # Connections (fork ConnectionSchema: name, host URL, username, password)
+    # ------------------------------------------------------------------
+
+    async def list_connections(self) -> list[dict[str, Any]] | None:
+        """List the caller's team connections, or None on failure."""
+        data = await self._request("get", "/connections", op="list_connections")
+        return data if isinstance(data, list) else None
 
     async def create_connection(
         self,
-        team_id: str,
+        *,
         name: str,
         host: str,
-        port: int,
-        database: str,
-        user: str,
-        password: str,
+        username: str,
+        password: str = "",
+        port: int | None = None,
     ) -> str | None:
-        """Create a ClickHouse connection on a HyperDX team.
+        """Create a ClickHouse connection on the caller's team.
 
         Args:
-            team_id: HyperDX team ID.
             name: Connection name.
-            host: ClickHouse hostname.
-            port: ClickHouse HTTP port.
-            database: ClickHouse database.
-            user: ClickHouse username.
+            host: ClickHouse host (bare hostname or full URL).
+            username: ClickHouse username (the fork field is ``username``, not ``user``).
             password: ClickHouse password.
+            port: ClickHouse HTTP port, folded into the URL when ``host`` is bare.
 
         Returns:
             Connection ID string on success, None on failure.
         """
-        if not self._connected:
-            logger.warning(
-                "HyperDX unreachable, skipping create_connection",
-                team_id=team_id,
-                connection=name,
-            )
+        body = {
+            "name": name,
+            "host": _connection_host_url(host, port),
+            "username": username,
+            "password": password,
+        }
+        data = await self._request(
+            "post",
+            "/connections",
+            json_body=body,
+            op="create_connection",
+            connection=name,
+        )
+        if not isinstance(data, dict):
             return None
+        conn_id = str(data.get("id", ""))
+        if conn_id:
+            logger.info("HyperDX connection created", connection=name, conn_id=conn_id)
+        return conn_id or None
 
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.post(
-                    f"/api/v1/teams/{team_id}/connections",
-                    json={
-                        "name": name,
-                        "host": host,
-                        "port": port,
-                        "database": database,
-                        "user": user,
-                        "password": password,
-                    },
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                data = response.json()
-                conn_id = data.get("id", "")
-                logger.info(
-                    "HyperDX connection created",
-                    team_id=team_id,
-                    connection=name,
-                    conn_id=conn_id,
-                )
-                return conn_id
-        except Exception as exc:
-            self._connected = False
-            logger.warning(
-                "HyperDX create_connection failed (non-fatal)",
-                team_id=team_id,
-                connection=name,
-                error=str(exc),
-            )
-            return None
-
-    async def delete_connection(self, team_id: str, conn_id: str) -> bool:
-        """Delete a ClickHouse connection from a HyperDX team.
-
-        Args:
-            team_id: HyperDX team ID.
-            conn_id: Connection ID to delete.
-
-        Returns:
-            True on success, False on failure.
-        """
-        if not self._connected:
-            logger.warning(
-                "HyperDX unreachable, skipping delete_connection",
-                team_id=team_id,
-                conn_id=conn_id,
-            )
-            return False
-
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.delete(
-                    f"/api/v1/teams/{team_id}/connections/{conn_id}",
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                logger.info(
-                    "HyperDX connection deleted",
-                    team_id=team_id,
-                    conn_id=conn_id,
-                )
-                return True
-        except Exception as exc:
-            self._connected = False
-            logger.warning(
-                "HyperDX delete_connection failed (non-fatal)",
-                team_id=team_id,
-                conn_id=conn_id,
-                error=str(exc),
-            )
-            return False
-
-    async def delete_team(self, team_id: str) -> bool:
-        """Delete a HyperDX team.
-
-        Args:
-            team_id: HyperDX team ID to delete.
-
-        Returns:
-            True on success, False on failure.
-        """
-        if not self._connected:
-            logger.warning(
-                "HyperDX unreachable, skipping delete_team",
-                team_id=team_id,
-            )
-            return False
-
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.delete(
-                    f"/api/v1/teams/{team_id}",
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                logger.info("HyperDX team deleted", team_id=team_id)
-                return True
-        except Exception as exc:
-            self._connected = False
-            logger.warning(
-                "HyperDX delete_team failed (non-fatal)",
-                team_id=team_id,
-                error=str(exc),
-            )
-            return False
-
-    async def update_connection(
+    async def ensure_connection(
         self,
-        team_id: str,
-        connection_id: str,
-        **kwargs: object,
-    ) -> bool:
-        """Update a ClickHouse connection on a HyperDX team.
+        *,
+        name: str,
+        host: str,
+        username: str,
+        password: str = "",
+        port: int | None = None,
+    ) -> str | None:
+        """Create the named connection unless it already exists (fork does not dedupe).
+
+        Returns:
+            Existing or new connection ID, None on failure.
+        """
+        existing = await self.list_connections()
+        if existing:
+            for conn in existing:
+                if conn.get("name") == name:
+                    return str(conn.get("id") or conn.get("_id") or "") or None
+        return await self.create_connection(
+            name=name, host=host, username=username, password=password, port=port
+        )
+
+    async def update_connection(self, connection_id: str, connection: dict[str, Any]) -> bool:
+        """Update a connection; the fork validates the FULL schema including ``id``.
 
         Args:
-            team_id: HyperDX team ID.
             connection_id: Connection ID to update.
-            **kwargs: Connection fields to update (e.g. host, port, password).
+            connection: Full connection body (``id`` is injected from the argument).
 
         Returns:
             True on success, False on failure.
         """
-        if not self._connected:
-            logger.warning(
-                "HyperDX unreachable, skipping update_connection",
-                team_id=team_id,
-                connection_id=connection_id,
-            )
-            return False
+        body = {**connection, "id": connection_id}
+        data = await self._request(
+            "put",
+            f"/connections/{connection_id}",
+            json_body=body,
+            op="update_connection",
+            connection_id=connection_id,
+        )
+        return data is not None
 
-        try:
-            from scalo.http import AsyncHttpClient
+    async def delete_connection(self, connection_id: str) -> bool:
+        """Delete a connection from the caller's team.
 
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.put(
-                    f"/api/v1/teams/{team_id}/connections/{connection_id}",
-                    json=kwargs,
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                logger.info(
-                    "HyperDX connection updated",
-                    team_id=team_id,
-                    connection_id=connection_id,
-                )
-                return True
-        except Exception as exc:
-            self._connected = False
-            logger.warning(
-                "HyperDX update_connection failed (non-fatal)",
-                team_id=team_id,
-                connection_id=connection_id,
-                error=str(exc),
-            )
-            return False
+        Returns:
+            True on success, False on failure.
+        """
+        data = await self._request(
+            "delete",
+            f"/connections/{connection_id}",
+            op="delete_connection",
+            connection_id=connection_id,
+        )
+        return data is not None
 
-    async def sync_connections(
-        self,
-        orgs: list[Org],
-        conn_config: ConnectionConfig,
-    ) -> SyncResult:
-        """Full reconciliation: ensure HyperDX teams match the org registry.
+    # ------------------------------------------------------------------
+    # Sources (fork SourceSchema: kind-discriminated union, passed through)
+    # ------------------------------------------------------------------
 
-        Creates a team for each enabled org (prefixed with ``customer-``)
-        and ensures it has the tenant_reader connection from conn_config.
+    async def list_sources(self) -> list[dict[str, Any]] | None:
+        """List the caller's team sources, or None on failure."""
+        data = await self._request("get", "/sources", op="list_sources")
+        return data if isinstance(data, list) else None
+
+    async def create_source(self, source: dict[str, Any]) -> dict[str, Any] | None:
+        """Create a source on the caller's team.
 
         Args:
-            orgs: List of orgs from OrgRegistry.
+            source: Fork ``SourceSchemaNoId`` body (``name``, ``kind``,
+                ``connection``, ``from``, ``timestampValueExpression``, ...).
+
+        Returns:
+            The created source document, or None on failure.
+        """
+        data = await self._request(
+            "post",
+            "/sources",
+            json_body=source,
+            op="create_source",
+            source=str(source.get("name", "")),
+        )
+        return data if isinstance(data, dict) else None
+
+    async def update_source(self, source_id: str, source: dict[str, Any]) -> bool:
+        """Update a source; the fork validates the FULL schema including ``id``.
+
+        Returns:
+            True on success, False on failure.
+        """
+        body = {**source, "id": source_id}
+        data = await self._request(
+            "put",
+            f"/sources/{source_id}",
+            json_body=body,
+            op="update_source",
+            source_id=source_id,
+        )
+        return data is not None
+
+    async def delete_source(self, source_id: str) -> bool:
+        """Delete a source from the caller's team.
+
+        Returns:
+            True on success, False on failure.
+        """
+        data = await self._request(
+            "delete",
+            f"/sources/{source_id}",
+            op="delete_source",
+            source_id=source_id,
+        )
+        return data is not None
+
+    # ------------------------------------------------------------------
+    # Reconciliation + chart seeding
+    # ------------------------------------------------------------------
+
+    async def sync_connections(self, conn_config: ConnectionConfig) -> SyncResult:
+        """Reconcile the default team: present and holding ``tenant_reader``.
+
+        The fork exposes no multi-team management, so reconciliation is:
+        confirm the caller's (default) team, then ensure the ``tenant_reader``
+        connection exists on it.
+
+        Args:
             conn_config: Connection configuration with connection definitions.
 
         Returns:
@@ -332,31 +330,23 @@ class HyperDXClient:
             logger.warning("No 'tenant_reader' connection in config, skipping sync")
             return result
 
-        for org in orgs:
-            if not org.enabled:
-                continue
+        team = await self.get_team()
+        if not team:
+            result.teams_failed.append("default")
+            return result
+        result.teams_created.append(str(team.get("name", "default")))
 
-            team_name = f"customer-{org.name}"
-            team_id = await self.create_team(team_name)
-            if team_id is None:
-                result.teams_failed.append(team_name)
-                continue
-            result.teams_created.append(team_name)
-
-            password = os.environ.get(tenant_conn.password_env, "")
-            conn_id = await self.create_connection(
-                team_id=team_id,
-                name=tenant_conn.name,
-                host=tenant_conn.host,
-                port=tenant_conn.port,
-                database=tenant_conn.database,
-                user=tenant_conn.user,
-                password=password,
-            )
-            if conn_id is None:
-                result.connections_failed += 1
-            else:
-                result.connections_created += 1
+        conn_id = await self.ensure_connection(
+            name=tenant_conn.name,
+            host=tenant_conn.host,
+            port=tenant_conn.port,
+            username=tenant_conn.user,
+            password=os.environ.get(tenant_conn.password_env, ""),
+        )
+        if conn_id is None:
+            result.connections_failed += 1
+        else:
+            result.connections_created += 1
 
         return result
 
@@ -364,10 +354,12 @@ class HyperDXClient:
         self,
         conn_config: ConnectionConfig,
     ) -> str:
-        """Generate DEFAULT_CONNECTIONS env var JSON for HyperDX Helm chart.
+        """Generate DEFAULT_CONNECTIONS env JSON in the fork's Connection shape.
 
-        Produces a JSON array of connection objects suitable for the
-        HyperDX ``DEFAULT_CONNECTIONS`` environment variable.
+        The fork's ``setupDefaults`` spreads each entry into its Connection
+        model, which knows ``username`` and a single URL ``host`` - emitting
+        ``user`` or separate port/database fields silently drops the credential
+        and falls back to the ClickHouse default user (dfe-engine#145).
 
         Args:
             conn_config: Connection configuration.
@@ -377,96 +369,51 @@ class HyperDXClient:
         """
         connections = []
         for name, conn in conn_config.connections.items():
-            password = os.environ.get(conn.password_env, "")
             connections.append(
                 {
                     "name": name,
-                    "host": conn.host,
-                    "port": conn.port,
-                    "database": conn.database,
-                    "user": conn.user,
-                    "password": password,
+                    "host": _connection_host_url(conn.host, conn.port),
+                    "username": conn.user,
+                    "password": os.environ.get(conn.password_env, ""),
                 }
             )
         return json.dumps(connections)
 
-    async def invite_member(self, team_api_key: str, email: str) -> bool:
-        """Invite a user to a HyperDX team by email.
-
-        Uses the team's own API key (not the admin key) since HyperDX team
-        endpoints are team-scoped.
-
-        Args:
-            team_api_key: API key for the target team.
-            email: Email address to invite.
-
-        Returns:
-            True on success, False on failure (non-fatal).
-        """
-        if not self._connected:
-            logger.warning("HyperDX unreachable, skipping invite_member", email=email)
-            return False
-
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.post(
-                    "/api/v1/team/invitation",
-                    json={"email": email},
-                    headers={
-                        "Authorization": f"Bearer {team_api_key}",
-                        "Content-Type": "application/json",
-                    },
-                )
-                response.raise_for_status()
-                logger.info("HyperDX member invited", email=email)
-                return True
-        except Exception as exc:
-            logger.warning(
-                "HyperDX invite_member failed (non-fatal)",
-                email=email,
-                error=str(exc),
-            )
-            return False
-
-    async def get_team_api_key(self, team_id: str) -> str | None:
-        """Get the API key for a specific team.
-
-        Uses the admin API key to retrieve team info.
-
-        Args:
-            team_id: HyperDX team ID.
-
-        Returns:
-            Team API key string, or None on failure.
-        """
-        if not self._connected:
-            return None
-
-        try:
-            from scalo.http import AsyncHttpClient
-
-            async with AsyncHttpClient(base_url=self._base_url) as client:
-                response = await client.get(
-                    f"/api/v1/teams/{team_id}",
-                    headers=self._headers(),
-                )
-                response.raise_for_status()
-                data = response.json()
-                return data.get("apiKey") or data.get("api_key") or None
-        except Exception as exc:
-            logger.warning(
-                "HyperDX get_team_api_key failed",
-                team_id=team_id,
-                error=str(exc),
-            )
-            self._connected = False
-            return None
-
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        json_body: dict[str, Any] | None = None,
+        op: str,
+        **log_fields: object,
+    ) -> Any | None:
+        """One non-fatal HTTP round trip; None (and ``_connected=False``) on failure."""
+        if not self._connected:
+            logger.warning("HyperDX unreachable, skipping call", op=op, **log_fields)
+            return None
+        try:
+            from scalo.http import AsyncHttpClient
+
+            async with AsyncHttpClient(base_url=self._base_url) as client:
+                verb = getattr(client, method)
+                kwargs: dict[str, Any] = {"headers": self._headers()}
+                if json_body is not None:
+                    kwargs["json"] = json_body
+                response = await verb(path, **kwargs)
+                response.raise_for_status()
+                # PUT/DELETE succeed with an empty body; report success, not JSON.
+                if not response.content:
+                    return {}
+                return response.json()
+        except Exception as exc:
+            self._connected = False
+            logger.warning("HyperDX call failed (non-fatal)", op=op, error=str(exc), **log_fields)
+            return None
 
     def _headers(self) -> dict[str, str]:
         """Return authorization headers for HyperDX API calls."""
