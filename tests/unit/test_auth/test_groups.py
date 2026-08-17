@@ -341,7 +341,7 @@ class TestGroupSourceProvider:
 
     def test_group_org_ids(self, tmp_path):
         store = GroupStore(tmp_path / "groups")
-        store.create("acme-viewers", roles=["customer_viewer"])
+        store.create("acme-viewers", roles=["org_viewer"])
         store.update("acme-viewers", org_ids=["acme"])
         group = store.get("acme-viewers")
         assert group.org_ids == ["acme"]

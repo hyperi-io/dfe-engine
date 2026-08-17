@@ -17,7 +17,7 @@ from dfe_engine.auth.jit import JitProvisioner
 def stores(tmp_path):
     accounts = AccountStore(tmp_path / "accounts")
     groups = GroupStore(tmp_path / "groups")
-    groups.create("acme-viewers", roles=["customer_viewer"])
+    groups.create("acme-viewers", roles=["org_viewer"])
     groups.update("acme-viewers", org_ids=["acme"])
     groups.create("dfe-admins", roles=["admin"])
     groups.create("dfe-analysts", roles=["data_analyst"])

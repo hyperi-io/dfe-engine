@@ -11,7 +11,7 @@ Groups already carry the org axis (``scope: org:<name>`` plus ``org_ids``), so
 bindings are DERIVED rather than configured separately - one source of truth, and
 an org-scoped group cannot drift from its ClickHouse user.
 
-Platform roles win: a group holding any role other than the customer's-customer
+Platform roles win: a group holding any role other than the org viewer
 role reads UNRESTRICTED, even when a domain rule or ``org_ids`` tie it to an org.
 The org filter exists to fence tenants in, not to fence the platform's own
 analysts out.
@@ -31,7 +31,7 @@ from .models import GroupChBinding
 
 # The one role whose holders get the tenant pin. Platform roles (admin,
 # data_analyst, ...) are never org-filtered, whatever the group's org markers say.
-CUSTOMER_ROLE = "customer_viewer"
+ORG_VIEWER_ROLE = "org_viewer"
 
 # Engine roles whose groups also read the otel database (platform telemetry);
 # analysts and org-scoped viewers never do.
@@ -57,7 +57,7 @@ def derive_group_bindings(groups: list[Any], orgs: list[Any]) -> list[GroupChBin
         claimed = scoped | set(group.org_ids)
 
         roles = set(getattr(group, "roles", []) or [])
-        if claimed and roles - {CUSTOMER_ROLE}:
+        if claimed and roles - {ORG_VIEWER_ROLE}:
             logger.info(
                 "group holds platform roles; its CH user is unrestricted despite org markers",
                 group=group.name,

@@ -11,7 +11,7 @@
 Connection resolution uses the role_connections mapping to find the
 best connection for a given user's roles.  Privilege precedence
 (highest to lowest): admin > data_analyst > data_analyst_viewer >
-data_viewer > infra_admin > infra_viewer > customer_viewer.
+data_viewer > infra_admin > infra_viewer > org_viewer.
 
 Clients are lazily created on first use and cached for the lifetime
 of the registry.
@@ -37,7 +37,7 @@ _ROLE_PRECEDENCE: list[str] = [
     "data_viewer",
     "infra_admin",
     "infra_viewer",
-    "customer_viewer",
+    "org_viewer",
 ]
 
 

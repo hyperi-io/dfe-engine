@@ -408,7 +408,7 @@ class TestDefaults:
             "data_viewer",
             "infra_admin",
             "infra_viewer",
-            "customer_viewer",
+            "org_viewer",
             "dfe_operator",
         }
         assert set(config.roles.keys()) == expected

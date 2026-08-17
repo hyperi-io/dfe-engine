@@ -20,4 +20,4 @@ role_connections:
   data_viewer: default
   infra_admin: default
   infra_viewer: default
-  customer_viewer: tenant_reader
+  org_viewer: tenant_reader
