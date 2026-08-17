@@ -46,6 +46,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -53,6 +54,15 @@ from typing import Any
 from scalo.logger import logger
 
 from dfe_engine.connections.config import ConnectionConfig
+
+# This is a non-fatal side channel called inside interactive API requests
+# (org create), so an unreachable fork must cost seconds, not the
+# AsyncHttpClient default of 30s x 3 retries.
+_TIMEOUT_SECONDS = 5.0
+_RETRIES = 1
+# After a failure the breaker re-probes once this window elapses, so a fork
+# that boots after the engine recovers without an engine restart.
+_RETRY_AFTER_SECONDS = 60.0
 
 
 def _connection_host_url(host: str, port: int | None) -> str:
@@ -99,6 +109,10 @@ class HyperDXClient:
         # Engine-minted machine JWT supplier; wins over any static api_key.
         self._token_provider = token_provider
         self._connected = True  # Optimistic; set False on first failure
+        # Consulted only while disconnected; inf means "never re-probe", so a
+        # manually latched breaker stays latched while a real failure sets a
+        # finite deadline.
+        self._retry_at = float("inf")
 
     # ------------------------------------------------------------------
     # Team (the fork exposes ONE team per authenticated principal)
@@ -394,12 +408,16 @@ class HyperDXClient:
     ) -> Any | None:
         """One non-fatal HTTP round trip; None (and ``_connected=False``) on failure."""
         if not self._connected:
-            logger.warning("HyperDX unreachable, skipping call", op=op, **log_fields)
-            return None
+            if time.monotonic() < self._retry_at:
+                logger.warning("HyperDX unreachable, skipping call", op=op, **log_fields)
+                return None
+            self._connected = True  # re-probe window elapsed
         try:
             from scalo.http import AsyncHttpClient
 
-            async with AsyncHttpClient(base_url=self._base_url) as client:
+            async with AsyncHttpClient(
+                base_url=self._base_url, timeout=_TIMEOUT_SECONDS, retries=_RETRIES
+            ) as client:
                 verb = getattr(client, method)
                 kwargs: dict[str, Any] = {"headers": self._headers()}
                 if json_body is not None:
@@ -412,6 +430,7 @@ class HyperDXClient:
                 return response.json()
         except Exception as exc:
             self._connected = False
+            self._retry_at = time.monotonic() + _RETRY_AFTER_SECONDS
             logger.warning("HyperDX call failed (non-fatal)", op=op, error=str(exc), **log_fields)
             return None
 
