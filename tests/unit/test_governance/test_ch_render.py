@@ -150,6 +150,24 @@ class TestRenderTenantAxis:
         s = _joined(render_tenant_axis([("dfe", "events")]))
         assert "acme" not in s
 
+    def test_deny_tables_get_a_using_0_policy(self):
+        """A tenant-reachable table with no _org_id is denied, not read in full."""
+        s = _joined(render_tenant_axis([("dfe", "events")], [("dfe", "hunt_lease")]))
+        # the _org_id table keeps its has() predicate
+        assert "`dfe_rowpol_tenant_dfe_events` ON `dfe`.`events`" in s
+        assert "getSetting('SQL_current_tenant_id')" in s
+        # the non-_org_id table is default-deny for the tenant role
+        assert (
+            "CREATE ROW POLICY IF NOT EXISTS `dfe_rowpol_tenant_dfe_hunt_lease` "
+            "ON `dfe`.`hunt_lease` AS RESTRICTIVE FOR SELECT USING 0 "
+            "TO `dfe_tenant_role`" in s
+        )
+        assert "PERMISSIVE" not in s  # restrictive-only, both kinds
+
+    def test_deny_tables_default_empty_changes_nothing(self):
+        """No deny list -> only the _org_id policy, no USING 0."""
+        assert _joined(render_tenant_axis([("dfe", "events")])).count("USING 0") == 0
+
 
 class TestRenderPinnedUser:
     def test_org_tied_user_pins_and_holds_the_tenant_role(self):

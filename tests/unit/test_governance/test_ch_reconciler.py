@@ -21,6 +21,7 @@ from dfe_engine.governance.ch.models import ChServiceRole, ChTier, GroupChBindin
 from dfe_engine.governance.ch.reconciler import (
     ChRbacReconciler,
     _default_tier_name,
+    _tenant_granted_dbs,
     compute_drops,
 )
 from dfe_engine.secrets import build_secrets
@@ -87,6 +88,29 @@ class TestDefaultTierName:
 
     def test_empty_when_kind_absent(self):
         assert _default_tier_name([ChTier(name="a1", kind="analyst")], "hunt") == ""
+
+
+class TestTenantGrantedDbs:
+    def test_extracts_db_wide_select_grants_from_analyst_tiers(self):
+        tiers = [
+            ChTier(
+                name="a2",
+                kind="analyst",
+                grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
+            ),
+            ChTier(name="h2", kind="hunt", grants=["INSERT ON dfe_hunts.*"]),  # not analyst
+        ]
+        assert _tenant_granted_dbs(tiers) == ["dfe", "dfe_hunts"]
+
+    def test_ignores_specific_table_and_non_select_grants(self):
+        tiers = [
+            ChTier(
+                name="a",
+                kind="analyst",
+                grants=["SELECT ON dfe.default", "INSERT ON dfe.*"],
+            )
+        ]
+        assert _tenant_granted_dbs(tiers) == []
 
 
 class TestRenderAll:
@@ -207,6 +231,26 @@ class TestRenderAll:
         assert "CREATE ROLE IF NOT EXISTS `dfe_query_reader_role`" in s
         assert "CREATE USER" not in s
 
+    def test_deny_tables_render_using_0_policies(self):
+        tiers, _service, _orgs, _b = self._inputs()
+        stmts = _rec().render_all(
+            tiers=tiers,
+            service_roles=[],
+            orgs=[],
+            bindings=[],
+            org_tables=[("dfe", "default")],
+            service_hashes={},
+            group_hashes={},
+            org_hashes={},
+            deny_tables=[("dfe", "hunt_lease")],
+        )
+        s = "\n".join(stmts)
+        assert "`dfe_rowpol_tenant_dfe_default` ON `dfe`.`default`" in s
+        assert (
+            "`dfe_rowpol_tenant_dfe_hunt_lease` ON `dfe`.`hunt_lease` "
+            "AS RESTRICTIVE FOR SELECT USING 0" in s
+        )
+
 
 class TestComputeDrops:
     def test_old_design_leftovers_swept_policies_first(self):
@@ -252,3 +296,19 @@ class TestComputeDrops:
         assert all("analyst_bob" not in d for d in drops)
         assert all("dfe_grp_soc" not in d for d in drops)
         assert any("dfe_org_gone_role" in d for d in drops)
+
+    def test_deny_policies_are_desired_not_dropped(self):
+        """A non-_org_id table's deny policy must survive the drop sweep."""
+        existing_policies = [
+            ("dfe_rowpol_tenant_dfe_default", "dfe", "default"),
+            ("dfe_rowpol_tenant_dfe_hunt_lease", "dfe", "hunt_lease"),
+        ]
+        drops = compute_drops(
+            set(),
+            existing_policies,
+            set(),
+            [],
+            [("dfe", "default")],
+            [("dfe", "hunt_lease")],
+        )
+        assert drops == []
