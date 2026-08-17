@@ -254,6 +254,68 @@ class SchemaLoader:
     # -----------------------------------------------------------------
 
     @staticmethod
+    def load_version_entry(
+        source: str | Path,
+        *,
+        version: str | None = None,
+    ) -> dict:
+        """Load a schema YAML file's resolved version entry as a raw dict.
+
+        Same file-layout and version resolution as :meth:`load_columns`.
+        Returns the raw version mapping (``columns`` plus any sibling keys
+        such as ``datagen``); flat files are wrapped as ``{"columns": [...]}``.
+
+        Raises:
+            SchemaLoadError: If file missing or invalid.
+        """
+        path = Path(source)
+        if not path.exists():
+            raise SchemaLoadError(f"Schema file not found: {path}")
+
+        try:
+            data = yaml_load(path)
+        except Exception as e:
+            raise SchemaLoadError(f"Failed to parse YAML: {path}: {e}") from e
+
+        if not data:
+            raise SchemaLoadError(f"Schema YAML is empty: {path}")
+
+        # Resolve target version: explicit arg > file's current > None
+        target_version = version or data.get("current")
+
+        if target_version and "versions" in data:
+            _extract_version_columns(data, target_version, path)
+            return data["versions"][target_version]
+        if "columns" in data:
+            # Flat layout (unversioned or no version requested)
+            return {"columns": data["columns"]}
+        raise SchemaLoadError(f"Schema YAML must contain 'columns' or 'versions' key: {path}")
+
+    @staticmethod
+    def load_raw_columns(
+        source: str | Path,
+        *,
+        version: str | None = None,
+    ) -> list[dict]:
+        """Load a schema YAML file's column list as raw dicts.
+
+        Same file-layout and version resolution as :meth:`load_columns`, but
+        returns the raw column mappings - for consumers that need keys the
+        ``SchemaColumn`` model does not carry (e.g. datagen hints).
+
+        Raises:
+            SchemaLoadError: If file missing or invalid.
+        """
+        raw_columns = SchemaLoader.load_version_entry(source, version=version)["columns"]
+
+        for i, col_data in enumerate(raw_columns):
+            if not isinstance(col_data, dict):
+                raise SchemaLoadError(
+                    f"Column {i} in {source} must be a dict, got {type(col_data).__name__}"
+                )
+        return raw_columns
+
+    @staticmethod
     def load_columns(
         source: str | Path,
         *,
@@ -297,41 +359,15 @@ class SchemaLoader:
         Raises:
             SchemaLoadError: If file missing or invalid.
         """
-        path = Path(source)
-        if not path.exists():
-            raise SchemaLoadError(f"Schema file not found: {path}")
-
-        try:
-            data = yaml_load(path)
-        except Exception as e:
-            raise SchemaLoadError(f"Failed to parse YAML: {path}: {e}") from e
-
-        if not data:
-            raise SchemaLoadError(f"Schema YAML is empty: {path}")
-
-        # Resolve target version: explicit arg > file's current > None
-        target_version = version or data.get("current")
-
-        # Version tree path: versions.<ver>.columns
-        if target_version and "versions" in data:
-            raw_columns = _extract_version_columns(data, target_version, path)
-        elif "columns" in data:
-            # Flat layout (unversioned or no version requested)
-            raw_columns = data["columns"]
-        else:
-            raise SchemaLoadError(f"Schema YAML must contain 'columns' or 'versions' key: {path}")
+        raw_columns = SchemaLoader.load_raw_columns(source, version=version)
 
         columns = []
         for i, col_data in enumerate(raw_columns):
-            if not isinstance(col_data, dict):
-                raise SchemaLoadError(
-                    f"Column {i} in {path} must be a dict, got {type(col_data).__name__}"
-                )
             try:
                 columns.append(SchemaColumn.model_validate(col_data))
             except Exception as e:
                 name = col_data.get("name", f"index {i}")
-                raise SchemaLoadError(f"Invalid column {name!r} in {path}: {e}") from e
+                raise SchemaLoadError(f"Invalid column {name!r} in {source}: {e}") from e
 
         return columns
 
@@ -558,7 +594,7 @@ class SchemaLoader:
         Returns column names where `order` is not None, sorted by order value.
         """
         ordered = [col for col in columns if col.order is not None]
-        ordered.sort(key=lambda c: c.order)
+        ordered.sort(key=lambda c: c.order if c.order is not None else 0)
         return [col.name for col in ordered]
 
     # -----------------------------------------------------------------

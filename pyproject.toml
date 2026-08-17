@@ -92,6 +92,7 @@ dependencies = [
     #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
     #   - logreducer: sampler 'smart'/'anomaly' modes (add + SHA-pin once it hits
     #     public PyPI; until then the sampler falls back with a clean message)
+    "faker>=40.36.0",
 ]
 
 [project.urls]
