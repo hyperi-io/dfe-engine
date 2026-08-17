@@ -70,6 +70,25 @@ class TestClientConstruction:
         assert headers["Authorization"] == "Bearer my-key"
         assert headers["Content-Type"] == "application/json"
 
+    def test_token_provider_wins_over_api_key(self):
+        client = HyperDXClient(
+            base_url="http://x",
+            api_key="static-key",
+            token_provider=lambda: "minted-jwt",
+        )
+        assert client._headers()["Authorization"] == "Bearer minted-jwt"
+
+    def test_token_provider_called_per_headers_build(self):
+        # a caching provider re-mints near expiry, so every call must consult it
+        tokens = iter(["t1", "t2"])
+        client = HyperDXClient(base_url="http://x", token_provider=lambda: next(tokens))
+        assert client._headers()["Authorization"] == "Bearer t1"
+        assert client._headers()["Authorization"] == "Bearer t2"
+
+    def test_api_key_defaults_empty_without_provider(self):
+        client = HyperDXClient(base_url="http://x")
+        assert client._headers()["Authorization"] == "Bearer "
+
 
 # ---------------------------------------------------------------------------
 # generate_default_connections_json (pure logic, no HTTP)

@@ -180,12 +180,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Bootstrap HyperDX client (optional)
     if settings.hyperdx.enabled and settings.hyperdx.base_url:
+        from dfe_engine.auth.jwt_authority import HYPERDX_AUDIENCE, MachineTokenSource
         from dfe_engine.hyperdx.client import HyperDXClient
 
-        api_key = os.environ.get(settings.hyperdx.api_key_env, "")
+        # Engine-signed machine JWTs replace the stored api key (dfe-engine#149).
+        token_source = MachineTokenSource(app.state.jwt_authority, audience=HYPERDX_AUDIENCE)
         app.state.hyperdx_client = HyperDXClient(
             base_url=settings.hyperdx.base_url,
-            api_key=api_key,
+            token_provider=token_source.token,
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 

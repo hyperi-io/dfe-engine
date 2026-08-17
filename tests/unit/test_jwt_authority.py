@@ -16,7 +16,13 @@ import pytest
 from cryptography.hazmat.primitives import serialization
 from jwt.exceptions import InvalidTokenError
 
-from dfe_engine.auth.jwt_authority import JwtAuthority
+from dfe_engine.auth.jwt_authority import (
+    HYPERDX_AUDIENCE,
+    MACHINE_SUBJECT,
+    MACHINE_TOKEN_TTL_SECONDS,
+    JwtAuthority,
+    MachineTokenSource,
+)
 from dfe_engine.secrets import build_secrets
 from dfe_engine.settings import SecretsSettings
 
@@ -129,3 +135,70 @@ def test_hs256_rejected_cannot_back_jwks(tmp_path):
     secrets = build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
     with pytest.raises(ValueError):
         JwtAuthority(secrets, issuer=ISS, algorithm="HS256")
+
+
+# --- machine tokens (engine -> dfe-hyperdx control calls, dfe-engine#149) ---
+
+
+def test_machine_token_verifies_against_published_jwks(tmp_path):
+    a = _authority(tmp_path)
+    token = a.mint_machine_token(audience=HYPERDX_AUDIENCE)
+    # the fork trusts ONLY the published JWKS, so verify through that path
+    jwk = a.jwks()["keys"][0]
+    claims = pyjwt.decode(
+        token,
+        pyjwt.PyJWK(jwk).key,
+        algorithms=["ES384"],
+        audience=HYPERDX_AUDIENCE,
+        issuer=ISS,
+    )
+    assert claims["sub"] == MACHINE_SUBJECT
+    assert claims["aud"] == HYPERDX_AUDIENCE
+    assert pyjwt.get_unverified_header(token)["kid"] == jwk["kid"]
+
+
+def test_machine_token_ttl_capped_at_300(tmp_path):
+    a = _authority(tmp_path)
+    token = a.mint_machine_token(audience=HYPERDX_AUDIENCE)
+    claims = a.verify(token)
+    assert claims["exp"] - claims["iat"] <= MACHINE_TOKEN_TTL_SECONDS
+
+
+@pytest.mark.parametrize("ttl", [0, -1, MACHINE_TOKEN_TTL_SECONDS + 1])
+def test_machine_token_ttl_out_of_range_rejected(tmp_path, ttl):
+    a = _authority(tmp_path)
+    with pytest.raises(ValueError):
+        a.mint_machine_token(audience=HYPERDX_AUDIENCE, ttl_seconds=ttl)
+
+
+def test_machine_token_wrong_audience_rejected_by_verifier(tmp_path):
+    a = _authority(tmp_path)
+    token = a.mint_machine_token(audience="someone-else")
+    jwk = a.jwks()["keys"][0]
+    with pytest.raises(InvalidTokenError):
+        pyjwt.decode(
+            token,
+            pyjwt.PyJWK(jwk).key,
+            algorithms=["ES384"],
+            audience=HYPERDX_AUDIENCE,
+            issuer=ISS,
+        )
+
+
+def test_machine_token_source_caches_and_refreshes_near_expiry(tmp_path):
+    a = _authority(tmp_path)
+    clock = {"t": 1_000_000.0}
+    src = MachineTokenSource(a, audience=HYPERDX_AUDIENCE, now=lambda: clock["t"])
+    first = src.token()
+    clock["t"] += 60.0
+    assert src.token() is first  # still cached mid-life
+    clock["t"] = 1_000_000.0 + MACHINE_TOKEN_TTL_SECONDS - 29.0
+    assert src.token() is not first  # inside the 30s margin -> re-minted
+
+
+def test_machine_token_source_token_is_valid(tmp_path):
+    a = _authority(tmp_path)
+    src = MachineTokenSource(a, audience=HYPERDX_AUDIENCE)
+    claims = a.verify(src.token())
+    assert claims["sub"] == MACHINE_SUBJECT
+    assert claims["aud"] == HYPERDX_AUDIENCE
