@@ -161,7 +161,7 @@ both. A group file carries `roles`, `org_ids`, and `scope`
 - **Control plane (3a/4a):** `roles.yaml` + wildcard `permission_matches` gate
   the dfe-engine API (manage sources/hunts/config/deploy). Static named roles.
 - **Data plane (3b/4b):** org_ids drive dynamic, data-only access -
-  `customer_viewer` (or any user carrying org_ids) -> `dfe_tenant_reader`
+  `org_viewer` (or any user carrying org_ids) -> `dfe_tenant_reader`
   ClickHouse connection -> `TenantScopedClient` sets `current_tenant_id` -> row
   policy filters to those orgs; OrgRegistry + HyperDXClient materialise a per-org
   HyperDX team for Kibana-style browsing. Read-only; no control-plane power.

@@ -46,7 +46,7 @@ def _make_config() -> ConnectionConfig:
             "data_viewer": "default",
             "infra_admin": "default",
             "infra_viewer": "default",
-            "customer_viewer": "tenant_reader",
+            "org_viewer": "tenant_reader",
         },
     )
 
@@ -64,21 +64,21 @@ class TestConnectionNameResolution:
         auth = AuthContext(user_id="bob", roles=["data_analyst"])
         assert registry.get_connection_name(auth) == "default"
 
-    def test_customer_viewer_resolves_to_tenant_reader(self) -> None:
+    def test_org_viewer_resolves_to_tenant_reader(self) -> None:
         registry = ConnectionRegistry(_make_config())
         auth = AuthContext(
             user_id="customer1",
-            roles=["customer_viewer"],
+            roles=["org_viewer"],
             org_ids=["org-abc"],
         )
         assert registry.get_connection_name(auth) == "tenant_reader"
 
     def test_multiple_roles_highest_privilege_wins(self) -> None:
         registry = ConnectionRegistry(_make_config())
-        # admin is higher precedence than customer_viewer
+        # admin is higher precedence than org_viewer
         auth = AuthContext(
             user_id="superuser",
-            roles=["customer_viewer", "admin"],
+            roles=["org_viewer", "admin"],
         )
         assert registry.get_connection_name(auth) == "default"
 
@@ -105,12 +105,12 @@ class TestConnectionNameResolution:
         auth = AuthContext(user_id="special", roles=["special_viewer"])
         assert registry.get_connection_name(auth) == "tenant_reader"
 
-    def test_data_analyst_viewer_over_customer_viewer(self) -> None:
-        """data_analyst_viewer has higher precedence than customer_viewer."""
+    def test_data_analyst_viewer_over_org_viewer(self) -> None:
+        """data_analyst_viewer has higher precedence than org_viewer."""
         registry = ConnectionRegistry(_make_config())
         auth = AuthContext(
             user_id="mixed",
-            roles=["customer_viewer", "data_analyst_viewer"],
+            roles=["org_viewer", "data_analyst_viewer"],
         )
         assert registry.get_connection_name(auth) == "default"
 

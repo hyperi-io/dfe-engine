@@ -34,7 +34,7 @@ class TestConnectionConfigLoader:
     def test_load_default_role_connections(self) -> None:
         config = ConnectionConfigLoader.load_default()
         assert config.role_connections["admin"] == "default"
-        assert config.role_connections["customer_viewer"] == "tenant_reader"
+        assert config.role_connections["org_viewer"] == "tenant_reader"
         assert config.role_connections["data_analyst"] == "default"
 
     def test_load_from_file(self, tmp_path: Path) -> None:

@@ -49,11 +49,9 @@ FIXTURE_GROUPS: dict[str, FixtureGroup] = {
     "dfe-viewers": FixtureGroup(roles=["data_viewer"]),
     "dfe-operators": FixtureGroup(roles=["dfe_operator"]),
     "dfe-test-org-viewers": FixtureGroup(
-        roles=["customer_viewer"], scope="org:test_org", org_ids=["test_org"]
+        roles=["org_viewer"], scope="org:test_org", org_ids=["test_org"]
     ),
-    "dfe-multi-viewers": FixtureGroup(
-        roles=["customer_viewer"], org_ids=["test_org", "test_org_2"]
-    ),
+    "dfe-multi-viewers": FixtureGroup(roles=["org_viewer"], org_ids=["test_org", "test_org_2"]),
 }
 
 # The canonical users, named for the role they exercise.

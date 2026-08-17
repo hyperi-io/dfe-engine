@@ -78,7 +78,7 @@ roles:
       - "service-surface:read"
       - "service:read"
       - "org:read"
-  customer_viewer:
+  org_viewer:
     description: "Org-restricted data viewer"
     resource_type: core
     permissions:

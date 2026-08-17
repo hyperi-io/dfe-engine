@@ -74,7 +74,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         SimpleNamespace(name=org_b, org_ids=[org_b]),
     ]
     groups = [
-        SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[], roles=["customer_viewer"]),
+        SimpleNamespace(name=g_scoped, scope_org=org_a, org_ids=[], roles=["org_viewer"]),
         SimpleNamespace(name=g_open, scope_org="", org_ids=[], roles=[]),
         SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
         SimpleNamespace(name=g_admin, scope_org="", org_ids=[], roles=["admin"]),

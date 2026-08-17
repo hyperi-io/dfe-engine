@@ -45,8 +45,8 @@ EXPECTED_ROLES: dict[str, list[str]] = {
     "dfe-analyst-viewer": ["data_analyst_viewer"],
     "dfe-viewer": ["data_viewer"],
     "dfe-operator": ["dfe_operator"],
-    "dfe-test-org-viewer": ["customer_viewer"],
-    "dfe-multi-viewer": ["customer_viewer"],
+    "dfe-test-org-viewer": ["org_viewer"],
+    "dfe-multi-viewer": ["org_viewer"],
     "dfe-nobody": [],
 }
 
@@ -117,7 +117,7 @@ class TestWritePerspective:
 
 
 class TestDataPlanePerspective:
-    """org scope - a customer viewer carries exactly their org_ids.
+    """org scope - a org viewer carries exactly their org_ids.
 
     This is the data plane (what you can SEE), orthogonal to the control plane
     above (what you can DO). ``test_org`` is the standard single org; the

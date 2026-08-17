@@ -256,7 +256,7 @@ graph LR
     end
 
     subgraph "Scoped Roles"
-        CV["customer_viewer<br/>org-restricted<br/>data viewer<br/>(scoped: true)"]
+        CV["org_viewer<br/>org-restricted<br/>data viewer<br/>(scoped: true)"]
     end
 
     style ADMIN fill:#c33,color:#fff
@@ -575,7 +575,7 @@ flowchart TD
     end
 
     subgraph "ConnectionRegistry"
-        PREC["Privilege Precedence<br/>admin → infra_admin → data_analyst<br/>→ data_analyst_viewer → data_viewer<br/>→ infra_viewer → customer_viewer"]
+        PREC["Privilege Precedence<br/>admin → infra_admin → data_analyst<br/>→ data_analyst_viewer → data_viewer<br/>→ infra_viewer → org_viewer"]
         CACHE["Client Cache<br/>(lazy-loaded)"]
     end
 
@@ -630,7 +630,7 @@ role_connections:
   data_viewer: viewer
   infra_admin: default
   infra_viewer: analyst_ro
-  customer_viewer: tenant_reader
+  org_viewer: tenant_reader
 ```
 
 ### 5.4 TenantScopedClient
@@ -708,7 +708,7 @@ policies handle it. dfe-engine just needs to know the org_ids to inject.
 | admin | `dfe-admin` | `default` | None (unrestricted) |
 | data_analyst | `dfe-analysts` | `analyst` | None |
 | data_viewer | `dfe-viewers` | `viewer` | None |
-| customer_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
+| org_viewer (acme) | `customer-acme` | `tenant_reader` | `current_tenant_id=acme` |
 
 ---
 

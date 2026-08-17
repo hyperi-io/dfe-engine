@@ -34,7 +34,7 @@ modelling mistake:
   restricted to data browsing (HyperDX, Kibana-style). A user can be a powerful
   analyst on the control plane and see exactly one org's rows.
 
-A role is not "more senior" than another across planes. `customer_viewer` is not
+A role is not "more senior" than another across planes. `org_viewer` is not
 a junior `admin`; it is a different axis.
 
 ## Canonical roles
@@ -51,7 +51,7 @@ rather than system-wide.
 | `data_analyst_viewer` | control | Analyst scope, read-only |
 | `data_viewer` | data | HyperDX dashboards and query execution |
 | `dfe_operator` | control | Curated operational dials - invoke shipped actions, read governed state |
-| `customer_viewer` | data | Org-restricted data viewer (`scoped: true`) |
+| `org_viewer` | data | Org-restricted data viewer (`scoped: true`) |
 
 ## Canonical default groups
 
@@ -68,10 +68,22 @@ on them existing.
 | `dfe-infra-viewers` | `infra_viewer` | no | Infrastructure read-only |
 | `dfe-analyst-viewers` | `data_analyst_viewer` | no | Analyst read-only |
 | `dfe-operators` | `dfe_operator` | no | Curated ops dials |
-| `dfe-<org>-viewers` | `customer_viewer` | no | Per-org data plane, `scope: org:<org>` |
+| `dfe-<org>-viewers` | `org_viewer` | no | Per-org data plane, `scope: org:<org>` |
 
 Note `dfe-infra`, not `dfe-infra-admins`. The engine seeded that name first and
 it stands; a parallel name would mean two groups granting one role.
+
+## org_viewer -- the org-tied exception role
+
+`org_viewer` (renamed from `customer_viewer`) is the one role hard-tied to
+the org_id CRUD: a user/group carrying it is associated with one or more
+`org_ids`, and that association IS the grant. When such a user browses data
+through the HyperDX iframe inside dfe-ui, the pinned ClickHouse identity
+(`tenant_reader` via `role_connections`, `current_tenant_id` row policies)
+auto-appends the org filter -- effectively `WHERE org_id = '<org id>'` on
+every query, always. There is no unfiltered path: the scoping lives in the
+ClickHouse role, not in anything the UI or the user sends. See
+[rbac.md](rbac.md) sections 5-6 for the mechanism.
 
 ## Naming conventions
 
