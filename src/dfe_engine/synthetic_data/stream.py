@@ -19,6 +19,7 @@ exercises the real default data path end to end.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from datetime import UTC, datetime
@@ -28,10 +29,6 @@ from scalo.logger import logger
 
 from dfe_engine.synthetic_data.models import SyntheticDataError
 from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
-
-# A stream is a demo artefact - cap the rate defensively so a fat-fingered
-# config cannot turn it into a load test.
-MAX_RATE_EPS = 200.0
 
 
 class EventSink(Protocol):
@@ -98,11 +95,13 @@ class HttpPostSink:
 
     async def _get_client(self) -> Any:
         # One client for the sink's lifetime - a long demo stream must not
-        # rebuild a connection pool per batch.
+        # rebuild a connection pool per batch. retries=1 keeps degrade-fast
+        # semantics: the scalo client would otherwise retry failed POSTs with
+        # backoff, stalling the cadence and double-delivering on a late 5xx.
         if self._client is None:
             from scalo.http import AsyncHttpClient
 
-            self._client = AsyncHttpClient(timeout=self.timeout)
+            self._client = AsyncHttpClient(timeout=self.timeout, retries=1)
             await self._client.__aenter__()
         return self._client
 
@@ -115,14 +114,14 @@ class HttpPostSink:
             client = await self._get_client()
             # The URL is passed whole: a base_url + "" join appends a trailing
             # slash and 404s on exact-path ingest routes.
+            # The scalo client raises on non-2xx itself - no status check here.
             if self.ndjson:
                 payload = "\n".join(json.dumps(e, default=str) for e in batch)
                 headers = {**self.headers, "Content-Type": "application/x-ndjson"}
-                response = await client.post(self.url, content=payload, headers=headers)
+                await client.post(self.url, content=payload, headers=headers)
             else:
                 body: Any = batch[0] if len(batch) == 1 else batch
-                response = await client.post(self.url, json=body, headers=self.headers)
-            response.raise_for_status()
+                await client.post(self.url, json=body, headers=self.headers)
             self.sent += len(batch)
         except Exception as exc:
             # A demo stream must degrade, not die: count it and stream on.
@@ -151,8 +150,8 @@ async def stream_events(
     Args:
         factory: Event source.
         sink: Delivery target.
-        rate_eps: Mean events per second (Poisson pacing), capped at
-            ``MAX_RATE_EPS``.
+        rate_eps: Mean events per second (Poisson pacing). Rate ceilings are
+            the service's job (``synthetic_data.max_rate_eps``).
         count: Stop after this many events.
         duration_s: Stop after this many seconds.
 
@@ -167,33 +166,37 @@ async def stream_events(
         raise SyntheticDataError("stream needs a bound: count and/or duration_s")
     if rate_eps <= 0:
         raise SyntheticDataError("rate_eps must be positive")
-    rate = min(rate_eps, MAX_RATE_EPS)
 
     emitted = 0
     started = time.monotonic()
     rng = factory.pool.rng
-    while True:
-        if count is not None and emitted >= count:
-            break
-        if duration_s is not None and time.monotonic() - started >= duration_s:
-            break
-        await sink(factory.event(when=datetime.now(UTC)))
-        emitted += 1
-        delay = rng.expovariate(rate)
-        remaining = None
-        if duration_s is not None:
-            remaining = duration_s - (time.monotonic() - started)
-            if remaining <= 0:
+    try:
+        while True:
+            if count is not None and emitted >= count:
                 break
-        await asyncio.sleep(min(delay, remaining) if remaining is not None else delay)
-    await sink.flush()
-    aclose = getattr(sink, "aclose", None)
-    if aclose is not None:
-        await aclose()
+            if duration_s is not None and time.monotonic() - started >= duration_s:
+                break
+            await sink(factory.event(when=datetime.now(UTC)))
+            emitted += 1
+            delay = rng.expovariate(rate_eps)
+            remaining = None
+            if duration_s is not None:
+                remaining = duration_s - (time.monotonic() - started)
+                if remaining <= 0:
+                    break
+            await asyncio.sleep(min(delay, remaining) if remaining is not None else delay)
+        await sink.flush()
+    finally:
+        # Cancellation must not leak the sink's HTTP client: shield the close
+        # so a pending CancelledError cannot abort it mid-teardown.
+        aclose = getattr(sink, "aclose", None)
+        if aclose is not None:
+            with contextlib.suppress(BaseException):
+                await asyncio.shield(aclose())
     logger.info(
         "synthetic data stream complete",
         events=emitted,
         seconds=round(time.monotonic() - started, 1),
-        rate_eps=rate,
+        rate_eps=rate_eps,
     )
     return emitted

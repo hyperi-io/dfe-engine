@@ -50,11 +50,11 @@ class ColumnHints(BaseModel):
     """
 
     static: Any | None = None
-    values: list[Any] | None = None
+    values: list[Any] | None = Field(default=None, min_length=1)
     weights: list[float] | None = Field(
         default=None, description="Draw weights aligned with values"
     )
-    templates: list[str] | None = None
+    templates: list[str] | None = Field(default=None, min_length=1)
     provider: str | None = None
     minimum: float | None = None
     maximum: float | None = None
@@ -95,6 +95,14 @@ class Scenario(BaseModel):
     weight: float = Field(default=1.0, gt=0)
     values: dict[str, Any] = Field(default_factory=dict)
     templates: dict[str, list[str]] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _check_templates(self) -> Scenario:
+        """A scenario naming a column with an empty template set is an authoring error."""
+        for column, templates in self.templates.items():
+            if not templates:
+                raise ValueError(f"scenario template set for {column!r} is empty")
+        return self
 
 
 class PackInfo(BaseModel):

@@ -84,6 +84,51 @@ class TestHttpPostSink:
         assert sink.sent == 1
         assert sink.failed == 0
 
+    async def test_ndjson_batch_and_header_passthrough(self):
+        import asyncio
+
+        captured: dict[str, str | int] = {}
+
+        async def handle(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+            await reader.readline()
+            length = 0
+            while True:
+                header = (await reader.readline()).decode()
+                if header in ("\r\n", ""):
+                    break
+                name, _, value = header.partition(":")
+                lowered = name.strip().lower()
+                if lowered == "content-length":
+                    length = int(value.strip())
+                elif lowered in ("content-type", "x-demo-token"):
+                    captured[lowered] = value.strip()
+            body = await reader.readexactly(length)
+            captured["lines"] = len(body.decode().splitlines())
+            writer.write(b"HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+            await writer.drain()
+            writer.close()
+
+        server = await asyncio.start_server(handle, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        try:
+            sink = HttpPostSink(
+                f"http://127.0.0.1:{port}/ingest",
+                headers={"X-Demo-Token": "demo-value"},
+                batch_max=3,
+                ndjson=True,
+                timeout=5.0,
+            )
+            for i in range(3):
+                await sink({"n": i})
+            await sink.aclose()
+        finally:
+            server.close()
+            await server.wait_closed()
+        assert sink.sent == 3
+        assert captured["content-type"] == "application/x-ndjson"
+        assert captured["x-demo-token"] == "demo-value"
+        assert captured["lines"] == 3
+
     async def test_unreachable_endpoint_degrades_not_dies(self):
         # Port 9 (discard) is closed on any sane host - a real connection
         # failure with no service to mock.

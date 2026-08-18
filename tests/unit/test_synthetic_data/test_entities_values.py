@@ -134,6 +134,9 @@ class TestClassify:
             (col("event_id", "integer"), Semantic.NUMBER),
             (col("trace_id"), Semantic.TOKEN),
             (col("span_id"), Semantic.TOKEN),
+            (col("user_count", "integer"), Semantic.NUMBER),
+            (col("md5_hash"), Semantic.MD5),
+            (col("workstation"), Semantic.HOSTNAME),
         ],
     )
     def test_semantic(self, column: SchemaColumn, semantic: Semantic):

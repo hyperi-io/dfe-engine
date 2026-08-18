@@ -152,6 +152,21 @@ spec:
                 secretKeyRef:
                   name: {{ include "dfe-engine.authSecretName" . }}
                   key: {{ .Values.auth.viewer.secretKeys.password }}
+            {{- with .Values.config.synthetic_data }}
+            {{- if .autostart_schemas }}
+            # Standing synthetic demo streams (default off)
+            - name: DFE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS
+              value: {{ .autostart_schemas | quote }}
+            - name: DFE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL
+              value: {{ .autostart_receiver_url | quote }}
+            - name: DFE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS
+              value: {{ .autostart_rate_eps | quote }}
+            {{- if .autostart_seed }}
+            - name: DFE_SYNTHETIC_DATA_AUTOSTART_SEED
+              value: {{ .autostart_seed | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- if .Values.config.config_dir }}
             - name: DFE_CONFIG_DIR
               value: {{ .Values.config.config_dir | quote }}

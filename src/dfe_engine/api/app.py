@@ -240,9 +240,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
 
     # Synthetic data service (synthetic reference streams; ceilings from settings)
+    from dfe_engine.synthetic_data.autostart import start_autostart
     from dfe_engine.synthetic_data.service import SyntheticDataService
 
     app.state.synthetic_data = SyntheticDataService(settings.synthetic_data)
+    # Standing demo streams - only when an operator configured autostart.
+    app.state.synthetic_autostart = start_autostart(
+        app.state.synthetic_data, settings.synthetic_data
+    )
 
     # Readiness reflects ClickHouse reachability. The engine's core paths
     # (ingest, load, hunt, query) all need CH, so a pod that cannot reach it is
@@ -271,6 +276,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
     health.set_ready(False)
+    autostart_tasks = getattr(app.state, "synthetic_autostart", [])
+    for task in autostart_tasks:
+        task.cancel()
+    if autostart_tasks:
+        # Await the cancellations so sink teardown (HTTP client close) runs.
+        import asyncio
+
+        await asyncio.gather(*autostart_tasks, return_exceptions=True)
     shutdown_registries()
     logger.info("DFE Engine API stopped")
 
