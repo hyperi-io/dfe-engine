@@ -423,10 +423,13 @@ class SchemaRegistry:
             try:
                 schema = self._parse_meta_schema(table, config_data)
             except ValidationError as e:
-                logger.error(f"Invalid schema {table!r} (excluded from list): {e}")
+                # The schemas root holds non-schema YAML too (a schemas repo ships
+                # .github/, argocd/, docs/), so a non-MetaSchema file is an expected
+                # exclusion on this read path, not a per-call error.
+                logger.debug(f"Non-schema file {table!r} excluded from list: {e}")
                 continue
             except Exception as e:
-                logger.error(f"Failed to load schema {table!r}, (excluded from list): {e}")
+                logger.warning(f"Failed to load schema {table!r} (excluded from list): {e}")
                 continue
 
             # Resolve YAML path for modified-time (use store table key, not list_schemas filter)
