@@ -288,7 +288,9 @@ class TestDefaultServiceRoles:
 
     def test_query_reader_readonly_no_ddl_select_only(self):
         qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
-        assert qr.settings["readonly"] == 1
+        # readonly=2, not 1: hyperdx sends per-query output settings and readonly=1
+        # rejects them (code 164); allow_ddl=0 + SELECT-only keep it read-only.
+        assert qr.settings["readonly"] == 2
         assert qr.settings["allow_ddl"] == 0
         assert all("INSERT" not in g for g in qr.grants)
 
