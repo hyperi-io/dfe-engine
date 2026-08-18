@@ -217,6 +217,7 @@ class HelmServiceValues(BaseModel):
     keda: HelmKedaConfig = HelmKedaConfig()
     config: dict[str, Any] = {}
 
+
 values = HelmServiceValues(**merged_config)
 yaml_output = yaml.dump(values.model_dump(exclude_none=True))
 ```

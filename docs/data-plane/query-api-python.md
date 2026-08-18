@@ -101,7 +101,7 @@ df = result.to_pandas()
 ```python
 # Client sends:
 result = client.query(
-    "hunts/active_threats",      # Query label
+    "hunts/active_threats",  # Query label
     params={"severities": ["critical", "high"]},  # Validated parameters
     limit=500,
 )
@@ -134,9 +134,9 @@ result = client.query(
 class QueryClient:
     def __init__(
         self,
-        base_url: str | None = None,      # API URL for HTTP mode
-        direct: bool = False,              # Use in-process execution
-        timeout_seconds: int = 30,         # Default query timeout
+        base_url: str | None = None,  # API URL for HTTP mode
+        direct: bool = False,  # Use in-process execution
+        timeout_seconds: int = 30,  # Default query timeout
     ): ...
 ```
 
@@ -294,8 +294,8 @@ result = client.query("analytics/user_activity")
 df = result.to_pandas()
 
 # Python native
-rows = result.to_pylist()           # List of dicts
-cols = result.to_pydict()           # Dict of lists
+rows = result.to_pylist()  # List of dicts
+cols = result.to_pydict()  # Dict of lists
 
 # Text formats
 json_str = result.to_json()
@@ -321,20 +321,21 @@ Query execution plan from EXPLAIN.
 
 ```python
 class ExplainPlan(BaseModel):
-    steps: list[ExplainStep]           # Execution steps
-    total_estimated_cost: float | None # Estimated query cost
-    total_estimated_rows: int | None   # Estimated row count
-    warnings: list[str]                # Performance warnings
-    raw_plan: str | None               # Original EXPLAIN output
+    steps: list[ExplainStep]  # Execution steps
+    total_estimated_cost: float | None  # Estimated query cost
+    total_estimated_rows: int | None  # Estimated row count
+    warnings: list[str]  # Performance warnings
+    raw_plan: str | None  # Original EXPLAIN output
+
 
 class ExplainStep(BaseModel):
-    step_type: ExplainStepType         # READ, FILTER, AGGREGATE, etc.
-    description: str                   # Step description
-    estimated_rows: int | None         # Estimated rows for this step
-    estimated_cost: float | None       # Estimated cost
-    actual_rows: int | None            # Actual rows (if available)
-    actual_time_ms: float | None       # Actual time (if available)
-    details: dict | None               # Step-specific details
+    step_type: ExplainStepType  # READ, FILTER, AGGREGATE, etc.
+    description: str  # Step description
+    estimated_rows: int | None  # Estimated rows for this step
+    estimated_cost: float | None  # Estimated cost
+    actual_rows: int | None  # Actual rows (if available)
+    actual_time_ms: float | None  # Actual time (if available)
+    details: dict | None  # Step-specific details
 ```
 
 ### Step Types
@@ -652,8 +653,10 @@ from dfe_engine.query.validator import AuthorizationError
 
 app = FastAPI()
 
+
 def get_query_client() -> QueryClient:
     return QueryClient(direct=True)
+
 
 @app.get("/threats")
 async def get_threats(
@@ -688,6 +691,7 @@ from dfe_engine.query import QueryClient
 
 app = typer.Typer()
 console = Console()
+
 
 @app.command()
 def query(
