@@ -189,6 +189,23 @@ class TestResetPassword:
         assert resp.status_code == 200
         assert resp.json()["message"] == "password reset"
 
+    def test_reset_to_current_password_rejected(self, client, admin_headers):
+        client.post(
+            "/api/v1/auth/accounts",
+            json={"username": "pwsame", "password": "samepw"},
+            headers=admin_headers,
+        )
+        resp = client.post(
+            "/api/v1/auth/accounts/pwsame/reset-password",
+            json={"new_password": "samepw"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400
+        body = resp.json()
+        assert body["code"] == "password_reused"
+        # Message must not reveal that the match was the current password.
+        assert "current" not in body["message"].lower()
+
     def test_reset_nonexistent_returns_404(self, client, admin_headers):
         resp = client.post(
             "/api/v1/auth/accounts/ghost/reset-password",

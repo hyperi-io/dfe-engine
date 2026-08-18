@@ -210,6 +210,19 @@ def _get_registry(request: Request):
     return registry
 
 
+def _refresh_rp(request: Request) -> None:
+    """Rebuild the relying party so this write takes effect on the login routes.
+
+    The registry is read fresh from YAML on every call, but the RP snapshots the
+    enabled providers when it is built. Without this rebuild a provider created
+    here 404s on ``/auth/oidc/{name}/login`` until the process restarts. Cheap
+    and non-raising - see ``build_relying_party``.
+    """
+    from dfe_engine.auth.oidc.rp import build_relying_party
+
+    request.app.state.oidc_rp = build_relying_party(_get_registry(request))
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -262,6 +275,7 @@ async def create_provider(
             detail={"code": "conflict", "message": f"OIDC provider '{body.name}' already exists"},
         )
 
+    _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", body.name, "created")
     return _provider_to_response(body.name, provider)
 
@@ -353,6 +367,8 @@ async def update_provider(
         )
 
     provider = registry.update(name, **update_fields)
+    # Picks up an enable/disable flip and a rotated client_secret_env alike.
+    _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "updated")
     return _provider_to_response(name, provider)
 
@@ -396,6 +412,8 @@ async def delete_provider(
             )
 
     registry.delete(name)
+    # A detached provider must stop serving logins immediately, not at restart.
+    _refresh_rp(request)
     audit_resource_change(user.user_id, "oidc_provider", name, "deleted")
 
     return DetachResponse(deleted=name, orphaned_groups=orphaned)

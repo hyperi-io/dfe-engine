@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 
 from dfe_engine.api.app import create_app
 from dfe_engine.api.deps import _registries
+from dfe_engine.auth.bootstrap import admin_account_name
+from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.settings import (
     APISettings,
     AuthSettings,
@@ -60,7 +62,7 @@ def _complete_setup(app) -> None:
     """Satisfy every required step: org, real user, rotated break-glass password."""
     app.state.org_registry.create("acme", display_name="Acme")
     app.state.account_store.create("alice", "a-strong-user-password", groups=["dfe-admins"])
-    app.state.account_store.reset_password("admin", "a-strong-local-admin-password")
+    app.state.account_store.reset_password(admin_account_name(), "a-strong-local-admin-password")
 
 
 def test_setup_status_public_and_incomplete_on_fresh_bootstrap(tmp_path):
@@ -200,5 +202,36 @@ def test_setup_status_withholds_registries_once_complete(tmp_path):
             assert body["initial_setup"]["complete"] is True
             assert body["organisations"] == []
             assert body["oidc_providers"] == []
+    finally:
+        _registries.clear()
+
+
+def test_setup_status_keeps_oidc_login_options_once_complete(tmp_path):
+    """Post-setup the login screen still gets the enabled IdPs — name + label only."""
+    app = create_app(settings=_settings(tmp_path))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            app.state.oidc_provider_registry.create(
+                "entra",
+                OIDCProvider(
+                    enabled=True,
+                    display_name="Microsoft Entra",
+                    issuer="https://idp",
+                    client_secret_env="ENTRA_SECRET",
+                ),
+            )
+            app.state.oidc_provider_registry.create(
+                "okta",
+                OIDCProvider(enabled=False, issuer="https://okta"),
+            )
+            _complete_setup(app)
+
+            body = client.get("/api/v1/auth/setup-status").json()
+
+            assert body["initial_setup"]["complete"] is True
+            assert body["oidc_providers"] == [
+                {"name": "entra", "display_name": "Microsoft Entra"},
+            ]
+            assert "https://idp" not in json.dumps(body)
     finally:
         _registries.clear()

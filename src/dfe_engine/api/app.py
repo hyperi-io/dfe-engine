@@ -83,15 +83,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             auth_dir_str = str(Path("config") / "auth")
 
     auth_dir = Path(auth_dir_str)
-    # Prefer the documented DFE_AUTH_LOCAL_ADMIN_PASSWORD (settings.auth.local),
-    # then the legacy DFE_ADMIN_PASSWORD env, then the default. Without the first
-    # source the documented + chart-used var was silently ignored, leaving the
-    # admin on the well-known 'changeme' even when an operator set it.
-    default_admin_pw = (
-        settings.auth.local.admin_password or os.environ.get("DFE_ADMIN_PASSWORD") or "changeme"
-    )
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
-        auth_dir, default_admin_password=default_admin_pw
+        auth_dir,
+        default_admin_password=settings.auth.local.admin_password,
+        default_admin_name=settings.auth.local.admin_name,
     )
     app.state.account_store = account_store
     app.state.group_store = group_store
@@ -133,13 +128,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Build the OIDC relying party from the enabled providers. The engine is the
     # RP + single token issuer: it terminates the IdP login and re-mints its own
     # ES384 token. Zero providers is fine (an empty registry -> every login 404s).
-    from dfe_engine.auth.oidc.rp import OidcRelyingParty
+    # This is only the INITIAL build - the RP is rebuilt whenever the provider
+    # registry changes, so a new provider can serve logins without a restart.
+    from dfe_engine.auth.oidc.rp import build_relying_party
 
-    try:
-        app.state.oidc_rp = OidcRelyingParty(app.state.oidc_provider_registry)
-    except Exception as exc:  # never let RP setup break app startup
-        logger.warning("OIDC relying party unavailable", error=str(exc))
-        app.state.oidc_rp = None
+    app.state.oidc_rp = build_relying_party(app.state.oidc_provider_registry)
 
     # Bootstrap connection registry for multi-tenant ClickHouse
     from dfe_engine.connections.config import ConnectionConfigLoader

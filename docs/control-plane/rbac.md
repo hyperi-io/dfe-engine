@@ -432,7 +432,7 @@ On first startup (empty `config/auth/` directory), `bootstrap_auth()` seeds:
 - `dfe-viewers` → roles: `[data_viewer]`
 - `dfe-infra` → roles: `[infra_admin]`
 
-**Account:** `admin` (password: `changeme`, group: `dfe-admins`)
+**Account:** username from `DFE_AUTH_LOCAL_ADMIN_NAME` (default `admin`), password from `DFE_AUTH_LOCAL_ADMIN_PASSWORD` (default `changeme`), group `dfe-admins`.
 
 Startup logs a warning if the default password is still in use.
 

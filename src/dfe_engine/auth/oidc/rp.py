@@ -274,3 +274,25 @@ class OidcRelyingParty:
         if identity.groups_overflowed or group_ids or not identity.groups:
             return identity.model_copy(update={"groups": group_ids})
         return identity
+
+
+def build_relying_party(registry: OIDCProviderRegistry) -> OidcRelyingParty | None:
+    """Build an RP over the registry's CURRENT contents, or None if it cannot be built.
+
+    An RP SNAPSHOTS the enabled providers at construction - both its own
+    ``_providers`` map and the Authlib client registry underneath it, which
+    caches one client per name and will NOT pick up a re-registration. So the RP
+    has to be rebuilt wholesale whenever the registry changes; otherwise the
+    login endpoints keep serving the provider set from process start and a
+    freshly created provider 404s until a restart. Rebuilding is local work:
+    Authlib fetches the discovery document lazily on first use, so nothing here
+    touches the network.
+
+    Never raises. RP setup is not allowed to break startup, and one provider
+    with malformed config must not take a CRUD write down with it.
+    """
+    try:
+        return OidcRelyingParty(registry)
+    except Exception as exc:
+        logger.warning("OIDC relying party unavailable", error=str(exc))
+        return None

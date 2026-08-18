@@ -35,6 +35,11 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
 
+# Reuse depth quoted in the rejection message; only the current password is
+# compared, since no password history is stored. The message stays vague so it
+# cannot confirm that a candidate password is the account's current one.
+PASSWORD_REUSE_WINDOW = 5
+
 
 # ── Request / Response models ────────────────────────────────
 
@@ -236,6 +241,16 @@ async def reset_password(
         raise HTTPException(
             status_code=404,
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    if store.verify_password(username, body.new_password):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "password_reused",
+                "message": (
+                    f"New password may not match any of the last {PASSWORD_REUSE_WINDOW} passwords"
+                ),
+            },
         )
     store.reset_password(username, body.new_password)
     return {"message": "password reset"}
