@@ -66,12 +66,12 @@ dependencies = [
     # Alerting / notifications
     "apprise>=1.11.0",
     # API server
-    "fastapi>=0.138.2",
+    "fastapi>=0.141.1",
     "python-multipart>=0.0.32",
     "starlette>=1.3.1",
     # Floor 50: GHSA PKCS#7 Bleichenbacher oracle, vulnerable >=44,<50.
     "cryptography>=50.0.0",
-    "uvicorn[standard]>=0.49.0",
+    "uvicorn[standard]>=0.52.1",
     "PyJWT[crypto]>=2.13.0",
     "sse-starlette>=3.4.5",
     # Transitive override: diskcache pulled in by pySigma for MITRE ATT&CK caching.
@@ -130,7 +130,7 @@ dev = [
     "defusedxml>=0.7.1",
     "moto[s3]>=5.2.2",
     "werkzeug>=3.1.8",
-    "ruff>=0.15.20",
+    "ruff>=0.16.2",
     "Faker>=40.27.0",
     "types-requests>=2.33.0",
     "python-dotenv>=1.2.2",

@@ -62,8 +62,8 @@ from dfe_engine.source.type_registry import TypeRegistry
 registry = TypeRegistry.default()  # loads type_registry.yaml
 resolved = registry.resolve("string", attributes=["lowcardinality"])
 # ResolvedType(ch_type='LowCardinality(Nullable(String))', codec='ZSTD(1)')
-registry.validate_use_case("integer", "dimension")   # OK
-registry.validate_use_case("integer", "fulltext")    # raises ValueError
+registry.validate_use_case("integer", "dimension")  # OK
+registry.validate_use_case("integer", "fulltext")  # raises ValueError
 registry.validate_attribute("json", "lowcardinality")  # raises ValueError
 ```
 
@@ -93,10 +93,10 @@ builder = SchemaBuilderV2(
     schemas_base_dir=Path("schemas/"),
 )
 result = builder.build(source)
-result.create_table_ddl     # CREATE TABLE statement
-result.columns              # list[SchemaColumn]
-result.validation_errors    # list[str]
-result.view_ddls            # {"sigma": "CREATE VIEW ...", ...}
+result.create_table_ddl  # CREATE TABLE statement
+result.columns  # list[SchemaColumn]
+result.validation_errors  # list[str]
+result.view_ddls  # {"sigma": "CREATE VIEW ...", ...}
 
 ddl = builder.build_ddl_only(columns, "my_table", DDLConfig(ttl_days=90))
 add_ddl = builder.generate_alter_add(source, new_column, after="existing_col")
@@ -129,13 +129,15 @@ SchemaManager.create_meta_schema(
     summary="Initial schema",
 )
 SchemaManager.add_version(
-    "meta/syslog.yaml", "1.1.0",
+    "meta/syslog.yaml",
+    "1.1.0",
     columns=[...],  # complete column snapshot
     type="addition",
     summary="Added geo_country column",
 )
 SchemaManager.clone_version(
-    "meta/syslog.yaml", "2.0.0",
+    "meta/syslog.yaml",
+    "2.0.0",
     source_version="1.1.0",
     type="model",
     summary="Changed message type",
@@ -153,7 +155,7 @@ SchemaManager.clone_version(
 from dfe_engine.schema.ddl_writer import DDLFileWriter
 
 writer = DDLFileWriter()
-files = writer.generate_all()             # {relative_path: sql_content}
+files = writer.generate_all()  # {relative_path: sql_content}
 written = writer.write_all(Path("out/"))  # writes + returns paths
 ```
 
