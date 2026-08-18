@@ -254,3 +254,61 @@ def test_login_json_mode_returns_authorization_url(client, app):
     resp = client.get("/api/v1/auth/oidc/stub/login?redirect=false")
     assert resp.status_code == 200
     assert resp.json() == {"authorization_url": "https://idp.example/authorize?state=test"}
+
+
+# ── RP self-heal on an out-of-band registry change ───────────────
+#
+# The CRUD endpoints rebuild the RP on write, which only heals the worker that
+# served it; the login path consults the registry before 404ing so a provider
+# written by another worker or a gitops sync needs no engine restart.
+
+
+class _Req:
+    """Minimal stand-in for a Starlette Request - the reload path only reads app.state."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+
+
+def test_reload_picks_up_provider_written_out_of_band(client, app):
+    """A provider written straight to the registry dir is usable without a restart."""
+    from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
+
+    assert app.state.oidc_rp is not None
+    assert not app.state.oidc_rp.has_provider("gitops-added")
+
+    app.state.oidc_provider_registry.create(
+        "gitops-added", OIDCProvider(type="generic", issuer="https://idp.example")
+    )
+
+    rp = _reload_rp_if_provider_known(_Req(app), "gitops-added")
+    assert rp is not None
+    assert rp.has_provider("gitops-added")
+    # Rebuilt in place, so the next request sees it too.
+    assert app.state.oidc_rp is rp
+
+
+def test_reload_ignores_unknown_provider(client, app):
+    """A bogus name does NOT rebuild - an unauthenticated caller cannot force churn."""
+    from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
+
+    before = app.state.oidc_rp
+    assert _reload_rp_if_provider_known(_Req(app), "no-such-provider") is None
+    assert app.state.oidc_rp is before
+
+
+def test_reload_ignores_disabled_provider(client, app):
+    """A disabled provider stays unusable - the reload is not an enable back door."""
+    from dfe_engine.api.v1.oidc_login import _reload_rp_if_provider_known
+
+    app.state.oidc_provider_registry.create(
+        "switched-off",
+        OIDCProvider(type="generic", issuer="https://idp.example", enabled=False),
+    )
+    assert _reload_rp_if_provider_known(_Req(app), "switched-off") is None
+
+
+def test_login_still_404s_for_a_provider_that_was_never_configured(client):
+    """The reload path must not turn an unknown provider into anything but a 404."""
+    resp = client.get("/api/v1/auth/oidc/never-configured/login", follow_redirects=False)
+    assert resp.status_code == 404

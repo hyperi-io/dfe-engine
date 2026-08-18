@@ -27,8 +27,10 @@ from dfe_engine.state_machines.setup import (
 
 
 @pytest.fixture
-def ctx(tmp_path: Path) -> SetupContext:
+def ctx(tmp_path: Path, monkeypatch) -> SetupContext:
     """A freshly bootstrapped deployment: seeded admin, nothing else configured."""
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
     accounts = AccountStore(tmp_path / "accounts")
     accounts.create("admin", "changeme", groups=["dfe-admins"])
     return SetupContext(
@@ -105,6 +107,23 @@ def test_break_glass_admin_does_not_count_as_the_first_user(ctx):
     assert STEP_FIRST_USER in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
+def test_custom_dfe_admin_name_is_the_break_glass_account(tmp_path, monkeypatch):
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "alt-admin")
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("alt-admin", "changeme", groups=["dfe-admins"])
+    ctx = SetupContext(
+        account_store=accounts,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+    )
+
+    state = SETUP_MACHINE.evaluate(ctx)
+
+    assert STEP_FIRST_USER not in state.completed_steps
+    assert STEP_ADMIN_PASSWORD in state.steps
+    assert STEP_ADMIN_PASSWORD not in state.completed_steps
+
+
 def test_disabled_account_does_not_count_as_the_first_user(ctx):
     ctx.account_store.create("alice", "a-strong-user-password")
     ctx.account_store.update("alice", enabled=False)
@@ -124,6 +143,24 @@ def test_admin_password_step_clears_only_after_rotation(ctx):
     assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
 
     ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+    assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+
+def test_admin_password_step_uses_env_password_as_rotation_baseline(tmp_path, monkeypatch):
+    """The wizard must detect rotation from DFE_AUTH_LOCAL_ADMIN_PASSWORD, not only changeme."""
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "new-admin")
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "test")
+    accounts = AccountStore(tmp_path / "accounts")
+    accounts.create("new-admin", "test", groups=["dfe-admins"])
+    ctx = SetupContext(
+        account_store=accounts,
+        org_registry=OrgRegistry(tmp_path / "orgs"),
+    )
+
+    assert STEP_FIRST_USER not in SETUP_MACHINE.evaluate(ctx).completed_steps
+    assert STEP_ADMIN_PASSWORD not in SETUP_MACHINE.evaluate(ctx).completed_steps
+
+    accounts.reset_password("new-admin", "a-strong-local-admin-password")
     assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
@@ -179,3 +216,61 @@ def test_status_withholds_registries_once_setup_is_complete(ctx):
     # ...unless the caller opts in (an authenticated admin view, say).
     unredacted = SETUP_MACHINE.status(ctx, redact_when_complete=False)
     assert [o.name for o in unredacted.organisations] == ["acme"]
+
+
+def _complete(ctx: SetupContext) -> None:
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+
+
+def test_completed_setup_keeps_oidc_login_options_only(ctx):
+    """The login screen still needs the IdPs it can offer, and their labels."""
+    ctx.oidc_registry.create(
+        "entra",
+        OIDCProvider(
+            enabled=True,
+            display_name="Microsoft Entra",
+            issuer="https://idp",
+            client_secret_env="ENTRA_SECRET",
+        ),
+    )
+    _complete(ctx)
+
+    status = SETUP_MACHINE.status(ctx)
+
+    assert status.initial_setup.complete is True
+    # Name and display name, and nothing else: no issuer, no env vars, no type.
+    assert [p.model_dump() for p in status.oidc_providers] == [
+        {"name": "entra", "display_name": "Microsoft Entra"},
+    ]
+    assert "ENTRA_SECRET" not in status.model_dump_json()
+
+
+def test_completed_setup_leaves_an_unset_display_name_empty(ctx):
+    """No invented label — ``name`` is right there for the UI to fall back to."""
+    ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
+    _complete(ctx)
+
+    assert [p.model_dump() for p in SETUP_MACHINE.status(ctx).oidc_providers] == [
+        {"name": "entra", "display_name": ""},
+    ]
+
+
+def test_completed_setup_drops_disabled_oidc_providers(ctx):
+    """A disabled provider cannot be logged in with, so it is pure inventory."""
+    ctx.oidc_registry.create("entra", OIDCProvider(enabled=True, issuer="https://idp"))
+    ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
+    _complete(ctx)
+
+    assert [p.name for p in SETUP_MACHINE.status(ctx).oidc_providers] == ["entra"]
+
+
+def test_incomplete_setup_still_returns_full_oidc_providers(ctx):
+    """The wizard edits providers, so it gets the whole record — disabled included."""
+    ctx.oidc_registry.create("okta", OIDCProvider(enabled=False, issuer="https://okta"))
+
+    providers = SETUP_MACHINE.status(ctx).oidc_providers
+
+    assert [p.name for p in providers] == ["okta"]
+    assert providers[0].issuer == "https://okta"

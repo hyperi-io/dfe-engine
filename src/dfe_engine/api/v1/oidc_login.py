@@ -59,9 +59,45 @@ class OidcCallbackResponse(BaseModel):
     groups: list[str] = Field(default_factory=list, description="Resolved group identifiers")
 
 
+def _reload_rp_if_provider_known(request: Request, provider: str):
+    """Rebuild the RP when the registry knows an enabled provider the RP does not.
+
+    The provider-CRUD endpoints rebuild the RP on every write, but that only
+    heals the worker that served the write. The registry is a directory of YAML
+    files that also changes out-of-band - another uvicorn worker's write, a
+    gitops sync, an operator editing a file - so the login path checks the
+    registry once before giving up. That turns "restart the engine" into a
+    self-heal.
+
+    Costs a single stat + one small YAML parse for the NAMED provider (no
+    directory walk), so an unauthenticated caller spamming bogus names buys
+    itself a failed stat and nothing more.
+
+    Returns the rebuilt RP, or None if the registry does not vindicate the miss.
+    """
+    registry = getattr(request.app.state, "oidc_provider_registry", None)
+    if registry is None:
+        return None
+    try:
+        known = registry.get(provider)
+    except Exception as exc:  # malformed YAML on disk - not this request's problem
+        logger.warning("OIDC provider registry read failed", provider=provider, error=str(exc))
+        return None
+    if known is None or not known.enabled:
+        return None
+
+    from dfe_engine.auth.oidc.rp import build_relying_party
+
+    logger.info("OIDC RP stale - rebuilding for a provider added since startup", provider=provider)
+    request.app.state.oidc_rp = build_relying_party(registry)
+    return request.app.state.oidc_rp
+
+
 def _rp_or_404(request: Request, provider: str):
     """Resolve the relying party and assert the provider is registered."""
     rp = getattr(request.app.state, "oidc_rp", None)
+    if rp is None or not rp.has_provider(provider):
+        rp = _reload_rp_if_provider_known(request, provider)
     if rp is None or not rp.has_provider(provider):
         raise HTTPException(
             status_code=404,
