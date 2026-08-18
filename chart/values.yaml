@@ -90,6 +90,15 @@ config:
     local:
       enabled: true
       org_id: "default"
+  # -- Synthetic data standing demo streams. DEFAULT OFF: set autostart_schemas
+  # (comma-separated pack refs, e.g. "meta/syslog,meta/otel/logs") plus the
+  # receiver ingest URL and the engine keeps a live-tail synthetic stream
+  # running - realistic inbound data for demos and testing, always tagged
+  # tags.synthetic=true.
+  synthetic_data:
+    autostart_schemas: ""
+    autostart_receiver_url: ""
+    autostart_rate_eps: 2
   # -- Root config directory — maps to DFE_CONFIG_DIR.
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.
