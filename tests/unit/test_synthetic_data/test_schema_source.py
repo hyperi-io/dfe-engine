@@ -1,6 +1,6 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_datagen/test_schema_source.py
-#  Purpose:      @source path inversion, factory generation, datagen hints
+#  File:         tests/unit/test_synthetic_data/test_schema_source.py
+#  Purpose:      @source path inversion, factory generation, synthetic data hints
 #  Language:     Python
 #
 #  License:      BUSL-1.1
@@ -14,14 +14,14 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.datagen.models import DatagenError
-from dfe_engine.datagen.schema_source import (
+from dfe_engine.source.models import SchemaColumn
+from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.schema_source import (
     SchemaEventFactory,
-    load_datagen_hints,
+    load_synthetic_hints,
     parse_source_path,
     set_path,
 )
-from dfe_engine.source.models import SchemaColumn
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 GUARDDUTY = REPO_ROOT / "schemas" / "meta" / "aws" / "guardduty.yaml"
@@ -66,7 +66,7 @@ class TestParseSourcePath:
         assert parse_source_path(None) is None
 
     def test_malformed_segment_raises(self):
-        with pytest.raises(DatagenError):
+        with pytest.raises(SyntheticDataError):
             parse_source_path("@source: Resources[x].Type")
 
 
@@ -129,40 +129,40 @@ versions:
   "1.0.0":
     date: "2026-08-18"
     type: model
-    summary: "datagen hints fixture"
+    summary: "synthetic data hints fixture"
     columns:
       - name: vendor
         type: string
         expr: "@source: vendor"
-        datagen:
+        synthetic:
           static: acme
       - name: action
         type: string
         expr: "@source: action"
-        datagen:
+        synthetic:
           values: [allow, deny]
           weights: [9, 1]
       - name: message
         type: text
         expr: "@source: message"
-        datagen:
+        synthetic:
           templates:
             - "Failed password for {username} from {external_ipv4} port {port} ssh2"
       - name: score
         type: integer
         expr: "@source: score"
-        datagen:
+        synthetic:
           minimum: 1
           maximum: 5
       - name: event_time
         type: string
         expr: "@source: event_time"
-        datagen:
+        synthetic:
           format: epoch_ms
       - name: agent
         type: string
         expr: "@source: agent"
-        datagen:
+        synthetic:
           provider: user_agent
 """
 
@@ -176,7 +176,7 @@ def hinted_schema(tmp_path: Path) -> Path:
 
 class TestHints:
     def test_hints_loaded(self, hinted_schema: Path):
-        hints = load_datagen_hints(hinted_schema)
+        hints = load_synthetic_hints(hinted_schema)
         assert set(hints) == {"vendor", "action", "message", "score", "event_time", "agent"}
 
     def test_hint_behaviours(self, hinted_schema: Path):
@@ -200,7 +200,7 @@ class TestHints:
         path = tmp_path / "bad.yaml"
         path.write_text(bad, encoding="utf-8")
         factory = SchemaEventFactory.from_schema(path, seed=3)
-        with pytest.raises(DatagenError, match="placeholder"):
+        with pytest.raises(SyntheticDataError, match="placeholder"):
             factory.event(when=FIXED_END)
 
     def test_unknown_provider_raises(self, tmp_path: Path):
@@ -208,25 +208,25 @@ class TestHints:
         path = tmp_path / "bad.yaml"
         path.write_text(bad, encoding="utf-8")
         factory = SchemaEventFactory.from_schema(path, seed=3)
-        with pytest.raises(DatagenError, match="provider"):
+        with pytest.raises(SyntheticDataError, match="provider"):
             factory.event(when=FIXED_END)
 
     def test_mismatched_weights_raise(self, tmp_path: Path):
         bad = HINTED_SCHEMA.replace("weights: [9, 1]", "weights: [9]")
         path = tmp_path / "bad.yaml"
         path.write_text(bad, encoding="utf-8")
-        with pytest.raises(DatagenError, match="weights"):
-            load_datagen_hints(path)
+        with pytest.raises(SyntheticDataError, match="weights"):
+            load_synthetic_hints(path)
 
 
 class TestFactoryEdges:
     def test_no_source_columns_raises(self):
         columns = [SchemaColumn(name="x", type="string", expr="@generated: now64(3)")]
-        with pytest.raises(DatagenError, match="no @source"):
+        with pytest.raises(SyntheticDataError, match="no @source"):
             SchemaEventFactory(columns, seed=1)
 
     def test_count_below_one_raises(self):
         columns = [SchemaColumn(name="x", type="string", expr="@source: x")]
         factory = SchemaEventFactory(columns, seed=1)
-        with pytest.raises(DatagenError, match="count"):
+        with pytest.raises(SyntheticDataError, match="count"):
             factory.events(0)

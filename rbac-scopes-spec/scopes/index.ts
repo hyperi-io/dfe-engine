@@ -100,6 +100,11 @@ const sampler_scopes = {
   sampler_read: "sampler:read",
 } as const;
 
+const synthetic_data_scopes = {
+  synthetic_data_read: "synthetic-data:read",
+  synthetic_data_run: "synthetic-data:run",
+} as const;
+
 const rules_scopes = {
   rule_read: "rule:read",
   rule_write: "rule:write",
@@ -189,6 +194,7 @@ export const scopes = {
   ...repository_scopes,
   ...role_scopes,
   ...sampler_scopes,
+  ...synthetic_data_scopes,
   ...rules_scopes,
   ...schemas_scopes,
   ...service_surfaces_scopes,

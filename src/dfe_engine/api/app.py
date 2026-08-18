@@ -239,6 +239,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     app.state.sampler = Sampler(settings.sampler, settings.kafka, settings.clickhouse)
 
+    # Synthetic data service (synthetic reference streams; ceilings from settings)
+    from dfe_engine.synthetic_data.service import SyntheticDataService
+
+    app.state.synthetic_data = SyntheticDataService(settings.synthetic_data)
+
     # Readiness reflects ClickHouse reachability. The engine's core paths
     # (ingest, load, hunt, query) all need CH, so a pod that cannot reach it is
     # not ready to serve: /readyz goes NotReady and k8s pulls it from the

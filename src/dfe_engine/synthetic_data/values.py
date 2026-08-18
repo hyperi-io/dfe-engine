@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/values.py
+#  File:         synthetic_data/values.py
 #  Purpose:      Semantic column classification + typed value generation
 #  Language:     Python
 #
@@ -14,7 +14,7 @@ event (the hostname, FQDN, IP and MAC all belong to the same generated host).
 
 This is deliberately heuristic, not ML: for machine-data fields the name and
 type carry the semantics ("source_ip", "AwsAccountId", type datetime), and a
-reference pack can always override a column with explicit ``datagen:`` hints
+reference pack can always override a column with explicit ``synthetic:`` hints
 where a heuristic cannot reach (finding-type vocabularies, message templates).
 """
 
@@ -27,8 +27,8 @@ from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from dfe_engine.datagen.entities import CloudAccount, EntityPool, Host, User
     from dfe_engine.source.models import SchemaColumn
+    from dfe_engine.synthetic_data.entities import CloudAccount, EntityPool, Host, User
 
 
 class Semantic(StrEnum):

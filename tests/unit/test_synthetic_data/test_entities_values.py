@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         tests/unit/test_datagen/test_entities_values.py
+#  File:         tests/unit/test_synthetic_data/test_entities_values.py
 #  Purpose:      Entity pool coherence/determinism + semantic classification
 #  Language:     Python
 #
@@ -14,15 +14,15 @@ from datetime import UTC, datetime
 
 import pytest
 
-from dfe_engine.datagen.entities import EntityPool
-from dfe_engine.datagen.values import (
+from dfe_engine.source.models import SchemaColumn
+from dfe_engine.synthetic_data.entities import EntityPool
+from dfe_engine.synthetic_data.values import (
     EventContext,
     Semantic,
     classify,
     generate,
     render_timestamp,
 )
-from dfe_engine.source.models import SchemaColumn
 
 MAC_RE = re.compile(r"^([0-9a-fA-F]{2}:){5}[0-9a-fA-F]{2}$")
 

@@ -263,7 +263,7 @@ class SchemaLoader:
 
         Same file-layout and version resolution as :meth:`load_columns`.
         Returns the raw version mapping (``columns`` plus any sibling keys
-        such as ``datagen``); flat files are wrapped as ``{"columns": [...]}``.
+        such as ``synthetic``); flat files are wrapped as ``{"columns": [...]}``.
 
         Raises:
             SchemaLoadError: If file missing or invalid.
@@ -301,7 +301,7 @@ class SchemaLoader:
 
         Same file-layout and version resolution as :meth:`load_columns`, but
         returns the raw column mappings - for consumers that need keys the
-        ``SchemaColumn`` model does not carry (e.g. datagen hints).
+        ``SchemaColumn`` model does not carry (e.g. synthetic data hints).
 
         Raises:
             SchemaLoadError: If file missing or invalid.
