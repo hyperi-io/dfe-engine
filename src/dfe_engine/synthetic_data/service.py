@@ -20,6 +20,7 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 
 from scalo.logger import logger
 
@@ -172,6 +173,13 @@ class SyntheticDataService:
             )
         if not req.receiver_url.startswith(("http://", "https://")):
             raise SyntheticDataError("receiver_url must be http(s)")
+        allowed = [h.strip() for h in self.settings.allowed_receiver_hosts.split(",") if h.strip()]
+        if allowed:
+            host = urlsplit(req.receiver_url).hostname or ""
+            if host not in allowed:
+                raise SyntheticDataError(
+                    f"receiver host {host!r} is not in synthetic_data.allowed_receiver_hosts"
+                )
         self.resolve_ref(req.schema_ref)
 
     async def run_stream(self, req: StreamRequest, *, task: Any = None) -> dict[str, Any]:

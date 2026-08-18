@@ -276,8 +276,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     logger.info(f"DFE Engine API started (port={settings.api.port})")
     yield
     health.set_ready(False)
-    for task in getattr(app.state, "synthetic_autostart", []):
+    autostart_tasks = getattr(app.state, "synthetic_autostart", [])
+    for task in autostart_tasks:
         task.cancel()
+    if autostart_tasks:
+        # Await the cancellations so sink teardown (HTTP client close) runs.
+        import asyncio
+
+        await asyncio.gather(*autostart_tasks, return_exceptions=True)
     shutdown_registries()
     logger.info("DFE Engine API stopped")
 

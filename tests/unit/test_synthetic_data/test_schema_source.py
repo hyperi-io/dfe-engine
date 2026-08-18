@@ -220,6 +220,23 @@ class TestHints:
 
 
 class TestFactoryEdges:
+    def test_conflicting_source_paths_rejected(self):
+        columns = [
+            SchemaColumn(name="resource", type="string", expr="@source: Resource"),
+            SchemaColumn(name="resource_type", type="string", expr="@source: Resource.Type"),
+        ]
+        with pytest.raises(SyntheticDataError, match="conflict"):
+            SchemaEventFactory(columns, seed=1)
+
+    def test_empty_hint_values_rejected(self, tmp_path: Path):
+        bad = HINTED_SCHEMA.replace("values: [allow, deny]", "values: []").replace(
+            "weights: [9, 1]", ""
+        )
+        path = tmp_path / "bad.yaml"
+        path.write_text(bad, encoding="utf-8")
+        with pytest.raises(SyntheticDataError):
+            load_synthetic_hints(path)
+
     def test_no_source_columns_raises(self):
         columns = [SchemaColumn(name="x", type="string", expr="@generated: now64(3)")]
         with pytest.raises(SyntheticDataError, match="no @source"):

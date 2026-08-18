@@ -23,8 +23,6 @@ poll here or subscribe to ``GET /tasks/{task_id}/stream`` (SSE) for the UI.
 
 from __future__ import annotations
 
-import asyncio
-
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
@@ -106,22 +104,8 @@ async def _submit(
         wait = cfg.wait_seconds
 
     if wait > 0:
-        info = await _await_task(manager, info.id, wait) or info
+        info = await manager.await_terminal(info.id, wait) or info
     return _to_response(info)
-
-
-async def _await_task(manager: TaskManager, task_id: str, wait: float) -> TaskInfo | None:
-    """Block until the task reaches a terminal state or ``wait`` seconds elapse."""
-    loop = asyncio.get_running_loop()
-    deadline = loop.time() + wait
-    while True:
-        info = manager.get(task_id)
-        if info is None or info.status in _TERMINAL:
-            return info
-        remaining = deadline - loop.time()
-        if remaining <= 0:
-            return info
-        await manager.wait_for_progress(task_id, timeout=remaining)
 
 
 # ── endpoints ──────────────────────────────────────────────────

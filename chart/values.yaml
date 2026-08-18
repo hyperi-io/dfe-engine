@@ -99,6 +99,8 @@ config:
     autostart_schemas: ""
     autostart_receiver_url: ""
     autostart_rate_eps: 2
+    # -- Optional determinism seed for the standing streams
+    autostart_seed: ""
   # -- Root config directory — maps to DFE_CONFIG_DIR.
   # Auto-resolves sources/, services/, hunts/, etc. subdirectories.
   # Set to the mount path of your config PVC or git-synced volume.
