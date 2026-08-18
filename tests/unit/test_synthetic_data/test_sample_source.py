@@ -104,6 +104,26 @@ class TestIdentityScrub:
             message = event["message"]
             for ip in (*SAMPLE_PRIVATE_IPS, *SAMPLE_PUBLIC_IPS):
                 assert ip not in message
+            for user in SAMPLE_USERS:
+                assert user not in message
+
+    def test_hostnameish_key_synthesised_not_replayed(self):
+        # "workstation" has no validating regex - the key NAME must force
+        # synthesis so the real machine names never replay as enum vocab.
+        rows = [
+            {"workstation": name, "action": "login"}
+            for name in ("CORP-DC01", "LT-DEREK", "CORP-DC02") * 20
+        ]
+        events = SampleEventFactory(rows=rows, seed=4).events(60, end=FIXED_END)
+        for event in events:
+            assert event["workstation"] not in ("CORP-DC01", "LT-DEREK", "CORP-DC02")
+
+    def test_snowflake_ids_stay_numeric(self):
+        rows = [{"message_id": 113343747278665136 + i, "level": "info"} for i in range(30)]
+        events = SampleEventFactory(rows=rows, seed=4).events(20, end=FIXED_END)
+        low, high = 113343747278665136, 113343747278665136 + 29
+        for event in events:
+            assert low <= event["message_id"] <= high
 
 
 class TestModesAndEdges:

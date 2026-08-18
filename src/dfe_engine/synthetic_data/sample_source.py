@@ -25,6 +25,15 @@ Classification is value-population based (does the column actually hold
 IPs?), with the key NAME as the tie-breaker for semantics no regex can
 validate (usernames, hostnames): a name-identified identity key is always
 synthesised, never replayed, even when its cardinality looks enum-like.
+Every value observed under an identity key also enters a LEXICON with a
+stable synthesised replacement - free text is scrubbed against it and enum
+replay excludes it, so an identity seen anywhere structured cannot ride out
+through another key.
+
+The scrub is best-effort, not proof: an identity that appears ONLY in free
+text (never under a recognisable key) and matches no identity regex can
+still replay - the raw ``lines`` mode carries exactly that residual risk.
+Review output before publishing it outside the org.
 """
 
 from __future__ import annotations
@@ -35,6 +44,8 @@ from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+
+from scalo.logger import logger
 
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.synthetic_data.entities import EntityPool
@@ -97,6 +108,7 @@ class _KeyPlan:
     fmt: str | None = None
     low: float = 0.0
     high: float = 0.0
+    observed: list[str] | None = None
 
 
 def _is_ipv4(value: str) -> bool:
@@ -171,24 +183,40 @@ def _plan_for(name: str, raw_values: list[Any]) -> _KeyPlan:
         return _KeyPlan("replay", values=vocab, weights=[counts[v] for v in vocab])
     if all(isinstance(v, int) and not isinstance(v, bool) for v in values):
         low, high = min(values), max(values)
-        if low >= 10**12:
+        # Epoch windows are bounded above (~year 2100) so snowflake-style ids
+        # do not masquerade as timestamps.
+        if 10**12 <= low and high < 4_102_444_800_000:
             return _KeyPlan("timestamp", fmt="epoch_ms")
-        if 10**9 <= low < 10**11:
+        if 10**9 <= low and high < 4_102_444_800:
             return _KeyPlan("timestamp", fmt="epoch_s")
         return _KeyPlan("number", low=low, high=high)
     if all(isinstance(v, int | float) and not isinstance(v, bool) for v in values):
         return _KeyPlan("float", low=float(min(values)), high=float(max(values)))
-    return _classify_strings(name, [str(v) for v in values])
+    strings = [str(v) for v in values]
+    plan = _classify_strings(name, strings)
+    if (
+        plan.kind == "semantic"
+        and plan.inference is not None
+        and plan.inference.semantic in _IDENTITY_SEMANTICS
+    ):
+        plan.observed = sorted(set(strings))
+    return plan
 
 
-def _flatten(row: dict[str, Any], prefix: tuple[str, ...] = ()) -> dict[tuple[str, ...], Any]:
+def _flatten(
+    row: dict[str, Any],
+    prefix: tuple[str, ...] = (),
+    dropped: set[tuple[str, ...]] | None = None,
+) -> dict[tuple[str, ...], Any]:
     flat: dict[tuple[str, ...], Any] = {}
     for key, value in row.items():
         path = (*prefix, str(key))
         if isinstance(value, dict):
-            flat.update(_flatten(value, path))
+            flat.update(_flatten(value, path, dropped))
         elif isinstance(value, list):
-            continue  # list-valued keys are out of scope for lookalike v1
+            # List-valued keys are out of scope for lookalike v1.
+            if dropped is not None:
+                dropped.add(path)
         else:
             flat[path] = value
     return flat
@@ -234,12 +262,13 @@ class SampleEventFactory:
         rows = (rows or [])[:max_sample]
         lines = (lines or [])[:max_sample]
         self._plans: dict[tuple[str, ...], _KeyPlan] = {}
+        dropped: set[tuple[str, ...]] = set()
         if rows:
             populations: dict[tuple[str, ...], list[Any]] = {}
             for row in rows:
                 if not isinstance(row, dict):
                     continue
-                for path, value in _flatten(row).items():
+                for path, value in _flatten(row, dropped=dropped).items():
                     populations.setdefault(path, []).append(value)
             for path, values in populations.items():
                 plan = _plan_for(path[-1], values)
@@ -252,8 +281,70 @@ class SampleEventFactory:
                 self._plans[("message",)] = _KeyPlan(
                     "text", values=vocab, weights=[counts[v] for v in vocab]
                 )
+        if dropped:
+            logger.info(
+                "lookalike: list-valued keys are not generated",
+                keys=sorted(".".join(path) for path in dropped),
+            )
         if not self._plans:
             raise SyntheticDataError("Sample has no usable rows or lines - nothing to generate")
+
+        # Identity lexicon: every value observed under an identity-classified
+        # key, mapped to a STABLE synthesised replacement. Text plans scrub
+        # these tokens and enum replay excludes them, so a real username or
+        # hostname can never ride out inside a message or a vocabulary.
+        self._lexicon = self._build_lexicon()
+        self._lexicon_re: re.Pattern[str] | None = None
+        if self._lexicon:
+            alternatives = "|".join(
+                re.escape(value) for value in sorted(self._lexicon, key=len, reverse=True)
+            )
+            self._lexicon_re = re.compile(rf"(?<![A-Za-z0-9])(?:{alternatives})(?![A-Za-z0-9])")
+        self._filter_replay_vocabularies()
+
+    def _build_lexicon(self) -> dict[str, str]:
+        lexicon: dict[str, str] = {}
+        identity_values: dict[str, Semantic] = {}
+        for plan in self._plans.values():
+            if (
+                plan.kind == "semantic"
+                and plan.inference is not None
+                and plan.inference.semantic in _IDENTITY_SEMANTICS
+                and plan.observed
+            ):
+                for value in plan.observed:
+                    identity_values.setdefault(value, plan.inference.semantic)
+        hosts = self.pool.hosts
+        users = self.pool.users
+        for i, (value, semantic) in enumerate(sorted(identity_values.items())):
+            if semantic in (Semantic.HOSTNAME,):
+                lexicon[value] = hosts[i % len(hosts)].hostname
+            elif semantic in (Semantic.FQDN,):
+                lexicon[value] = hosts[i % len(hosts)].fqdn
+            elif semantic in (Semantic.EMAIL,):
+                lexicon[value] = users[i % len(users)].email
+            elif semantic in (Semantic.USERNAME,):
+                lexicon[value] = users[i % len(users)].username
+            else:
+                lexicon[value] = self.pool.fake.hexify(text="^" * 12)
+        return lexicon
+
+    def _filter_replay_vocabularies(self) -> None:
+        for path, plan in list(self._plans.items()):
+            if plan.kind != "replay" or plan.values is None or plan.weights is None:
+                continue
+            kept = [
+                (v, w)
+                for v, w in zip(plan.values, plan.weights, strict=True)
+                if not (isinstance(v, str) and v in self._lexicon)
+            ]
+            if not kept:
+                self._plans[path] = _KeyPlan(
+                    "semantic", inference=Inference(Semantic.TOKEN, low=12)
+                )
+                continue
+            plan.values = [v for v, _ in kept]
+            plan.weights = [w for _, w in kept]
 
     # ── event construction ────────────────────────────────────────
 
@@ -321,4 +412,6 @@ class SampleEventFactory:
         line = _TEXT_EMAIL_RE.sub(lambda _: ctx.user.email, line)
         line = _TEXT_UUID_RE.sub(lambda _: pool.fake.uuid4(), line)
         line = _TEXT_MAC_RE.sub(lambda _: ctx.host.mac, line)
+        if self._lexicon_re is not None:
+            line = self._lexicon_re.sub(lambda m: self._lexicon[m.group(0)], line)
         return line

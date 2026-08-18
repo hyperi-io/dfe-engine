@@ -236,6 +236,38 @@ class TestStream:
         r = client.delete("/api/v1/synthetic-data/streams/not-a-task", headers=admin_headers)
         assert r.status_code == 404
 
+    def test_concurrent_stream_cap_enforced(self, client, admin_headers):
+        # Long low-rate streams stay RUNNING; the default cap is 3.
+        started = []
+        for _ in range(3):
+            r = client.post(
+                "/api/v1/synthetic-data/stream",
+                json={
+                    "schema": "meta/syslog",
+                    "duration_s": 60,
+                    "rate_eps": 0.5,
+                    "receiver_url": "http://127.0.0.1:9/ingest",
+                },
+                headers=admin_headers,
+            )
+            assert r.status_code == 200, r.text
+            started.append(r.json()["task_id"])
+        try:
+            r = client.post(
+                "/api/v1/synthetic-data/stream",
+                json={
+                    "schema": "meta/syslog",
+                    "duration_s": 60,
+                    "receiver_url": "http://127.0.0.1:9/ingest",
+                },
+                headers=admin_headers,
+            )
+            assert r.status_code == 409
+            assert "too_many_streams" in r.text
+        finally:
+            for task_id in started:
+                client.delete(f"/api/v1/synthetic-data/streams/{task_id}", headers=admin_headers)
+
     def test_viewer_cannot_stream(self, client, viewer_headers):
         r = client.post(
             "/api/v1/synthetic-data/stream",

@@ -6525,7 +6525,7 @@
           "synthetic-data"
         ],
         "summary": "Generate",
-        "description": "Generate a bounded batch of synthetic events inline.",
+        "description": "Generate a bounded batch of synthetic events inline.\n\nSync handler by design: a ceiling-sized batch is pure CPU, so FastAPI's\nthreadpool keeps the event loop responsive while it renders.",
         "operationId": "generate_api_v1_synthetic_data_generate_post",
         "requestBody": {
           "content": {
@@ -11922,6 +11922,33 @@
         ]
       }
     },
+    "/api/v1/hyperdx/connection": {
+      "get": {
+        "tags": [
+          "HyperDX"
+        ],
+        "summary": "Hyperdx Connection",
+        "description": "Return the caller's OWN org connection - never another org's.\n\nUnrestricted callers (any role beyond ``org_viewer``) get the platform reader;\na single-org caller gets its pinned ``dfe_org_<org>`` user; a caller that\nresolves to zero or several separate orgs is refused (403) so isolation fails\nclosed rather than guessing.",
+        "operationId": "hyperdx_connection_api_v1_hyperdx_connection_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HyperDXConnection"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/repository/preferences": {
       "get": {
         "tags": [
@@ -15372,6 +15399,35 @@
         },
         "type": "object",
         "title": "HyperDXConfig"
+      },
+      "HyperDXConnection": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "host": {
+            "type": "string",
+            "title": "Host"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "host",
+          "username",
+          "password"
+        ],
+        "title": "HyperDXConnection",
+        "description": "Connection material in the fork's shape (name, host URL, username, password)."
       },
       "InitialSetupState": {
         "properties": {

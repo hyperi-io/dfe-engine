@@ -587,11 +587,21 @@ class SyntheticDataSettings(BaseModel):
     ceiling that keeps a fat-fingered request modest. Rates are Poisson-paced
     events per second; streams are bounded by count and/or duration.
 
+    A standing demo stream (the sales-demo live tail) is the AUTOSTART knobs:
+    name reference packs and a receiver URL and the engine keeps those streams
+    running for the pod's lifetime. Default empty = off.
+
     Environment variables (DFE_SYNTHETIC_DATA_ prefix):
     - DFE_SYNTHETIC_DATA_MAX_COUNT -> synthetic_data.max_count
     - DFE_SYNTHETIC_DATA_MAX_RATE_EPS -> synthetic_data.max_rate_eps
     - DFE_SYNTHETIC_DATA_MAX_STREAM_SECONDS -> synthetic_data.max_stream_seconds
     - DFE_SYNTHETIC_DATA_DEFAULT_RATE_EPS -> synthetic_data.default_rate_eps
+    - DFE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS -> synthetic_data.autostart_schemas
+    - DFE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL -> synthetic_data.autostart_receiver_url
+    - DFE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS -> synthetic_data.autostart_rate_eps
+    - DFE_SYNTHETIC_DATA_AUTOSTART_SEED -> synthetic_data.autostart_seed
+    - DFE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS -> synthetic_data.max_concurrent_streams
+    - DFE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS -> synthetic_data.allowed_receiver_hosts
     """
 
     max_count: int = Field(
@@ -605,6 +615,28 @@ class SyntheticDataSettings(BaseModel):
     )
     default_rate_eps: float = Field(
         default=5.0, gt=0, description="Stream rate when the caller does not set one"
+    )
+    autostart_schemas: str = Field(
+        default="",
+        description="Comma-separated pack refs to stream continuously (empty = off)",
+    )
+    autostart_receiver_url: str = Field(
+        default="", description="Ingest URL the standing streams post to"
+    )
+    autostart_rate_eps: float = Field(
+        default=2.0, gt=0, description="Per-pack rate for the standing streams"
+    )
+    autostart_seed: int | None = Field(
+        default=None, description="Determinism seed for the standing streams"
+    )
+    max_concurrent_streams: int = Field(
+        default=3, ge=1, description="Hard cap on concurrently running API stream tasks"
+    )
+    allowed_receiver_hosts: str = Field(
+        default="",
+        description=(
+            "Comma-separated hostnames stream receiver URLs may target (empty = any http(s))"
+        ),
     )
 
 
@@ -1115,6 +1147,7 @@ def _get_env_overrides() -> dict:
         "query": {},
         "query_views": {},
         "sampler": {},
+        "synthetic_data": {},
         "keda_shim": {},
         "schemas": {},
         "source": {},
@@ -1348,6 +1381,28 @@ def _get_env_overrides() -> dict:
         overrides["sampler"]["wait_seconds"] = float(val)
     if val := _get_env("DFE_SAMPLER_MAX_EXECUTION_TIME"):
         overrides["sampler"]["max_execution_time"] = int(val)
+
+    # Synthetic data settings (ceilings + the standing demo stream)
+    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_COUNT"):
+        overrides["synthetic_data"]["max_count"] = int(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_RATE_EPS"):
+        overrides["synthetic_data"]["max_rate_eps"] = float(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_STREAM_SECONDS"):
+        overrides["synthetic_data"]["max_stream_seconds"] = float(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_DEFAULT_RATE_EPS"):
+        overrides["synthetic_data"]["default_rate_eps"] = float(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_SCHEMAS"):
+        overrides["synthetic_data"]["autostart_schemas"] = val
+    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_RECEIVER_URL"):
+        overrides["synthetic_data"]["autostart_receiver_url"] = val
+    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_RATE_EPS"):
+        overrides["synthetic_data"]["autostart_rate_eps"] = float(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_AUTOSTART_SEED"):
+        overrides["synthetic_data"]["autostart_seed"] = int(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_MAX_CONCURRENT_STREAMS"):
+        overrides["synthetic_data"]["max_concurrent_streams"] = int(val)
+    if val := _get_env("DFE_SYNTHETIC_DATA_ALLOWED_RECEIVER_HOSTS"):
+        overrides["synthetic_data"]["allowed_receiver_hosts"] = val
 
     # KEDA shim settings (the metrics-api -> ClickHouse query adapter)
     if val := _get_env("DFE_KEDA_SHIM_HOST"):

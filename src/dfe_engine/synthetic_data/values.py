@@ -209,7 +209,7 @@ def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
         return Inference(Semantic.MAC)
     if t & {"fqdn", "domain"}:
         return Inference(Semantic.FQDN)
-    if t & {"hostname", "host"}:
+    if t & {"hostname", "host", "workstation", "machine", "computer", "device", "endpoint"}:
         return Inference(Semantic.HOSTNAME)
     if t & {"email", "caller"}:
         return Inference(Semantic.EMAIL)
@@ -217,7 +217,7 @@ def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
         return Inference(Semantic.USER_AGENT)
     if {"user", "id"} <= t or "uid" in t:
         return Inference(Semantic.UUID)
-    if "username" in t or {"user", "name"} <= t or "user" in t:
+    if not numeric and ("username" in t or {"user", "name"} <= t or t & {"user", "actor"}):
         return Inference(Semantic.USERNAME)
     if t & {"url", "uri"}:
         return Inference(Semantic.URL)
@@ -231,10 +231,10 @@ def classify(column: SchemaColumn, *, provider: str = "aws") -> Inference:
         return Inference(Semantic.TOKEN, low=16)
     if t & {"process", "image"}:
         return Inference(Semantic.PROCESS_PATH)
-    if t & {"sha256", "hash"}:
-        return Inference(Semantic.SHA256)
     if "md5" in t:
         return Inference(Semantic.MD5)
+    if t & {"sha256", "hash"}:
+        return Inference(Semantic.SHA256)
     if "arn" in t:
         return Inference(Semantic.ARN)
     if "account" in t and "id" in t:

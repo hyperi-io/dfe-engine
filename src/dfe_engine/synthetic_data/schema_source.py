@@ -88,6 +88,9 @@ def set_path(event: dict[str, Any], segments: list[_PathSegment], value: Any) ->
     node: Any = event
     for i, seg in enumerate(segments):
         last = i == len(segments) - 1
+        if not isinstance(node, dict):
+            path = ".".join(s.key for s in segments)
+            raise SyntheticDataError(f"@source path {path!r} descends through a scalar value")
         if seg.index is None:
             if last:
                 node[seg.key] = value
@@ -201,6 +204,16 @@ class SchemaEventFactory:
             self._plan.append((col, segments, classify(col, provider=provider)))
         if not self._plan:
             raise SyntheticDataError("Schema has no @source columns - nothing to generate")
+        # A path that is a strict prefix of another cannot hold both a scalar
+        # and an object - refuse at build time instead of failing per event.
+        key_paths = {tuple(s.key for s in segments): col.name for col, segments, _ in self._plan}
+        for path, name in key_paths.items():
+            for other, other_name in key_paths.items():
+                if len(other) > len(path) and other[: len(path)] == path:
+                    raise SyntheticDataError(
+                        f"@source paths conflict: {name!r} and {other_name!r} "
+                        f"overlap at {'.'.join(path)}"
+                    )
 
     @classmethod
     def from_schema(

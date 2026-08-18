@@ -147,6 +147,7 @@ it.
 | [oidc-rbac-architecture.md](oidc-rbac-architecture.md) | OIDC + RBAC SSoT - auth model, the two RBAC planes, provider registry + adapters, management API, infra requirements, test emulation |
 | [rbac.md](rbac.md) | auth paths, RBAC model, multi-tenant ClickHouse, stores |
 | [rbac-vocabulary.md](rbac-vocabulary.md) | SSoT for role + group names and terms across engine, ui, infra, deploy, schemas and test envs |
+| [synthetic-data.md](synthetic-data.md) | synthetic data generation - reference packs, lookalike scrub, standing demo streams |
 | [ui-api-guide.md](ui-api-guide.md) | frontend integration guide (endpoint reference) |
 | [type-safety-sync.md](type-safety-sync.md) | OpenAPI + RBAC-scope typegen sync to dfe-ui |
 | [dfe-cli-design.md](dfe-cli-design.md) | the `dfe` client CLI design (AWS CLI v2 model) |
