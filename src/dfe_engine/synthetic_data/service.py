@@ -32,11 +32,13 @@ from dfe_engine.schema.schema_loader import (
 from dfe_engine.synthetic_data.models import (
     GenerateRequest,
     GenerateResult,
+    LookalikeRequest,
     PackInfo,
     StreamRequest,
     StreamSummary,
     SyntheticDataError,
 )
+from dfe_engine.synthetic_data.sample_source import SampleEventFactory
 from dfe_engine.synthetic_data.schema_source import SchemaEventFactory, _provider_from_path
 from dfe_engine.synthetic_data.stream import HttpPostSink, stream_events
 
@@ -135,6 +137,25 @@ class SyntheticDataService:
             seed=req.seed,
             events=events,
         )
+
+    def generate_lookalike(self, req: LookalikeRequest) -> GenerateResult:
+        """Generate a bounded lookalike batch from a supplied sample."""
+        if req.count > self.settings.max_count:
+            raise SyntheticDataError(
+                f"count {req.count} exceeds the configured ceiling {self.settings.max_count}"
+            )
+        if not (req.rows or req.lines):
+            raise SyntheticDataError("lookalike needs sample input: rows and/or lines")
+        factory = SampleEventFactory(
+            rows=req.rows,
+            lines=req.lines,
+            seed=req.seed,
+            tags=req.tags,
+            mark_synthetic=req.mark_synthetic,
+        )
+        rate = min(req.rate_eps or self.settings.default_rate_eps, self.settings.max_rate_eps)
+        events = factory.events(req.count, end=datetime.now(UTC), rate_eps=rate)
+        return GenerateResult(schema_ref="sample", count=len(events), seed=req.seed, events=events)
 
     def validate_stream(self, req: StreamRequest) -> None:
         """Fail fast on a bad stream request (before it becomes a task)."""

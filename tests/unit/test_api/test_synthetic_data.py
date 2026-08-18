@@ -115,6 +115,42 @@ class TestGenerate:
         assert r.status_code == 200, r.text
 
 
+class TestLookalike:
+    def test_inline_lookalike(self, client, admin_headers):
+        rows = [
+            {"user": "real.person", "action": "login" if i % 2 else "logout", "n": i}
+            for i in range(30)
+        ]
+        r = client.post(
+            "/api/v1/synthetic-data/lookalike",
+            json={"rows": rows, "count": 20, "seed": 5},
+            headers=admin_headers,
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["schema"] == "sample"
+        assert len(body["events"]) == 20
+        for event in body["events"]:
+            assert event["tags"]["synthetic"] is True
+            assert event["user"] != "real.person"
+            assert event["action"] in ("login", "logout")
+
+    def test_missing_input_rejected(self, client, admin_headers):
+        r = client.post(
+            "/api/v1/synthetic-data/lookalike", json={"count": 5}, headers=admin_headers
+        )
+        assert r.status_code == 400
+        assert "sample input" in r.text
+
+    def test_viewer_cannot_lookalike(self, client, viewer_headers):
+        r = client.post(
+            "/api/v1/synthetic-data/lookalike",
+            json={"rows": [{"a": 1}], "count": 1},
+            headers=viewer_headers,
+        )
+        assert r.status_code == 403
+
+
 @needs_packs
 class TestStream:
     def test_stream_degrades_on_unreachable_receiver(self, client, admin_headers):

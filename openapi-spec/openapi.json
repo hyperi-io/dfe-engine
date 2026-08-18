@@ -6566,6 +6566,53 @@
         ]
       }
     },
+    "/api/v1/synthetic-data/lookalike": {
+      "post": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "Lookalike",
+        "description": "Generate a lookalike batch from a supplied sample (identities scrubbed).",
+        "operationId": "lookalike_api_v1_synthetic_data_lookalike_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LookalikeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/synthetic-data/stream": {
       "post": {
         "tags": [
@@ -15853,6 +15900,95 @@
         "title": "LogsourceMatch",
         "description": "A source matching a Sigma logsource selector."
       },
+      "LookalikeRequest": {
+        "properties": {
+          "rows": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rows",
+            "description": "Parsed sample events (preferred input)"
+          },
+          "lines": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lines",
+            "description": "Raw sample lines (used when rows is empty)"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Count",
+            "description": "Events to generate (capped by settings)",
+            "default": 100
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Determinism seed"
+          },
+          "rate_eps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Eps",
+            "description": "Timestamp spacing rate (events/second)"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Extra tags merged into events"
+          },
+          "mark_synthetic": {
+            "type": "boolean",
+            "title": "Mark Synthetic",
+            "description": "Emit tags.synthetic=true",
+            "default": true
+          }
+        },
+        "type": "object",
+        "title": "LookalikeRequest",
+        "description": "Inline lookalike generation from a sample (the sampler's rows/lines).\n\nIdentity values in the sample (IPs, users, hosts, emails, ...) are never\nreplayed - they are synthesised from the entity pool. Enum vocabularies\nand message structure are kept."
+      },
       "ManifestRefreshResponse": {
         "properties": {
           "service": {
@@ -21994,7 +22130,7 @@
           "task_id": {
             "type": "string",
             "title": "Task Id",
-            "description": "Task ID; poll via GET /synthetic_data/streams/{task_id}"
+            "description": "Task ID; poll via GET /synthetic-data/streams/{task_id}"
           },
           "status": {
             "$ref": "#/components/schemas/TaskStatus",

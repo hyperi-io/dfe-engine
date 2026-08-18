@@ -7,12 +7,13 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Synthetic data router - generate realistic synthetic data from reference packs.
 
-    GET    /synthetic_data/packs               -> list generatable schema packs
-    POST   /synthetic_data/generate            -> bounded inline batch (demo/test data)
-    POST   /synthetic_data/stream              -> start a stream task posting to a receiver
-    GET    /synthetic_data/streams             -> list stream tasks
-    GET    /synthetic_data/streams/{task_id}   -> poll a stream task
-    DELETE /synthetic_data/streams/{task_id}   -> cancel a running stream
+    GET    /synthetic-data/packs               -> list generatable schema packs
+    POST   /synthetic-data/generate            -> bounded inline batch (demo/test data)
+    POST   /synthetic-data/lookalike           -> batch shaped like a supplied sample
+    POST   /synthetic-data/stream              -> start a stream task posting to a receiver
+    GET    /synthetic-data/streams             -> list stream tasks
+    GET    /synthetic-data/streams/{task_id}   -> poll a stream task
+    DELETE /synthetic-data/streams/{task_id}   -> cancel a running stream
 
 Reads need ``synthetic-data:read``; generating or streaming needs ``synthetic-data:run``
 (generation injects data into the pipeline, so it is a write-grade action).
@@ -32,6 +33,7 @@ from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.synthetic_data.models import (
     GenerateRequest,
     GenerateResult,
+    LookalikeRequest,
     PackInfo,
     StreamRequest,
     SyntheticDataError,
@@ -49,7 +51,7 @@ _TASK_KIND = "synthetic-data:stream"
 class StreamSubmitResponse(BaseModel):
     """Envelope returned by a stream submit and by the poll endpoint."""
 
-    task_id: str = Field(description="Task ID; poll via GET /synthetic_data/streams/{task_id}")
+    task_id: str = Field(description="Task ID; poll via GET /synthetic-data/streams/{task_id}")
     status: TaskStatus = Field(description="pending | running | completed | failed | cancelled")
     result: dict | None = Field(default=None, description="Stream summary once terminal")
     error: str | None = Field(default=None, description="Present on failure")
@@ -106,6 +108,17 @@ async def generate(body: GenerateRequest, request: Request, user: CurrentUser) -
     except SyntheticDataError as exc:
         raise _bad_request(exc) from exc
     audit_resource_change(user.user_id, "synthetic-data", body.schema_ref, "executed")
+    return result
+
+
+@router.post("/synthetic-data/lookalike", response_model=GenerateResult, dependencies=[_RUN])
+async def lookalike(body: LookalikeRequest, request: Request, user: CurrentUser) -> GenerateResult:
+    """Generate a lookalike batch from a supplied sample (identities scrubbed)."""
+    try:
+        result = _service(request).generate_lookalike(body)
+    except SyntheticDataError as exc:
+        raise _bad_request(exc) from exc
+    audit_resource_change(user.user_id, "synthetic-data", "sample", "executed")
     return result
 
 

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
@@ -300,6 +300,18 @@ def _process_path(ctx: EventContext) -> str:
     if ctx.host.os == "windows":
         return f"C:\\Windows\\System32\\{ctx.pool.rng.choice(_WINDOWS_PROCS)}"
     return f"/usr/sbin/{ctx.pool.rng.choice(_LINUX_PROCS)}"
+
+
+def paced_timestamps(rng: Any, count: int, end: datetime, rate_eps: float) -> list[datetime]:
+    """Poisson-spaced timestamps ending at ``end``, oldest first.
+
+    A batch stamped this way reads as a live tail that has been running,
+    not a block insert.
+    """
+    offsets = [0.0]
+    for _ in range(count - 1):
+        offsets.append(offsets[-1] + rng.expovariate(rate_eps))
+    return [end - timedelta(seconds=offsets[-1] - offset) for offset in offsets]
 
 
 def render_timestamp(when: datetime, fmt: str | None) -> Any:
