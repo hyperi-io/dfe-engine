@@ -220,7 +220,10 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
         mint_user=True,
         grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
         settings={
-            "readonly": 1,
+            # readonly=2, not 1: queries only, but per-query output settings stay
+            # changeable -- hyperdx sends date_time_output_format with every query
+            # and readonly=1 rejects the whole request. allow_ddl=0 still bars DDL.
+            "readonly": 2,
             "allow_ddl": 0,
             "max_execution_time": 30,
             "max_rows_to_read": 10_000_000,
