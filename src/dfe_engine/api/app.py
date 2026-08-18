@@ -191,6 +191,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
+    # Identity-issuer management plane: mTLS gRPC to the bundled OIDC issuer.
+    # The engine is the sole control plane for it (generic API -> issuer backend).
+    # Disabled by default; the channel is lazy so this never blocks startup.
+    from dfe_engine.auth.issuer.factory import build_issuer_backend
+
+    app.state.issuer_backend = build_issuer_backend(settings)
+
     # Org ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
     # Reconciles the seeded quota tiers + service roles + per-org roles/row
     # policies on _org_id into ClickHouse, plus one CH user per RBAC group
@@ -284,6 +291,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         import asyncio
 
         await asyncio.gather(*autostart_tasks, return_exceptions=True)
+    issuer_backend = getattr(app.state, "issuer_backend", None)
+    if issuer_backend is not None:
+        await issuer_backend.close()
     shutdown_registries()
     logger.info("DFE Engine API stopped")
 
