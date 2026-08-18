@@ -875,6 +875,34 @@ class HyperDXSettings(BaseModel):
     enabled: bool = Field(default=False, description="Enable HyperDX integration")
 
 
+class IssuerSettings(BaseModel):
+    """The engine's mTLS gRPC link to the bundled OIDC issuer management plane.
+
+    Issuer-agnostic on purpose -- no field names the issuer, so swapping it is
+    config, not code. Dex is the implementation today.
+
+    Environment variables (DFE_ISSUER_ prefix):
+    - DFE_ISSUER_ENABLED -> issuer.enabled
+    - DFE_ISSUER_ENDPOINT -> issuer.endpoint (host:port of the gRPC service)
+    - DFE_ISSUER_CA_CERT -> issuer.ca_cert (PEM CA that signed the server cert)
+    - DFE_ISSUER_CLIENT_CERT -> issuer.client_cert (engine client cert, same CA)
+    - DFE_ISSUER_CLIENT_KEY -> issuer.client_key (engine client key)
+    - DFE_ISSUER_SERVER_NAME -> issuer.server_name (TLS authority override)
+    """
+
+    enabled: bool = Field(default=False, description="Enable the issuer management plane")
+    endpoint: str = Field(default="", description="host:port of the issuer gRPC management service")
+    ca_cert: str = Field(default="", description="PEM CA file that signed the issuer's server cert")
+    client_cert: str = Field(
+        default="", description="PEM engine client cert for mTLS (issued by the same CA)"
+    )
+    client_key: str = Field(default="", description="PEM engine client private key for mTLS")
+    server_name: str = Field(
+        default="",
+        description="Override the TLS authority when the endpoint host is not a server-cert SAN",
+    )
+
+
 class GitopsSettings(BaseModel):
     """Deploy-specific gitops repo the engine renders artifacts into.
 
@@ -1081,6 +1109,7 @@ class DFESettings(BaseModel):
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
+    issuer: IssuerSettings = Field(default_factory=IssuerSettings)
     gitops: GitopsSettings = Field(default_factory=GitopsSettings)
     api: APISettings = Field(default_factory=APISettings)
     secrets: SecretsSettings = Field(default_factory=SecretsSettings)
@@ -1162,6 +1191,7 @@ def _get_env_overrides() -> dict:
         "helm": {},
         "auth": {},
         "hyperdx": {},
+        "issuer": {},
         "gitops": {},
         "api": {},
         "secrets": {},
@@ -1507,6 +1537,20 @@ def _get_env_overrides() -> dict:
         overrides["hyperdx"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_HYPERDX_API_KEY_ENV"):
         overrides["hyperdx"]["api_key_env"] = val
+
+    # Identity-issuer management plane (mTLS gRPC to the bundled OIDC issuer)
+    if val := _get_env("DFE_ISSUER_ENABLED"):
+        overrides["issuer"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_ISSUER_ENDPOINT"):
+        overrides["issuer"]["endpoint"] = val
+    if val := _get_env("DFE_ISSUER_CA_CERT"):
+        overrides["issuer"]["ca_cert"] = val
+    if val := _get_env("DFE_ISSUER_CLIENT_CERT"):
+        overrides["issuer"]["client_cert"] = val
+    if val := _get_env("DFE_ISSUER_CLIENT_KEY"):
+        overrides["issuer"]["client_key"] = val
+    if val := _get_env("DFE_ISSUER_SERVER_NAME"):
+        overrides["issuer"]["server_name"] = val
 
     # Gitops settings
     if val := _get_env("DFE_GITOPS_ENABLED"):
