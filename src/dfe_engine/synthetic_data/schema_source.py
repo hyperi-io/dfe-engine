@@ -27,7 +27,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +42,7 @@ from dfe_engine.synthetic_data.values import (
     Inference,
     classify,
     generate,
+    paced_timestamps,
     render_timestamp,
 )
 
@@ -267,11 +268,7 @@ class SchemaEventFactory:
         """
         if count < 1:
             raise SyntheticDataError("count must be >= 1")
-        end = end or datetime.now(UTC)
-        offsets = [0.0]
-        for _ in range(count - 1):
-            offsets.append(offsets[-1] + self.pool.rng.expovariate(rate_eps))
-        stamps = [end - timedelta(seconds=offsets[-1] - o) for o in offsets]
+        stamps = paced_timestamps(self.pool.rng, count, end or datetime.now(UTC), rate_eps)
         return [self.event(when=stamp) for stamp in stamps]
 
     def _value(

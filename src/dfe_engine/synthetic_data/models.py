@@ -125,6 +125,29 @@ class GenerateRequest(BaseModel):
     mark_synthetic: bool = Field(default=True, description="Emit tags.synthetic=true")
 
 
+class LookalikeRequest(BaseModel):
+    """Inline lookalike generation from a sample (the sampler's rows/lines).
+
+    Identity values in the sample (IPs, users, hosts, emails, ...) are never
+    replayed - they are synthesised from the entity pool. Enum vocabularies
+    and message structure are kept.
+    """
+
+    rows: list[dict[str, Any]] | None = Field(
+        default=None, description="Parsed sample events (preferred input)"
+    )
+    lines: list[str] | None = Field(
+        default=None, description="Raw sample lines (used when rows is empty)"
+    )
+    count: int = Field(default=100, ge=1, description="Events to generate (capped by settings)")
+    seed: int | None = Field(default=None, description="Determinism seed")
+    rate_eps: float | None = Field(
+        default=None, gt=0, description="Timestamp spacing rate (events/second)"
+    )
+    tags: dict[str, Any] | None = Field(default=None, description="Extra tags merged into events")
+    mark_synthetic: bool = Field(default=True, description="Emit tags.synthetic=true")
+
+
 class GenerateResult(BaseModel):
     """Inline generation result."""
 
