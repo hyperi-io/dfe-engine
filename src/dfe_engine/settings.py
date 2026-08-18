@@ -874,9 +874,10 @@ class HyperDXSettings(BaseModel):
 
 
 class IssuerSettings(BaseModel):
-    """Identity-issuer management plane: the engine's mTLS gRPC link to the
-    bundled OIDC issuer (dex today). Issuer-agnostic on purpose -- no field
-    names it, so swapping issuers is config, not code.
+    """The engine's mTLS gRPC link to the bundled OIDC issuer management plane.
+
+    Issuer-agnostic on purpose -- no field names the issuer, so swapping it is
+    config, not code. Dex is the implementation today.
 
     Environment variables (DFE_ISSUER_ prefix):
     - DFE_ISSUER_ENABLED -> issuer.enabled
@@ -888,12 +889,8 @@ class IssuerSettings(BaseModel):
     """
 
     enabled: bool = Field(default=False, description="Enable the issuer management plane")
-    endpoint: str = Field(
-        default="", description="host:port of the issuer gRPC management service"
-    )
-    ca_cert: str = Field(
-        default="", description="PEM CA file that signed the issuer's server cert"
-    )
+    endpoint: str = Field(default="", description="host:port of the issuer gRPC management service")
+    ca_cert: str = Field(default="", description="PEM CA file that signed the issuer's server cert")
     client_cert: str = Field(
         default="", description="PEM engine client cert for mTLS (issued by the same CA)"
     )

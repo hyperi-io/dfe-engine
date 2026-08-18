@@ -89,7 +89,9 @@ class DexIssuerBackend(IssuerBackend):
             )
         except OSError as exc:
             raise IssuerError(f"issuer mTLS material unreadable: {exc}") from exc
-        options = [("grpc.ssl_target_name_override", self._server_name)] if self._server_name else []
+        options = (
+            [("grpc.ssl_target_name_override", self._server_name)] if self._server_name else []
+        )
         self._channel = aio.secure_channel(self._endpoint, creds, options=options)
         self._stub = pb_grpc.DexStub(self._channel)
         logger.debug("issuer gRPC channel opened", endpoint=self._endpoint)
@@ -107,6 +109,7 @@ class DexIssuerBackend(IssuerBackend):
     async def create_user(
         self, *, email: str, password: str, username: str = "", subject: str = ""
     ) -> bool:
+        """Create a dex Password entry from the plaintext (bcrypt-hashed here)."""
         req = pb.CreatePasswordReq(
             password=pb.Password(
                 email=email,
@@ -121,6 +124,7 @@ class DexIssuerBackend(IssuerBackend):
     async def update_user(
         self, *, email: str, new_password: str | None = None, new_username: str | None = None
     ) -> bool:
+        """Update the user's password and/or username, preserving the unset field."""
         if new_password is None and new_username is None:
             return True
         # dex UpdatePassword overwrites BOTH hash and username, so preserve the
@@ -140,25 +144,32 @@ class DexIssuerBackend(IssuerBackend):
         return not resp.not_found
 
     async def delete_user(self, *, email: str) -> bool:
+        """Delete the dex Password for this email; False when it was absent."""
         req = pb.DeletePasswordReq(email=email)
         resp = await self._call("DeletePassword", self._ensure_stub().DeletePassword, req)
         return not resp.not_found
 
     async def list_users(self) -> list[IssuerUser]:
-        resp = await self._call("ListPasswords", self._ensure_stub().ListPasswords, pb.ListPasswordReq())
+        """List all dex Password entries as issuer users."""
+        resp = await self._call(
+            "ListPasswords", self._ensure_stub().ListPasswords, pb.ListPasswordReq()
+        )
         return [
             IssuerUser(email=p.email, username=p.username, subject=p.user_id)
             for p in resp.passwords
         ]
 
     async def verify_user(self, *, email: str, password: str) -> bool:
+        """Check the plaintext against the stored bcrypt hash via dex."""
         req = pb.VerifyPasswordReq(email=email, password=password)
         resp = await self._call("VerifyPassword", self._ensure_stub().VerifyPassword, req)
         return resp.verified and not resp.not_found
 
     async def _find_user(self, email: str) -> pb.Password | None:
         """Return the raw dex Password for an email (carries the hash), or None."""
-        resp = await self._call("ListPasswords", self._ensure_stub().ListPasswords, pb.ListPasswordReq())
+        resp = await self._call(
+            "ListPasswords", self._ensure_stub().ListPasswords, pb.ListPasswordReq()
+        )
         for p in resp.passwords:
             if p.email == email:
                 return p
@@ -169,6 +180,7 @@ class DexIssuerBackend(IssuerBackend):
     async def create_connector(
         self, *, id: str, type: str, name: str, config: dict[str, object]
     ) -> bool:
+        """Create a dex Connector with the config JSON-serialised to bytes."""
         req = pb.CreateConnectorReq(
             connector=pb.Connector(id=id, type=type, name=name, config=_dump_config(config))
         )
@@ -183,6 +195,7 @@ class DexIssuerBackend(IssuerBackend):
         new_name: str | None = None,
         new_config: dict[str, object] | None = None,
     ) -> bool:
+        """Update a connector, preserving the fields the caller left unset."""
         if new_type is None and new_name is None and new_config is None:
             return True
         # dex UpdateConnector overwrites type/name/config together; preserve the
@@ -202,11 +215,13 @@ class DexIssuerBackend(IssuerBackend):
         return not resp.not_found
 
     async def delete_connector(self, *, id: str) -> bool:
+        """Delete the dex Connector by id; False when it was absent."""
         req = pb.DeleteConnectorReq(id=id)
         resp = await self._call("DeleteConnector", self._ensure_stub().DeleteConnector, req)
         return not resp.not_found
 
     async def list_connectors(self) -> list[IssuerConnector]:
+        """List all dex connectors, parsing each JSON config back to a dict."""
         resp = await self._call(
             "ListConnectors", self._ensure_stub().ListConnectors, pb.ListConnectorReq()
         )
@@ -227,6 +242,7 @@ class DexIssuerBackend(IssuerBackend):
     # -- sessions ---------------------------------------------------------
 
     async def list_sessions(self, *, subject: str) -> list[IssuerSession]:
+        """List the user's dex refresh tokens, keyed by OIDC subject."""
         req = pb.ListRefreshReq(user_id=subject)
         resp = await self._call("ListRefresh", self._ensure_stub().ListRefresh, req)
         return [
@@ -237,6 +253,7 @@ class DexIssuerBackend(IssuerBackend):
         ]
 
     async def revoke_session(self, *, subject: str, client_id: str) -> bool:
+        """Revoke the refresh token for a subject/client pair; False if absent."""
         req = pb.RevokeRefreshReq(user_id=subject, client_id=client_id)
         resp = await self._call("RevokeRefresh", self._ensure_stub().RevokeRefresh, req)
         return not resp.not_found
@@ -244,6 +261,7 @@ class DexIssuerBackend(IssuerBackend):
     # -- lifecycle --------------------------------------------------------
 
     async def health(self) -> tuple[str, int]:
+        """Return dex's (server_version, api_version) via a live GetVersion."""
         resp = await self._call("GetVersion", self._ensure_stub().GetVersion, pb.VersionReq())
         return resp.server, resp.api
 
