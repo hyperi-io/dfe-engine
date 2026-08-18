@@ -105,7 +105,7 @@ API (Elasticsearch template elastic-converter upload limits):
 
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -1138,7 +1138,9 @@ def _get_env_overrides() -> dict:
 
     DFE_ prefixed vars take precedence over legacy names.
     """
-    overrides = {
+    # Mixed value types by design: section dicts plus top-level scalars
+    # (env, config_dir), so the annotation is Any, not dict.
+    overrides: dict[str, Any] = {
         "clickhouse": {},
         "hunts": {},
         "artifactory": {},
