@@ -6488,6 +6488,256 @@
         ]
       }
     },
+    "/api/v1/synthetic-data/packs": {
+      "get": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "List Packs",
+        "description": "List schema packs the generator can drive.",
+        "operationId": "list_packs_api_v1_synthetic_data_packs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PackInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Packs Api V1 Synthetic Data Packs Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/synthetic-data/generate": {
+      "post": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "Generate",
+        "description": "Generate a bounded batch of synthetic events inline.",
+        "operationId": "generate_api_v1_synthetic_data_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/synthetic-data/stream": {
+      "post": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "Start Stream",
+        "description": "Start a stream task that posts generated events to an ingest URL.",
+        "operationId": "start_stream_api_v1_synthetic_data_stream_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StreamRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/synthetic-data/streams": {
+      "get": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "List Streams",
+        "description": "List stream tasks (most recent first).",
+        "operationId": "list_streams_api_v1_synthetic_data_streams_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/TaskInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Streams Api V1 Synthetic Data Streams Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/synthetic-data/streams/{task_id}": {
+      "get": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "Get Stream",
+        "description": "Poll a stream task's status and summary.",
+        "operationId": "get_stream_api_v1_synthetic_data_streams__task_id__get",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StreamSubmitResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "synthetic-data"
+        ],
+        "summary": "Cancel Stream",
+        "description": "Cancel a running stream task.",
+        "operationId": "cancel_stream_api_v1_synthetic_data_streams__task_id__delete",
+        "parameters": [
+          {
+            "name": "task_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Task Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/pipeline/templates": {
       "get": {
         "tags": [
@@ -12563,6 +12813,26 @@
         "title": "BulkActionResponse",
         "description": "Result of a bulk operation."
       },
+      "CancelResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "cancelled": {
+            "type": "boolean",
+            "title": "Cancelled",
+            "description": "True when cancellation was requested"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "cancelled"
+        ],
+        "title": "CancelResponse",
+        "description": "Result of a cancel request."
+      },
       "CasbinScopesResponse": {
         "properties": {
           "scopes": {
@@ -14076,6 +14346,133 @@
           "query"
         ],
         "title": "FromHyperdxRequest"
+      },
+      "GenerateRequest": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema",
+            "description": "Schema ref (e.g. meta/syslog) or path under the schemas root"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Schema version (default: current)"
+          },
+          "count": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Count",
+            "description": "Events to generate (capped by settings)",
+            "default": 100
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Determinism seed"
+          },
+          "rate_eps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Eps",
+            "description": "Timestamp spacing rate (events/second)"
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Extra tags merged into events"
+          },
+          "mark_synthetic": {
+            "type": "boolean",
+            "title": "Mark Synthetic",
+            "description": "Emit tags.synthetic=true",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema"
+        ],
+        "title": "GenerateRequest",
+        "description": "Inline generation request (bounded batch, timestamps read as a live tail)."
+      },
+      "GenerateResult": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "count": {
+            "type": "integer",
+            "title": "Count",
+            "default": 0
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed"
+          },
+          "events": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema"
+        ],
+        "title": "GenerateResult",
+        "description": "Inline generation result."
       },
       "GroupResolutionConfig": {
         "properties": {
@@ -16216,6 +16613,45 @@
         ],
         "title": "OrphanedGroupInfo"
       },
+      "PackInfo": {
+        "properties": {
+          "ref": {
+            "type": "string",
+            "title": "Ref",
+            "description": "Schema ref relative to the schemas root, e.g. meta/syslog"
+          },
+          "provider": {
+            "type": "string",
+            "title": "Provider",
+            "description": "Cloud vocabulary hint inferred from the path"
+          },
+          "columns": {
+            "type": "integer",
+            "title": "Columns",
+            "description": "@source columns the generator will fill"
+          },
+          "scenarios": {
+            "type": "integer",
+            "title": "Scenarios",
+            "description": "Coherent synthetic data scenarios declared",
+            "default": 0
+          },
+          "hinted_columns": {
+            "type": "integer",
+            "title": "Hinted Columns",
+            "description": "Columns carrying synthetic data hints",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "ref",
+          "provider",
+          "columns"
+        ],
+        "title": "PackInfo",
+        "description": "A generatable schema pack (a meta schema under the schemas root)."
+      },
       "PaginatedResponse_APIKeyResponse_": {
         "properties": {
           "items": {
@@ -17850,7 +18286,7 @@
             "type": "string",
             "title": "Hunt Target Table",
             "description": "global_target_table_name for a new hunt",
-            "default": "hunt_results"
+            "default": "detection"
           },
           "hunt_customers": {
             "items": {
@@ -21408,6 +21844,195 @@
           "valid"
         ],
         "title": "SqlValidationResponse"
+      },
+      "StreamRequest": {
+        "properties": {
+          "schema": {
+            "type": "string",
+            "title": "Schema",
+            "description": "Schema ref (e.g. meta/syslog) or path under the schemas root"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Schema version (default: current)"
+          },
+          "seed": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seed",
+            "description": "Determinism seed"
+          },
+          "rate_eps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rate Eps",
+            "description": "Events/second (Poisson; capped by settings)"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count",
+            "description": "Stop after this many events"
+          },
+          "duration_s": {
+            "anyOf": [
+              {
+                "type": "number",
+                "exclusiveMinimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration S",
+            "description": "Stop after this many seconds (capped by settings)"
+          },
+          "receiver_url": {
+            "type": "string",
+            "title": "Receiver Url",
+            "description": "Ingest URL to POST events to (dfe-receiver)"
+          },
+          "headers": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Headers",
+            "description": "Extra request headers (e.g. receiver auth)"
+          },
+          "ndjson": {
+            "type": "boolean",
+            "title": "Ndjson",
+            "description": "POST batches as NDJSON instead of JSON",
+            "default": false
+          },
+          "batch_max": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Batch Max",
+            "description": "Events per POST",
+            "default": 10
+          },
+          "tags": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags",
+            "description": "Extra tags merged into events"
+          },
+          "mark_synthetic": {
+            "type": "boolean",
+            "title": "Mark Synthetic",
+            "description": "Emit tags.synthetic=true",
+            "default": true
+          },
+          "wait": {
+            "anyOf": [
+              {
+                "type": "number",
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wait",
+            "description": "Seconds to block for inline completion before returning"
+          }
+        },
+        "type": "object",
+        "required": [
+          "schema",
+          "receiver_url"
+        ],
+        "title": "StreamRequest",
+        "description": "Background stream request - posts generated events to an HTTP ingest URL."
+      },
+      "StreamSubmitResponse": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id",
+            "description": "Task ID; poll via GET /synthetic_data/streams/{task_id}"
+          },
+          "status": {
+            "$ref": "#/components/schemas/TaskStatus",
+            "description": "pending | running | completed | failed | cancelled"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Result",
+            "description": "Stream summary once terminal"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error",
+            "description": "Present on failure"
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "status"
+        ],
+        "title": "StreamSubmitResponse",
+        "description": "Envelope returned by a stream submit and by the poll endpoint."
       },
       "SurfaceSummary": {
         "properties": {

@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/stream.py
+#  File:         synthetic_data/stream.py
 #  Purpose:      Live-tail cadence + delivery sinks for generated events
 #  Language:     Python
 #
@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Live-tail streaming of generated events.
 
-Datagen is a demo/test stream, never a load generator: pacing is a Poisson
+Synthetic data is a demo/test stream, never a load generator: pacing is a Poisson
 process at a modest configured rate (interarrival = expovariate draw), which
 reads as live telemetry in a tail view - bursts and gaps, no metronome.
 
@@ -26,8 +26,8 @@ from typing import Any, Protocol
 
 from scalo.logger import logger
 
-from dfe_engine.datagen.models import DatagenError
-from dfe_engine.datagen.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.models import SyntheticDataError
+from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
 
 # A stream is a demo artefact - cap the rate defensively so a fat-fingered
 # config cannot turn it into a load test.
@@ -80,7 +80,7 @@ class HttpPostSink:
         timeout: float = 10.0,
     ) -> None:
         if batch_max < 1:
-            raise DatagenError("batch_max must be >= 1")
+            raise SyntheticDataError("batch_max must be >= 1")
         self.url = url
         self.headers = headers or {}
         self.batch_max = batch_max
@@ -89,34 +89,53 @@ class HttpPostSink:
         self.sent = 0
         self.failed = 0
         self._buffer: list[dict[str, Any]] = []
+        self._client: Any = None
 
     async def __call__(self, event: dict[str, Any]) -> None:
         self._buffer.append(event)
         if len(self._buffer) >= self.batch_max:
             await self.flush()
 
+    async def _get_client(self) -> Any:
+        # One client for the sink's lifetime - a long demo stream must not
+        # rebuild a connection pool per batch.
+        if self._client is None:
+            from scalo.http import AsyncHttpClient
+
+            self._client = AsyncHttpClient(timeout=self.timeout)
+            await self._client.__aenter__()
+        return self._client
+
     async def flush(self) -> None:
         """POST the buffered batch; failures are counted, never fatal."""
         if not self._buffer:
             return
         batch, self._buffer = self._buffer, []
-        from scalo.http import AsyncHttpClient
-
         try:
-            async with AsyncHttpClient(base_url=self.url, timeout=self.timeout) as client:
-                if self.ndjson:
-                    payload = "\n".join(json.dumps(e, default=str) for e in batch)
-                    headers = {**self.headers, "Content-Type": "application/x-ndjson"}
-                    response = await client.post("", content=payload, headers=headers)
-                else:
-                    body: Any = batch[0] if len(batch) == 1 else batch
-                    response = await client.post("", json=body, headers=self.headers)
-                response.raise_for_status()
-                self.sent += len(batch)
+            client = await self._get_client()
+            # The URL is passed whole: a base_url + "" join appends a trailing
+            # slash and 404s on exact-path ingest routes.
+            if self.ndjson:
+                payload = "\n".join(json.dumps(e, default=str) for e in batch)
+                headers = {**self.headers, "Content-Type": "application/x-ndjson"}
+                response = await client.post(self.url, content=payload, headers=headers)
+            else:
+                body: Any = batch[0] if len(batch) == 1 else batch
+                response = await client.post(self.url, json=body, headers=self.headers)
+            response.raise_for_status()
+            self.sent += len(batch)
         except Exception as exc:
             # A demo stream must degrade, not die: count it and stream on.
             self.failed += len(batch)
-            logger.warning("datagen POST failed", url=self.url, batch=len(batch), error=str(exc))
+            logger.warning(
+                "synthetic data POST failed", url=self.url, batch=len(batch), error=str(exc)
+            )
+
+    async def aclose(self) -> None:
+        """Release the HTTP client after the final flush."""
+        if self._client is not None:
+            client, self._client = self._client, None
+            await client.__aexit__(None, None, None)
 
 
 async def stream_events(
@@ -141,13 +160,13 @@ async def stream_events(
         Events emitted.
 
     Raises:
-        DatagenError: If neither ``count`` nor ``duration_s`` bounds the run,
+        SyntheticDataError: If neither ``count`` nor ``duration_s`` bounds the run,
             or the rate is not positive.
     """
     if count is None and duration_s is None:
-        raise DatagenError("stream needs a bound: count and/or duration_s")
+        raise SyntheticDataError("stream needs a bound: count and/or duration_s")
     if rate_eps <= 0:
-        raise DatagenError("rate_eps must be positive")
+        raise SyntheticDataError("rate_eps must be positive")
     rate = min(rate_eps, MAX_RATE_EPS)
 
     emitted = 0
@@ -168,8 +187,11 @@ async def stream_events(
                 break
         await asyncio.sleep(min(delay, remaining) if remaining is not None else delay)
     await sink.flush()
+    aclose = getattr(sink, "aclose", None)
+    if aclose is not None:
+        await aclose()
     logger.info(
-        "datagen stream complete",
+        "synthetic data stream complete",
         events=emitted,
         seconds=round(time.monotonic() - started, 1),
         rate_eps=rate,

@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         datagen/__init__.py
+#  File:         synthetic_data/__init__.py
 #  Purpose:      Realistic test/demo data generation (reference packs + streams)
 #  Language:     Python
 #
@@ -13,25 +13,25 @@ stream at modest rates, never a load generator. Two modes:
 - **schema** (default): drive generation from a dfe-schemas meta schema. The
   ``@source:`` exprs give the source JSON shape; column name/type/use_case
   heuristics pick semantic generators (IPs, FQDNs, users, ...); optional
-  per-column ``datagen:`` hints in the schema YAML supply curated vocabularies
+  per-column ``synthetic:`` hints in the schema YAML supply curated vocabularies
   and message templates where heuristics cannot reach.
 - **sample**: lookalike generation from a logreducer-reduced sample (later
-  stage - see the datagen plan).
+  stage - see the synthetic data plan).
 
-A seeded :class:`~dfe_engine.datagen.entities.EntityPool` keeps events
+A seeded :class:`~dfe_engine.synthetic_data.entities.EntityPool` keeps events
 coherent: the same host always carries the same FQDN/IP/MAC and its users,
 and an identical seed reproduces the identical stream.
 """
 
-from dfe_engine.datagen.entities import EntityPool
-from dfe_engine.datagen.models import ColumnHints, DatagenError
-from dfe_engine.datagen.schema_source import SchemaEventFactory
-from dfe_engine.datagen.stream import CollectSink, HttpPostSink, stream_events
+from dfe_engine.synthetic_data.entities import EntityPool
+from dfe_engine.synthetic_data.models import ColumnHints, SyntheticDataError
+from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
+from dfe_engine.synthetic_data.stream import CollectSink, HttpPostSink, stream_events
 
 __all__ = [
     "CollectSink",
     "ColumnHints",
-    "DatagenError",
+    "SyntheticDataError",
     "EntityPool",
     "HttpPostSink",
     "SchemaEventFactory",

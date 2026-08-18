@@ -108,6 +108,11 @@ sampler_scopes = {
     "sampler_read": "sampler:read",
 }
 
+synthetic_data_scopes = {
+    "synthetic_data_read": "synthetic-data:read",
+    "synthetic_data_run": "synthetic-data:run",
+}
+
 rules_scopes = {
     "rule_read": "rule:read",
     "rule_write": "rule:write",

@@ -34,6 +34,7 @@ from dfe_engine.api.v1.service_surfaces import router as service_surfaces_router
 from dfe_engine.api.v1.services import router as services_router
 from dfe_engine.api.v1.sigma import router as sigma_router
 from dfe_engine.api.v1.sources import router as sources_router
+from dfe_engine.api.v1.synthetic_data import router as synthetic_data_router
 from dfe_engine.api.v1.system import router as system_router
 from dfe_engine.api.v1.tasks import router as tasks_router
 from dfe_engine.api.v1.transforms import router as transforms_router
@@ -80,6 +81,7 @@ v1_router.include_router(transforms_router)
 v1_router.include_router(hunts_router)
 v1_router.include_router(queries_router)
 v1_router.include_router(sampler_router)
+v1_router.include_router(synthetic_data_router)
 v1_router.include_router(pipeline_router)
 v1_router.include_router(tasks_router)
 v1_router.include_router(discovery_router)
