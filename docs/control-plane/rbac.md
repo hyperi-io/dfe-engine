@@ -751,12 +751,12 @@ No custom ClickHouse audit table — standard OTel log ingestion is used.
 
 ```python
 class AuthContext(BaseModel):
-    org_id: str = "default"      # Primary tenant
-    user_id: str                 # Required unique identifier
-    roles: list[str]             # Resolved DFE roles
-    groups: list[str] = []       # OIDC or local groups
-    org_ids: list[str] = []      # For customer-scoped roles
-    connection_id: str = ""      # Resolved CH connection name
+    org_id: str = "default"  # Primary tenant
+    user_id: str  # Required unique identifier
+    roles: list[str]  # Resolved DFE roles
+    groups: list[str] = []  # OIDC or local groups
+    org_ids: list[str] = []  # For customer-scoped roles
+    connection_id: str = ""  # Resolved CH connection name
     request_id: str | None = None
     client_ip: str | None = None
     user_agent: str | None = None
@@ -771,14 +771,15 @@ the context.
 
 ```python
 class AuthSettings(BaseModel):
-    enabled: bool = False         # Off by default (dev/test)
-    auth_dir: str = ""            # Path to config/auth/ directory
+    enabled: bool = False  # Off by default (dev/test)
+    auth_dir: str = ""  # Path to config/auth/ directory
 
-    oidc: OIDCSettings            # Nested OIDC config
+    oidc: OIDCSettings  # Nested OIDC config
+
 
 class OIDCSettings(BaseModel):
-    providers_dir: str = ""       # Path to OIDC provider config dir
-    sync_enabled: bool = True     # Enable background group sync
+    providers_dir: str = ""  # Path to OIDC provider config dir
+    sync_enabled: bool = True  # Enable background group sync
     sync_on_startup: bool = True  # Sync providers at startup
 ```
 
