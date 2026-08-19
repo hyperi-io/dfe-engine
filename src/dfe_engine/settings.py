@@ -820,6 +820,30 @@ class LocalAuthSettings(BaseModel):
     viewer_password: str = Field(default="", description="Bootstrap viewer password")
 
 
+class AccountStoreSettings(BaseModel):
+    """FerretDB / mongo-wire connection for the local account store.
+
+    Used only when ``auth.accounts_backend == 'ferretdb'``. The URI carries the
+    SCRAM credential (sourced from the secret manager at deploy time); the
+    database is separate from HyperDX's for isolation.
+
+    Environment variables:
+    - DFE_AUTH_ACCOUNTS_STORE_URI -> auth.accounts_store.uri
+    - DFE_AUTH_ACCOUNTS_STORE_DATABASE -> auth.accounts_store.database
+    - DFE_AUTH_ACCOUNTS_STORE_COLLECTION -> auth.accounts_store.collection
+    """
+
+    uri: str = Field(
+        default="",
+        description="mongodb:// connection URI (SCRAM credential from the secret manager)",
+    )
+    database: str = Field(
+        default="dfe_engine",
+        description="Document database name (separate from HyperDX's)",
+    )
+    collection: str = Field(default="accounts", description="Accounts collection name")
+
+
 class AuthSettings(BaseModel):
     """Authorization settings.
 
@@ -856,6 +880,14 @@ class AuthSettings(BaseModel):
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
+    accounts_backend: str = Field(
+        default="yaml",
+        description=(
+            "Local account store backend: 'yaml' (config-seeded / gitcrud, the "
+            "break-glass default) or 'ferretdb' (out of the git cycle)."
+        ),
+    )
+    accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)
 
 
 class HyperDXSettings(BaseModel):
@@ -1529,6 +1561,16 @@ def _get_env_overrides() -> dict:
             "1",
             "yes",
         )
+
+    # Account store backend (yaml default; ferretdb nested under auth.accounts_store)
+    if val := _get_env("DFE_AUTH_ACCOUNTS_BACKEND"):
+        overrides["auth"]["accounts_backend"] = val
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_URI"):
+        overrides["auth"].setdefault("accounts_store", {})["uri"] = val
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_DATABASE"):
+        overrides["auth"].setdefault("accounts_store", {})["database"] = val
+    if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_COLLECTION"):
+        overrides["auth"].setdefault("accounts_store", {})["collection"] = val
 
     # HyperDX settings
     if val := _get_env("DFE_HYPERDX_BASE_URL"):
