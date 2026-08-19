@@ -29,7 +29,7 @@ from pathlib import Path
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.accounts import AccountStore, FerretDBAccountStore
 from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.role_store import RoleStore
@@ -78,7 +78,8 @@ def bootstrap_auth(
     auth_dir: Path,
     default_admin_password: str = "",
     default_admin_name: str = "",
-) -> tuple[AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
+    account_store: AccountStore | FerretDBAccountStore | None = None,
+) -> tuple[AccountStore | FerretDBAccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
     """Bootstrap auth stores with sensible defaults.
 
     Creates subdirectories, seeds roles/groups/admin account if missing,
@@ -113,8 +114,10 @@ def bootstrap_auth(
     role_store = RoleStore(roles_path)
     role_config = role_store.load_config()
 
-    # Instantiate stores
-    account_store = AccountStore(accounts_dir)
+    # Instantiate stores. A caller may inject a backend (e.g. FerretDB); the
+    # default is the YAML store under accounts_dir (config-seeded / gitcrud).
+    if account_store is None:
+        account_store = AccountStore(accounts_dir)
     group_store = GroupStore(groups_dir)
     api_key_store = APIKeyStore(api_keys_dir)
 
@@ -123,8 +126,8 @@ def bootstrap_auth(
         _seed_groups(group_store)
         logger.info("Seeded default groups")
 
-    # Seed admin account if accounts dir is empty
-    if not list(accounts_dir.glob("*.yaml")):
+    # Seed admin account if the store has no accounts yet (backend-agnostic)
+    if not account_store.list():
         password = admin_account_password(default_admin_password)
         _seed_admin(
             account_store,
