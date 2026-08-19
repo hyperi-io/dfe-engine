@@ -26,6 +26,7 @@ from dfe_engine.governance.ch.render import (
     render_materialise,
     render_pinned_user,
     render_service_role,
+    render_service_user,
     render_tenant_axis,
     render_tier,
 )
@@ -125,6 +126,23 @@ class TestRenderServiceRole:
         assert r.user() == "dfe_loader"
 
 
+class TestRenderServiceUser:
+    def test_password_is_reasserted_via_alter(self):
+        """Same convergence as the pinned user: the minted service user's password
+        is re-asserted every reconcile so it can never drift from its stored
+        ch/service/<name> secret (the value /hyperdx/connection serves)."""
+        r = ChServiceRole(name="query_reader", mint_user=True, grants=["SELECT ON dfe.*"])
+        s = _joined(render_service_user(r, "cafef00d"))
+        assert (
+            "CREATE USER IF NOT EXISTS `dfe_query_reader` "
+            "IDENTIFIED WITH sha256_hash BY 'cafef00d'" in s
+        )
+        assert (
+            "ALTER USER `dfe_query_reader` IDENTIFIED WITH sha256_hash BY 'cafef00d'" in s
+        )
+        assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in s
+
+
 class TestRenderTenantAxis:
     def test_shared_role_and_getsetting_policy(self):
         s = _joined(render_tenant_axis([("dfe", "events")]))
@@ -168,6 +186,17 @@ class TestRenderTenantAxis:
         """No deny list -> only the _org_id policy, no USING 0."""
         assert _joined(render_tenant_axis([("dfe", "events")])).count("USING 0") == 0
 
+    def test_deny_policy_covers_an_otel_shaped_table(self):
+        """The deny backstop fences dfe.otel_* (no _org_id). Under D9 the broad
+        dfe.* grant DOES reach it, so this USING 0 policy is the SOLE control
+        keeping otel/meta tables away from a fenced tenant user."""
+        s = _joined(render_tenant_axis([("dfe", "default")], [("dfe", "otel_logs")]))
+        assert (
+            "CREATE ROW POLICY IF NOT EXISTS `dfe_rowpol_tenant_dfe_otel_logs` "
+            "ON `dfe`.`otel_logs` AS RESTRICTIVE FOR SELECT USING 0 "
+            "TO `dfe_tenant_role`" in s
+        )
+
 
 class TestRenderPinnedUser:
     def test_org_tied_user_pins_and_holds_the_tenant_role(self):
@@ -209,6 +238,33 @@ class TestRenderPinnedUser:
         assert "dfe_tenant_role" not in s
         assert "SQL_current_tenant_id" not in s
 
+    def test_org_and_platform_users_differ_only_by_the_tenant_pin(self):
+        """D9: no per-user data-grant difference. Both org and platform users hold
+        the analyst tier role (which carries the broad dfe.* grant), so a fenced org
+        user sees every source table automatically. render_pinned_user never emits a
+        direct dfe.* grant on either user - isolation is the tenant role + row
+        policy, not grant scope. Only the org user gets the tenant role + pin."""
+        org = _joined(
+            render_pinned_user(
+                "dfe_org_acme", "h", tier_role="dfe_analyst_tier_2_role", org_ids=["acme"]
+            )
+        )
+        platform = _joined(
+            render_pinned_user(
+                "dfe_grp_ops", "h", tier_role="dfe_analyst_tier_2_role", org_ids=[]
+            )
+        )
+        # both get the tier role; neither gets a direct whole-db data grant
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in org
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_grp_ops`" in platform
+        assert "GRANT SELECT ON dfe.*" not in org
+        assert "GRANT SELECT ON dfe.*" not in platform
+        # only the org user is fenced by the tenant role + READONLY pin
+        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in org
+        assert "SQL_current_tenant_id = 'acme' READONLY" in org
+        assert "dfe_tenant_role" not in platform
+        assert "SQL_current_tenant_id" not in platform
+
     def test_pin_escaping(self):
         s = _joined(
             render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["o'brien"])
@@ -219,6 +275,19 @@ class TestRenderPinnedUser:
         """A comma would split into fragments that match nothing - refuse it."""
         with pytest.raises(ValueError):
             render_pinned_user("dfe_org_x", "h", tier_role="dfe_t_role", org_ids=["a,b"])
+
+    def test_password_is_reasserted_via_alter(self):
+        """Regression: CREATE USER IF NOT EXISTS sets a password only at first
+        create, so an existing user keeps a stale hash while the stored secret
+        rotated (CH auth 516). An ALTER must re-assert the hash every reconcile."""
+        s = _joined(
+            render_pinned_user(
+                "dfe_org_acme", "deadbeef", tier_role="dfe_analyst_tier_2_role", org_ids=["acme"]
+            )
+        )
+        assert (
+            "ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY 'deadbeef'" in s
+        )
 
 
 class TestDefaultTiers:
@@ -256,6 +325,16 @@ class TestDefaultTiers:
         assert any("INSERT" in g for g in by_name["hunt_tier_1"].grants)
         assert all("INSERT" not in g for g in by_name["analyst_tier_1"].grants)
 
+    def test_analyst_tier_grants_the_whole_data_db(self):
+        """D9: the analyst tier role grants the broad dfe.* for every user, so a new
+        source table is visible automatically with no admin action. Isolation is by
+        row policy, not by narrowing the grant to dfe.default."""
+        by_name = {t.name: t for t in DEFAULT_TIERS}
+        for n in ("analyst_tier_1", "analyst_tier_2", "analyst_tier_3"):
+            grants = by_name[n].grants
+            assert "SELECT ON dfe.*" in grants
+            assert "SELECT ON dfe.default" not in grants
+
     def test_every_default_tier_renders_profile_role_quota(self):
         for t in DEFAULT_TIERS:
             s = _joined(render_tier(t))
@@ -282,9 +361,14 @@ class TestDefaultServiceRoles:
         assert by_name["hunt_runner"].mint_user is False
         assert by_name["otel_reader"].mint_user is False
 
-    def test_otel_reader_reads_otel_only(self):
+    def test_otel_reader_reads_the_otel_database(self):
+        # The otel tables moved from the CH-builtin `default` db into `dfe`; the
+        # grant follows them. ClickHouse GRANT has no table-name wildcard, so it is
+        # db-wide on the otel database rather than a `dfe.otel_*` prefix.
         otel = {r.name: r for r in DEFAULT_SERVICE_ROLES}["otel_reader"]
-        assert otel.grants == ["SELECT ON otel.*"]
+        assert otel.grants == ["SELECT ON dfe.*"]
+        # regression: never the old literal `otel` database (which never existed)
+        assert otel.grants != ["SELECT ON otel.*"]
 
     def test_query_reader_readonly_no_ddl_select_only(self):
         qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
@@ -293,6 +377,12 @@ class TestDefaultServiceRoles:
         assert qr.settings["readonly"] == 2
         assert qr.settings["allow_ddl"] == 0
         assert all("INSERT" not in g for g in qr.grants)
+
+    def test_query_reader_reads_the_whole_data_db_including_otel(self):
+        """The platform reader keeps whole-db read of dfe - dfe.otel_* included.
+        It holds no tenant role, so the deny row policies never target it."""
+        qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
+        assert "SELECT ON dfe.*" in qr.grants
 
     def test_loader_inserts_and_async(self):
         loader = {r.name: r for r in DEFAULT_SERVICE_ROLES}["loader"]

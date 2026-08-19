@@ -91,13 +91,6 @@ dependencies = [
     # projection (promoted from transitive to direct deps for the auto-CLI).
     "click>=8.4.2",
     "jmespath>=1.1.0",
-    # Identity-issuer management: gRPC client to the bundled OIDC issuer (dex) over
-    # mTLS. grpcio arrives transitively via scalo[opentelemetry]; declared direct
-    # because the issuer backend imports grpc.aio + the generated stubs. protobuf is
-    # the runtime the vendored api_pb2 stubs bind to -- floor matches the gencode
-    # emitted by grpcio-tools 1.83.0 (protobuf 7.35.1).
-    "grpcio>=1.83.0,<2",
-    "protobuf>=7.35.1,<8",
     # Optional lazy runtime integrations (NOT locked here, imported on demand so a
     # default install still runs; the code degrades with a clear error when absent):
     #   - confluent-kafka: Kafka topic admin (helm) + sampler Kafka backend
@@ -139,9 +132,6 @@ dev = [
     "types-requests>=2.33.0",
     "python-dotenv>=1.2.2",
     "pytest-timeout>=2.4.0",
-    # protoc for regenerating the vendored issuer stubs (see scripts/gen_issuer_proto.sh).
-    # Pinned to the grpcio line so gencode + runtime protobuf stay on 7.35.x.
-    "grpcio-tools>=1.83.0,<2",
 ]
 
 [tool.pytest.ini_options]
@@ -205,8 +195,6 @@ target-version = "py312"
 extend-exclude = [
     "config",
     "schemas",
-    # Generated protobuf/gRPC stubs (regenerate via scripts/gen_issuer_proto.sh).
-    "**/dex/proto/api_pb2*",
 ]
 
 [tool.ruff.lint]
