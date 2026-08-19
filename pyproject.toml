@@ -63,6 +63,10 @@ dependencies = [
     # Signs the OIDC RP session cookie (SessionMiddleware / Authlib OAuth state+nonce)
     "itsdangerous>=2.2.0",
     "scim2-models>=0.6.12",
+    # Document store for control-plane state (accounts now; preferences, teams
+    # later) over FerretDB / mongo wire protocol. Sync client on purpose -- the
+    # engine is a low-volume control plane, so no async driver is warranted.
+    "pymongo>=4.9.0",
     # Alerting / notifications
     "apprise>=1.11.0",
     # API server
