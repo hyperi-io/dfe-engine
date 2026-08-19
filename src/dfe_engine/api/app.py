@@ -356,7 +356,7 @@ def create_app(
 
     openapi_tags = None
     if e2e_docs:
-        from dfe_engine.api.v1.e2e import E2E_OPENAPI_TAG
+        from dfe_engine.api.e2e import E2E_OPENAPI_TAG
 
         openapi_tags = [E2E_OPENAPI_TAG]
     app = FastAPI(
@@ -414,10 +414,10 @@ def create_app(
     app.include_router(v1_router, prefix="/api")
 
     if e2e_docs:
-        from dfe_engine.api.v1.e2e import router as e2e_router
+        from dfe_engine.api.e2e import router as e2e_router
 
-        app.include_router(e2e_router, prefix="/api/v1")
-        logger.warning("e2e-server routes mounted at /api/v1/e2e")
+        app.include_router(e2e_router, prefix="/api")
+        logger.warning("e2e-server routes mounted at /api/e2e")
 
     # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
     from dfe_engine.api.well_known import router as well_known_router
@@ -463,7 +463,7 @@ def create_app(
         # Apply BearerAuth to all /api/ routes by default. The e2e-server
         # helpers are unauthenticated and must stay that way in Swagger.
         for path_key, path_item in schema.get("paths", {}).items():
-            if path_key.startswith("/api/v1/e2e"):
+            if path_key.startswith("/api/e2e"):
                 continue
             if path_key.startswith("/api/"):
                 for method_data in path_item.values():

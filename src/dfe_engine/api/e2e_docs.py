@@ -24,8 +24,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.openapi.utils import get_openapi
 from fastapi.responses import HTMLResponse, JSONResponse
 
-E2E_OPENAPI_PATH = "/openapi-e2e.json"
-E2E_PATH_PREFIX = "/api/v1/e2e"
+E2E_OPENAPI_PATH = "/openapi.e2e.json"
+E2E_PATH_PREFIX = "/api/e2e"
 E2E_TAG_NAME = "E2E"
 
 _SWAGGER_JS = "https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js"
@@ -62,8 +62,8 @@ def split_openapi(full: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]
 
 def build_e2e_spec(*, version: str) -> dict[str, Any]:
     """OpenAPI document for the Playwright helpers only — no product API paths."""
-    from dfe_engine.api.v1.e2e import E2E_OPENAPI_TAG
-    from dfe_engine.api.v1.e2e import router as e2e_router
+    from dfe_engine.api.e2e import E2E_OPENAPI_TAG
+    from dfe_engine.api.e2e import router as e2e_router
 
     app = FastAPI(
         title="DFE Engine API — E2E",
@@ -74,7 +74,7 @@ def build_e2e_spec(*, version: str) -> dict[str, Any]:
         version=version,
         openapi_tags=[E2E_OPENAPI_TAG],
     )
-    app.include_router(e2e_router, prefix="/api/v1")
+    app.include_router(e2e_router, prefix="/api")
     return get_openapi(
         title=app.title,
         version=app.version,
@@ -128,7 +128,7 @@ const ui = SwaggerUIBundle({{
 
 
 def install_e2e_swagger(app: FastAPI) -> None:
-    """Serve ``/openapi-e2e.json`` and replace ``/docs`` with the spec selector."""
+    """Serve ``/openapi.e2e.json`` and replace ``/docs`` with the spec selector."""
 
     @app.get(E2E_OPENAPI_PATH, include_in_schema=False)
     async def openapi_e2e() -> JSONResponse:

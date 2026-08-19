@@ -28,8 +28,8 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 
-_SEED = "/api/v1/e2e/seed-admin"
-_STATUS = "/api/v1/e2e/status"
+_SEED = "/api/e2e/seed-admin"
+_STATUS = "/api/e2e/status"
 
 
 @pytest.fixture(autouse=True)
@@ -81,9 +81,9 @@ def test_e2e_openapi_absent_when_flag_off(tmp_path):
             assert _SEED not in spec["paths"]
             assert _STATUS not in spec["paths"]
             assert "E2E" not in {t["name"] for t in spec.get("tags", [])}
-            assert client.get("/openapi-e2e.json").status_code == 404
+            assert client.get("/openapi.e2e.json").status_code == 404
             docs = client.get("/docs").text
-            assert "openapi-e2e.json" not in docs
+            assert "openapi.e2e.json" not in docs
     finally:
         _registries.clear()
 
@@ -107,7 +107,7 @@ def test_e2e_openapi_group_when_flag_on(tmp_path):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             api_spec = client.get("/openapi.json").json()
-            e2e_spec = client.get("/openapi-e2e.json").json()
+            e2e_spec = client.get("/openapi.e2e.json").json()
             docs = client.get("/docs").text
 
         assert _STATUS not in api_spec["paths"]
@@ -124,7 +124,7 @@ def test_e2e_openapi_group_when_flag_on(tmp_path):
         assert "Playwright" in e2e_tags[0]["description"]
         assert "/api/v1/auth/login" not in e2e_spec["paths"]
 
-        assert "openapi-e2e.json" in docs
+        assert "openapi.e2e.json" in docs
         assert "StandaloneLayout" in docs
         assert '"name": "API"' in docs or '"name":"API"' in docs
         assert '"name": "E2E"' in docs or '"name":"E2E"' in docs

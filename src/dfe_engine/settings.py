@@ -1000,7 +1000,7 @@ def is_dev_posture(env: str) -> bool:
 
 
 def e2e_routes_enabled(settings: "DFESettings") -> bool:
-    """True when the unauthenticated /api/v1/e2e/* group may be mounted.
+    """True when the unauthenticated /api/e2e/* group may be mounted.
 
     Requires both the explicit DFE_E2E_SERVER flag and a non-production posture.
     ``make e2e-server`` sets the flag; a production DFE_ENV refuses it at load.
@@ -1158,7 +1158,7 @@ class DFESettings(BaseModel):
     e2e_server: bool = Field(
         default=False,
         description=(
-            "Mount the unauthenticated /api/v1/e2e/* Playwright helpers "
+            "Mount the unauthenticated /api/e2e/* Playwright helpers "
             "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
         ),
     )
@@ -1171,7 +1171,7 @@ class DFESettings(BaseModel):
         if self.e2e_server and is_prod:
             raise ValueError(
                 "e2e_server is True but env is production: the unauthenticated "
-                "/api/v1/e2e/* seed endpoints must not ship. Set DFE_ENV to "
+                "/api/e2e/* seed endpoints must not ship. Set DFE_ENV to "
                 "dev/test/ci, or DFE_E2E_SERVER=false"
             )
         if not is_prod:

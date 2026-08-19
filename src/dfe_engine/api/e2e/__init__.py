@@ -1,5 +1,5 @@
 #  Project:      dfe-engine
-#  File:         api/v1/e2e/__init__.py
+#  File:         api/e2e/__init__.py
 #  Purpose:      Unauthenticated Playwright helpers, mounted only in e2e-server mode
 #  Language:     Python
 #
@@ -9,13 +9,13 @@
 """e2e-server-only API group.
 
 Mounted by ``create_app`` only when ``DFE_E2E_SERVER`` is on and the posture is
-non-production. In that process, ``/docs`` has a spec dropdown: **API**
-(``/openapi.json``) vs **E2E** (``/openapi-e2e.json``). The committed product
-spec never includes them; ``openapi-spec/openapi.e2e.json`` is generated
-alongside it.
+non-production. Lives under ``/api/e2e`` (not the versioned product API). In
+that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
+**E2E** (``/openapi.e2e.json``). The committed product spec never includes
+them; ``openapi-spec/openapi.e2e.json`` is generated alongside it.
 
-GET  /api/v1/e2e/status      → confirm the group is live
-POST /api/v1/e2e/seed-admin  → create or reset a local admin (no auth)
+GET  /api/e2e/status      → confirm the group is live
+POST /api/e2e/seed-admin  → create or reset a local admin (no auth)
 """
 
 from __future__ import annotations
