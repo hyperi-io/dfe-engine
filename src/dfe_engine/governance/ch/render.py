@@ -108,10 +108,19 @@ def render_service_user(role_def: ChServiceRole, pw_hash: str) -> list[str]:
 
     Separate from ``render_service_role`` because it carries the freshly minted
     password hash; the reconciler calls it only after minting the secret.
+
+    The ALTER re-asserts the password every reconcile. ``CREATE USER IF NOT
+    EXISTS`` sets a password only when it FIRST creates the user, so an already
+    existing user keeps whatever hash it was born with - and the served secret
+    (``ch/service/<name>``) is the source of truth, so any drift between the two
+    is a hard CH auth failure (code 516) until the user is realigned. The ALTER
+    converges the user to the stored secret's hash on every run; it is a no-op
+    when they already match.
     """
     qu = _bq(role_def.user())
     stmts = [
         f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
         f"GRANT {_bq(role_def.role())} TO {qu}",
     ]
     if role_def.settings:
@@ -174,17 +183,30 @@ def render_pinned_user(
 
     With ``org_ids``: grant the shared tenant role and PIN the tenant setting
     READONLY - the pin is what makes an attacker-authored ``SETTINGS`` override a
-    hard 452 instead of a cross-tenant read. Empty ``org_ids`` is the unrestricted
-    shape (universal analysts): tier only, no tenant role, no pin.
-    ``extra_roles`` compose additional grant roles (e.g. otel_reader) onto the
-    tier; quotas and settings still come from the tier alone.
+    hard 452 instead of a cross-tenant read. The analyst tier role grants the
+    whole data db ``dfe.*``, so the fenced org user sees every source table
+    automatically; isolation is by the RESTRICTIVE ``_org_id`` row policy plus the
+    ``USING 0`` deny policy on the non-``_org_id`` tables (dfe.otel_*, meta), NOT
+    by grant scope.
 
-    The ALTER re-runs every reconcile, so the pin tracks org_ids changes even
-    though ``CREATE USER IF NOT EXISTS`` never touches an existing user.
+    Empty ``org_ids`` is the unrestricted shape (PLATFORM analysts/operators):
+    tier only, no tenant role, no pin. ``extra_roles`` compose additional grant
+    roles (e.g. otel_reader) onto the tier; quotas and settings still come from
+    the tier alone.
+
+    Two ALTERs re-run every reconcile, because ``CREATE USER IF NOT EXISTS``
+    never touches an existing user: the pin ALTER tracks org_ids changes, and
+    the IDENTIFIED ALTER re-asserts the password. The served secret
+    (``ch/orgs/<org>`` for the pinned org user) is the single source of truth,
+    so a user that was created in a different epoch than its stored secret keeps
+    a stale hash and every hyperdx connect fails CH auth (code 516) until it is
+    realigned. The IDENTIFIED ALTER converges the user to the stored hash on
+    every run; it is a no-op when they already match.
     """
     qu = _bq(user)
     stmts = [
         f"CREATE USER IF NOT EXISTS {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
+        f"ALTER USER {qu} IDENTIFIED WITH sha256_hash BY {_sq(pw_hash)}",
         f"GRANT {_bq(tier_role)} TO {qu}",
     ]
     for role in extra_roles or []:

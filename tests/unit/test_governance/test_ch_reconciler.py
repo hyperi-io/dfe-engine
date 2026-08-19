@@ -32,6 +32,24 @@ def _org(name: str, ids: list[str]) -> SimpleNamespace:
     return SimpleNamespace(name=name, org_ids=ids)
 
 
+class _FakeAdminClient:
+    """Records executed DDL; every discovery query returns no rows.
+
+    Enough to exercise the whole ``reconcile`` apply path without a cluster: the
+    empty result_rows mean no existing objects to drop, so only the rendered
+    create/alter/grant DDL is executed - which is exactly what we assert on.
+    """
+
+    def __init__(self) -> None:
+        self.executed: list[str] = []
+
+    def query(self, sql: str, parameters: dict | None = None) -> SimpleNamespace:
+        return SimpleNamespace(result_rows=[])
+
+    def command(self, stmt: str) -> None:
+        self.executed.append(stmt)
+
+
 def _rec() -> ChRbacReconciler:
     # render_all is pure - it never touches the client.
     return ChRbacReconciler(admin_client=None)
@@ -74,6 +92,78 @@ class TestHashFor:
         assert rec._hash_for("ch/service/a") != rec._hash_for("ch/service/b")
 
 
+# ── password <-> served-secret sync (the bug) ───────────────────────
+# The pinned CH user authenticates with the password whose sha256 hash reconcile
+# sets on it; /api/v1/hyperdx/connection serves the plaintext at the SAME secret
+# path (ch/orgs/<org> for an org, ch/service/<name> for a service user). These
+# assert the two agree AFTER a reconcile - so the hyperdx embed's connect can
+# never hit CH auth 516 because CREATE USER IF NOT EXISTS left a stale password.
+
+
+class TestReconcilePasswordSync:
+    def _store(self, tmp_path):
+        return build_secrets(SecretsSettings(provider="file", path=str(tmp_path)))
+
+    def _analyst_tiers(self):
+        return [
+            ChTier(name="analyst_tier_2", kind="analyst", default=True, grants=["SELECT ON dfe.*"])
+        ]
+
+    def test_org_user_password_matches_the_served_secret(self, tmp_path):
+        store = self._store(tmp_path)
+        client = _FakeAdminClient()
+        ChRbacReconciler(client, secrets_store=store).reconcile(
+            tiers=self._analyst_tiers(),
+            service_roles=[],
+            orgs=[_org("acme", ["acme"])],
+            bindings=[],
+        )
+        # exactly the plaintext GET /hyperdx/connection reads for org 'acme'
+        served = store.get("ch/orgs/acme")
+        expected = hashlib.sha256(served.encode()).hexdigest()
+        assert (
+            f"ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY '{expected}'"
+            in client.executed
+        )
+
+    def test_realigns_a_stale_preexisting_user_to_the_stored_secret(self, tmp_path):
+        """The reproduced fault: the secret was rotated in the store while the CH
+        user survived from an older epoch. CREATE USER IF NOT EXISTS is a no-op on
+        it, so only the ALTER carries the realignment to the served value."""
+        store = self._store(tmp_path)
+        store.put("ch/orgs/acme", "rotated-pw")
+        client = _FakeAdminClient()
+        ChRbacReconciler(client, secrets_store=store).reconcile(
+            tiers=self._analyst_tiers(),
+            service_roles=[],
+            orgs=[_org("acme", ["acme"])],
+            bindings=[],
+        )
+        expected = hashlib.sha256(b"rotated-pw").hexdigest()
+        assert (
+            f"ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY '{expected}'"
+            in client.executed
+        )
+
+    def test_service_user_password_matches_the_served_secret(self, tmp_path):
+        store = self._store(tmp_path)
+        client = _FakeAdminClient()
+        ChRbacReconciler(client, secrets_store=store).reconcile(
+            tiers=[],
+            service_roles=[
+                ChServiceRole(name="loader", mint_user=True, grants=["INSERT ON dfe.*"])
+            ],
+            orgs=[],
+            bindings=[],
+        )
+        served = store.get("ch/service/loader")
+        expected = hashlib.sha256(served.encode()).hexdigest()
+        assert (
+            f"ALTER USER `dfe_loader` IDENTIFIED WITH sha256_hash BY '{expected}'"
+            in client.executed
+        )
+
+
 class TestDefaultTierName:
     def test_flagged_default_wins(self):
         tiers = [
@@ -102,15 +192,16 @@ class TestTenantGrantedDbs:
         ]
         assert _tenant_granted_dbs(tiers) == ["dfe", "dfe_hunts"]
 
-    def test_ignores_specific_table_and_non_select_grants(self):
-        tiers = [
-            ChTier(
-                name="a",
-                kind="analyst",
-                grants=["SELECT ON dfe.default", "INSERT ON dfe.*"],
-            )
-        ]
+    def test_ignores_non_select_grants(self):
+        tiers = [ChTier(name="a", kind="analyst", grants=["INSERT ON dfe.*"])]
         assert _tenant_granted_dbs(tiers) == []
+
+    def test_default_analyst_tiers_discover_dfe(self):
+        """The seeded analyst tiers grant broad dfe.* (D9), so dfe stays in the deny
+        set, or the dfe.otel_* tables (no _org_id) would get no backstop policy."""
+        from dfe_engine.governance.ch.models import DEFAULT_TIERS
+
+        assert "dfe" in _tenant_granted_dbs(DEFAULT_TIERS)
 
 
 class TestRenderAll:
@@ -166,6 +257,53 @@ class TestRenderAll:
         assert "ALTER USER `dfe_grp_admin` SETTINGS SQL_current_tenant_id" not in s
         # binding without a minted secret is skipped
         assert "dfe_grp_nohash" not in s
+
+    def test_row_policy_isolation_end_to_end(self):
+        """Full composition with the SEEDED tiers (D9): every user - org and
+        platform alike - reads the whole data db via the broad analyst tier role, so
+        a fenced org user sees every source table automatically. The org user is
+        confined by the tenant role + pin plus the otel deny policy, NOT by a
+        narrowed grant."""
+        from dfe_engine.governance.ch.models import DEFAULT_SERVICE_ROLES, DEFAULT_TIERS
+
+        orgs = [_org("acme", ["acme"])]
+        bindings = [
+            GroupChBinding(group="ops"),  # platform -> tier only, no pin
+            GroupChBinding(group="soc", org="acme"),  # org-scoped -> fenced
+        ]
+        stmts = _rec().render_all(
+            tiers=DEFAULT_TIERS,
+            service_roles=DEFAULT_SERVICE_ROLES,
+            orgs=orgs,
+            bindings=bindings,
+            org_tables=[("dfe", "default")],
+            service_hashes={},
+            group_hashes={"ops": "h1", "soc": "h2"},
+            org_hashes={"acme": "h3"},
+            deny_tables=[("dfe", "otel_logs")],
+        )
+        s = "\n".join(stmts)
+        # the analyst tier role grants the whole data db - an org user reaches every
+        # source table through it, never a narrowed dfe.default
+        assert "GRANT SELECT ON dfe.* TO `dfe_analyst_tier_2_role`" in s
+        assert "GRANT SELECT ON dfe.default TO `dfe_analyst_tier_2_role`" not in s
+        # no per-user data grant: org and platform users alike only hold the tier
+        # role, never a direct dfe.* grant on the user itself
+        assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in s
+        assert "GRANT SELECT ON dfe.* TO `dfe_org_acme`" not in s
+        assert "GRANT SELECT ON dfe.* TO `dfe_grp_ops`" not in s
+        # only the org-scoped users are fenced by the tenant role + pin
+        assert "GRANT `dfe_tenant_role` TO `dfe_org_acme`" in s
+        assert "GRANT `dfe_tenant_role` TO `dfe_grp_soc`" in s
+        assert "GRANT `dfe_tenant_role` TO `dfe_grp_ops`" not in s
+        # the deny backstop fences dfe.otel_logs for the tenant role - the sole
+        # control keeping otel away from a fenced user now the grant is broad
+        assert (
+            "`dfe_rowpol_tenant_dfe_otel_logs` ON `dfe`.`otel_logs` "
+            "AS RESTRICTIVE FOR SELECT USING 0" in s
+        )
+        # dfe_query_reader (platform reader) keeps whole-db read incl dfe.otel_*
+        assert "GRANT SELECT ON dfe.* TO `dfe_query_reader_role`" in s
 
     def test_explicit_tier_overrides_default(self):
         tiers, _service, _orgs, _b = self._inputs()

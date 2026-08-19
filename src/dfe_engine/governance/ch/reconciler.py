@@ -59,9 +59,10 @@ def _default_tier_name(tiers: list[Any], kind: str) -> str:
 def _tenant_granted_dbs(tiers: list[Any]) -> list[str]:
     """Databases a tenant (pinned) user can SELECT, from the analyst-tier grants.
 
-    Pinned users hold an analyst tier whose grants are ``SELECT ON <db>.*``. A
-    table in one of those dbs that carries no ``_org_id`` gets no row policy, so
-    the tenant reads it in full - this list bounds where that class can hide, and
+    Pinned users hold an analyst tier whose grants are ``SELECT ON <db>.*`` (the
+    broad data-db grant, D9). A table in one of those dbs that carries no
+    ``_org_id`` gets no ``_org_id`` row policy, so the tenant would read it in full
+    - this list bounds where that class can hide (``dfe``'s ``otel_*`` etc.) and
     feeds the deny policies rendered by ``render_tenant_axis``.
     """
     dbs: set[str] = set()
