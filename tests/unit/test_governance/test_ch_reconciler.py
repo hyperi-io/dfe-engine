@@ -150,7 +150,9 @@ class TestReconcilePasswordSync:
         client = _FakeAdminClient()
         ChRbacReconciler(client, secrets_store=store).reconcile(
             tiers=[],
-            service_roles=[ChServiceRole(name="loader", mint_user=True, grants=["INSERT ON dfe.*"])],
+            service_roles=[
+                ChServiceRole(name="loader", mint_user=True, grants=["INSERT ON dfe.*"])
+            ],
             orgs=[],
             bindings=[],
         )

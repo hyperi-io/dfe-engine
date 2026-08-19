@@ -137,9 +137,7 @@ class TestRenderServiceUser:
             "CREATE USER IF NOT EXISTS `dfe_query_reader` "
             "IDENTIFIED WITH sha256_hash BY 'cafef00d'" in s
         )
-        assert (
-            "ALTER USER `dfe_query_reader` IDENTIFIED WITH sha256_hash BY 'cafef00d'" in s
-        )
+        assert "ALTER USER `dfe_query_reader` IDENTIFIED WITH sha256_hash BY 'cafef00d'" in s
         assert "GRANT `dfe_query_reader_role` TO `dfe_query_reader`" in s
 
 
@@ -250,9 +248,7 @@ class TestRenderPinnedUser:
             )
         )
         platform = _joined(
-            render_pinned_user(
-                "dfe_grp_ops", "h", tier_role="dfe_analyst_tier_2_role", org_ids=[]
-            )
+            render_pinned_user("dfe_grp_ops", "h", tier_role="dfe_analyst_tier_2_role", org_ids=[])
         )
         # both get the tier role; neither gets a direct whole-db data grant
         assert "GRANT `dfe_analyst_tier_2_role` TO `dfe_org_acme`" in org
@@ -285,9 +281,7 @@ class TestRenderPinnedUser:
                 "dfe_org_acme", "deadbeef", tier_role="dfe_analyst_tier_2_role", org_ids=["acme"]
             )
         )
-        assert (
-            "ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY 'deadbeef'" in s
-        )
+        assert "ALTER USER `dfe_org_acme` IDENTIFIED WITH sha256_hash BY 'deadbeef'" in s
 
 
 class TestDefaultTiers:
