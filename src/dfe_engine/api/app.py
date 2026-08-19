@@ -21,7 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
-from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
+from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
 @asynccontextmanager
@@ -405,6 +405,12 @@ def create_app(
     from dfe_engine.api.v1 import v1_router
 
     app.include_router(v1_router, prefix="/api")
+
+    if e2e_routes_enabled(settings):
+        from dfe_engine.api.v1.e2e import router as e2e_router
+
+        app.include_router(e2e_router, prefix="/api/v1")
+        logger.warning("e2e-server routes mounted at /api/v1/e2e")
 
     # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
     from dfe_engine.api.well_known import router as well_known_router

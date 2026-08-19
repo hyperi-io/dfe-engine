@@ -48,6 +48,7 @@ e2e-server:
 	@echo "ClickHouse databases -> $(E2E_CH_DATA_DB), $(E2E_CH_HUNTS_DB)"
 	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${DFE_API_PORT:-8003}/readyz"
+	@echo "e2e seed-admin -> POST http://localhost:$${DFE_API_PORT:-8003}/api/v1/e2e/seed-admin"
 	set -a; . ./.env.e2e; set +a; \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
 	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" "$(E2E_WORKSPACE)/secrets"; \
@@ -74,5 +75,6 @@ e2e-server:
 	export DFE_STORAGE_PATH="$(E2E_WORKSPACE)/artifacts"; \
 	export DFE_CLICKHOUSE_DATA_DATABASE="$(E2E_CH_DATA_DB)"; \
 	export DFE_CLICKHOUSE_HUNTS_DATABASE="$(E2E_CH_HUNTS_DB)"; \
+	export DFE_E2E_SERVER=true; \
 	export DFE_ENV_FILE=.env.e2e; \
 	uv run dfe-engine run

@@ -195,6 +195,12 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.hunts_database == "dfe_e2e_hunts"
 
+    def test_e2e_server_env_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.setenv("DFE_E2E_SERVER", "true")
+        settings = load_settings()
+        assert settings.e2e_server is True
+
     def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
         monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
@@ -553,6 +559,14 @@ class TestProductionPostureCannotShipWithAuthOff:
     def test_production_posture_with_auth_off_refuses_to_load(self):
         with pytest.raises(ValidationError, match="grants every unauthenticated caller"):
             DFESettings(env="production", auth=AuthSettings(enabled=False))
+
+    def test_production_posture_rejects_e2e_server(self):
+        with pytest.raises(ValidationError, match="e2e_server"):
+            DFESettings(env="production", e2e_server=True)
+
+    def test_dev_posture_allows_e2e_server(self):
+        settings = DFESettings(env="test", e2e_server=True)
+        assert settings.e2e_server is True
 
     def test_dev_posture_with_auth_off_still_loads(self):
         # The opt-out has to keep working, or every local dev setup breaks.

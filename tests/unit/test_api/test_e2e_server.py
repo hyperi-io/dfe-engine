@@ -1,0 +1,129 @@
+#  Project:      dfe-engine
+#  File:         tests/unit/test_api/test_e2e_server.py
+#  Purpose:      e2e-server-only API group (seed-admin) is absent outside that mode
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from dfe_engine.api.app import create_app
+from dfe_engine.api.deps import _registries
+from dfe_engine.settings import (
+    APISettings,
+    AuthSettings,
+    ClickHouseSettings,
+    DFESettings,
+    HuntsSettings,
+    LocalAuthSettings,
+    SchemasSettings,
+    SecretsSettings,
+    ServicesSettings,
+    SourceSettings,
+)
+
+_SEED = "/api/v1/e2e/seed-admin"
+_STATUS = "/api/v1/e2e/status"
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_break_glass(monkeypatch):
+    """Do not inherit DFE_AUTH_LOCAL_ADMIN_* from a developer .env."""
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+
+
+def _settings(tmp_path: Path, *, e2e_server: bool, env: str = "test") -> DFESettings:
+    for sub in ("sources", "services", "rules", "hunts", "auth", "schemas", "secrets"):
+        (tmp_path / sub).mkdir()
+    return DFESettings(
+        env=env,
+        e2e_server=e2e_server,
+        config_dir=str(tmp_path),
+        clickhouse=ClickHouseSettings(bootstrap_tables=False),
+        source=SourceSettings(sources_dir=str(tmp_path / "sources")),
+        services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
+        schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
+        hunts=HuntsSettings(rules_dir=str(tmp_path / "rules"), hunt_dir=str(tmp_path / "hunts")),
+        auth=AuthSettings(
+            enabled=True,
+            auth_dir=str(tmp_path / "auth"),
+            local=LocalAuthSettings(enabled=True, admin_password="changeme"),
+        ),
+        secrets=SecretsSettings(provider="file", path=str(tmp_path / "secrets")),
+        api=APISettings(jwt_secret="test-secret-key-for-unit-tests-hmac32"),
+    )
+
+
+def test_e2e_routes_absent_when_flag_off(tmp_path):
+    app = create_app(settings=_settings(tmp_path, e2e_server=False))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert client.get(_STATUS).status_code == 404
+            assert (
+                client.post(_SEED, json={"username": "admin", "password": "pw"}).status_code == 404
+            )
+    finally:
+        _registries.clear()
+
+
+def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
+    app = create_app(settings=_settings(tmp_path, e2e_server=True))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            status = client.get(_STATUS)
+            assert status.status_code == 200
+            assert status.json() == {"enabled": True}
+
+            # Drop the bootstrap admin so seed-admin has to create one.
+            app.state.account_store.delete("admin")
+            resp = client.post(_SEED, json={"username": "playwright", "password": "e2e-secret"})
+            assert resp.status_code == 200
+            body = resp.json()
+            assert body == {"username": "playwright", "created": True}
+            assert "password" not in body
+
+            login = client.post(
+                "/api/v1/auth/login",
+                json={"username": "playwright", "password": "e2e-secret"},
+            )
+            assert login.status_code == 200
+            assert "admin" in login.json()["roles"]
+    finally:
+        _registries.clear()
+
+
+def test_e2e_seed_admin_resets_existing_password(tmp_path):
+    app = create_app(settings=_settings(tmp_path, e2e_server=True))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            first = client.post(_SEED, json={"username": "admin", "password": "first-pass"})
+            assert first.status_code == 200
+            assert first.json()["created"] is False  # bootstrap already seeded admin
+
+            second = client.post(_SEED, json={"username": "admin", "password": "second-pass"})
+            assert second.status_code == 200
+            assert second.json() == {"username": "admin", "created": False}
+
+            assert (
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "first-pass"},
+                ).status_code
+                == 401
+            )
+            assert (
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "second-pass"},
+                ).status_code
+                == 200
+            )
+    finally:
+        _registries.clear()
