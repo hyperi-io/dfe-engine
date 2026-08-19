@@ -3,6 +3,16 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.15.0](https://github.com/hyperi-io/dfe-engine/compare/v1.14.1...v1.15.0) (2026-08-19)
+
+### Features
+
+* **auth:** FerretDB-backed account store and reusable document layer ([9888ec0](https://github.com/hyperi-io/dfe-engine/commit/9888ec0b5c5ef93691c3bf4dd9a96b5d6f5b459d))
+
+### Bug Fixes
+
+* **hyperdx:** scope-aware query:execute gate so an org_viewer gets its connection ([2240256](https://github.com/hyperi-io/dfe-engine/commit/224025616af48dfd55ddd5ab317452b0cea0a376))
+
 ## [1.14.1](https://github.com/hyperi-io/dfe-engine/compare/v1.14.0...v1.14.1) (2026-08-19)
 
 ### Bug Fixes
