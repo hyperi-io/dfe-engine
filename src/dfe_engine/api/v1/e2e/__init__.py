@@ -10,8 +10,9 @@
 
 Mounted by ``create_app`` only when ``DFE_E2E_SERVER`` is on and the posture is
 non-production. In that process, ``/docs`` has a spec dropdown: **API**
-(``/openapi.json``) vs **E2E** (``/openapi-e2e.json``). The committed OpenAPI
-spec (generated without the flag) never includes them.
+(``/openapi.json``) vs **E2E** (``/openapi-e2e.json``). The committed product
+spec never includes them; ``openapi-spec/openapi.e2e.json`` is generated
+alongside it.
 
 GET  /api/v1/e2e/status      → confirm the group is live
 POST /api/v1/e2e/seed-admin  → create or reset a local admin (no auth)
@@ -33,7 +34,7 @@ E2E_OPENAPI_TAG: dict[str, str] = {
     "name": E2E_TAG,
     "description": (
         "Playwright helpers for `make e2e-server`. Unauthenticated. "
-        "Mounted and documented only in that mode — not in the committed spec."
+        "Mounted and documented only in that mode — not in the product spec."
     ),
 }
 

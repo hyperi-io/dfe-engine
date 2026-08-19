@@ -472,8 +472,7 @@ def create_app(
         if e2e_docs:
             from dfe_engine.api.e2e_docs import split_openapi
 
-            api_schema, e2e_schema = split_openapi(schema)
-            app.state.e2e_openapi_schema = e2e_schema
+            api_schema, _ = split_openapi(schema)
             app.openapi_schema = api_schema
         else:
             app.openapi_schema = schema
