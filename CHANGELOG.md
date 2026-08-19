@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.14.1](https://github.com/hyperi-io/dfe-engine/compare/v1.14.0...v1.14.1) (2026-08-19)
+
+### Bug Fixes
+
+* adopt scalo 2.29.14 so the collector endpoint the charts set is honoured ([d75d0ca](https://github.com/hyperi-io/dfe-engine/commit/d75d0caa3a4239f59914205d8b5202a2633ac7a0))
+* **deps:** update dependency node to v24.19.0 ([#134](https://github.com/hyperi-io/dfe-engine/issues/134)) ([7bb1c59](https://github.com/hyperi-io/dfe-engine/commit/7bb1c592ac15109f99c0d953e4b218f34d3880cd))
+
 ## [1.14.0](https://github.com/hyperi-io/dfe-engine/compare/v1.13.0...v1.14.0) (2026-08-18)
 
 ## [1.13.0](https://github.com/hyperi-io/dfe-engine/compare/v1.12.0...v1.13.0) (2026-08-18)
