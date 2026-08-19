@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.15.1](https://github.com/hyperi-io/dfe-engine/compare/v1.15.0...v1.15.1) (2026-08-19)
+
+### Bug Fixes
+
+* **governance:** reconcile reasserts CH passwords, otel db->dfe, dex issuer backout ([aa0247f](https://github.com/hyperi-io/dfe-engine/commit/aa0247f0bdde7e61db54cc813bdb4bff1c095a26))
+
 ## [1.15.0](https://github.com/hyperi-io/dfe-engine/compare/v1.14.1...v1.15.0) (2026-08-19)
 
 ### Features
