@@ -34,6 +34,8 @@ def main() -> None:
     app.openapi_schema = None
 
     spec = app.openapi()
+    if any(path.startswith("/api/v1/e2e") for path in spec.get("paths", {})):
+        raise SystemExit("refusing to commit e2e-server paths into openapi.json")
     SPEC_FILE.write_text(json.dumps(spec, indent=2) + "\n")
     print(f"OpenAPI spec written to {SPEC_FILE} ({len(spec.get('paths', {}))} paths)")
 

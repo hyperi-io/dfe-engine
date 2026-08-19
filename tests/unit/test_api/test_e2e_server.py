@@ -73,6 +73,51 @@ def test_e2e_routes_absent_when_flag_off(tmp_path):
         _registries.clear()
 
 
+def test_e2e_openapi_absent_when_flag_off(tmp_path):
+    app = create_app(settings=_settings(tmp_path, e2e_server=False))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            spec = client.get("/openapi.json").json()
+            assert _SEED not in spec["paths"]
+            assert _STATUS not in spec["paths"]
+            assert "E2E" not in {t["name"] for t in spec.get("tags", [])}
+            assert client.get("/openapi-e2e.json").status_code == 404
+            docs = client.get("/docs").text
+            assert "openapi-e2e.json" not in docs
+    finally:
+        _registries.clear()
+
+
+def test_e2e_openapi_group_when_flag_on(tmp_path):
+    app = create_app(settings=_settings(tmp_path, e2e_server=True))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            api_spec = client.get("/openapi.json").json()
+            e2e_spec = client.get("/openapi-e2e.json").json()
+            docs = client.get("/docs").text
+
+        assert _STATUS not in api_spec["paths"]
+        assert _SEED not in api_spec["paths"]
+        assert "E2E" not in {t["name"] for t in api_spec.get("tags", [])}
+
+        assert _STATUS in e2e_spec["paths"]
+        assert _SEED in e2e_spec["paths"]
+        assert e2e_spec["paths"][_STATUS]["get"]["tags"] == ["E2E"]
+        assert e2e_spec["paths"][_SEED]["post"]["tags"] == ["E2E"]
+        assert e2e_spec["paths"][_SEED]["post"].get("security") == []
+        e2e_tags = [t for t in e2e_spec.get("tags", []) if t["name"] == "E2E"]
+        assert len(e2e_tags) == 1
+        assert "Playwright" in e2e_tags[0]["description"]
+        assert "/api/v1/auth/login" not in e2e_spec["paths"]
+
+        assert "openapi-e2e.json" in docs
+        assert "StandaloneLayout" in docs
+        assert '"name": "API"' in docs or '"name":"API"' in docs
+        assert '"name": "E2E"' in docs or '"name":"E2E"' in docs
+    finally:
+        _registries.clear()
+
+
 def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
     app = create_app(settings=_settings(tmp_path, e2e_server=True))
     try:

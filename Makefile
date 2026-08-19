@@ -46,7 +46,7 @@ e2e-server:
 	@test -f .env.e2e || { echo "Create .env.e2e first (copy .env and set DFE_ENV=test)"; exit 1; }
 	@echo "e2e workspace (fresh) -> $(E2E_WORKSPACE)"
 	@echo "ClickHouse databases -> $(E2E_CH_DATA_DB), $(E2E_CH_HUNTS_DB)"
-	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs"
+	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs  (select API or E2E)"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${DFE_API_PORT:-8003}/readyz"
 	@echo "e2e seed-admin -> POST http://localhost:$${DFE_API_PORT:-8003}/api/v1/e2e/seed-admin"
 	set -a; . ./.env.e2e; set +a; \
