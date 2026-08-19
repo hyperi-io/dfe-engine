@@ -28,7 +28,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 
-_SEED = "/api/e2e/seed-admin"
+_SEED = "/api/e2e/seed"
 _STATUS = "/api/e2e/status"
 
 
@@ -66,9 +66,7 @@ def test_e2e_routes_absent_when_flag_off(tmp_path):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             assert client.get(_STATUS).status_code == 404
-            assert (
-                client.post(_SEED, json={"username": "admin", "password": "pw"}).status_code == 404
-            )
+            assert client.post(_SEED, json={"script": "seed_admin"}).status_code == 404
     finally:
         _registries.clear()
 
@@ -140,17 +138,17 @@ def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
             assert status.status_code == 200
             assert status.json() == {"enabled": True}
 
-            # Drop the bootstrap admin so seed-admin has to create one.
+            # Drop the bootstrap admin so seed_admin has to create one.
             app.state.account_store.delete("admin")
-            resp = client.post(_SEED, json={"username": "playwright", "password": "e2e-secret"})
+            resp = client.post(_SEED, json={"script": "seed_admin"})
             assert resp.status_code == 200
             body = resp.json()
-            assert body == {"username": "playwright", "created": True}
+            assert body["success"] is True
             assert "password" not in body
 
             login = client.post(
                 "/api/v1/auth/login",
-                json={"username": "playwright", "password": "e2e-secret"},
+                json={"username": "admin", "password": "changeme"},
             )
             assert login.status_code == 200
             assert "admin" in login.json()["roles"]
@@ -162,13 +160,14 @@ def test_e2e_seed_admin_resets_existing_password(tmp_path):
     app = create_app(settings=_settings(tmp_path, e2e_server=True))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            first = client.post(_SEED, json={"username": "admin", "password": "first-pass"})
+            app.state.account_store.reset_password("admin", "first-pass")
+            first = client.post(_SEED, json={"script": "seed_admin"})
             assert first.status_code == 200
-            assert first.json()["created"] is False  # bootstrap already seeded admin
+            assert first.json()["success"] is True
 
-            second = client.post(_SEED, json={"username": "admin", "password": "second-pass"})
+            second = client.post(_SEED, json={"script": "seed_admin"})
             assert second.status_code == 200
-            assert second.json() == {"username": "admin", "created": False}
+            assert second.json()["success"] is True
 
             assert (
                 client.post(
@@ -180,7 +179,7 @@ def test_e2e_seed_admin_resets_existing_password(tmp_path):
             assert (
                 client.post(
                     "/api/v1/auth/login",
-                    json={"username": "admin", "password": "second-pass"},
+                    json={"username": "admin", "password": "changeme"},
                 ).status_code
                 == 200
             )

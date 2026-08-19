@@ -15,19 +15,19 @@ that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 them; ``openapi-spec/openapi.e2e.json`` is generated alongside it.
 
 GET  /api/e2e/status      → confirm the group is live
-POST /api/e2e/seed-admin  → create or reset a local admin (no auth)
+POST /api/e2e/seed        → run a named seed script (e.g. seed_admin)
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.api.cli_exposure import CLI_HIDDEN
-from dfe_engine.auth.bootstrap import ensure_admin_account
+from dfe_engine.api.e2e.seed import Seed
 
 E2E_TAG = "E2E"
 E2E_OPENAPI_TAG: dict[str, str] = {
@@ -49,16 +49,13 @@ class E2EStatusResponse(BaseModel):
     enabled: bool
 
 
-class SeedAdminRequest(BaseModel):
-    username: str = Field(default="admin", description="Local admin username to seed")
-    password: str = Field(
-        default="changeme", description="Plaintext password (hashed before storage)"
-    )
+class SeedRequest(BaseModel):
+    script: Literal["seed_admin" | "seed_setup_complete"]
 
 
-class SeedAdminResponse(BaseModel):
-    username: str
-    created: bool
+class SeedResponse(BaseModel):
+    success: bool
+    message: str
 
 
 @router.get("/status", response_model=E2EStatusResponse, openapi_extra=_E2E_OPENAPI_EXTRA)
@@ -67,14 +64,15 @@ async def e2e_status() -> E2EStatusResponse:
     return E2EStatusResponse(enabled=True)
 
 
-@router.post("/seed-admin", response_model=SeedAdminResponse, openapi_extra=_E2E_OPENAPI_EXTRA)
-async def seed_admin(body: SeedAdminRequest, request: Request) -> SeedAdminResponse:
-    """Create or reset a local admin in dfe-admins. Unauthenticated by design."""
-    created = ensure_admin_account(
-        request.app.state.account_store,
-        request.app.state.group_store,
-        name=body.username,
-        password=body.password,
+@router.post("/seed-static", response_model=SeedResponse, openapi_extra=_E2E_OPENAPI_EXTRA)
+async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
+    """Run a named e2e seed script. Unauthenticated by design."""
+    seeder = Seed(
+        account_store=request.app.state.account_store,
+        group_store=request.app.state.group_store,
+        env=request.app.state.settings.env,
     )
-    logger.warning("e2e seed-admin", username=body.username, created=created)
-    return SeedAdminResponse(username=body.username, created=created)
+    success = seeder.seed(body.script)
+    logger.warning("e2e seed", script=body.script, success=success)
+    message = "Seed successful" if success else f"Unknown seed script: {body.script}"
+    return SeedResponse(success=success, message=message)

@@ -32,19 +32,19 @@
         }
       }
     },
-    "/api/e2e/seed-admin": {
+    "/api/e2e/seed-static": {
       "post": {
         "tags": [
           "E2E"
         ],
-        "summary": "Seed Admin",
-        "description": "Create or reset a local admin in dfe-admins. Unauthenticated by design.",
-        "operationId": "seed_admin_api_e2e_seed_admin_post",
+        "summary": "Seed Static",
+        "description": "Run a named e2e seed script. Unauthenticated by design.",
+        "operationId": "seed_static_api_e2e_seed_static_post",
         "requestBody": {
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/SeedAdminRequest"
+                "$ref": "#/components/schemas/SeedRequest"
               }
             }
           },
@@ -56,7 +56,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SeedAdminResponse"
+                  "$ref": "#/components/schemas/SeedResponse"
                 }
               }
             }
@@ -107,41 +107,37 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
-      "SeedAdminRequest": {
+      "SeedRequest": {
         "properties": {
-          "username": {
+          "script": {
             "type": "string",
-            "title": "Username",
-            "description": "Local admin username to seed",
-            "default": "admin"
-          },
-          "password": {
-            "type": "string",
-            "title": "Password",
-            "description": "Plaintext password (hashed before storage)",
-            "default": "changeme"
-          }
-        },
-        "type": "object",
-        "title": "SeedAdminRequest"
-      },
-      "SeedAdminResponse": {
-        "properties": {
-          "username": {
-            "type": "string",
-            "title": "Username"
-          },
-          "created": {
-            "type": "boolean",
-            "title": "Created"
+            "const": "seed_admin",
+            "title": "Script"
           }
         },
         "type": "object",
         "required": [
-          "username",
-          "created"
+          "script"
         ],
-        "title": "SeedAdminResponse"
+        "title": "SeedRequest"
+      },
+      "SeedResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "SeedResponse"
       },
       "ValidationError": {
         "properties": {

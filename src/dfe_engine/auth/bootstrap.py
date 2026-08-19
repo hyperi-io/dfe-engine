@@ -182,37 +182,6 @@ def bootstrap_auth(
     return account_store, group_store, api_key_store, role_store, role_config
 
 
-def ensure_admin_account(
-    account_store: AccountStore | FerretDBAccountStore,
-    group_store: GroupStore,
-    *,
-    name: str,
-    password: str,
-) -> bool:
-    """Create or reset a local admin account in ``dfe-admins``.
-
-    Returns True when the account was created, False when an existing account
-    was reset (password + membership + enabled).
-    """
-    if group_store.get("dfe-admins") is None:
-        group_store.create("dfe-admins", roles=["admin"], description="Full administrative access")
-
-    existing = account_store.get(name)
-    if existing is None:
-        _seed_admin(account_store, group_store, password, name)
-        return True
-
-    account_store.reset_password(name, password)
-    groups = list(existing.groups)
-    if "dfe-admins" not in groups:
-        groups.append("dfe-admins")
-        account_store.update(name, groups=groups, enabled=True)
-    elif not existing.enabled:
-        account_store.update(name, enabled=True)
-    group_store.add_member("dfe-admins", name)
-    return False
-
-
 def _seed_roles(dest: Path) -> None:
     """Copy built-in roles.yaml to dest."""
     pkg = importlib.resources.files("dfe_engine.auth.resources")

@@ -48,7 +48,7 @@ e2e-server:
 	@echo "ClickHouse databases -> $(E2E_CH_DATA_DB), $(E2E_CH_HUNTS_DB)"
 	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs  (select API or E2E)"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${DFE_API_PORT:-8003}/readyz"
-	@echo "e2e seed-admin -> POST http://localhost:$${DFE_API_PORT:-8003}/api/e2e/seed-admin"
+	@echo "e2e seed -> POST http://localhost:$${DFE_API_PORT:-8003}/api/e2e/seed"
 	set -a; . ./.env.e2e; set +a; \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
 	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" "$(E2E_WORKSPACE)/secrets"; \
