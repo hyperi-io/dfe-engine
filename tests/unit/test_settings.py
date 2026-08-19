@@ -190,6 +190,11 @@ class TestEnvOverrides:
         monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
         assert load_settings().clickhouse.effective_data_database == "telemetry"
 
+    def test_clickhouse_hunts_database_override(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_HUNTS_DATABASE", "dfe_e2e_hunts")
+        settings = load_settings()
+        assert settings.clickhouse.hunts_database == "dfe_e2e_hunts"
+
     def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
         monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)

@@ -1230,6 +1230,10 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["database"] = val
     if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
+    if val := _get_env("DFE_CLICKHOUSE_OTEL_DATABASE", "CLICKHOUSE_OTEL_DATABASE"):
+        overrides["clickhouse"]["otel_database"] = val
+    if val := _get_env("DFE_CLICKHOUSE_HUNTS_DATABASE"):
+        overrides["clickhouse"]["hunts_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
         overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
