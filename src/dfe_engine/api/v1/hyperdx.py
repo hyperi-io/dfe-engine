@@ -23,10 +23,11 @@ closed. The ``query:execute`` gate keeps callers with no data-plane access out.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 
-from dfe_engine.api.deps import CurrentUser, Settings, require_action
+from dfe_engine.api.deps import CurrentUser, Settings, is_action_allowed
+from dfe_engine.auth import Scope
 from dfe_engine.auth.rbac_scopes import scopes_dict
 from dfe_engine.governance.ch.bindings import ORG_VIEWER_ROLE
 from dfe_engine.governance.ch.models import org_user_name
@@ -55,10 +56,32 @@ def _ch_host_url(settings) -> str:
     return f"{scheme}://{ch.host}:{ch.port}"
 
 
+def _require_query_execute(request: Request, user) -> None:
+    """Gate the connection on ``query:execute``, evaluated scope-aware.
+
+    An org_viewer holds ``query:execute`` only at its OWN org scope, so a plain
+    system-scope check (the default ``require_action``) locks every org_viewer out
+    of its own connection - the exact caller this endpoint exists to serve. Pass
+    if the caller can execute at system scope OR at any org they belong to.
+    """
+    action = scopes_dict["query_execute"]
+    if is_action_allowed(request, user, action):
+        return
+    for org_id in user.org_ids:
+        if is_action_allowed(request, user, action, scope=Scope(type="org", id=org_id)):
+            return
+    raise HTTPException(
+        status_code=status.HTTP_403_FORBIDDEN,
+        detail={
+            "code": "forbidden",
+            "message": "query:execute required (at system or your org scope)",
+        },
+    )
+
+
 @router.get(
     "/connection",
     response_model=HyperDXConnection,
-    dependencies=[Depends(require_action(scopes_dict["query_execute"]))],
 )
 async def hyperdx_connection(
     request: Request,
@@ -72,6 +95,8 @@ async def hyperdx_connection(
     resolves to zero or several separate orgs is refused (403) so isolation fails
     closed rather than guessing.
     """
+    _require_query_execute(request, user)
+
     from dfe_engine.secrets import build_secrets
 
     store = build_secrets(settings.secrets)

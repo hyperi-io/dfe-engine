@@ -38,8 +38,18 @@ def _settings(tmp_path):
 
 
 def _request(orgs):
+    # The scope-aware query:execute gate (moved into the handler) resolves via
+    # is_action_allowed, which reads settings.auth.enabled + role_config off
+    # app.state - provide both so the gate can evaluate.
+    from dfe_engine.auth.roles import RoleConfig
+
     reg = SimpleNamespace(list=lambda: orgs)
-    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(org_registry=reg)))
+    state = SimpleNamespace(
+        org_registry=reg,
+        settings=SimpleNamespace(auth=SimpleNamespace(enabled=True)),
+        role_config=RoleConfig.load_builtin(),
+    )
+    return SimpleNamespace(app=SimpleNamespace(state=state))
 
 
 async def test_org_viewer_gets_only_its_own_org_connection(tmp_path):
@@ -56,6 +66,31 @@ async def test_org_viewer_gets_only_its_own_org_connection(tmp_path):
     assert conn.username == "dfe_org_acme"
     assert conn.password == "acme-pw"
     assert conn.host == "http://ch.example:8123"
+
+
+async def test_org_viewer_with_org_scoped_grant_passes_the_gate(tmp_path):
+    """Regression (found by driving): an org_viewer resolves query:execute only at
+    its OWN org scope (org-scoped group -> org-scoped grant). The old gate checked
+    query:execute at SYSTEM scope, so every org_viewer got 403 and the embed showed
+    'No available connections'. The gate must accept the org-scoped grant.
+    """
+    from dfe_engine.auth import Scope, ScopedGrant
+
+    settings = _settings(tmp_path)
+    store = build_secrets(settings.secrets)
+    store.put("ch/orgs/acme", "acme-pw")
+    user = AuthContext(
+        user_id="acme-viewer",
+        roles=["org_viewer"],
+        org_ids=["acme"],
+        grants=[ScopedGrant(role="org_viewer", scope=Scope(type="org", id="acme"))],
+    )
+    req = _request([_org("acme", ["acme"])])
+
+    conn = await hyperdx_connection(req, user, settings)
+
+    assert conn.name == "acme"
+    assert conn.username == "dfe_org_acme"
 
 
 async def test_platform_role_gets_the_unrestricted_reader(tmp_path):
