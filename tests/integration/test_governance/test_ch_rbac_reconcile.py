@@ -79,13 +79,16 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         SimpleNamespace(name=g_analyst, scope_org="", org_ids=[org_a], roles=["data_analyst"]),
         SimpleNamespace(name=g_admin, scope_org="", org_ids=[], roles=["admin"]),
     ]
-    # A uid-scoped tier so the users can read the test table; the seeded tiers
-    # grant SELECT on dfe.* only, and their names are not uid-scoped.
+    # A uid-scoped tier so the users can read the test table; the seeded tiers'
+    # names are not uid-scoped. Mirrors the seeded analyst tiers (D9): a BROAD grant
+    # on the whole data db `dfe` (so a platform user reads every source table incl
+    # dfe.otel_*) PLUS the uid test db that holds this fixture's own events table.
+    # Isolation is by row policy, not grant scope.
     tier = ChTier(
         name=f"test{uid}",
         kind="analyst",
         default=True,
-        grants=[f"SELECT ON {db}.*"],
+        grants=[f"SELECT ON {db}.*", "SELECT ON dfe.*"],
         # Mirrors the seeded analyst tiers: readonly=2 keeps queries read-only
         # while BI clients can still set per-query output settings.
         settings={"readonly": 2},
@@ -94,7 +97,11 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
     users = [org_user_name(org_a), org_user_name(org_b)] + [
         f"dfe_grp_{g}" for g in (g_scoped, g_open, g_analyst, g_admin)
     ]
-    otel_table = f"otel.probe_{uid}"
+    # The otel telemetry tables live in the `dfe` data db (dfe.otel_*), not a
+    # standalone `otel` db. A platform user reads them via the broad dfe.* grant; a
+    # fenced tenant user reaches dfe.* too, but the `USING 0` deny policy on the
+    # non-_org_id otel table returns zero rows.
+    otel_table = f"dfe.otel_probe_{uid}"
 
     def _drop_all() -> None:
         for u in users:
@@ -117,16 +124,10 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
         drop_safely(ch_client, f"DROP SETTINGS PROFILE IF EXISTS {tier.profile()}")
         drop_safely(ch_client, f"DROP QUOTA IF EXISTS {tier.quota_name()}")
         drop_safely(ch_client, f"DROP DATABASE IF EXISTS {db}")
+        # Drop only the uid-scoped otel probe table, never the shared `dfe` db.
         drop_safely(ch_client, f"DROP TABLE IF EXISTS {otel_table}")
         drop_safely(ch_client, "DROP ROLE IF EXISTS dfe_otel_reader_role")
-        if not had_otel:
-            drop_safely(ch_client, "DROP DATABASE IF EXISTS otel")
 
-    had_otel = bool(
-        ch_client.query("SELECT count() FROM system.databases WHERE name = 'otel'").result_rows[0][
-            0
-        ]
-    )
     try:
         ch_client.command(f"CREATE DATABASE IF NOT EXISTS {db}")
         ch_client.command(
@@ -139,7 +140,7 @@ def reconciled_world(admin_client, conn_params, tmp_path_factory):
             f"('{org_a}','a1'),('{org_a}','a2'),('{org_a}','a3'),"
             f"('{org_b}','b1'),('{org_b}','b2')"
         )
-        ch_client.command("CREATE DATABASE IF NOT EXISTS otel")
+        ch_client.command("CREATE DATABASE IF NOT EXISTS dfe")
         ch_client.command(f"CREATE TABLE {otel_table} (x UInt8) ENGINE = MergeTree() ORDER BY x")
         ch_client.command(f"INSERT INTO {otel_table} VALUES (1)")
 
@@ -289,26 +290,30 @@ class TestReconcilerPinsTheTenant:
         )
         assert n == 1
 
-    def test_analyst_group_is_denied_otel(self, reconciled_world):
-        """Analysts read every org's data but never platform telemetry."""
+    def test_analyst_group_reads_otel(self, reconciled_world):
+        """A platform analyst holds the broad dfe.* tier grant and no tenant role,
+        so the otel deny policy never targets it - it reads platform telemetry."""
         w = reconciled_world
-        with pytest.raises(Exception, match=r"ACCESS_DENIED|Not enough privileges|497"):
-            count_as(
-                w["params"],
-                f"dfe_grp_{w['g_analyst']}",
-                _group_password(w["store"], w["g_analyst"]),
-                w["otel_table"],
-            )
+        n = count_as(
+            w["params"],
+            f"dfe_grp_{w['g_analyst']}",
+            _group_password(w["store"], w["g_analyst"]),
+            w["otel_table"],
+        )
+        assert n == 1
 
-    def test_org_scoped_group_is_denied_otel(self, reconciled_world):
+    def test_org_scoped_group_sees_no_otel(self, reconciled_world):
+        """A fenced tenant group reaches dfe.* by grant (broad tier), but the
+        `USING 0` deny policy on the non-_org_id otel table returns zero rows -
+        isolation is the row policy, not grant-scoping."""
         w = reconciled_world
-        with pytest.raises(Exception, match=r"ACCESS_DENIED|Not enough privileges|497"):
-            count_as(
-                w["params"],
-                f"dfe_grp_{w['g_scoped']}",
-                _group_password(w["store"], w["g_scoped"]),
-                w["otel_table"],
-            )
+        n = count_as(
+            w["params"],
+            f"dfe_grp_{w['g_scoped']}",
+            _group_password(w["store"], w["g_scoped"]),
+            w["otel_table"],
+        )
+        assert n == 0
 
     def test_old_design_leftovers_are_swept(self, reconciled_world, admin_client):
         """Upgrade path: no per-org roles survive a reconcile."""
