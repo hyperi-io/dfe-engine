@@ -16,6 +16,7 @@ from scalo.logger import logger
 
 from dfe_engine.auth.accounts import AccountStore, FerretDBAccountStore
 from dfe_engine.auth.groups import GroupStore
+from dfe_engine.orgs.registry import OrgRegistry
 
 _TEST_ENV = "test"
 
@@ -28,6 +29,7 @@ class Seed:
         *,
         account_store: AccountStore | FerretDBAccountStore,
         group_store: GroupStore,
+        org_registry: OrgRegistry,
         env: str | None = None,
     ) -> None:
         resolved = (env if env is not None else os.environ.get("DFE_ENV", "")).strip().lower()
@@ -35,29 +37,43 @@ class Seed:
             raise PermissionError("e2e seed helpers require DFE_ENV=test")
         self._account_store = account_store
         self._group_store = group_store
-        self._attach_accounts(resolved)
+        self._org_registry = org_registry
+        self._attach_seeders(resolved)
 
-    def _attach_accounts(self, env: str) -> None:
-        """``Seed`` owns an ``Accounts`` seeder; an ``Accounts`` instance is that seeder."""
-        if type(self) is Seed:
-            from dfe_engine.api.e2e.seed.accounts import Accounts
+    def _seeder_kwargs(self, env: str) -> dict[str, object]:
+        return {
+            "account_store": self._account_store,
+            "group_store": self._group_store,
+            "org_registry": self._org_registry,
+            "env": env,
+        }
 
-            self.accounts = Accounts(
-                account_store=self._account_store,
-                group_store=self._group_store,
-                env=env,
-            )
-        else:
+    def _attach_seeders(self, env: str) -> None:
+        """``Seed`` owns child seeders; a child instance is that seeder."""
+        from dfe_engine.api.e2e.seed.accounts import Accounts
+        from dfe_engine.api.e2e.seed.organisations import Organisations
+
+        cls = type(self)
+        if cls is Seed:
+            kwargs = self._seeder_kwargs(env)
+            self.accounts = Accounts(**kwargs)
+            self.organisations = Organisations(**kwargs)
+            return
+        if cls is Accounts:
             self.accounts = self
+            return
+        if cls is Organisations:
+            self.organisations = self
 
     def seed_static(self, script: str) -> bool:
-        """Dispatch *script* to ``Accounts``. Returns False when unknown."""
+        """Dispatch *script* to child seeders. Returns False when unknown."""
         if script == "seed_admin":
             account = self.accounts.seed_admin()
             logger.warning("e2e seed", script=script, account=account)
             return True
         if script == "seed_setup_complete":
-            self.accounts.seed_admin()
+            self.accounts.seed_admin("admin", "already_reset")
             self.accounts.seed_initial_user()
+            self.organisations.seed_organisation()
             return True
         return False

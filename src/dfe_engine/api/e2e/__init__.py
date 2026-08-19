@@ -70,6 +70,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
     seeder = Seed(
         account_store=request.app.state.account_store,
         group_store=request.app.state.group_store,
+        org_registry=request.app.state.org_registry,
         env=request.app.state.settings.env,
     )
     success = seeder.seed_static(body.script)
