@@ -173,6 +173,12 @@ class TestEnvOverrides:
         assert settings.clickhouse.data_database == "dfe"
         assert settings.clickhouse.effective_data_database == "dfe"
 
+    def test_clickhouse_otel_database_default_and_override(self, monkeypatch):
+        monkeypatch.delenv("DFE_CLICKHOUSE_OTEL_DATABASE", raising=False)
+        assert load_settings().clickhouse.otel_database == "dfe"
+        monkeypatch.setenv("DFE_CLICKHOUSE_OTEL_DATABASE", "telemetry")
+        assert load_settings().clickhouse.otel_database == "telemetry"
+
     def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")
         monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
