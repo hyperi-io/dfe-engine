@@ -1,0 +1,108 @@
+"""Integration tests for the FerretDB-backed account store + document layer.
+
+Runs only when ``DFE_TEST_MONGO_URI`` points at a reachable FerretDB / mongo-wire
+server (the rig FerretDB via port-forward, or a testcontainer in CI). Uses a
+throwaway database per test so it never touches real data, and drops it on
+teardown. Real dependency, no mocks - the timing-safe and unusable-password
+semantics must hold against a real store exactly as they do for the YAML backend.
+"""
+
+from __future__ import annotations
+
+import os
+import uuid
+
+import pytest
+
+from dfe_engine.auth.accounts import FerretDBAccountStore
+from dfe_engine.store.documents import DocumentStore
+
+pytestmark = pytest.mark.integration
+
+_URI = os.environ.get("DFE_TEST_MONGO_URI", "")
+
+
+@pytest.fixture
+def store():
+    if not _URI:
+        pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable FerretDB)")
+    db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
+    doc = DocumentStore(_URI, db_name)
+    doc.ping()  # fail fast if the server is unreachable / auth wrong
+    try:
+        yield FerretDBAccountStore(doc, collection="accounts")
+    finally:
+        doc.drop_database(db_name)
+        doc.close()
+
+
+class TestFerretDBAccountStore:
+    """Behaviour parity with the YAML AccountStore, against a real FerretDB."""
+
+    def test_create_and_get(self, store):
+        acct = store.create("alice", "s3cret-Pw", groups=["dfe-admins"])
+        assert acct.username == "alice"
+        assert acct.groups == ["dfe-admins"]
+        got = store.get("alice")
+        assert got is not None
+        assert got.username == "alice"
+        assert got.password_hash.startswith("$2")  # bcrypt, not plaintext
+
+    def test_create_duplicate_raises(self, store):
+        store.create("bob", "pw-Aa1")
+        with pytest.raises(ValueError):
+            store.create("bob", "other-Pw")
+
+    def test_create_rejects_unsafe_name(self, store):
+        with pytest.raises(ValueError):
+            store.create("../evil", "pw-Aa1")
+
+    def test_get_missing_returns_none(self, store):
+        assert store.get("nobody") is None
+
+    def test_list_sorted_by_username(self, store):
+        store.create("u2", "pw-Aa1")
+        store.create("u1", "pw-Aa1")
+        assert [a.username for a in store.list()] == ["u1", "u2"]
+
+    def test_update_groups_and_enabled(self, store):
+        store.create("carol", "pw-Aa1", groups=["g1"])
+        updated = store.update("carol", groups=["g2", "g3"], enabled=False)
+        assert updated.groups == ["g2", "g3"]
+        assert updated.enabled is False
+        assert store.get("carol").enabled is False
+
+    def test_update_missing_raises(self, store):
+        with pytest.raises(KeyError):
+            store.update("ghost", enabled=False)
+
+    def test_reset_password_swaps_credential(self, store):
+        store.create("dave", "old-Pw-1")
+        assert store.verify_password("dave", "old-Pw-1")
+        store.reset_password("dave", "new-Pw-2")
+        assert not store.verify_password("dave", "old-Pw-1")
+        assert store.verify_password("dave", "new-Pw-2")
+
+    def test_delete(self, store):
+        store.create("erin", "pw-Aa1")
+        store.delete("erin")
+        assert store.get("erin") is None
+
+    def test_delete_missing_raises(self, store):
+        with pytest.raises(KeyError):
+            store.delete("ghost")
+
+    def test_verify_correct_and_wrong(self, store):
+        store.create("frank", "right-Pw-1")
+        assert store.verify_password("frank", "right-Pw-1")
+        assert not store.verify_password("frank", "wrong-Pw")
+
+    def test_verify_unknown_user_is_false(self, store):
+        # Timing-safe path: unknown user still returns False, never raises.
+        assert not store.verify_password("nobody", "whatever")
+
+    def test_external_account_never_authenticates_locally(self, store):
+        # Empty password -> unusable-password sentinel ("!"), never a "$2" hash.
+        store.create("ext", "")
+        assert not store.verify_password("ext", "")
+        assert not store.verify_password("ext", "anything")

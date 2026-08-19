@@ -29,11 +29,15 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import bcrypt
 from pydantic import BaseModel, Field
 
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.store.documents import DocumentStore
 
 # Dummy hash used for timing-safe rejection of unknown users.
 # Generated once at import time; cost=4 is intentionally low (we just need
@@ -274,6 +278,103 @@ class AccountStore:
         """Persist an Account to YAML, omitting the username field."""
         data = account.model_dump(exclude={"username"})
         yaml_dump(data, path)
+
+
+# Fields update() may change; username and password_hash are excluded (the
+# password changes only via reset_password). Kept identical to the YAML store.
+_UPDATABLE_FIELDS = (
+    "enabled",
+    "groups",
+    "external",
+    "source_provider",
+    "external_id",
+    "last_login_at",
+)
+
+
+class FerretDBAccountStore:
+    """FerretDB-backed account store - the same interface as :class:`AccountStore`.
+
+    Persists one :class:`Account` document per username (keyed and unique-indexed
+    on ``username``) instead of one YAML file. Every domain rule - name
+    validation, bcrypt hashing, the unusable-password sentinel, and the
+    timing-safe :meth:`verify_password` - is identical to the YAML store, so the
+    two are drop-in interchangeable behind the same construction seam.
+    """
+
+    def __init__(self, store: DocumentStore, *, collection: str = "accounts") -> None:
+        self._c = store.typed(collection, Account, key="username")
+
+    def create(
+        self,
+        username: str,
+        password: str,
+        *,
+        groups: list[str] | None = None,
+    ) -> Account:
+        """Create a new account. Raises ValueError if the name is invalid or taken."""
+        if not _VALID_NAME.match(username):
+            raise ValueError(f"Invalid account name: {username!r}")
+        if self._c.exists(username):
+            raise ValueError(f"Account already exists: {username}")
+        now = _now()
+        account = Account(
+            username=username,
+            password_hash=_hash_password(password) if password else _UNUSABLE_PASSWORD_HASH,
+            enabled=True,
+            groups=groups or [],
+            created_at=now,
+            updated_at=now,
+        )
+        self._c.put(username, account)
+        return account
+
+    def get(self, username: str) -> Account | None:
+        """Return the account for *username*, or None if not found."""
+        return self._c.get(username)
+
+    def list(self) -> list[Account]:
+        """Return all accounts, sorted by username."""
+        return self._c.list()
+
+    def update(self, username: str, **fields: object) -> Account:
+        """Update permitted fields on an account. Raises KeyError if missing."""
+        account = self._c.get(username)
+        if account is None:
+            raise KeyError(username)
+        updates = {k: fields[k] for k in _UPDATABLE_FIELDS if k in fields}
+        account = account.model_copy(update={**updates, "updated_at": _now()})
+        self._c.put(username, account)
+        return account
+
+    def reset_password(self, username: str, new_password: str) -> None:
+        """Replace the stored hash with a fresh bcrypt hash. Raises KeyError if missing."""
+        account = self._c.get(username)
+        if account is None:
+            raise KeyError(username)
+        account = account.model_copy(
+            update={"password_hash": _hash_password(new_password), "updated_at": _now()}
+        )
+        self._c.put(username, account)
+
+    def delete(self, username: str) -> None:
+        """Remove an account. Raises KeyError if it does not exist."""
+        if not self._c.delete(username):
+            raise KeyError(username)
+
+    def verify_password(self, username: str, password: str) -> bool:
+        """Timing-safe password check - identical semantics to the YAML store."""
+        account = self._c.get(username)
+        if account is None:
+            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            return False
+        if not password or not account.password_hash.startswith("$2"):
+            bcrypt.checkpw(password.encode("utf-8"), _DUMMY_HASH)
+            return False
+        return bcrypt.checkpw(
+            password.encode("utf-8"),
+            account.password_hash.encode("utf-8"),
+        )
 
 
 # ------------------------------------------------------------------
