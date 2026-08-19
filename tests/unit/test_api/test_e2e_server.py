@@ -28,7 +28,7 @@ from dfe_engine.settings import (
     SourceSettings,
 )
 
-_SEED = "/api/e2e/seed"
+_SEED = "/api/e2e/seed-static"
 _STATUS = "/api/e2e/status"
 
 

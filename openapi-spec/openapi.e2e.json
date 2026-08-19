@@ -111,7 +111,10 @@
         "properties": {
           "script": {
             "type": "string",
-            "const": "seed_admin",
+            "enum": [
+              "seed_admin",
+              "seed_setup_complete"
+            ],
             "title": "Script"
           }
         },

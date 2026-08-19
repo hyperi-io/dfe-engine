@@ -14,8 +14,8 @@ that process, ``/docs`` has a spec dropdown: **API** (``/openapi.json``) vs
 **E2E** (``/openapi.e2e.json``). The committed product spec never includes
 them; ``openapi-spec/openapi.e2e.json`` is generated alongside it.
 
-GET  /api/e2e/status      → confirm the group is live
-POST /api/e2e/seed        → run a named seed script (e.g. seed_admin)
+GET  /api/e2e/status       → confirm the group is live
+POST /api/e2e/seed-static  → run a named seed script (e.g. seed_admin)
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ class E2EStatusResponse(BaseModel):
 
 
 class SeedRequest(BaseModel):
-    script: Literal["seed_admin" | "seed_setup_complete"]
+    script: Literal["seed_admin", "seed_setup_complete"]
 
 
 class SeedResponse(BaseModel):
@@ -72,7 +72,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         group_store=request.app.state.group_store,
         env=request.app.state.settings.env,
     )
-    success = seeder.seed(body.script)
+    success = seeder.seed_static(body.script)
     logger.warning("e2e seed", script=body.script, success=success)
     message = "Seed successful" if success else f"Unknown seed script: {body.script}"
     return SeedResponse(success=success, message=message)

@@ -64,8 +64,8 @@ def test_seed_dispatches_seed_admin_to_accounts(tmp_path, monkeypatch):
     accounts, groups = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups)
 
-    assert seeder.seed("seed_admin") is True
-    assert seeder.seed("unknown") is False
+    assert seeder.seed_static("seed_admin") is True
+    assert seeder.seed_static("unknown") is False
     user = accounts.get("admin")
     assert user is not None
     assert accounts.get("new-admin") is None
