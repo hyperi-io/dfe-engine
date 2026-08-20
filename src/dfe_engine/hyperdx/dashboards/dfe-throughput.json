@@ -279,7 +279,10 @@
         ],
         "where": "",
         "whereLanguage": "lucene",
-        "groupBy": "_org_id",
+        "groupBy": [
+          { "valueExpression": "_org_id" }
+        ],
+        "selectGroupBy": true,
         "orderBy": "events DESC",
         "limit": {
           "limit": 20
@@ -314,7 +317,10 @@
         ],
         "where": "",
         "whereLanguage": "lucene",
-        "groupBy": "_source",
+        "groupBy": [
+          { "valueExpression": "_source" }
+        ],
+        "selectGroupBy": true,
         "orderBy": "newest_event ASC",
         "limit": {
           "limit": 50

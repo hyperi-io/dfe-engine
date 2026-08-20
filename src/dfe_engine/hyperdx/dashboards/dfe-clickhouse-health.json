@@ -379,69 +379,6 @@
         "where": "",
         "whereLanguage": "lucene"
       }
-    },
-    {
-      "id": "tables-by-rows",
-      "x": 0,
-      "y": 21,
-      "w": 12,
-      "h": 6,
-      "config": {
-        "name": "Largest tables by rows",
-        "source": "otel_metrics",
-        "displayType": "table",
-        "select": [
-          {
-            "aggFn": "max",
-            "aggCondition": "",
-            "aggConditionLanguage": "lucene",
-            "valueExpression": "Value",
-            "alias": "rows",
-            "metricType": "gauge",
-            "metricName": "clickhouse_table_rows"
-          }
-        ],
-        "where": "",
-        "whereLanguage": "lucene",
-        "groupBy": "concat(Attributes['database'], '.', Attributes['table'])",
-        "orderBy": "rows DESC",
-        "limit": {
-          "limit": 20
-        }
-      }
-    },
-    {
-      "id": "tables-by-disk",
-      "x": 12,
-      "y": 21,
-      "w": 12,
-      "h": 6,
-      "config": {
-        "name": "Largest tables on disk",
-        "source": "otel_metrics",
-        "displayType": "table",
-        "numberFormat": {
-          "output": "byte"
-        },
-        "select": [
-          {
-            "aggFn": "max",
-            "aggCondition": "",
-            "aggConditionLanguage": "lucene",
-            "valueExpression": "Value",
-            "alias": "bytes_on_disk",
-            "metricType": "gauge",
-            "metricName": "clickhouse_table_bytes_on_disk"
-          }
-        ],
-        "where": "",
-        "whereLanguage": "lucene",
-        "groupBy": "concat(Attributes['database'], '.', Attributes['table'])",
-        "orderBy": "bytes_on_disk DESC",
-        "limit": {
-          "limit": 20
-        }
-      }
     }
   ],
   "tags": [
