@@ -21,6 +21,8 @@ Password hashes are NEVER returned in any response.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
@@ -112,6 +114,12 @@ class AccountResponse(BaseModel):
     groups: list[str]
     created_at: str
     updated_at: str
+
+
+class AttributesRequest(BaseModel):
+    """Full-replace body for an account's attribute blob (non-sensitive or sensitive)."""
+
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Endpoints ────────────────────────────────────────────────
@@ -403,3 +411,105 @@ async def delete_account(
             actor=user.user_id,
             request_id=request.headers.get("X-Request-ID", ""),
         )
+
+
+# ── Attributes ───────────────────────────────────────────────
+#
+# Non-sensitive attributes ride inline on the Account model, so they are read
+# and written through the account store. Sensitive attributes live in a separate
+# keyed store (never inline, so a broad account read cannot leak them); both
+# sensitive endpoints still require the account to exist first.
+
+
+@router.get(
+    "/{username}/attributes",
+    dependencies=[Depends(require_action(scopes_dict["account_attributes_read"]))],
+)
+async def get_account_attributes(
+    username: str,
+    user: CurrentUser,
+    request: Request,
+):
+    """Read an account's non-sensitive attribute blob (404 if the account is missing)."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    account = store.get(username)
+    if account is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    return {"attributes": account.attributes}
+
+
+@router.put(
+    "/{username}/attributes",
+    dependencies=[Depends(require_action(scopes_dict["account_attributes_write"]))],
+)
+async def put_account_attributes(
+    username: str,
+    body: AttributesRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Full-replace an account's non-sensitive attribute blob (404 if missing)."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    try:
+        account = store.set_attributes(username, body.attributes)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        ) from exc
+    return {"attributes": account.attributes}
+
+
+@router.get(
+    "/{username}/sensitive-attributes",
+    dependencies=[Depends(require_action(scopes_dict["account_attributes_read_sensitive"]))],
+)
+async def get_account_sensitive_attributes(
+    username: str,
+    user: CurrentUser,
+    request: Request,
+):
+    """Read an account's SENSITIVE attribute blob from the separate keyed store.
+
+    The account must exist first (404 otherwise), so a sensitive read cannot be
+    used to probe for accounts that are not there.
+    """
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    if store.get(username) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    return {"attributes": request.app.state.account_sensitive_attributes.get(username)}
+
+
+@router.put(
+    "/{username}/sensitive-attributes",
+    dependencies=[Depends(require_action(scopes_dict["account_attributes_write_sensitive"]))],
+)
+async def put_account_sensitive_attributes(
+    username: str,
+    body: AttributesRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Full-replace an account's SENSITIVE attribute blob (404 if the account is missing)."""
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    if store.get(username) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    request.app.state.account_sensitive_attributes.put(username, body.attributes)
+    return {"attributes": request.app.state.account_sensitive_attributes.get(username)}

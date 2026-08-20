@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import bcrypt
 from pydantic import BaseModel, Field
@@ -69,6 +69,12 @@ class Account(BaseModel):
     last_login_at: str = ""
     created_at: str = ""
     updated_at: str = ""
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    """Free-form NON-sensitive attributes (nested JSON, KVP is the floor).
+
+    Stored inline on the account and round-trips through both backends. Never put
+    secrets here - a broad account read returns this blob; sensitive attributes
+    live in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
 
 
 class AccountStore:
@@ -223,6 +229,28 @@ class AccountStore:
         )
         self._write(path, account)
 
+    def set_attributes(self, username: str, attributes: dict) -> Account:
+        """Full-replace the non-sensitive ``attributes`` blob on an account.
+
+        Args:
+            username: Account to update.
+            attributes: The new attributes dict (replaces the field wholesale).
+
+        Returns:
+            The updated Account.
+
+        Raises:
+            KeyError: If no account with *username* exists.
+        """
+        path = self._path(username)
+        if not path.exists():
+            raise KeyError(username)
+
+        account = self._read(path)
+        account = account.model_copy(update={"attributes": attributes, "updated_at": _now()})
+        self._write(path, account)
+        return account
+
     def delete(self, username: str) -> None:
         """Remove an account.
 
@@ -375,6 +403,15 @@ class DocuStoreAccountStore:
             update={"password_hash": _hash_password(new_password), "updated_at": _now()}
         )
         self._c.put(username, account)
+
+    def set_attributes(self, username: str, attributes: dict) -> Account:
+        """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
+        account = self._c.get(username)
+        if account is None:
+            raise KeyError(username)
+        account = account.model_copy(update={"attributes": attributes, "updated_at": _now()})
+        self._c.put(username, account)
+        return account
 
     def delete(self, username: str) -> None:
         """Remove an account. Raises KeyError if it does not exist."""
