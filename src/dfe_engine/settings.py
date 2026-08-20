@@ -831,9 +831,9 @@ class LocalAuthSettings(BaseModel):
 
 
 class AccountStoreSettings(BaseModel):
-    """FerretDB / mongo-wire connection for the local account store.
+    """Document-store / mongo-wire connection for the local account store.
 
-    Used only when ``auth.accounts_backend == 'ferretdb'``. The URI carries the
+    Used when ``auth.store_backend`` resolves to document. The URI carries the
     SCRAM credential (sourced from the secret manager at deploy time); the
     database is separate from HyperDX's for isolation.
 
@@ -890,11 +890,14 @@ class AuthSettings(BaseModel):
     )
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
     local: LocalAuthSettings = Field(default_factory=LocalAuthSettings)
-    accounts_backend: str = Field(
-        default="yaml",
+    store_backend: str = Field(
+        default="auto",
         description=(
-            "Local account store backend: 'yaml' (config-seeded / gitcrud, the "
-            "break-glass default) or 'ferretdb' (out of the git cycle)."
+            "Central backend for BOTH local users and groups (config-cascade "
+            "overridable): 'auto' (default -- document when a reachable URI is "
+            "configured, else yaml files), 'document' (force; fail if unreachable), "
+            "or 'yaml'. gitcrud is not a store here -- only the break-glass admin is "
+            "additionally git-persisted, as the teardown backstop."
         ),
     )
     accounts_store: AccountStoreSettings = Field(default_factory=AccountStoreSettings)
@@ -1544,9 +1547,9 @@ def _get_env_overrides() -> dict:
             "yes",
         )
 
-    # Account store backend (yaml default; ferretdb nested under auth.accounts_store)
-    if val := _get_env("DFE_AUTH_ACCOUNTS_BACKEND"):
-        overrides["auth"]["accounts_backend"] = val
+    # Central users+groups store backend (auto default; document nested under auth.accounts_store)
+    if val := _get_env("DFE_AUTH_STORE_BACKEND"):
+        overrides["auth"]["store_backend"] = val
     if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_URI"):
         overrides["auth"].setdefault("accounts_store", {})["uri"] = val
     if val := _get_env("DFE_AUTH_ACCOUNTS_STORE_DATABASE"):

@@ -19,6 +19,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from dulwich import porcelain
 
 from dfe_engine.auth import account_durability as ad
 from dfe_engine.auth.accounts import Account, AccountStore
@@ -77,6 +78,7 @@ def test_disabled_publish_returns_none_and_file_share_state():
     assert outcome is None
     state = ad.state_from_outcome(None, outcome)
     assert state.enabled is False
+    assert state.committed is False  # not in git
     assert state.merged is True  # a file share is already durable
     assert state.pending is None
 
@@ -89,7 +91,9 @@ def test_disabled_steady_state_is_durable(tmp_path):
 
 
 def account_durability_file_share():
-    return ad.AccountGitState(enabled=False, auto_merge=False, merged=True, pending=None)
+    return ad.AccountGitState(
+        enabled=False, auto_merge=False, committed=False, merged=True, pending=None
+    )
 
 
 # ── Dev / solo: direct commit, immediately durable ───────────
@@ -112,6 +116,7 @@ def test_dev_direct_commit_is_merged(tmp_path):
     assert outcome.review_required is False
     state = ad.state_from_outcome(gc, outcome)
     assert state.enabled is True
+    assert state.committed is True
     assert state.merged is True
     assert state.pending is None
     # The account landed on the tracked branch (working tree), not a side branch.
@@ -159,7 +164,8 @@ def test_prod_team_opens_pr_and_is_pending(tmp_path):
     assert outcome.review_required is True
     assert forge.opened, "a PR should have been opened"
     state = ad.state_from_outcome(gc, outcome)
-    assert state.merged is False
+    assert state.committed is True  # committed to the review branch -- saved, not failed
+    assert state.merged is False  # but not on main until the PR merges
     assert state.pending is not None
     assert state.pending.pr_url == "http://forge.local/pr/7"
     assert state.pending.command is None  # a forge PR, not the CLI fallback
@@ -185,6 +191,7 @@ def test_prod_team_no_forge_falls_back_to_cli(tmp_path):
     assert outcome.review_required is True
     assert outcome.branch  # committed to a review branch, never main
     state = ad.state_from_outcome(gc, outcome)
+    assert state.committed is True
     assert state.merged is False
     assert state.pending is not None
     assert state.pending.pr_url is None
@@ -284,3 +291,80 @@ def test_remove_account_noop_when_disabled():
         ad.remove_account(None, None, environment=DEV, mode="solo", username="admin", actor="admin")
         is None
     )
+
+
+# ── Remote merge poll (step 2 of the review-PR path) ─────────
+
+
+def test_remote_state_file_share_when_disabled(tmp_path):
+    store = AccountStore(tmp_path / "accounts")
+    store.put(_account())
+    state = ad.remote_state(None, store, "admin", environment=DEV, mode="solo")
+    assert state.enabled is False
+    assert state.merged is True
+
+
+def test_remote_state_uses_working_tree_when_no_remote(tmp_path):
+    gc = _gc(tmp_path)  # local-init repo, no remote -> the working tree is the truth
+    store = AccountStore(tmp_path / "accounts")
+    store.put(_account(password_hash=_HASH_A))
+    ad.publish_seed(gc, _account(password_hash=_HASH_A))
+    assert ad.remote_state(gc, store, "admin", environment=DEV, mode="solo").merged is True
+    store.put(_account(password_hash=_HASH_B))
+    assert ad.remote_state(gc, store, "admin", environment=DEV, mode="solo").merged is False
+
+
+def test_remote_state_flips_merged_when_remote_catches_up(tmp_path):
+    # A remote deploy repo with the admin persisted at hash A.
+    remote = GitopsRepo(local_path=str(tmp_path / "remote"), repo_url="", push=False)
+    remote_gc = GitCrud(remote)
+    ad.publish_seed(remote_gc, _account(password_hash=_HASH_A))
+    branch = porcelain.active_branch(str(remote.path)).decode()
+
+    # The engine clones that remote.
+    engine = GitopsRepo(
+        local_path=str(tmp_path / "engine"), repo_url=str(remote.path), push=False, branch=branch
+    )
+    engine_gc = GitCrud(engine)
+
+    # The engine rotated the password to B and opened a PR; remote main still has A.
+    store = AccountStore(tmp_path / "live")
+    store.put(_account(password_hash=_HASH_B))
+    pending = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
+    assert pending.enabled is True
+    assert pending.committed is True  # the rotation is committed to the PR branch
+    assert pending.merged is False  # just not merged to remote main yet
+
+    # The operator merges the PR: remote main advances to B.
+    ad.publish_seed(remote_gc, _account(password_hash=_HASH_B))
+    confirmed = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
+    assert confirmed.merged is True
+
+
+def test_read_remote_file_none_without_remote(tmp_path):
+    repo = GitopsRepo(local_path=str(tmp_path / "local"), repo_url="", push=False)
+    assert repo.has_remote is False
+    assert repo.read_remote_file("governance/rbac/accounts/admin.yaml") is None
+
+
+# ── Break-glass gating (only the admin is git-persisted) ─────
+
+
+def test_is_break_glass_matches_the_admin(monkeypatch):
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+    assert ad.is_break_glass("admin") is True
+    assert ad.is_break_glass("alice") is False
+
+
+def test_is_break_glass_follows_env_admin_name(monkeypatch):
+    monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "root")
+    assert ad.is_break_glass("root") is True
+    assert ad.is_break_glass("admin") is False
+
+
+def test_not_git_backed_state_is_durable():
+    state = ad.not_git_backed_state()
+    assert state.enabled is False
+    assert state.committed is False  # not in git; durable in its own store
+    assert state.merged is True
+    assert state.pending is None

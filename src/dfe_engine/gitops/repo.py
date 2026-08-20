@@ -88,6 +88,39 @@ class GitopsRepo:
         except (KeyError, FileNotFoundError):
             return None
 
+    @property
+    def has_remote(self) -> bool:
+        """True when a remote deploy repo is configured (vs a local-only init)."""
+        return bool(self._repo_url)
+
+    def read_remote_file(self, rel: str) -> str | None:
+        """Fetch the deploy repo and return ``rel``'s content at remote ``<branch>``.
+
+        Read-only: fetches objects into the local store and reads the blob at the
+        REMOTE branch head straight from the fetch result -- it never touches the
+        working tree, makes a merge commit, or relies on remote-tracking refs (which
+        a targeted fetch does not update). Used by the review-PR merge poll so a PR
+        an operator merged on the forge is seen without recloning the pod. Returns
+        None when there is no remote, the remote branch is unknown, or the path is
+        absent in that tree.
+        """
+        if not self._repo_url:
+            return None
+        from dulwich.object_store import tree_lookup_path
+        from dulwich.repo import Repo
+
+        result = porcelain.fetch(str(self._path), self._authed_url())
+        head = result.refs.get(b"refs/heads/" + self._branch.encode())
+        if head is None:
+            return None
+        with Repo(str(self._path)) as repo:
+            try:
+                commit = repo[head]
+                _mode, blob_sha = tree_lookup_path(repo.get_object, commit.tree, rel.encode())
+            except KeyError:
+                return None
+            return repo[blob_sha].data.decode("utf-8")
+
     def _authed_url(self) -> str:
         """Embed HTTPS credentials in the remote URL.
 

@@ -48,7 +48,13 @@ def _persist_account(
     summary: str,
     actor: str,
 ) -> AccountGitState:
-    """Mirror an account write into the durable deploy repo and report the state."""
+    """Mirror an account write into the durable deploy repo and report the state.
+
+    Only the break-glass admin is git-persisted; regular users are durable in their
+    own store (document store/yaml), so they never touch the deploy repo.
+    """
+    if not account_durability.is_break_glass(username):
+        return account_durability.not_git_backed_state()
     gc = getattr(request.app.state, "gitcrud", None)
     forge = getattr(request.app.state, "forge", None)
     outcome = account_durability.publish_account(
@@ -329,6 +335,43 @@ async def reset_password(
     return ResetPasswordResponse(git=git)
 
 
+@router.get(
+    "/{username}/git-status",
+    response_model=AccountGitState,
+    dependencies=[Depends(require_action(scopes_dict["account_read"]))],
+)
+async def account_git_status(
+    username: str,
+    user: CurrentUser,
+    request: Request,
+    settings: Settings,
+) -> AccountGitState:
+    """Poll whether an account's password has merged to the deploy repo's main.
+
+    Step 2 of the review-PR path for the break-glass admin: the UI polls this after
+    the operator merges the PR; it fetches remote main and flips ``merged`` true.
+    Durable immediately in the auto-merge and file-share modes. A regular user is
+    never git-persisted, so it reports not-git-backed (durable in its own store).
+    """
+    from dfe_engine.auth.accounts import AccountStore
+
+    store: AccountStore = request.app.state.account_store
+    if store.get(username) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Account '{username}' not found"},
+        )
+    if not account_durability.is_break_glass(username):
+        return account_durability.not_git_backed_state()
+    return account_durability.remote_state(
+        getattr(request.app.state, "gitcrud", None),
+        store,
+        username,
+        environment=settings.env,
+        mode=settings.gitops.mode,
+    )
+
+
 @router.delete(
     "/{username}",
     status_code=204,
@@ -350,12 +393,13 @@ async def delete_account(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.delete(username)
-    account_durability.remove_account(
-        getattr(request.app.state, "gitcrud", None),
-        getattr(request.app.state, "forge", None),
-        environment=settings.env,
-        mode=settings.gitops.mode,
-        username=username,
-        actor=user.user_id,
-        request_id=request.headers.get("X-Request-ID", ""),
-    )
+    if account_durability.is_break_glass(username):
+        account_durability.remove_account(
+            getattr(request.app.state, "gitcrud", None),
+            getattr(request.app.state, "forge", None),
+            environment=settings.env,
+            mode=settings.gitops.mode,
+            username=username,
+            actor=user.user_id,
+            request_id=request.headers.get("X-Request-ID", ""),
+        )

@@ -6,10 +6,10 @@
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Reusable document store layer (FerretDB / mongo wire protocol)."""
+"""Reusable document store layer (mongo wire protocol)."""
 
 from __future__ import annotations
 
-from dfe_engine.store.documents import DocumentCollection, DocumentStore
+from dfe_engine.store.documents import DocumentCollection, DocuStore
 
-__all__ = ["DocumentCollection", "DocumentStore"]
+__all__ = ["DocumentCollection", "DocuStore"]

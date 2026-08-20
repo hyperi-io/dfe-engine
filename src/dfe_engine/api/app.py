@@ -84,29 +84,34 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     auth_dir = Path(auth_dir_str)
 
-    # Local account store backend: 'yaml' (default, config-seeded / gitcrud) or
-    # 'ferretdb' (out of the git cycle). The FerretDB document store is engine-wide
-    # and lifespan-owned so later consumers (preferences, teams) share it.
-    injected_account_store = None
-    app.state.document_store = None
-    if settings.auth.accounts_backend == "ferretdb":
-        from dfe_engine.auth.accounts import FerretDBAccountStore
-        from dfe_engine.store.documents import DocumentStore
+    # One central backend for local users AND groups: 'auto' (document store when a
+    # reachable URI is configured, else yaml), 'document' (forced), or 'yaml'. The
+    # document store is engine-wide and lifespan-owned so consumers share it.
+    from dfe_engine.auth.store_backend import resolve_store_backend
 
-        doc_store = DocumentStore(
-            settings.auth.accounts_store.uri,
-            settings.auth.accounts_store.database,
-        )
-        app.state.document_store = doc_store
-        injected_account_store = FerretDBAccountStore(
+    store_backend, doc_store = resolve_store_backend(
+        settings.auth.store_backend,
+        settings.auth.accounts_store.uri,
+        settings.auth.accounts_store.database,
+    )
+    app.state.document_store = doc_store
+    injected_account_store = None
+    injected_group_store = None
+    if store_backend == "document":
+        from dfe_engine.auth.accounts import DocuStoreAccountStore
+        from dfe_engine.auth.groups import DocuStoreGroupStore
+
+        injected_account_store = DocuStoreAccountStore(
             doc_store, collection=settings.auth.accounts_store.collection
         )
+        injected_group_store = DocuStoreGroupStore(doc_store)
 
     account_store, group_store, api_key_store, role_store, role_config = bootstrap_auth(
         auth_dir,
         default_admin_password=settings.auth.local.admin_password,
         default_admin_name=settings.auth.local.admin_name,
         account_store=injected_account_store,
+        group_store=injected_group_store,
         gitcrud=gitcrud,
     )
     app.state.account_store = account_store
