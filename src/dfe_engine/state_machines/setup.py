@@ -17,7 +17,7 @@ Wizard order (declared in :data:`SETUP_STEPS`)::
     oidc_provider    optional   configure an external IdP
     organisations    required   create the first customer organisation
     first_user       required   create a real user (NOT the break-glass admin)
-    admin_password   required   rotate the seeded break-glass admin password
+    admin_password   required   rotate the seeded break-glass admin password (and, when gitops is on, wait until that rotation has merged to deploy-repo main)
 
 A step applies when the thing it configures actually exists — not when a
 settings toggle says so. ``app.py`` bootstraps the account store and seeds the
@@ -31,7 +31,11 @@ JIT-provisioned at first login — hence OIDC comes first, so an operator who
 wants IdP-only users can configure it before creating anyone.
 
 ``admin_password`` is deliberately last: the break-glass credential is what
-gets you through the earlier steps, so rotating it is the closing act.
+gets you through the earlier steps, so rotating it — and, when gitops is on,
+waiting until that rotation has merged to deploy-repo main — is the closing
+act. A pending review PR is ``committed`` but not ``merged``: the live
+password works, a rebuild from origin/main would revert it, so setup stays
+open.
 
 The machine is pure. It reads a :class:`SetupContext` — never a Request — so
 it can be evaluated in a unit test with hand-built stores.
@@ -115,7 +119,7 @@ def _break_glass_git_state(
 
     None while auth or settings are still bootstrapping; otherwise the steady-state
     git status for the seeded admin so the wizard can show "persisted" vs a pending
-    review PR. Pre-login safe: booleans only, no secrets or paths.
+    review PR (including the merge command / PR URL). Pre-login safe: no secrets.
     """
     if account_store is None:
         return None
@@ -224,8 +228,8 @@ class SetupStatus(BaseModel):
     break_glass: AccountGitState | None = Field(
         default=None,
         description="Durability of the break-glass admin password in the deploy "
-        "repo: enabled/auto_merge/merged. Lets the wizard show whether a rotation "
-        "is persisted (survives rebuild) or still a pending review PR.",
+        "repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/"
+        "branch when a review PR or CLI merge is still outstanding.",
     )
 
 
@@ -298,6 +302,23 @@ def _break_glass_password_rotated(ctx: SetupContext) -> bool:
     return not ctx.account_store.verify_password(admin_account_name(), admin_account_password())
 
 
+def _break_glass_merged(ctx: SetupContext) -> bool:
+    """True when the rotation is on deploy-repo main, or gitops is not in play.
+
+    ``break_glass_git is None`` (unit tests, stores still bootstrapping) does
+    not block. File-share / not-git-backed state already reports ``merged``.
+    """
+    git = ctx.break_glass_git
+    if git is None:
+        return True
+    return git.merged
+
+
+def _admin_password_step_complete(ctx: SetupContext) -> bool:
+    """Rotated off the bootstrap password, and durable on main if git-backed."""
+    return _break_glass_password_rotated(ctx) and _break_glass_merged(ctx)
+
+
 SETUP_STEPS: tuple[StepDefinition, ...] = (
     StepDefinition(
         id=STEP_OIDC_PROVIDER,
@@ -337,11 +358,13 @@ SETUP_STEPS: tuple[StepDefinition, ...] = (
         title="Rotate the break-glass admin password",
         description=(
             "The bootstrapped admin account still uses its bootstrap password. "
-            "Change it — it is the emergency credential for this deployment."
+            "Change it — it is the emergency credential for this deployment. "
+            "If gitops is on, setup stays open until that rotation has merged "
+            "to the deploy-repo main (a pending review PR is not enough)."
         ),
         applies=_has_break_glass_account,
         required=lambda _ctx: True,
-        complete=_break_glass_password_rotated,
+        complete=_admin_password_step_complete,
     ),
 )
 
