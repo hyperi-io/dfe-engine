@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -56,6 +56,12 @@ class Group(BaseModel):
     """Provider-specific group identifier (e.g. Google group key, Entra object ID)."""
     org_ids: list[str] = Field(default_factory=list)
     """Organisation IDs this group has access to (empty means no org-scoped access)."""
+    attributes: dict[str, Any] = Field(default_factory=dict)
+    """Free-form NON-sensitive attributes (nested JSON, KVP is the floor).
+
+    Stored inline on the group and round-trips through both backends. Never put
+    secrets here - a broad group read returns this blob; sensitive attributes live
+    in the separate keyed store (:mod:`dfe_engine.auth.attributes`)."""
 
     @field_validator("scope")
     @classmethod
@@ -198,6 +204,26 @@ class GroupStore:
             # model_copy(update=...) skips validators - check explicitly.
             validate_group_scope(str(fields["scope"]))
         updated = group.model_copy(update=fields)
+        self._write(updated)
+        return updated
+
+    def set_attributes(self, name: str, attributes: dict) -> Group:
+        """Full-replace the non-sensitive ``attributes`` blob on a group.
+
+        Args:
+            name: Group to update.
+            attributes: The new attributes dict (replaces the field wholesale).
+
+        Returns:
+            The updated Group.
+
+        Raises:
+            KeyError: If the group does not exist.
+        """
+        group = self._read(name)
+        if group is None:
+            raise KeyError(f"Group '{name}' not found")
+        updated = group.model_copy(update={"attributes": attributes})
         self._write(updated)
         return updated
 
@@ -350,6 +376,15 @@ class DocuStoreGroupStore:
             validate_group_scope(str(fields["scope"]))
         updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
         updated = group.model_copy(update=updates)
+        self._c.put(name, updated)
+        return updated
+
+    def set_attributes(self, name: str, attributes: dict) -> Group:
+        """Full-replace the non-sensitive ``attributes`` blob. Raises KeyError if missing."""
+        group = self._c.get(name)
+        if group is None:
+            raise KeyError(f"Group '{name}' not found")
+        updated = group.model_copy(update={"attributes": attributes})
         self._c.put(name, updated)
         return updated
 

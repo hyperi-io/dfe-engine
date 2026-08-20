@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from dfe_engine.auth.engine import API_ENFORCED_ACTIONS, ARGO_ACTION_PREFIX, ENGINE_ACTIONS
 from dfe_engine.auth.rbac_scopes.scope_constants import (
+    account_attributes_scopes,
     account_groups_scopes,
     accounts_scopes,
     alerts_scopes,
@@ -24,6 +25,7 @@ from dfe_engine.auth.rbac_scopes.scope_constants import (
     discovery_scopes,
     fieldmap_scopes,
     governance_scopes,
+    group_attributes_scopes,
     helmvars_scopes,
     hunt_scopes,
     lifecycle_scopes,
@@ -50,6 +52,8 @@ from dfe_engine.auth.roles import RoleConfig
 scopes_dict = {
     **account_groups_scopes,
     **accounts_scopes,
+    **account_attributes_scopes,
+    **group_attributes_scopes,
     **alerts_scopes,
     **api_keys_scopes,
     **cel_scopes,

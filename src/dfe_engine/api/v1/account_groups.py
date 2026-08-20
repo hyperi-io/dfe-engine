@@ -26,10 +26,12 @@ org-local groups are never listed outside their org.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed
+from dfe_engine.api.deps import CurrentUser, check_action, is_action_allowed, require_action
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
@@ -77,6 +79,12 @@ class GroupResponse(BaseModel):
     roles: list[str]
     members: list[str]
     scope: str
+
+
+class AttributesRequest(BaseModel):
+    """Full-replace body for a group's attribute blob (non-sensitive or sensitive)."""
+
+    attributes: dict[str, Any] = Field(default_factory=dict)
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -373,3 +381,104 @@ async def delete_group(
             status_code=409,
             detail={"code": "conflict", "message": str(exc)},
         ) from exc
+
+
+# ── Attributes ───────────────────────────────────────────────
+#
+# Non-sensitive attributes ride inline on the Group model; sensitive attributes
+# live in the separate keyed store (never inline, so a broad group read cannot
+# leak them). Both sensitive endpoints require the group to exist first.
+
+
+@router.get(
+    "/{name}/attributes",
+    dependencies=[Depends(require_action(scopes_dict["group_attributes_read"]))],
+)
+async def get_group_attributes(
+    name: str,
+    user: CurrentUser,
+    request: Request,
+):
+    """Read a group's non-sensitive attribute blob (404 if the group is missing)."""
+    from dfe_engine.auth.groups import GroupStore
+
+    store: GroupStore = request.app.state.group_store
+    group = store.get(name)
+    if group is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
+    return {"attributes": group.attributes}
+
+
+@router.put(
+    "/{name}/attributes",
+    dependencies=[Depends(require_action(scopes_dict["group_attributes_write"]))],
+)
+async def put_group_attributes(
+    name: str,
+    body: AttributesRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Full-replace a group's non-sensitive attribute blob (404 if missing)."""
+    from dfe_engine.auth.groups import GroupStore
+
+    store: GroupStore = request.app.state.group_store
+    try:
+        group = store.set_attributes(name, body.attributes)
+    except KeyError as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        ) from exc
+    return {"attributes": group.attributes}
+
+
+@router.get(
+    "/{name}/sensitive-attributes",
+    dependencies=[Depends(require_action(scopes_dict["group_attributes_read_sensitive"]))],
+)
+async def get_group_sensitive_attributes(
+    name: str,
+    user: CurrentUser,
+    request: Request,
+):
+    """Read a group's SENSITIVE attribute blob from the separate keyed store.
+
+    The group must exist first (404 otherwise), so a sensitive read cannot probe
+    for groups that are not there.
+    """
+    from dfe_engine.auth.groups import GroupStore
+
+    store: GroupStore = request.app.state.group_store
+    if store.get(name) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
+    return {"attributes": request.app.state.group_sensitive_attributes.get(name)}
+
+
+@router.put(
+    "/{name}/sensitive-attributes",
+    dependencies=[Depends(require_action(scopes_dict["group_attributes_write_sensitive"]))],
+)
+async def put_group_sensitive_attributes(
+    name: str,
+    body: AttributesRequest,
+    user: CurrentUser,
+    request: Request,
+):
+    """Full-replace a group's SENSITIVE attribute blob (404 if the group is missing)."""
+    from dfe_engine.auth.groups import GroupStore
+
+    store: GroupStore = request.app.state.group_store
+    if store.get(name) is None:
+        raise HTTPException(
+            status_code=404,
+            detail={"code": "not_found", "message": f"Group '{name}' not found"},
+        )
+    request.app.state.group_sensitive_attributes.put(name, body.attributes)
+    return {"attributes": request.app.state.group_sensitive_attributes.get(name)}
