@@ -1,0 +1,452 @@
+{
+  "version": "0.1.0",
+  "name": "DFE ClickHouse Health",
+  "tiles": [
+    {
+      "id": "max-parts",
+      "x": 0,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Max parts per partition",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_max_parts_per_partition"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "delayed-inserts",
+      "x": 4,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Delayed inserts",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_delayed_inserts"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "queries-running",
+      "x": 8,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Queries running",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_queries_running"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "merges-running",
+      "x": 12,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Merges running",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_merges_running"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "memory-tracked",
+      "x": 16,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Memory tracked",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "numberFormat": {
+          "output": "byte"
+        },
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_memory_tracked_bytes"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "readonly-replicas",
+      "x": 20,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Readonly replicas",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "clickhouse_readonly_replicas"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "parts-over-time",
+      "x": 0,
+      "y": 3,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Parts (the too-many-parts leading indicator)",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "max_per_partition",
+            "metricType": "gauge",
+            "metricName": "clickhouse_max_parts_per_partition"
+          },
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "active_parts",
+            "metricType": "gauge",
+            "metricName": "clickhouse_active_parts"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "merge-pressure",
+      "x": 12,
+      "y": 3,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Merge pressure and throttled inserts",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "avg",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "merges_running",
+            "metricType": "gauge",
+            "metricName": "clickhouse_merges_running"
+          },
+          {
+            "aggFn": "avg",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "mutations_running",
+            "metricType": "gauge",
+            "metricName": "clickhouse_mutations_running"
+          },
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "delayed_inserts",
+            "metricType": "gauge",
+            "metricName": "clickhouse_delayed_inserts"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "row-throughput",
+      "x": 0,
+      "y": 9,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Rows inserted, merged and selected",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "inserted",
+            "metricType": "sum",
+            "metricName": "clickhouse_inserted_rows_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "merged",
+            "metricType": "sum",
+            "metricName": "clickhouse_merged_rows_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "selected",
+            "metricType": "sum",
+            "metricName": "clickhouse_selected_rows_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "bytes-inserted",
+      "x": 12,
+      "y": 9,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Bytes inserted",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "numberFormat": {
+          "output": "byte"
+        },
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "inserted_bytes",
+            "metricType": "sum",
+            "metricName": "clickhouse_inserted_bytes_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "query-failures",
+      "x": 0,
+      "y": 15,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Queries and failures",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "queries",
+            "metricType": "sum",
+            "metricName": "clickhouse_queries_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "failed_queries",
+            "metricType": "sum",
+            "metricName": "clickhouse_failed_queries_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "failed_inserts",
+            "metricType": "sum",
+            "metricName": "clickhouse_failed_insert_queries_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "connections",
+      "x": 12,
+      "y": 15,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Client connections and tracked memory",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "tcp_connections",
+            "metricType": "gauge",
+            "metricName": "clickhouse_tcp_connections"
+          },
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "memory_tracked_bytes",
+            "metricType": "gauge",
+            "metricName": "clickhouse_memory_tracked_bytes"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "tables-by-rows",
+      "x": 0,
+      "y": 21,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Largest tables by rows",
+        "source": "otel_metrics",
+        "displayType": "table",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "rows",
+            "metricType": "gauge",
+            "metricName": "clickhouse_table_rows"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "concat(Attributes['database'], '.', Attributes['table'])",
+        "orderBy": "rows DESC",
+        "limit": {
+          "limit": 20
+        }
+      }
+    },
+    {
+      "id": "tables-by-disk",
+      "x": 12,
+      "y": 21,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Largest tables on disk",
+        "source": "otel_metrics",
+        "displayType": "table",
+        "numberFormat": {
+          "output": "byte"
+        },
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "bytes_on_disk",
+            "metricType": "gauge",
+            "metricName": "clickhouse_table_bytes_on_disk"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "concat(Attributes['database'], '.', Attributes['table'])",
+        "orderBy": "bytes_on_disk DESC",
+        "limit": {
+          "limit": 20
+        }
+      }
+    }
+  ],
+  "tags": [
+    "dfe",
+    "provisioned",
+    "platform"
+  ]
+}
