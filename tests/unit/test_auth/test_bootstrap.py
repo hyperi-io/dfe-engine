@@ -13,6 +13,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from dfe_engine.auth.bootstrap import bootstrap_auth
+from dfe_engine.settings import SeedAccount
 
 _NAME = "DFE_AUTH_LOCAL_ADMIN_NAME"
 _PASSWORD = "DFE_AUTH_LOCAL_ADMIN_PASSWORD"
@@ -70,3 +71,82 @@ def test_explicit_password_beats_dfe_auth_local_admin_password(tmp_path: Path, m
     account_store, *_ = bootstrap_auth(tmp_path / "auth", default_admin_password="from-arg")
 
     assert account_store.verify_password("admin", "from-arg")
+
+
+# ── Named seed accounts (dfe-infra #106) ─────────────────────────
+
+
+def test_seed_account_created_with_password_and_groups(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(_NAME, raising=False)
+    monkeypatch.delenv(_PASSWORD, raising=False)
+    seeds = [SeedAccount(username="kay", password="kay-password-long", groups=["dfe-analysts"])]
+
+    account_store, group_store, *_ = bootstrap_auth(tmp_path / "auth", seed_accounts=seeds)
+
+    kay = account_store.get("kay")
+    assert kay is not None
+    assert kay.groups == ["dfe-analysts"]
+    assert account_store.verify_password("kay", "kay-password-long")
+    assert "kay" in group_store.get("dfe-analysts").members
+
+
+def test_seed_account_password_reconciles_on_rebuild(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(_NAME, raising=False)
+    monkeypatch.delenv(_PASSWORD, raising=False)
+    auth_dir = tmp_path / "auth"
+
+    bootstrap_auth(
+        auth_dir,
+        seed_accounts=[SeedAccount(username="kaz", password="old-password-long", groups=["dfe-analysts"])],
+    )
+    # A rebuild against the SAME store with a changed config password: config wins.
+    account_store, *_ = bootstrap_auth(
+        auth_dir,
+        seed_accounts=[SeedAccount(username="kaz", password="new-password-long", groups=["dfe-analysts"])],
+    )
+
+    assert account_store.verify_password("kaz", "new-password-long")
+    assert not account_store.verify_password("kaz", "old-password-long")
+
+
+def test_seed_account_groups_reconcile_on_rebuild(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(_NAME, raising=False)
+    monkeypatch.delenv(_PASSWORD, raising=False)
+    auth_dir = tmp_path / "auth"
+
+    bootstrap_auth(
+        auth_dir,
+        seed_accounts=[SeedAccount(username="kay", password="kay-password-long", groups=["dfe-analysts"])],
+    )
+    account_store, group_store, *_ = bootstrap_auth(
+        auth_dir,
+        seed_accounts=[SeedAccount(username="kay", password="kay-password-long", groups=["dfe-viewers"])],
+    )
+
+    assert set(account_store.get("kay").groups) == {"dfe-viewers"}
+    assert "kay" in group_store.get("dfe-viewers").members
+    assert "kay" not in group_store.get("dfe-analysts").members
+
+
+def test_seed_account_skips_break_glass_admin_name(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(_NAME, raising=False)
+    monkeypatch.delenv(_PASSWORD, raising=False)
+    # A seed spec colliding with the break-glass admin must not clobber its password.
+    seeds = [SeedAccount(username="admin", password="hijack-attempt-long", groups=["dfe-viewers"])]
+
+    account_store, *_ = bootstrap_auth(tmp_path / "auth", seed_accounts=seeds)
+
+    assert account_store.verify_password("admin", "changeme")
+    assert not account_store.verify_password("admin", "hijack-attempt-long")
+
+
+def test_seed_account_unknown_group_is_skipped_not_fatal(tmp_path: Path, monkeypatch):
+    monkeypatch.delenv(_NAME, raising=False)
+    monkeypatch.delenv(_PASSWORD, raising=False)
+    seeds = [SeedAccount(username="kay", password="kay-password-long", groups=["no-such-group"])]
+
+    account_store, *_ = bootstrap_auth(tmp_path / "auth", seed_accounts=seeds)
+
+    kay = account_store.get("kay")
+    assert kay is not None
+    assert kay.groups == []

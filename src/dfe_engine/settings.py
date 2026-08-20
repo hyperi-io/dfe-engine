@@ -814,6 +814,28 @@ class OIDCSettings(BaseModel):
     sync_on_startup: bool = Field(default=True, description="Sync on startup")
 
 
+class SeedAccount(BaseModel):
+    """One named local account seeded + RECONCILED on every bootstrap.
+
+    Unlike the break-glass admin (seeded only into an empty store), each seed
+    account is reconciled on every startup: the configured password and groups
+    WIN, so a full teardown+rebuild restores the exact shared team logins
+    unchanged (dfe-infra #106). A runtime password change to a seed account is
+    therefore reasserted to the configured value on the next rebuild -- these are
+    shared, config-owned logins, not self-service personal credentials.
+    """
+
+    username: str = Field(description="Login username")
+    password: str = Field(
+        default="",
+        description="Password, reconciled to win on every boot. Empty -> account left unusable.",
+    )
+    groups: list[str] = Field(
+        default_factory=list,
+        description="Group memberships to reconcile (e.g. dfe-analysts, dfe-viewers).",
+    )
+
+
 class LocalAuthSettings(BaseModel):
     """Built-in local-account bootstrap config (nested under auth.local).
 
@@ -828,6 +850,15 @@ class LocalAuthSettings(BaseModel):
     admin_password: str = Field(default="", description="Bootstrap admin password")
     operator_password: str = Field(default="", description="Bootstrap operator password")
     viewer_password: str = Field(default="", description="Bootstrap viewer password")
+    seed_accounts: list[SeedAccount] = Field(
+        default_factory=list,
+        description=(
+            "Named accounts reconciled on EVERY startup (config wins), so shared team "
+            "logins survive a teardown+rebuild unchanged (dfe-infra #106). Set from "
+            "DFE_AUTH_LOCAL_SEED_ACCOUNTS: a JSON list of "
+            "{username, password, groups}. Profile-independent (same across slim/single/scale)."
+        ),
+    )
 
 
 class AccountStoreSettings(BaseModel):
@@ -1530,6 +1561,18 @@ def _get_env_overrides() -> dict:
         overrides["auth"].setdefault("local", {})["viewer_password"] = val
     if val := _get_env("DFE_AUTH_LOCAL_ORG_ID"):
         overrides["auth"].setdefault("local", {})["org_id"] = val
+    if val := _get_env("DFE_AUTH_LOCAL_SEED_ACCOUNTS"):
+        # A JSON list of {username, password, groups}. Fail loudly on malformed
+        # config: a dropped list would silently strip the shared team logins.
+        import json
+
+        try:
+            seed = json.loads(val)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                f"DFE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}"
+            ) from exc
+        overrides["auth"].setdefault("local", {})["seed_accounts"] = seed
 
     # OIDC settings (nested under auth.oidc)
     if val := _get_env("DFE_AUTH_OIDC_PROVIDERS_DIR"):
