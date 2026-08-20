@@ -314,3 +314,61 @@ class TestRulesCreate:
         data = resp.json()
         assert isinstance(data["valid"], bool)
         assert isinstance(data["errors"], list)
+
+
+class TestRulesFromHyperdx:
+    """POST /api/v1/rules/from-hyperdx — create a rule from a HyperDX view."""
+
+    _RAW_SQL = "SELECT * FROM default.events WHERE severity = 'high'"
+
+    def test_from_hyperdx_creates_rule_and_returns_id(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL, "saved_search_name": "High Severity Logins"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == "high-severity-logins"
+        assert data["display_name"] == "High Severity Logins"
+
+    def test_from_hyperdx_default_id_when_no_name(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["id"] == "hyperdx-rule"
+
+    def test_from_hyperdx_dedupes_id(self, client, admin_headers):
+        body = {"raw_sql": self._RAW_SQL, "saved_search_name": "Repeat Search"}
+        first = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+        second = client.post("/api/v1/rules/from-hyperdx", json=body, headers=admin_headers)
+        assert first.status_code == 201
+        assert second.status_code == 201
+        assert first.json()["id"] == "repeat-search"
+        assert second.json()["id"] == "repeat-search-2"
+
+    def test_from_hyperdx_requires_write_permission(self, client, viewer_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL, "saved_search_name": "Viewer Attempt"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 403
+
+    def test_from_hyperdx_requires_auth(self, client):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL},
+        )
+        assert resp.status_code == 401
+
+    def test_from_hyperdx_requires_raw_sql(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_name": "No SQL"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422

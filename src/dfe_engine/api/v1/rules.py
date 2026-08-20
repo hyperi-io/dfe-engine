@@ -129,6 +129,33 @@ class RuleCreateResponse(BaseModel):
     cost_estimate: CostEstimate | None = None
 
 
+class RuleFromHyperdxRequest(BaseModel):
+    """Create a hunt rule from a live HyperDX view.
+
+    HyperDX posts the expanded ClickHouse SELECT; the create pipeline strips the UI
+    meta (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the HyperDX
+    sanitizer, and the engine derives a unique rule id from the saved-search name.
+    The caller gets that id back and opens ``/rules/{id}`` -- no id to invent, no
+    IndexedDB round-trip.
+    """
+
+    raw_sql: str = Field(description="Expanded HyperDX ClickHouse SELECT to turn into a rule")
+    saved_search_name: str | None = Field(
+        default=None, description="HyperDX saved-search name; seeds the rule id and label"
+    )
+    severity: str = Field(default="medium", description="low|medium|high|critical")
+    hunt_name: str | None = Field(default=None, description="Parent hunt name")
+    source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
+
+
+class RuleFromHyperdxResponse(BaseModel):
+    id: str = Field(description="Created rule id (YAML stem); open at /rules/{id}")
+    display_name: str
+    sanitize_summary: dict = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    sql_errors: list[SqlValidationError] = Field(default_factory=list)
+
+
 # ── Endpoints ────────────────────────────────────────────────
 
 
@@ -222,6 +249,63 @@ async def create_rule(
 
     audit_resource_change(user.user_id, "rule", body.name, "created")
     return _build_create_response(result, body.cost_window_minutes)
+
+
+@router.post(
+    "/from-hyperdx",
+    response_model=RuleFromHyperdxResponse,
+    status_code=201,
+    dependencies=[Depends(require_action(scopes_dict["rule_write"]))],
+)
+async def create_rule_from_hyperdx(
+    body: RuleFromHyperdxRequest,
+    user: CurrentUser,
+    settings: Settings,
+    registry: RuleReg,
+):
+    """Create a hunt rule from a HyperDX view's expanded query.
+
+    Wraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a
+    unique rule id from the saved-search name, so the caller need not supply one.
+    RBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor
+    the UI button.
+    """
+    from dfe_engine.hunts.rule_creation_service import (
+        RuleCreateRequest as SvcRequest,
+    )
+    from dfe_engine.hunts.rule_creation_service import (
+        RuleCreationService,
+    )
+    from dfe_engine.settings import get_clickhouse_config
+
+    rule_id = _unique_rule_id(registry, body.saved_search_name)
+    display = body.saved_search_name or default_display_name(rule_id)
+
+    service = RuleCreationService(ch_config=get_clickhouse_config(settings))
+    svc_request = SvcRequest(
+        name=display,
+        severity=body.severity,
+        source_type="hyperdx",
+        user_sql=body.raw_sql,
+        hunt_name=body.hunt_name,
+        source=body.source,
+    )
+
+    result = service.create_rule(svc_request, rule_id)
+    registry.save(
+        result.rule,
+        created_by=git_author(user),
+        description=f"rule: create {rule_id} (from hyperdx view)",
+    )
+
+    audit_resource_change(user.user_id, "rule", rule_id, "created")
+    return RuleFromHyperdxResponse(
+        id=rule_id,
+        display_name=result.rule.name,
+        sanitize_summary=result.sanitize_summary or {},
+        warnings=list(getattr(result.rule, "warnings", []) or []),
+        sql_errors=_map_sql_errors(result.sql_errors or []),
+    )
 
 
 @router.post(
@@ -400,6 +484,23 @@ def _map_sql_errors(errors) -> list[SqlValidationError]:
         )
         for e in errors
     ]
+
+
+def _slugify_rule_id(text: str | None) -> str:
+    """Slug free text into the rule-id charset /^[a-zA-Z0-9_-]+$/, falling back to a default."""
+    base = re.sub(r"[^a-zA-Z0-9_-]+", "-", (text or "").strip()).strip("-").lower()
+    return base or "hyperdx-rule"
+
+
+def _unique_rule_id(registry, saved_search_name: str | None) -> str:
+    """Derive a rule id from the saved-search name, de-duplicated against the registry."""
+    base = _slugify_rule_id(saved_search_name)
+    candidate = base
+    n = 2
+    while registry.name_exists(candidate):
+        candidate = f"{base}-{n}"
+        n += 1
+    return candidate
 
 
 def _build_create_response(result, cost_window_minutes: int) -> RuleCreateResponse:
