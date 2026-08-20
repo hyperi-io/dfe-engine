@@ -26,6 +26,7 @@ import importlib.resources
 import os
 import shutil
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
@@ -34,6 +35,9 @@ from dfe_engine.auth.api_keys import APIKeyStore
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
+
+if TYPE_CHECKING:
+    from dfe_engine.gitcrud.engine import GitCrud
 
 # Default break-glass username; overridden by DFE_AUTH_LOCAL_ADMIN_NAME.
 _DEFAULT_ADMIN_NAME = "admin"
@@ -79,6 +83,7 @@ def bootstrap_auth(
     default_admin_password: str = "",
     default_admin_name: str = "",
     account_store: AccountStore | FerretDBAccountStore | None = None,
+    gitcrud: GitCrud | None = None,
 ) -> tuple[AccountStore | FerretDBAccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
     """Bootstrap auth stores with sensible defaults.
 
@@ -91,10 +96,16 @@ def bootstrap_auth(
             falls through to ``DFE_AUTH_LOCAL_ADMIN_PASSWORD``, then ``changeme``.
         default_admin_name: Username for the seeded admin account. Empty falls
             through to ``DFE_AUTH_LOCAL_ADMIN_NAME``, then ``admin``.
+        gitcrud: When gitops is enabled, the deploy-repo engine. The live store is
+            hydrated from it before the seed-if-empty check (so a persisted
+            break-glass password survives a rebuild), and a freshly seeded admin is
+            persisted back into it.
 
     Returns:
         Tuple of (AccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig).
     """
+    from dfe_engine.auth import account_durability
+
     accounts_dir = auth_dir / "accounts"
     groups_dir = auth_dir / "groups"
     api_keys_dir = auth_dir / "api-keys"
@@ -126,21 +137,29 @@ def bootstrap_auth(
         _seed_groups(group_store)
         logger.info("Seeded default groups")
 
+    # Restore accounts from the durable deploy repo BEFORE the seed-if-empty check,
+    # so a rotated break-glass password survives a rebuild rather than reverting to
+    # the shipped default.
+    restored = account_durability.hydrate_from_deploy_repo(gitcrud, account_store)
+    if restored:
+        logger.info("Restored %d account(s) from the deploy repo", restored)
+
     # Seed admin account if the store has no accounts yet (backend-agnostic)
     if not account_store.list():
         password = admin_account_password(default_admin_password)
-        _seed_admin(
-            account_store,
-            group_store,
-            password,
-            admin_account_name(default_admin_name),
-        )
+        admin_name = admin_account_name(default_admin_name)
+        _seed_admin(account_store, group_store, password, admin_name)
         if password == _DEFAULT_PASSWORD:
             logger.warning(
                 "Admin account seeded with default password '%s'"
                 " — change in production (set DFE_AUTH_LOCAL_ADMIN_PASSWORD)",
                 _DEFAULT_PASSWORD,
             )
+        # Persist the freshly seeded admin so the break-glass credential is durable
+        # from the first start, not only after an operator rotates it.
+        seeded = account_store.get(admin_name)
+        if seeded is not None:
+            account_durability.publish_seed(gitcrud, seeded)
 
     return account_store, group_store, api_key_store, role_store, role_config
 

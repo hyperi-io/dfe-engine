@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.accounts import AccountStore
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.auth.oidc.registry import OIDCProviderRegistry
@@ -264,6 +265,27 @@ def test_completed_setup_drops_disabled_oidc_providers(ctx):
     _complete(ctx)
 
     assert [p.name for p in SETUP_MACHINE.status(ctx).oidc_providers] == ["entra"]
+
+
+def test_status_surfaces_the_break_glass_git_state(ctx):
+    # A pending review PR (production+team): the wizard must see it is not durable yet.
+    ctx = SetupContext(
+        account_store=ctx.account_store,
+        org_registry=ctx.org_registry,
+        oidc_registry=ctx.oidc_registry,
+        break_glass_git=AccountGitState(
+            enabled=True, auto_merge=False, merged=False, pending=None
+        ),
+    )
+    status = SETUP_MACHINE.status(ctx)
+    assert status.break_glass is not None
+    assert status.break_glass.enabled is True
+    assert status.break_glass.merged is False
+
+
+def test_status_break_glass_absent_when_not_computed(ctx):
+    # Default context carries no git state -> the field is simply absent (None).
+    assert SETUP_MACHINE.status(ctx).break_glass is None
 
 
 def test_incomplete_setup_still_returns_full_oidc_providers(ctx):
