@@ -1,12 +1,12 @@
 #  Project:      dfe-engine
 #  File:         store/documents.py
-#  Purpose:      Generic sync document store over FerretDB (mongo wire protocol)
+#  Purpose:      Generic sync document store over the mongo wire protocol
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Reusable document store for engine control-plane state (FerretDB / mongo wire).
+"""Reusable document store for engine control-plane state (mongo wire protocol).
 
 The engine is a control plane for a small number of operators, so this layer is
 deliberately synchronous (PyMongo's ``MongoClient``): it runs inside FastAPI's
@@ -29,8 +29,8 @@ from pymongo.collection import Collection as MongoCollection
 T = TypeVar("T", bound=BaseModel)
 
 
-class DocumentStore:
-    """A sync connection to one FerretDB database, shared across consumers.
+class DocuStore:
+    """A sync connection to one document-store database, shared across consumers.
 
     ``MongoClient`` connects lazily, so constructing this never blocks; the first
     real operation (or an explicit :meth:`ping`) is what surfaces an unreachable

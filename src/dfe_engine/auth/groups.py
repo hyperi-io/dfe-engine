@@ -10,10 +10,14 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator
 
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
+
+if TYPE_CHECKING:
+    from dfe_engine.store.documents import DocuStore
 
 GROUP_SCOPE_SYSTEM = "system"
 _ORG_SCOPE_PREFIX = "org:"
@@ -248,6 +252,139 @@ class GroupStore:
         Scans every group file; a user accumulates roles from all groups they
         belong to.  Returns an empty list if the user is in no groups.
         """
+        roles: set[str] = set()
+        for group in self.list():
+            if username in group.members:
+                roles.update(group.roles)
+        return sorted(roles)
+
+
+# Fields update() may change; the name is the document key and never moves,
+# and source_provider / source_id are owned by the sync path. Kept identical to
+# the documented GroupStore.update contract.
+_UPDATABLE_GROUP_FIELDS = (
+    "roles",
+    "description",
+    "members",
+    "org_ids",
+    "scope",
+)
+
+
+class DocuStoreGroupStore:
+    """Document-store-backed group store - the same interface as :class:`GroupStore`.
+
+    Persists one :class:`Group` document per name (keyed and unique-indexed on
+    ``name``) instead of one YAML file. Every domain rule - name validation,
+    member de-duplication, scope validation, and the delete-with-members guard -
+    is identical to the YAML store, so the two are drop-in interchangeable behind
+    the same construction seam.
+    """
+
+    def __init__(self, store: DocuStore, *, collection: str = "groups") -> None:
+        self._c = store.typed(collection, Group, key="name")
+
+    def create(
+        self,
+        name: str,
+        roles: list[str],
+        description: str = "",
+        *,
+        members: list[str] | None = None,
+        scope: str = GROUP_SCOPE_SYSTEM,
+    ) -> Group:
+        """Create a new group. Raises ValueError if the name is invalid/taken or scope is bad."""
+        if not _VALID_NAME.match(name):
+            raise ValueError(f"Invalid group name: {name!r}")
+        if self._c.exists(name):
+            raise ValueError(f"Group '{name}' already exists")
+        member_list: list[str] = []
+        if members:
+            seen: set[str] = set()
+            for username in members:
+                if username not in seen:
+                    seen.add(username)
+                    member_list.append(username)
+        group = Group(
+            name=name,
+            roles=roles,
+            description=description,
+            members=member_list,
+            scope=scope,
+        )
+        self._c.put(name, group)
+        return group
+
+    def get(self, name: str) -> Group | None:
+        """Return the named group, or None if it does not exist."""
+        return self._c.get(name)
+
+    def list(self) -> list[Group]:
+        """Return all groups sorted by name."""
+        return self._c.list()
+
+    def by_source_id(self) -> dict[str, Group]:
+        """Return groups keyed by their provider ``source_id`` (only non-empty ones).
+
+        When two groups share a source_id (a misconfiguration) the
+        last-by-sorted-name wins - deterministic rather than correct, and such a
+        collision is a config error worth avoiding.
+        """
+        index: dict[str, Group] = {}
+        for group in self.list():
+            if group.source_id:
+                index[group.source_id] = group
+        return index
+
+    def update(self, name: str, **fields: object) -> Group:
+        """Update permitted fields on a group. Raises KeyError if missing, ValueError on bad scope.
+
+        Accepted keyword arguments: ``roles``, ``description``, ``members``,
+        ``org_ids``, ``scope``.
+        """
+        group = self._c.get(name)
+        if group is None:
+            raise KeyError(f"Group '{name}' not found")
+        if "scope" in fields:
+            # model_copy(update=...) skips validators - check explicitly.
+            validate_group_scope(str(fields["scope"]))
+        updates = {k: fields[k] for k in _UPDATABLE_GROUP_FIELDS if k in fields}
+        updated = group.model_copy(update=updates)
+        self._c.put(name, updated)
+        return updated
+
+    def delete(self, name: str) -> None:
+        """Delete the named group. Raises KeyError if missing, ValueError if it has members."""
+        group = self._c.get(name)
+        if group is None:
+            raise KeyError(f"Group '{name}' not found")
+        if group.members:
+            raise ValueError(
+                f"Cannot delete group '{name}': remove all {len(group.members)} member(s) first"
+            )
+        self._c.delete(name)
+
+    def add_member(self, group_name: str, username: str) -> None:
+        """Add a username to the group's member list (idempotent). Raises KeyError if missing."""
+        group = self._c.get(group_name)
+        if group is None:
+            raise KeyError(f"Group '{group_name}' not found")
+        if username not in group.members:
+            updated = group.model_copy(update={"members": [*group.members, username]})
+            self._c.put(group_name, updated)
+
+    def remove_member(self, group_name: str, username: str) -> None:
+        """Remove a username from the group's member list (no-op if absent). KeyError if missing."""
+        group = self._c.get(group_name)
+        if group is None:
+            raise KeyError(f"Group '{group_name}' not found")
+        updated_members = [m for m in group.members if m != username]
+        if updated_members != group.members:
+            updated = group.model_copy(update={"members": updated_members})
+            self._c.put(group_name, updated)
+
+    def resolve_roles_for_member(self, username: str) -> list[str]:
+        """Return the sorted unique list of roles held by a member across all groups."""
         roles: set[str] = set()
         for group in self.list():
             if username in group.members:

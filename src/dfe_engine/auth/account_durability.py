@@ -41,9 +41,10 @@ from dfe_engine.gitcrud.routing import (
     pr_branch_name,
     route_write,
 )
+from dfe_engine.yaml_utils import yaml_load_string
 
 if TYPE_CHECKING:
-    from dfe_engine.auth.accounts import Account, AccountStore, FerretDBAccountStore
+    from dfe_engine.auth.accounts import Account, AccountStore, DocuStoreAccountStore
     from dfe_engine.gitcrud.engine import GitCrud
     from dfe_engine.gitcrud.forge import ForgeProvider
 
@@ -72,7 +73,10 @@ class AccountGitPending(BaseModel):
 class AccountGitState(BaseModel):
     """Durability state of an account change, for the API + the setup wizard."""
 
-    enabled: bool = Field(description="Deploy-repo persistence is wired (gitops enabled).")
+    enabled: bool = Field(
+        description="This account is git-persisted (the break-glass admin on a gitops "
+        "deploy). False for a regular user -- durable in its own store, no git flow."
+    )
     auto_merge: bool = Field(description="Effective auto-merge: changes commit straight to main.")
     merged: bool = Field(
         description="The durable copy matches the live account -- survives a rebuild."
@@ -83,8 +87,26 @@ class AccountGitState(BaseModel):
 
 
 # The git-disabled deployment: the live store is a plain file share, so it is
-# already durable and there is nothing to merge.
+# already durable and there is nothing to merge. Also the state for a regular
+# account, whose durability is its own store (document store/yaml), not git.
 _FILE_SHARE_STATE = AccountGitState(enabled=False, auto_merge=False, merged=True, pending=None)
+
+
+def not_git_backed_state() -> AccountGitState:
+    """Durability state for an account that is not git-persisted (its store is durable)."""
+    return _FILE_SHARE_STATE
+
+
+def is_break_glass(username: str) -> bool:
+    """True for the break-glass admin -- the ONLY account git-persisted by default.
+
+    Regular users and groups live in the resolved store (document store/yaml); gitcrud is
+    the exception, reserved for the emergency credential that must survive a total
+    teardown. Follows the live ``DFE_AUTH_LOCAL_ADMIN_NAME``.
+    """
+    from dfe_engine.auth.bootstrap import admin_account_name
+
+    return username == admin_account_name()
 
 
 # ── Helpers ──────────────────────────────────────────────────
@@ -248,7 +270,7 @@ def state_from_outcome(gc: GitCrud | None, outcome: WriteOutcome | None) -> Acco
 
 def steady_state(
     gc: GitCrud | None,
-    account_store: AccountStore | FerretDBAccountStore | None,
+    account_store: AccountStore | DocuStoreAccountStore | None,
     username: str,
     *,
     environment: str,
@@ -279,12 +301,49 @@ def steady_state(
     return AccountGitState(enabled=True, auto_merge=state.effective, merged=merged, pending=None)
 
 
+def _account_rel(gc: GitCrud, username: str) -> str:
+    """The account file's deploy-repo-relative path (governance/rbac/accounts/<u>.yaml)."""
+    cls = gc.resource_class(ACCOUNTS_CLASS)
+    return f"{cls.directory}/{username}{cls.suffix}"
+
+
+def remote_state(
+    gc: GitCrud | None,
+    account_store: AccountStore | DocuStoreAccountStore | None,
+    username: str,
+    *,
+    environment: str,
+    mode: str,
+) -> AccountGitState:
+    """Fetch the deploy repo and report whether main now carries the live password.
+
+    The step-2 poll for the review-PR path: after the operator merges the PR, this
+    fetches remote main and flips ``merged`` true -- the running engine sees it
+    without a pod re-clone, which the working-tree-only :func:`steady_state` cannot.
+    Falls back to :func:`steady_state` when there is no remote (a local-init repo is
+    its own truth), and to the file-share state when gitops is off.
+    """
+    if gc is None or account_store is None:
+        return _FILE_SHARE_STATE
+    if not gc.repo.has_remote:
+        return steady_state(gc, account_store, username, environment=environment, mode=mode)
+
+    state = resolve_state(gc, environment=environment, mode=mode, warn=False)
+    content = gc.repo.read_remote_file(_account_rel(gc, username))
+    live = account_store.get(username)
+    merged = False
+    if content is not None and live is not None:
+        doc = yaml_load_string(content) or {}
+        merged = doc.get("password_hash") == live.password_hash
+    return AccountGitState(enabled=True, auto_merge=state.effective, merged=merged, pending=None)
+
+
 # ── Boot hydration ───────────────────────────────────────────
 
 
 def hydrate_from_deploy_repo(
     gc: GitCrud | None,
-    account_store: AccountStore | FerretDBAccountStore,
+    account_store: AccountStore | DocuStoreAccountStore,
 ) -> int:
     """Restore the live store from the deploy repo on boot. Returns the count restored.
 
