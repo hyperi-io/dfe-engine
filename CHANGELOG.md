@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.16.0](https://github.com/hyperi-io/dfe-engine/compare/v1.15.1...v1.16.0) (2026-08-20)
+
+### Features
+
+* **rules:** create a hunt rule from a HyperDX view (POST /rules/from-hyperdx) ([#183](https://github.com/hyperi-io/dfe-engine/issues/183)) ([86585f5](https://github.com/hyperi-io/dfe-engine/commit/86585f5705ec4e05ee4fa787a991bedb922b42ed))
+
 ## [1.15.1](https://github.com/hyperi-io/dfe-engine/compare/v1.15.0...v1.15.1) (2026-08-19)
 
 ### Bug Fixes
