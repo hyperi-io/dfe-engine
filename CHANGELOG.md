@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.16.3](https://github.com/hyperi-io/dfe-engine/compare/v1.16.2...v1.16.3) (2026-08-20)
+
+### Bug Fixes
+
+* **auth:** reconcile named seed accounts on every boot ([#192](https://github.com/hyperi-io/dfe-engine/issues/192)) ([c6bc8de](https://github.com/hyperi-io/dfe-engine/commit/c6bc8dec6d26d332ff7dd750d6ee77bfba399f4d)), closes [#106](https://github.com/hyperi-io/dfe-engine/issues/106)
+
 ## [1.16.2](https://github.com/hyperi-io/dfe-engine/compare/v1.16.1...v1.16.2) (2026-08-20)
 
 ### Bug Fixes
