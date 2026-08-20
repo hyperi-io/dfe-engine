@@ -273,9 +273,7 @@ def test_status_surfaces_the_break_glass_git_state(ctx):
         account_store=ctx.account_store,
         org_registry=ctx.org_registry,
         oidc_registry=ctx.oidc_registry,
-        break_glass_git=AccountGitState(
-            enabled=True, auto_merge=False, merged=False, pending=None
-        ),
+        break_glass_git=AccountGitState(enabled=True, auto_merge=False, merged=False, pending=None),
     )
     status = SETUP_MACHINE.status(ctx)
     assert status.break_glass is not None
