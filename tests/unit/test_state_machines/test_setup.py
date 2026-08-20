@@ -147,6 +147,43 @@ def test_admin_password_step_clears_only_after_rotation(ctx):
     assert STEP_ADMIN_PASSWORD in SETUP_MACHINE.evaluate(ctx).completed_steps
 
 
+def _with_git(ctx: SetupContext, *, merged: bool) -> SetupContext:
+    return SetupContext(
+        account_store=ctx.account_store,
+        org_registry=ctx.org_registry,
+        oidc_registry=ctx.oidc_registry,
+        break_glass_git=AccountGitState(
+            enabled=True, auto_merge=False, committed=True, merged=merged, pending=None
+        ),
+    )
+
+
+def test_setup_stays_incomplete_until_break_glass_is_merged(ctx):
+    """A rotated password sitting on a review branch is not durable yet."""
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+
+    state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=False))
+
+    assert state.complete is False
+    assert state.current_step == STEP_ADMIN_PASSWORD
+    assert STEP_ADMIN_PASSWORD in state.pending_steps
+    assert STEP_ADMIN_PASSWORD not in state.completed_steps
+
+
+def test_setup_completes_once_break_glass_is_merged(ctx):
+    ctx.org_registry.create("acme")
+    ctx.account_store.create("alice", "a-strong-user-password")
+    ctx.account_store.reset_password("admin", "a-strong-local-admin-password")
+
+    state = SETUP_MACHINE.evaluate(_with_git(ctx, merged=True))
+
+    assert state.complete is True
+    assert state.current_step is None
+    assert STEP_ADMIN_PASSWORD in state.completed_steps
+
+
 def test_admin_password_step_uses_env_password_as_rotation_baseline(tmp_path, monkeypatch):
     """The wizard must detect rotation from DFE_AUTH_LOCAL_ADMIN_PASSWORD, not only changeme."""
     monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "new-admin")
