@@ -121,6 +121,27 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.role_config = role_config
     app.state.auth_provider = LocalAuthProvider(account_store, group_store)
 
+    # Sensitive-attribute stores: a SEPARATE keyed store per entity kind, never
+    # inline on the account/group model (a broad read would leak them). Backend
+    # follows the account/group split - one document collection each in document
+    # mode, else one YAML dir each under auth_dir.
+    from dfe_engine.auth.attributes import AttributeStore, DocuStoreAttributeStore
+
+    if store_backend == "document":
+        app.state.account_sensitive_attributes = DocuStoreAttributeStore(
+            doc_store, collection="sensitive_account_attributes"
+        )
+        app.state.group_sensitive_attributes = DocuStoreAttributeStore(
+            doc_store, collection="sensitive_group_attributes"
+        )
+    else:
+        app.state.account_sensitive_attributes = AttributeStore(
+            auth_dir / "sensitive-account-attributes"
+        )
+        app.state.group_sensitive_attributes = AttributeStore(
+            auth_dir / "sensitive-group-attributes"
+        )
+
     # JWT authority: the engine as the single ES384 issuer - signs, verifies, and
     # publishes the JWKS. Shares its scalo.secrets signing key with create_access_token.
     from dfe_engine.api.deps import jwt_authority_for
