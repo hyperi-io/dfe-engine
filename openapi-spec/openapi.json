@@ -574,7 +574,7 @@
           "Accounts"
         ],
         "summary": "Reset Password",
-        "description": "Reset an account's password (admin only).",
+        "description": "Reset an account's password (admin only).\n\nThe live store takes the new password immediately (next login), and the change\nis mirrored into the durable deploy repo so it survives a rebuild. The ``git``\nblock reports whether that mirror merged straight away (dev/solo) or is a\npending review PR / CLI merge (production+team), or is a no-op file share.",
         "operationId": "reset_password_api_v1_auth_accounts__username__reset_password_post",
         "parameters": [
           {
@@ -602,7 +602,57 @@
             "description": "Successful Response",
             "content": {
               "application/json": {
-                "schema": {}
+                "schema": {
+                  "$ref": "#/components/schemas/ResetPasswordResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/{username}/git-status": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Account Git Status",
+        "description": "Poll whether an account's password has merged to the deploy repo's main.\n\nStep 2 of the review-PR path for the break-glass admin: the UI polls this after\nthe operator merges the PR; it fetches remote main and flips ``merged`` true.\nDurable immediately in the auto-merge and file-share modes. A regular user is\nnever git-persisted, so it reports not-git-backed (durable in its own store).",
+        "operationId": "account_git_status_api_v1_auth_accounts__username__git_status_get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountGitState"
+                }
               }
             }
           },
@@ -4713,6 +4763,53 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RuleCreateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/rules/from-hyperdx": {
+      "post": {
+        "tags": [
+          "Rules"
+        ],
+        "summary": "Create Rule From Hyperdx",
+        "description": "Create a hunt rule from a HyperDX view's expanded query.\n\nWraps the create pipeline with ``source_type='hyperdx'`` and auto-derives a\nunique rule id from the saved-search name, so the caller need not supply one.\nRBAC: ``rule:write`` (data_analyst) -- ``org_viewer`` has neither this grant nor\nthe UI button.",
+        "operationId": "create_rule_from_hyperdx_api_v1_rules_from_hyperdx_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RuleFromHyperdxRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RuleFromHyperdxResponse"
                 }
               }
             }
@@ -12534,6 +12631,93 @@
         "title": "APIKeyResponse",
         "description": "API key metadata \u2014 key_hash is NEVER included."
       },
+      "AccountGitPending": {
+        "properties": {
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url",
+            "description": "Review PR to merge (production+team with a forge)."
+          },
+          "command": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Command",
+            "description": "Git command to merge the review branch, when no forge is configured."
+          },
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Branch",
+            "description": "The review branch the change is on."
+          }
+        },
+        "type": "object",
+        "title": "AccountGitPending",
+        "description": "What the operator must do to make a not-yet-merged change durable."
+      },
+      "AccountGitState": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled",
+            "description": "This account is git-persisted (the break-glass admin on a gitops deploy). False for a regular user -- durable in its own store, no git flow."
+          },
+          "auto_merge": {
+            "type": "boolean",
+            "title": "Auto Merge",
+            "description": "Effective auto-merge: changes commit straight to main."
+          },
+          "committed": {
+            "type": "boolean",
+            "title": "Committed",
+            "description": "The change is committed into git -- a review branch/PR, or main. True as soon as the write lands, so a pending PR reads as saved (safe), not failed."
+          },
+          "merged": {
+            "type": "boolean",
+            "title": "Merged",
+            "description": "The durable copy matches the live account -- on main, survives a rebuild. False while a review PR is committed but unmerged (committed stays true)."
+          },
+          "pending": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountGitPending"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present when merged is false: the action to make it durable."
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled",
+          "auto_merge",
+          "committed",
+          "merged"
+        ],
+        "title": "AccountGitState",
+        "description": "Durability state of an account change, for the API + the setup wizard."
+      },
       "AccountResponse": {
         "properties": {
           "username": {
@@ -19067,6 +19251,25 @@
         ],
         "title": "ResetPasswordRequest"
       },
+      "ResetPasswordResponse": {
+        "properties": {
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": "password reset"
+          },
+          "git": {
+            "$ref": "#/components/schemas/AccountGitState",
+            "description": "Durability state: merged straight away, or a pending PR/command."
+          }
+        },
+        "type": "object",
+        "required": [
+          "git"
+        ],
+        "title": "ResetPasswordResponse",
+        "description": "Reset outcome plus where the change stands in the durable deploy repo."
+      },
       "ReviewRequest": {
         "properties": {
           "sql": {
@@ -19278,6 +19481,101 @@
         ],
         "title": "RuleEditRequest",
         "description": "Operator edit of a rule's content (marks it locally edited -> survives re-import)."
+      },
+      "RuleFromHyperdxRequest": {
+        "properties": {
+          "raw_sql": {
+            "type": "string",
+            "title": "Raw Sql",
+            "description": "Expanded HyperDX ClickHouse SELECT to turn into a rule"
+          },
+          "saved_search_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Search Name",
+            "description": "HyperDX saved-search name; seeds the rule id and label"
+          },
+          "severity": {
+            "type": "string",
+            "title": "Severity",
+            "description": "low|medium|high|critical",
+            "default": "medium"
+          },
+          "hunt_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hunt Name",
+            "description": "Parent hunt name"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source",
+            "description": "Source label (e.g. windows_audit)"
+          }
+        },
+        "type": "object",
+        "required": [
+          "raw_sql"
+        ],
+        "title": "RuleFromHyperdxRequest",
+        "description": "Create a hunt rule from a live HyperDX view.\n\nHyperDX posts the expanded ClickHouse SELECT; the create pipeline strips the UI\nmeta (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the HyperDX\nsanitizer, and the engine derives a unique rule id from the saved-search name.\nThe caller gets that id back and opens ``/rules/{id}`` -- no id to invent, no\nIndexedDB round-trip."
+      },
+      "RuleFromHyperdxResponse": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id",
+            "description": "Created rule id (YAML stem); open at /rules/{id}"
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name"
+          },
+          "sanitize_summary": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Sanitize Summary"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Warnings"
+          },
+          "sql_errors": {
+            "items": {
+              "$ref": "#/components/schemas/SqlValidationError"
+            },
+            "type": "array",
+            "title": "Sql Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "display_name"
+        ],
+        "title": "RuleFromHyperdxResponse"
       },
       "RuleResponse": {
         "properties": {
@@ -20622,6 +20920,17 @@
             "type": "array",
             "title": "Organisations",
             "description": "The organisation registry. Empty once setup is complete."
+          },
+          "break_glass": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccountGitState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Durability of the break-glass admin password in the deploy repo: enabled/auto_merge/committed/merged, plus pending.pr_url/command/branch when a review PR or CLI merge is still outstanding."
           }
         },
         "type": "object",
