@@ -131,6 +131,12 @@ Each version of the software (including your contributions) will automatically
 become available under the Apache License, Version 2.0 on the third
 anniversary of its release.
 
+## Running locally
+
+To run the engine as a plain local process (a `uv` virtualenv, no containers or
+Kubernetes) -- including the no-dependencies auth spike and how it wires to
+dfe-hyperdx / dfe-ui / a local dfe-deploy clone -- see [docs/LOCAL-DEV.md](docs/LOCAL-DEV.md).
+
 ## How to Contribute
 
 1. **Fork the repository** and create your branch from `main`
