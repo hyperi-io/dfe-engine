@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.16.1](https://github.com/hyperi-io/dfe-engine/compare/v1.16.0...v1.16.1) (2026-08-20)
+
+### Bug Fixes
+
+* **auth:** document-store default for users/groups; git only for break-glass ([940377e](https://github.com/hyperi-io/dfe-engine/commit/940377e3068376aa713d7c1ce2a791cf971f55c5))
+* **auth:** persist break-glass account changes to the deploy repo ([f0034bc](https://github.com/hyperi-io/dfe-engine/commit/f0034bcf147ef8f677a37b56b1c458286a241a33)), closes [#188](https://github.com/hyperi-io/dfe-engine/issues/188)
+
 ## [1.16.0](https://github.com/hyperi-io/dfe-engine/compare/v1.15.1...v1.16.0) (2026-08-20)
 
 ### Features
