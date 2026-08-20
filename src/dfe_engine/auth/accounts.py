@@ -125,6 +125,18 @@ class AccountStore:
         self._write(path, account)
         return account
 
+    def put(self, account: Account) -> Account:
+        """Upsert a complete account (used to restore from the durable deploy repo).
+
+        Unlike :meth:`create` / :meth:`reset_password`, this writes the account
+        verbatim -- hash and timestamps included -- so a hydration pass can put back
+        exactly what the deploy repo holds. Raises on an invalid username.
+        """
+        if not _VALID_NAME.match(account.username):
+            raise ValueError(f"Invalid account name: {account.username!r}")
+        self._write(self._path(account.username), account)
+        return account
+
     def get(self, username: str) -> Account | None:
         """Return the account for *username*, or None if not found.
 
@@ -327,6 +339,13 @@ class FerretDBAccountStore:
             updated_at=now,
         )
         self._c.put(username, account)
+        return account
+
+    def put(self, account: Account) -> Account:
+        """Upsert a complete account verbatim (restore from the durable deploy repo)."""
+        if not _VALID_NAME.match(account.username):
+            raise ValueError(f"Invalid account name: {account.username!r}")
+        self._c.put(account.username, account)
         return account
 
     def get(self, username: str) -> Account | None:

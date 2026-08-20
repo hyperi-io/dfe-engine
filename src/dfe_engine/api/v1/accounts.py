@@ -24,16 +24,46 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import CurrentUser, require_action
+from dfe_engine.api.deps import CurrentUser, Settings, require_action
 from dfe_engine.api.pagination import (
     PaginatedResponse,
     PaginationParams,
     apply_search,
     apply_sort,
 )
+from dfe_engine.auth import account_durability
+from dfe_engine.auth.account_durability import AccountGitState
+from dfe_engine.auth.accounts import Account
 from dfe_engine.auth.rbac_scopes import scopes_dict
 
 router = APIRouter(prefix="/accounts", tags=["Accounts"])
+
+
+def _persist_account(
+    request: Request,
+    settings: Settings,
+    *,
+    username: str,
+    account: Account,
+    summary: str,
+    actor: str,
+) -> AccountGitState:
+    """Mirror an account write into the durable deploy repo and report the state."""
+    gc = getattr(request.app.state, "gitcrud", None)
+    forge = getattr(request.app.state, "forge", None)
+    outcome = account_durability.publish_account(
+        gc,
+        forge,
+        environment=settings.env,
+        mode=settings.gitops.mode,
+        username=username,
+        doc=account.model_dump(exclude={"username"}),
+        summary=summary,
+        actor=actor,
+        request_id=request.headers.get("X-Request-ID", ""),
+    )
+    return account_durability.state_from_outcome(gc, outcome)
+
 
 # Reuse depth quoted in the rejection message; only the current password is
 # compared, since no password history is stored. The message stays vague so it
@@ -59,6 +89,15 @@ class ResetPasswordRequest(BaseModel):
     new_password: str = Field(description="New plaintext password")
 
 
+class ResetPasswordResponse(BaseModel):
+    """Reset outcome plus where the change stands in the durable deploy repo."""
+
+    message: str = Field(default="password reset")
+    git: AccountGitState = Field(
+        description="Durability state: merged straight away, or a pending PR/command."
+    )
+
+
 class AccountResponse(BaseModel):
     """Account detail — password_hash is NEVER included."""
 
@@ -82,6 +121,7 @@ async def create_account(
     body: CreateAccountRequest,
     user: CurrentUser,
     request: Request,
+    settings: Settings,
 ):
     """Create a new local user account (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
@@ -99,6 +139,14 @@ async def create_account(
         group_store,
         body.username,
         added=body.groups,
+    )
+    _persist_account(
+        request,
+        settings,
+        username=account.username,
+        account=account,
+        summary="create account",
+        actor=user.user_id,
     )
     return AccountResponse(
         username=account.username,
@@ -181,6 +229,7 @@ async def update_account(
     body: UpdateAccountRequest,
     user: CurrentUser,
     request: Request,
+    settings: Settings,
 ):
     """Update account groups or enabled status (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
@@ -211,6 +260,14 @@ async def update_account(
         )
     else:
         account = store.update(username, **update_fields)
+    _persist_account(
+        request,
+        settings,
+        username=account.username,
+        account=account,
+        summary="update account",
+        actor=user.user_id,
+    )
     return AccountResponse(
         username=account.username,
         enabled=account.enabled,
@@ -223,6 +280,7 @@ async def update_account(
 @router.post(
     "/{username}/reset-password",
     status_code=200,
+    response_model=ResetPasswordResponse,
     dependencies=[
         Depends(require_action(scopes_dict["accounts_reset_password"])),
     ],
@@ -232,8 +290,15 @@ async def reset_password(
     body: ResetPasswordRequest,
     user: CurrentUser,
     request: Request,
-):
-    """Reset an account's password (admin only)."""
+    settings: Settings,
+) -> ResetPasswordResponse:
+    """Reset an account's password (admin only).
+
+    The live store takes the new password immediately (next login), and the change
+    is mirrored into the durable deploy repo so it survives a rebuild. The ``git``
+    block reports whether that mirror merged straight away (dev/solo) or is a
+    pending review PR / CLI merge (production+team), or is a no-op file share.
+    """
     from dfe_engine.auth.accounts import AccountStore
 
     store: AccountStore = request.app.state.account_store
@@ -253,7 +318,15 @@ async def reset_password(
             },
         )
     store.reset_password(username, body.new_password)
-    return {"message": "password reset"}
+    git = _persist_account(
+        request,
+        settings,
+        username=username,
+        account=store.get(username),
+        summary="reset password",
+        actor=user.user_id,
+    )
+    return ResetPasswordResponse(git=git)
 
 
 @router.delete(
@@ -265,6 +338,7 @@ async def delete_account(
     username: str,
     user: CurrentUser,
     request: Request,
+    settings: Settings,
 ):
     """Delete an account (admin only)."""
     from dfe_engine.auth.accounts import AccountStore
@@ -276,3 +350,12 @@ async def delete_account(
             detail={"code": "not_found", "message": f"Account '{username}' not found"},
         )
     store.delete(username)
+    account_durability.remove_account(
+        getattr(request.app.state, "gitcrud", None),
+        getattr(request.app.state, "forge", None),
+        environment=settings.env,
+        mode=settings.gitops.mode,
+        username=username,
+        actor=user.user_id,
+        request_id=request.headers.get("X-Request-ID", ""),
+    )
