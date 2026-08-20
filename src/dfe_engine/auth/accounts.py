@@ -37,7 +37,7 @@ from pydantic import BaseModel, Field
 from dfe_engine.yaml_utils import yaml_dump, yaml_load
 
 if TYPE_CHECKING:
-    from dfe_engine.store.documents import DocumentStore
+    from dfe_engine.store.documents import DocuStore
 
 # Dummy hash used for timing-safe rejection of unknown users.
 # Generated once at import time; cost=4 is intentionally low (we just need
@@ -304,8 +304,8 @@ _UPDATABLE_FIELDS = (
 )
 
 
-class FerretDBAccountStore:
-    """FerretDB-backed account store - the same interface as :class:`AccountStore`.
+class DocuStoreAccountStore:
+    """Document-store-backed account store - the same interface as :class:`AccountStore`.
 
     Persists one :class:`Account` document per username (keyed and unique-indexed
     on ``username``) instead of one YAML file. Every domain rule - name
@@ -314,7 +314,7 @@ class FerretDBAccountStore:
     two are drop-in interchangeable behind the same construction seam.
     """
 
-    def __init__(self, store: DocumentStore, *, collection: str = "accounts") -> None:
+    def __init__(self, store: DocuStore, *, collection: str = "accounts") -> None:
         self._c = store.typed(collection, Account, key="username")
 
     def create(

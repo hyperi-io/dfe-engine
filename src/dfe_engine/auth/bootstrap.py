@@ -30,9 +30,9 @@ from typing import TYPE_CHECKING
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import AccountStore, FerretDBAccountStore
+from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
 from dfe_engine.auth.api_keys import APIKeyStore
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.auth.role_store import RoleStore
 from dfe_engine.auth.roles import RoleConfig
 
@@ -82,9 +82,16 @@ def bootstrap_auth(
     auth_dir: Path,
     default_admin_password: str = "",
     default_admin_name: str = "",
-    account_store: AccountStore | FerretDBAccountStore | None = None,
+    account_store: AccountStore | DocuStoreAccountStore | None = None,
+    group_store: GroupStore | DocuStoreGroupStore | None = None,
     gitcrud: GitCrud | None = None,
-) -> tuple[AccountStore | FerretDBAccountStore, GroupStore, APIKeyStore, RoleStore, RoleConfig]:
+) -> tuple[
+    AccountStore | DocuStoreAccountStore,
+    GroupStore | DocuStoreGroupStore,
+    APIKeyStore,
+    RoleStore,
+    RoleConfig,
+]:
     """Bootstrap auth stores with sensible defaults.
 
     Creates subdirectories, seeds roles/groups/admin account if missing,
@@ -125,15 +132,16 @@ def bootstrap_auth(
     role_store = RoleStore(roles_path)
     role_config = role_store.load_config()
 
-    # Instantiate stores. A caller may inject a backend (e.g. FerretDB); the
-    # default is the YAML store under accounts_dir (config-seeded / gitcrud).
+    # Instantiate stores. A caller may inject a backend (e.g. a document store); the
+    # default is the YAML file store. Accounts and groups share one backend.
     if account_store is None:
         account_store = AccountStore(accounts_dir)
-    group_store = GroupStore(groups_dir)
+    if group_store is None:
+        group_store = GroupStore(groups_dir)
     api_key_store = APIKeyStore(api_keys_dir)
 
-    # Seed default groups if groups dir is empty
-    if not list(groups_dir.glob("*.yaml")):
+    # Seed default groups if the store has none (backend-agnostic)
+    if not group_store.list():
         _seed_groups(group_store)
         logger.info("Seeded default groups")
 

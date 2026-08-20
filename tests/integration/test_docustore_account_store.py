@@ -1,7 +1,7 @@
-"""Integration tests for the FerretDB-backed account store + document layer.
+"""Integration tests for the document-store-backed account store + document layer.
 
-Runs only when ``DFE_TEST_MONGO_URI`` points at a reachable FerretDB / mongo-wire
-server (the rig FerretDB via port-forward, or a testcontainer in CI). Uses a
+Runs only when ``DFE_TEST_MONGO_URI`` points at a reachable document store / mongo-wire
+server (the rig document store via port-forward, or a testcontainer in CI). Uses a
 throwaway database per test so it never touches real data, and drops it on
 teardown. Real dependency, no mocks - the timing-safe and unusable-password
 semantics must hold against a real store exactly as they do for the YAML backend.
@@ -14,8 +14,8 @@ import uuid
 
 import pytest
 
-from dfe_engine.auth.accounts import FerretDBAccountStore
-from dfe_engine.store.documents import DocumentStore
+from dfe_engine.auth.accounts import DocuStoreAccountStore
+from dfe_engine.store.documents import DocuStore
 
 pytestmark = pytest.mark.integration
 
@@ -25,19 +25,19 @@ _URI = os.environ.get("DFE_TEST_MONGO_URI", "")
 @pytest.fixture
 def store():
     if not _URI:
-        pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable FerretDB)")
+        pytest.skip("DFE_TEST_MONGO_URI not set (needs a reachable document store)")
     db_name = f"dfe_engine_test_{uuid.uuid4().hex[:8]}"
-    doc = DocumentStore(_URI, db_name)
+    doc = DocuStore(_URI, db_name)
     doc.ping()  # fail fast if the server is unreachable / auth wrong
     try:
-        yield FerretDBAccountStore(doc, collection="accounts")
+        yield DocuStoreAccountStore(doc, collection="accounts")
     finally:
         doc.drop_database(db_name)
         doc.close()
 
 
-class TestFerretDBAccountStore:
-    """Behaviour parity with the YAML AccountStore, against a real FerretDB."""
+class TestDocuStoreAccountStore:
+    """Behaviour parity with the YAML AccountStore, against a real document store."""
 
     def test_create_and_get(self, store):
         acct = store.create("alice", "s3cret-Pw", groups=["dfe-admins"])
