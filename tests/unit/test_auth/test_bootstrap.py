@@ -97,12 +97,16 @@ def test_seed_account_password_reconciles_on_rebuild(tmp_path: Path, monkeypatch
 
     bootstrap_auth(
         auth_dir,
-        seed_accounts=[SeedAccount(username="kaz", password="old-password-long", groups=["dfe-analysts"])],
+        seed_accounts=[
+            SeedAccount(username="kaz", password="old-password-long", groups=["dfe-analysts"])
+        ],
     )
     # A rebuild against the SAME store with a changed config password: config wins.
     account_store, *_ = bootstrap_auth(
         auth_dir,
-        seed_accounts=[SeedAccount(username="kaz", password="new-password-long", groups=["dfe-analysts"])],
+        seed_accounts=[
+            SeedAccount(username="kaz", password="new-password-long", groups=["dfe-analysts"])
+        ],
     )
 
     assert account_store.verify_password("kaz", "new-password-long")
@@ -116,11 +120,15 @@ def test_seed_account_groups_reconcile_on_rebuild(tmp_path: Path, monkeypatch):
 
     bootstrap_auth(
         auth_dir,
-        seed_accounts=[SeedAccount(username="kay", password="kay-password-long", groups=["dfe-analysts"])],
+        seed_accounts=[
+            SeedAccount(username="kay", password="kay-password-long", groups=["dfe-analysts"])
+        ],
     )
     account_store, group_store, *_ = bootstrap_auth(
         auth_dir,
-        seed_accounts=[SeedAccount(username="kay", password="kay-password-long", groups=["dfe-viewers"])],
+        seed_accounts=[
+            SeedAccount(username="kay", password="kay-password-long", groups=["dfe-viewers"])
+        ],
     )
 
     assert set(account_store.get("kay").groups) == {"dfe-viewers"}

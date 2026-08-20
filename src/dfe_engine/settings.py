@@ -1569,9 +1569,7 @@ def _get_env_overrides() -> dict:
         try:
             seed = json.loads(val)
         except json.JSONDecodeError as exc:
-            raise ValueError(
-                f"DFE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}"
-            ) from exc
+            raise ValueError(f"DFE_AUTH_LOCAL_SEED_ACCOUNTS is not valid JSON: {exc}") from exc
         overrides["auth"].setdefault("local", {})["seed_accounts"] = seed
 
     # OIDC settings (nested under auth.oidc)
