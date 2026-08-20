@@ -78,6 +78,7 @@ def test_disabled_publish_returns_none_and_file_share_state():
     assert outcome is None
     state = ad.state_from_outcome(None, outcome)
     assert state.enabled is False
+    assert state.committed is False  # not in git
     assert state.merged is True  # a file share is already durable
     assert state.pending is None
 
@@ -90,7 +91,9 @@ def test_disabled_steady_state_is_durable(tmp_path):
 
 
 def account_durability_file_share():
-    return ad.AccountGitState(enabled=False, auto_merge=False, merged=True, pending=None)
+    return ad.AccountGitState(
+        enabled=False, auto_merge=False, committed=False, merged=True, pending=None
+    )
 
 
 # ── Dev / solo: direct commit, immediately durable ───────────
@@ -113,6 +116,7 @@ def test_dev_direct_commit_is_merged(tmp_path):
     assert outcome.review_required is False
     state = ad.state_from_outcome(gc, outcome)
     assert state.enabled is True
+    assert state.committed is True
     assert state.merged is True
     assert state.pending is None
     # The account landed on the tracked branch (working tree), not a side branch.
@@ -160,7 +164,8 @@ def test_prod_team_opens_pr_and_is_pending(tmp_path):
     assert outcome.review_required is True
     assert forge.opened, "a PR should have been opened"
     state = ad.state_from_outcome(gc, outcome)
-    assert state.merged is False
+    assert state.committed is True  # committed to the review branch -- saved, not failed
+    assert state.merged is False  # but not on main until the PR merges
     assert state.pending is not None
     assert state.pending.pr_url == "http://forge.local/pr/7"
     assert state.pending.command is None  # a forge PR, not the CLI fallback
@@ -186,6 +191,7 @@ def test_prod_team_no_forge_falls_back_to_cli(tmp_path):
     assert outcome.review_required is True
     assert outcome.branch  # committed to a review branch, never main
     state = ad.state_from_outcome(gc, outcome)
+    assert state.committed is True
     assert state.merged is False
     assert state.pending is not None
     assert state.pending.pr_url is None
@@ -326,7 +332,8 @@ def test_remote_state_flips_merged_when_remote_catches_up(tmp_path):
     store.put(_account(password_hash=_HASH_B))
     pending = ad.remote_state(engine_gc, store, "admin", environment=PROD, mode="team")
     assert pending.enabled is True
-    assert pending.merged is False
+    assert pending.committed is True  # the rotation is committed to the PR branch
+    assert pending.merged is False  # just not merged to remote main yet
 
     # The operator merges the PR: remote main advances to B.
     ad.publish_seed(remote_gc, _account(password_hash=_HASH_B))
@@ -358,5 +365,6 @@ def test_is_break_glass_follows_env_admin_name(monkeypatch):
 def test_not_git_backed_state_is_durable():
     state = ad.not_git_backed_state()
     assert state.enabled is False
+    assert state.committed is False  # not in git; durable in its own store
     assert state.merged is True
     assert state.pending is None

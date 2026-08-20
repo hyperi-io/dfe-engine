@@ -78,8 +78,13 @@ class AccountGitState(BaseModel):
         "deploy). False for a regular user -- durable in its own store, no git flow."
     )
     auto_merge: bool = Field(description="Effective auto-merge: changes commit straight to main.")
+    committed: bool = Field(
+        description="The change is committed into git -- a review branch/PR, or main. True as "
+        "soon as the write lands, so a pending PR reads as saved (safe), not failed."
+    )
     merged: bool = Field(
-        description="The durable copy matches the live account -- survives a rebuild."
+        description="The durable copy matches the live account -- on main, survives a rebuild. "
+        "False while a review PR is committed but unmerged (committed stays true)."
     )
     pending: AccountGitPending | None = Field(
         default=None, description="Present when merged is false: the action to make it durable."
@@ -88,8 +93,11 @@ class AccountGitState(BaseModel):
 
 # The git-disabled deployment: the live store is a plain file share, so it is
 # already durable and there is nothing to merge. Also the state for a regular
-# account, whose durability is its own store (document store/yaml), not git.
-_FILE_SHARE_STATE = AccountGitState(enabled=False, auto_merge=False, merged=True, pending=None)
+# account, whose durability is its own store (document store/yaml), not git -- so
+# it is not committed to git, but is durable (merged) in its own store.
+_FILE_SHARE_STATE = AccountGitState(
+    enabled=False, auto_merge=False, committed=False, merged=True, pending=None
+)
 
 
 def not_git_backed_state() -> AccountGitState:
@@ -251,18 +259,23 @@ def state_from_outcome(gc: GitCrud | None, outcome: WriteOutcome | None) -> Acco
     if gc is None:
         return _FILE_SHARE_STATE
     if outcome is None or not outcome.review_required:
+        # Direct / effective auto-merge: committed AND merged to main in one step.
         return AccountGitState(
             enabled=True,
             auto_merge=bool(outcome and outcome.auto_merged),
+            committed=True,
             merged=True,
             pending=None,
         )
+    # Review PR: committed to a branch (safe), not yet merged to main.
     pending = AccountGitPending(
         pr_url=outcome.pr_url,
         branch=outcome.branch,
         command=None if outcome.pr_url else _cli_merge_command(gc, outcome.branch or ""),
     )
-    return AccountGitState(enabled=True, auto_merge=False, merged=False, pending=pending)
+    return AccountGitState(
+        enabled=True, auto_merge=False, committed=True, merged=False, pending=pending
+    )
 
 
 # ── Steady-state read (setup-status) ─────────────────────────
@@ -293,12 +306,11 @@ def steady_state(
     except ResourceNotFoundError:
         stored = None
     live = account_store.get(username)
-    merged = (
-        stored is not None
-        and live is not None
-        and stored.get("password_hash") == live.password_hash
+    committed = stored is not None  # an account is committed on the tracked branch
+    merged = committed and live is not None and stored.get("password_hash") == live.password_hash
+    return AccountGitState(
+        enabled=True, auto_merge=state.effective, committed=committed, merged=merged, pending=None
     )
-    return AccountGitState(enabled=True, auto_merge=state.effective, merged=merged, pending=None)
 
 
 def _account_rel(gc: GitCrud, username: str) -> str:
@@ -335,7 +347,11 @@ def remote_state(
     if content is not None and live is not None:
         doc = yaml_load_string(content) or {}
         merged = doc.get("password_hash") == live.password_hash
-    return AccountGitState(enabled=True, auto_merge=state.effective, merged=merged, pending=None)
+    # This poll only runs for the git-backed break-glass account after a committing
+    # write, so the change is committed (on main if merged, else the review branch).
+    return AccountGitState(
+        enabled=True, auto_merge=state.effective, committed=True, merged=merged, pending=None
+    )
 
 
 # ── Boot hydration ───────────────────────────────────────────
