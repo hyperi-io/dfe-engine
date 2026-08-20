@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.16.2](https://github.com/hyperi-io/dfe-engine/compare/v1.16.1...v1.16.2) (2026-08-20)
+
+### Bug Fixes
+
+* **auth:** flexible attributes on users and groups, sensitive kept separate ([#191](https://github.com/hyperi-io/dfe-engine/issues/191)) ([8cebcda](https://github.com/hyperi-io/dfe-engine/commit/8cebcdaa077fae207ea714bd746039d13355ae7e))
+
 ## [1.16.1](https://github.com/hyperi-io/dfe-engine/compare/v1.16.0...v1.16.1) (2026-08-20)
 
 ### Bug Fixes
