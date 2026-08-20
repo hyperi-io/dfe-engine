@@ -284,6 +284,23 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.hunts.log_path == "/var/log/hunts"
 
+    def test_seed_accounts_json_override(self, monkeypatch):
+        monkeypatch.setenv(
+            "DFE_AUTH_LOCAL_SEED_ACCOUNTS",
+            '[{"username": "kay", "password": "pw-long", "groups": ["dfe-analysts"]}]',
+        )
+        settings = load_settings()
+        assert len(settings.auth.local.seed_accounts) == 1
+        seed = settings.auth.local.seed_accounts[0]
+        assert seed.username == "kay"
+        assert seed.password == "pw-long"
+        assert seed.groups == ["dfe-analysts"]
+
+    def test_seed_accounts_malformed_json_fails_loud(self, monkeypatch):
+        monkeypatch.setenv("DFE_AUTH_LOCAL_SEED_ACCOUNTS", "{not-json")
+        with pytest.raises(ValueError, match="not valid JSON"):
+            load_settings()
+
     def test_legacy_clickhouse_host_fallback(self, monkeypatch):
         """Legacy env var (no DFE_ prefix) should also work."""
         monkeypatch.setenv("CLICKHOUSE_HOST", "legacy.ch.com")
