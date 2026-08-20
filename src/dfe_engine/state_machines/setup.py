@@ -45,6 +45,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
+from dfe_engine.auth.account_durability import AccountGitState
 from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
 from dfe_engine.auth.oidc.models import OIDCProvider
 from dfe_engine.orgs.models import Org
@@ -83,6 +84,7 @@ class SetupContext:
     account_store: AccountStore | None = None
     org_registry: OrgRegistry | None = None
     oidc_registry: OIDCProviderRegistry | None = None
+    break_glass_git: AccountGitState | None = None
 
     @classmethod
     def from_app_state(cls, state: Any) -> SetupContext:
@@ -97,11 +99,38 @@ class SetupContext:
         Returns:
             A context describing the live deployment.
         """
+        account_store = getattr(state, "account_store", None)
         return cls(
-            account_store=getattr(state, "account_store", None),
+            account_store=account_store,
             org_registry=getattr(state, "org_registry", None),
             oidc_registry=getattr(state, "oidc_provider_registry", None),
+            break_glass_git=_break_glass_git_state(state, account_store),
         )
+
+
+def _break_glass_git_state(
+    state: Any, account_store: AccountStore | None
+) -> AccountGitState | None:
+    """Durability of the break-glass admin password in the deploy repo, or None.
+
+    None while auth or settings are still bootstrapping; otherwise the steady-state
+    git status for the seeded admin so the wizard can show "persisted" vs a pending
+    review PR. Pre-login safe: booleans only, no secrets or paths.
+    """
+    if account_store is None:
+        return None
+    settings = getattr(state, "settings", None)
+    if settings is None:
+        return None
+    from dfe_engine.auth.account_durability import steady_state
+
+    return steady_state(
+        getattr(state, "gitcrud", None),
+        account_store,
+        admin_account_name(),
+        environment=settings.env,
+        mode=settings.gitops.mode,
+    )
 
 
 # ── Response models ──────────────────────────────────────────
@@ -191,6 +220,12 @@ class SetupStatus(BaseModel):
     organisations: list[Org] = Field(
         default_factory=list,
         description="The organisation registry. Empty once setup is complete.",
+    )
+    break_glass: AccountGitState | None = Field(
+        default=None,
+        description="Durability of the break-glass admin password in the deploy "
+        "repo: enabled/auto_merge/merged. Lets the wizard show whether a rotation "
+        "is persisted (survives rebuild) or still a pending review PR.",
     )
 
 
@@ -381,12 +416,14 @@ class SetupStateMachine:
             return SetupStatus(
                 initial_setup=state,
                 oidc_providers=self._enabled_oidc_login_options(ctx),
+                break_glass=ctx.break_glass_git,
             )
 
         return SetupStatus(
             initial_setup=state,
             oidc_providers=self._oidc_providers(ctx),
             organisations=self._organisations(ctx),
+            break_glass=ctx.break_glass_git,
         )
 
     # ------------------------------------------------------------------
