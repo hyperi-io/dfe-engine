@@ -19,6 +19,7 @@ from dfe_engine.auth.groups import GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
 
 _TEST_ENV = "test"
+_SETUP_ADMIN_PASSWORD = "already_reset"
 
 
 class Seed:
@@ -72,7 +73,7 @@ class Seed:
             logger.warning("e2e seed", script=script, account=account)
             return True
         if script == "seed_setup_complete":
-            self.accounts.seed_admin("admin", "already_reset")
+            self.accounts.seed_admin("admin", password=_SETUP_ADMIN_PASSWORD)
             self.accounts.seed_initial_user()
             self.organisations.seed_organisation()
             return True

@@ -171,5 +171,7 @@ def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
 
     assert seeder.seed_static("seed_setup_complete") is True
     assert accounts.get("admin") is not None
+    assert accounts.verify_password("admin", "already_reset")
+    assert not accounts.verify_password("admin", "changeme")
     assert accounts.get("initial_user") is not None
     assert orgs.get("organisation") is not None
