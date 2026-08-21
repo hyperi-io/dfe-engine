@@ -674,6 +674,206 @@
         ]
       }
     },
+    "/api/v1/auth/accounts/{username}/attributes": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Account Attributes",
+        "description": "Read an account's non-sensitive attribute blob (404 if the account is missing).",
+        "operationId": "get_account_attributes_api_v1_auth_accounts__username__attributes_get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Put Account Attributes",
+        "description": "Full-replace an account's non-sensitive attribute blob (404 if missing).",
+        "operationId": "put_account_attributes_api_v1_auth_accounts__username__attributes_put",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__accounts__AttributesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/accounts/{username}/sensitive-attributes": {
+      "get": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Get Account Sensitive Attributes",
+        "description": "Read an account's SENSITIVE attribute blob from the separate keyed store.\n\nThe account must exist first (404 otherwise), so a sensitive read cannot be\nused to probe for accounts that are not there.",
+        "operationId": "get_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_get",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Accounts"
+        ],
+        "summary": "Put Account Sensitive Attributes",
+        "description": "Full-replace an account's SENSITIVE attribute blob (404 if the account is missing).",
+        "operationId": "put_account_sensitive_attributes_api_v1_auth_accounts__username__sensitive_attributes_put",
+        "parameters": [
+          {
+            "name": "username",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Username"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__accounts__AttributesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/auth/groups": {
       "post": {
         "tags": [
@@ -1064,6 +1264,206 @@
                 "schema": {
                   "$ref": "#/components/schemas/GroupResponse"
                 }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups/{name}/attributes": {
+      "get": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Get Group Attributes",
+        "description": "Read a group's non-sensitive attribute blob (404 if the group is missing).",
+        "operationId": "get_group_attributes_api_v1_auth_groups__name__attributes_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Put Group Attributes",
+        "description": "Full-replace a group's non-sensitive attribute blob (404 if missing).",
+        "operationId": "put_group_attributes_api_v1_auth_groups__name__attributes_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__account_groups__AttributesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/auth/groups/{name}/sensitive-attributes": {
+      "get": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Get Group Sensitive Attributes",
+        "description": "Read a group's SENSITIVE attribute blob from the separate keyed store.\n\nThe group must exist first (404 otherwise), so a sensitive read cannot probe\nfor groups that are not there.",
+        "operationId": "get_group_sensitive_attributes_api_v1_auth_groups__name__sensitive_attributes_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "Groups"
+        ],
+        "summary": "Put Group Sensitive Attributes",
+        "description": "Full-replace a group's SENSITIVE attribute blob (404 if the group is missing).",
+        "operationId": "put_group_sensitive_attributes_api_v1_auth_groups__name__sensitive_attributes_put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/dfe_engine__api__v1__account_groups__AttributesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           },
@@ -23764,6 +24164,30 @@
           "prev_page"
         ],
         "title": "PaginatedResponse[SchemaColumn]"
+      },
+      "dfe_engine__api__v1__account_groups__AttributesRequest": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          }
+        },
+        "type": "object",
+        "title": "AttributesRequest",
+        "description": "Full-replace body for a group's attribute blob (non-sensitive or sensitive)."
+      },
+      "dfe_engine__api__v1__accounts__AttributesRequest": {
+        "properties": {
+          "attributes": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Attributes"
+          }
+        },
+        "type": "object",
+        "title": "AttributesRequest",
+        "description": "Full-replace body for an account's attribute blob (non-sensitive or sensitive)."
       },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {

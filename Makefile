@@ -38,6 +38,10 @@ dev:
 # is left alone). Pass E2E_KEEP=1 to reuse the last run instead of wiping.
 # Playwright must poll /readyz (not /health/ready, which 404s on this binary):
 #   DFE_ENGINE_READY_URL=http://127.0.0.1:8003/readyz yarn test:e2e
+# Startup parity: a plain `dfe-engine run`, so the process comes up with exactly
+# what auth/bootstrap.py seeds (roles.yaml, the four dfe-* groups, break-glass
+# admin) and no baseline beyond it. Fixture data is the suite's job, seeded over
+# the API from dfe-ui.
 E2E_WORKSPACE := $(CURDIR)/tmp/e2e
 E2E_CH_DATA_DB := dfe_e2e
 E2E_CH_HUNTS_DB := dfe_e2e_hunts
@@ -48,7 +52,7 @@ e2e-server:
 	@echo "ClickHouse databases -> $(E2E_CH_DATA_DB), $(E2E_CH_HUNTS_DB)"
 	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs  (select API or E2E)"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${DFE_API_PORT:-8003}/readyz"
-	@echo "e2e seed -> POST http://localhost:$${DFE_API_PORT:-8003}/api/e2e/seed"
+	@echo "e2e seed -> POST http://localhost:$${DFE_API_PORT:-8003}/api/e2e/seed-static"
 	set -a; . ./.env.e2e; set +a; \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
 	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" "$(E2E_WORKSPACE)/secrets"; \

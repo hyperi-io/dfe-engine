@@ -37,9 +37,7 @@ class Accounts(Seed):
             password=_DEFAULT_PASSWORD if password is None else password,
         )
 
-    def seed_dfe_admin_user(
-        self, name: str = "dfe_admin", *, password: str | None = None
-    ) -> bool:
+    def seed_dfe_admin_user(self, name: str = "dfe_admin", *, password: str | None = None) -> bool:
         """Seed local DFE admin account.
 
         Omitting *password* uses the well-known e2e password ``changeme``.
@@ -59,9 +57,7 @@ class Accounts(Seed):
             name, password=_DEFAULT_PASSWORD if password is None else password
         )
 
-    def seed_dfe_infra_user(
-        self, name: str = "dfe_infra", *, password: str | None = None
-    ) -> bool:
+    def seed_dfe_infra_user(self, name: str = "dfe_infra", *, password: str | None = None) -> bool:
         """Seed local DFE infra account.
 
         Omitting *password* uses the well-known e2e password ``changeme``.
@@ -86,11 +82,7 @@ class Accounts(Seed):
 
         Returns True when the account was created, False when it was reset.
         """
-        self._ensure_group(
-            _ADMIN_GROUP,
-            roles=["admin"],
-            description="Full administrative access",
-        )
+        self._ensure_group(_ADMIN_GROUP)
         return self._ensure(name, password, groups=[_ADMIN_GROUP])
 
     def _ensure_dfe_analyst(self, name: str = "dfe_analyst", *, password: str) -> bool:
@@ -98,11 +90,7 @@ class Accounts(Seed):
 
         Returns True when the account was created, False when it was reset.
         """
-        self._ensure_group(
-            _DFE_ANALYST_GROUP,
-            roles=["data_analysts"],
-            description="DFE analyst access",
-        )
+        self._ensure_group(_DFE_ANALYST_GROUP)
         return self._ensure(name, password, groups=[_DFE_ANALYST_GROUP])
 
     def _ensure_dfe_infra(self, name: str = "dfe_infra", *, password: str) -> bool:
@@ -110,11 +98,7 @@ class Accounts(Seed):
 
         Returns True when the account was created, False when it was reset.
         """
-        self._ensure_group(
-            _DFE_INFRA_GROUP,
-            roles=["infra_admin"],
-            description="DFE infra access",
-        )
+        self._ensure_group(_DFE_INFRA_GROUP)
         return self._ensure(name, password, groups=[_DFE_INFRA_GROUP])
 
     def _ensure_dfe_viewers(self, name: str = "dfe_viewers", *, password: str) -> bool:
@@ -122,26 +106,26 @@ class Accounts(Seed):
 
         Returns True when the account was created, False when it was reset.
         """
-        self._ensure_group(
-            _DFE_VIEWERS_GROUP,
-            roles=["data_viewer"],
-            description="DFE viewers access",
-        )
+        self._ensure_group(_DFE_VIEWERS_GROUP)
         return self._ensure(name, password, groups=[_DFE_VIEWERS_GROUP])
 
     def _ensure(self, name: str, password: str, *, groups: list[str]) -> bool:
         """Create or reset local account and attach it to *groups*.
 
-        Groups must already exist (use ``_ensure_group`` from a sibling seeder
-        that knows the role mapping). Returns True when created.
+        Groups must already exist -- ``bootstrap_auth`` seeds them on every
+        startup, so guard with ``_ensure_group``. Returns True when created.
         """
         created = self._upsert_local_account(name, password, groups=groups)
         for group_name in groups:
             self._ensure_membership(group_name, name)
         return created
 
-    def _ensure_group(self, name: str, *, roles: list[str], description: str = "") -> None:
-        """Error on missing group."""
+    def _ensure_group(self, name: str) -> None:
+        """Error on a group the startup bootstrap did not create.
+
+        Takes no roles/description: ``auth/bootstrap.py::_DEFAULT_GROUPS`` is the
+        only source of truth for what each group grants.
+        """
         if self._group_store.get(name) is None:
             raise ValueError(f"Group {name} does not exist")
 

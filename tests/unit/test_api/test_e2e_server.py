@@ -66,7 +66,7 @@ def test_e2e_routes_absent_when_flag_off(tmp_path):
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
             assert client.get(_STATUS).status_code == 404
-            assert client.post(_SEED, json={"script": "seed_admin"}).status_code == 404
+            assert client.post(_SEED, json={"script": "seed_dfe_admin_user"}).status_code == 404
     finally:
         _registries.clear()
 
@@ -130,7 +130,7 @@ def test_e2e_openapi_group_when_flag_on(tmp_path):
         _registries.clear()
 
 
-def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
+def test_e2e_status_and_seed_dfe_admin_when_flag_on(tmp_path):
     app = create_app(settings=_settings(tmp_path, e2e_server=True))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
@@ -138,9 +138,13 @@ def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
             assert status.status_code == 200
             assert status.json() == {"enabled": True}
 
-            # Drop the bootstrap admin so seed_admin has to create one.
-            app.state.account_store.delete("admin")
-            resp = client.post(_SEED, json={"script": "seed_admin"})
+            # The seeder rides on the startup bootstrap: dfe-admins already
+            # exists, and the break-glass admin is a SEPARATE account it never
+            # touches. Nothing is torn down first.
+            assert app.state.group_store.get("dfe-admins") is not None
+            assert app.state.account_store.get("admin") is not None
+
+            resp = client.post(_SEED, json={"script": "seed_dfe_admin_user"})
             assert resp.status_code == 200
             body = resp.json()
             assert body["success"] is True
@@ -148,7 +152,7 @@ def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
 
             login = client.post(
                 "/api/v1/auth/login",
-                json={"username": "admin", "password": "changeme"},
+                json={"username": "dfe_admin", "password": "changeme"},
             )
             assert login.status_code == 200
             assert "admin" in login.json()["roles"]
@@ -156,26 +160,48 @@ def test_e2e_status_and_seed_admin_when_flag_on(tmp_path):
         _registries.clear()
 
 
-def test_e2e_seed_admin_resets_existing_password(tmp_path):
+def test_e2e_seed_dfe_admin_resets_existing_password(tmp_path):
     app = create_app(settings=_settings(tmp_path, e2e_server=True))
     try:
         with TestClient(app, raise_server_exceptions=False) as client:
-            app.state.account_store.reset_password("admin", "first-pass")
-            first = client.post(_SEED, json={"script": "seed_admin"})
+            first = client.post(_SEED, json={"script": "seed_dfe_admin_user"})
             assert first.status_code == 200
             assert first.json()["success"] is True
 
-            second = client.post(_SEED, json={"script": "seed_admin"})
+            app.state.account_store.reset_password("dfe_admin", "first-pass")
+            second = client.post(_SEED, json={"script": "seed_dfe_admin_user"})
             assert second.status_code == 200
             assert second.json()["success"] is True
 
             assert (
                 client.post(
                     "/api/v1/auth/login",
-                    json={"username": "admin", "password": "first-pass"},
+                    json={"username": "dfe_admin", "password": "first-pass"},
                 ).status_code
                 == 401
             )
+            assert (
+                client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "dfe_admin", "password": "changeme"},
+                ).status_code
+                == 200
+            )
+    finally:
+        _registries.clear()
+
+
+def test_e2e_seed_does_not_disturb_the_bootstrap_break_glass_admin(tmp_path):
+    """The seeders add e2e accounts; startup bootstrap still owns ``admin``.
+
+    `make e2e-server` must come up with exactly what `dfe-engine run` seeds --
+    default groups plus the break-glass admin -- and a seed call must not
+    rewrite that credential out from under a test.
+    """
+    app = create_app(settings=_settings(tmp_path, e2e_server=True))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            assert client.post(_SEED, json={"script": "seed_dfe_admin_user"}).status_code == 200
             assert (
                 client.post(
                     "/api/v1/auth/login",

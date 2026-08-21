@@ -112,8 +112,12 @@
           "script": {
             "type": "string",
             "enum": [
-              "seed_admin",
-              "seed_setup_complete"
+              "seed_setup_complete",
+              "seed_organisation",
+              "seed_dfe_admin_user",
+              "seed_dfe_analyst_user",
+              "seed_dfe_infra_user",
+              "seed_dfe_viewers_user"
             ],
             "title": "Script"
           }

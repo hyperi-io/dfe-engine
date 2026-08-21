@@ -13,16 +13,22 @@ from pathlib import Path
 import pytest
 
 from dfe_engine.auth.accounts import AccountStore
+from dfe_engine.auth.bootstrap import bootstrap_auth
 from dfe_engine.auth.groups import GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
 
 
 def _stores(tmp_path: Path) -> tuple[AccountStore, GroupStore, OrgRegistry]:
-    return (
-        AccountStore(tmp_path / "accounts"),
-        GroupStore(tmp_path / "groups"),
-        OrgRegistry(tmp_path / "orgs"),
-    )
+    """Stores as the running app hands them to the seeders.
+
+    ``api/app.py``'s lifespan always runs ``bootstrap_auth`` before the e2e
+    routes can be called, so the default groups and the break-glass admin are
+    already there. Going through the real bootstrap (rather than hand-built
+    empty stores) is what keeps the seeders' group names pinned to the ones
+    startup actually creates -- ``_ensure_group`` raises on any drift.
+    """
+    account_store, group_store, *_ = bootstrap_auth(tmp_path / "config" / "auth")
+    return account_store, group_store, OrgRegistry(tmp_path / "orgs")
 
 
 def test_seed_refuses_when_env_is_not_test(tmp_path, monkeypatch):
@@ -59,27 +65,30 @@ def test_seed_allows_explicit_test_env_when_environ_is_dev(tmp_path, monkeypatch
     Seed(account_store=accounts, group_store=groups, org_registry=orgs, env="test")
 
 
-def test_seed_dispatches_seed_admin_to_accounts(tmp_path, monkeypatch):
+def test_seed_dispatches_dfe_admin_user_to_accounts(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 
     monkeypatch.setenv("DFE_ENV", "test")
-    # Ambient break-glass env must not redirect the well-known e2e admin.
+    # Ambient break-glass env renames the account BOOTSTRAP seeds; it must not
+    # redirect the well-known e2e account the seeder adds alongside it.
     monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_NAME", "new-admin")
     monkeypatch.setenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
 
-    assert seeder.seed_static("seed_admin") is True
+    assert seeder.seed_static("seed_dfe_admin_user") is True
     assert seeder.seed_static("unknown") is False
-    user = accounts.get("admin")
+    user = accounts.get("dfe_admin")
     assert user is not None
-    assert accounts.get("new-admin") is None
     assert "dfe-admins" in user.groups
-    assert accounts.verify_password("admin", "changeme")
-    assert "admin" in groups.get("dfe-admins").members
+    assert accounts.verify_password("dfe_admin", "changeme")
+    assert "dfe_admin" in groups.get("dfe-admins").members
+    # The bootstrap-owned break-glass account is untouched by the seed.
+    assert accounts.verify_password("new-admin", "test")
 
 
-def test_account_ensure_admin_creates_group_and_membership(tmp_path, monkeypatch):
+def test_account_ensure_admin_joins_the_bootstrapped_group(tmp_path, monkeypatch):
+    """The seeder attaches membership; bootstrap owns the group itself."""
     from dfe_engine.api.e2e.seed.accounts import Accounts
 
     monkeypatch.setenv("DFE_ENV", "test")
@@ -105,10 +114,10 @@ def test_account_ensure_admin_resets_existing(tmp_path, monkeypatch):
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 
-    assert seeder.seed_dfe_admin_user(name="admin", password="first-pass") is True
-    assert seeder.seed_dfe_admin_user(name="admin", password="second-pass") is False
-    assert accounts.verify_password("admin", "second-pass")
-    assert not accounts.verify_password("admin", "first-pass")
+    assert seeder.seed_dfe_admin_user(name="dfe_admin", password="first-pass") is True
+    assert seeder.seed_dfe_admin_user(name="dfe_admin", password="second-pass") is False
+    assert accounts.verify_password("dfe_admin", "second-pass")
+    assert not accounts.verify_password("dfe_admin", "first-pass")
 
 
 def test_account_ensure_reuses_private_upsert_for_other_groups(tmp_path, monkeypatch):
@@ -117,9 +126,7 @@ def test_account_ensure_reuses_private_upsert_for_other_groups(tmp_path, monkeyp
     monkeypatch.setenv("DFE_ENV", "test")
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
-    seeder._ensure_group(
-        "dfe-analysts", roles=["data_analyst"], description="Hunt, query, source CRUD"
-    )
+    seeder._ensure_group("dfe-analysts")
 
     assert seeder._ensure("analyst", "analyst-pw", groups=["dfe-analysts"]) is True
     user = accounts.get("analyst")
@@ -175,3 +182,21 @@ def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     assert not accounts.verify_password("admin", "changeme")
     assert accounts.get("initial_user") is not None
     assert orgs.get("organisation") is not None
+
+
+def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
+    """Groups are startup-bootstrap territory: a seeder refuses an unknown one.
+
+    This is the guard that keeps `make e2e-server` honest -- the seeders may
+    only join groups `dfe-engine run` already created, so an e2e process can
+    never end up with a roster the product bootstrap would not produce.
+    """
+    from dfe_engine.api.e2e.seed.accounts import Accounts
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    with pytest.raises(ValueError, match="dfe-nonesuch does not exist"):
+        seeder._ensure_group("dfe-nonesuch")
+    assert groups.get("dfe-nonesuch") is None

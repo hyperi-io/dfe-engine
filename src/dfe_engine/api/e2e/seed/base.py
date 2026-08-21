@@ -14,8 +14,8 @@ import os
 
 from scalo.logger import logger
 
-from dfe_engine.auth.accounts import AccountStore, FerretDBAccountStore
-from dfe_engine.auth.groups import GroupStore
+from dfe_engine.auth.accounts import AccountStore, DocuStoreAccountStore
+from dfe_engine.auth.groups import DocuStoreGroupStore, GroupStore
 from dfe_engine.orgs.registry import OrgRegistry
 
 _TEST_ENV = "test"
@@ -28,8 +28,8 @@ class Seed:
     def __init__(
         self,
         *,
-        account_store: AccountStore | FerretDBAccountStore,
-        group_store: GroupStore,
+        account_store: AccountStore | DocuStoreAccountStore,
+        group_store: GroupStore | DocuStoreGroupStore,
         org_registry: OrgRegistry,
         env: str | None = None,
     ) -> None:

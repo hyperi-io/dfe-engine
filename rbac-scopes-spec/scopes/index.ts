@@ -15,6 +15,20 @@ const accounts_scopes = {
   accounts_reset_password: "accounts:reset_password",
 } as const;
 
+const account_attributes_scopes = {
+  account_attributes_read: "account:attributes:read",
+  account_attributes_write: "account:attributes:write",
+  account_attributes_read_sensitive: "account:attributes:read_sensitive",
+  account_attributes_write_sensitive: "account:attributes:write_sensitive",
+} as const;
+
+const group_attributes_scopes = {
+  group_attributes_read: "group:attributes:read",
+  group_attributes_write: "group:attributes:write",
+  group_attributes_read_sensitive: "group:attributes:read_sensitive",
+  group_attributes_write_sensitive: "group:attributes:write_sensitive",
+} as const;
+
 const alerts_scopes = {
   alert_read: "alert:read",
   alert_write: "alert:write",
@@ -178,6 +192,8 @@ const config_scopes = {
 export const scopes = {
   ...account_groups_scopes,
   ...accounts_scopes,
+  ...account_attributes_scopes,
+  ...group_attributes_scopes,
   ...alerts_scopes,
   ...api_keys_scopes,
   ...cel_scopes,
