@@ -1,0 +1,459 @@
+{
+  "version": "0.1.0",
+  "name": "DFE Pipeline Health",
+  "tiles": [
+    {
+      "id": "records-received",
+      "x": 0,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Records received",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "sum",
+            "metricName": "records_received_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "records-delivered",
+      "x": 4,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Records delivered",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "sum",
+            "metricName": "records_delivered_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "kafka-lag-max",
+      "x": 8,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Kafka consumer lag (max)",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "rdkafka_topic_partition_consumer_lag"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "buffer-rows",
+      "x": 12,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Loader buffer rows",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "buffer_rows"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "worker-saturation-max",
+      "x": 16,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Worker pool saturation (max)",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "numberFormat": {
+          "output": "percent"
+        },
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "worker_pool_saturation"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "collector-queue",
+      "x": 20,
+      "y": 0,
+      "w": 4,
+      "h": 3,
+      "config": {
+        "name": "Collector export queue",
+        "source": "otel_metrics",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "metricType": "gauge",
+            "metricName": "otelcol_exporter_queue_size"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "records-in-out",
+      "x": 0,
+      "y": 3,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Records received, processed and delivered",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "received",
+            "metricType": "sum",
+            "metricName": "records_received_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "processed",
+            "metricType": "sum",
+            "metricName": "records_processed_total"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "delivered",
+            "metricType": "sum",
+            "metricName": "records_delivered_total"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "kafka-lag",
+      "x": 12,
+      "y": 3,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Kafka consumer lag by service",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "lag",
+            "metricType": "gauge",
+            "metricName": "rdkafka_topic_partition_consumer_lag"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName"
+      }
+    },
+    {
+      "id": "insert-latency",
+      "x": 0,
+      "y": 9,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "ClickHouse insert latency (s)",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "quantile",
+            "level": 0.5,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "p50",
+            "metricType": "histogram",
+            "metricName": "insert_latency_seconds"
+          },
+          {
+            "aggFn": "quantile",
+            "level": 0.95,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "p95",
+            "metricType": "histogram",
+            "metricName": "insert_latency_seconds"
+          },
+          {
+            "aggFn": "quantile",
+            "level": 0.99,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "p99",
+            "metricType": "histogram",
+            "metricName": "insert_latency_seconds"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "buffer-depth",
+      "x": 12,
+      "y": 9,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Loader buffer depth and insert rate",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "buffer_rows",
+            "metricType": "gauge",
+            "metricName": "buffer_rows"
+          },
+          {
+            "aggFn": "avg",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "rows_per_sec",
+            "metricType": "gauge",
+            "metricName": "clickhouse_rows_per_second"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "worker-saturation",
+      "x": 0,
+      "y": 15,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Worker pool saturation by service",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "saturation",
+            "metricType": "gauge",
+            "metricName": "worker_pool_saturation"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName"
+      }
+    },
+    {
+      "id": "collector-intake",
+      "x": 12,
+      "y": 15,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Collector intake: accepted vs refused vs failed",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "accepted_metrics",
+            "metricType": "sum",
+            "metricName": "otelcol_receiver_accepted_metric_points"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "refused_metrics",
+            "metricType": "sum",
+            "metricName": "otelcol_receiver_refused_metric_points"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "accepted_logs",
+            "metricType": "sum",
+            "metricName": "otelcol_receiver_accepted_log_records"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "refused_logs",
+            "metricType": "sum",
+            "metricName": "otelcol_receiver_refused_log_records"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "collector-export",
+      "x": 0,
+      "y": 21,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Collector export: queue depth vs points sent",
+        "source": "otel_metrics",
+        "displayType": "line",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "max",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "queue_size",
+            "metricType": "gauge",
+            "metricName": "otelcol_exporter_queue_size"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "sent_metric_points",
+            "metricType": "sum",
+            "metricName": "otelcol_exporter_sent_metric_points"
+          },
+          {
+            "aggFn": "increase",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Value",
+            "alias": "sent_log_records",
+            "metricType": "sum",
+            "metricName": "otelcol_exporter_sent_log_records"
+          }
+        ],
+        "where": "",
+        "whereLanguage": "lucene"
+      }
+    },
+    {
+      "id": "errors-by-service",
+      "x": 12,
+      "y": 21,
+      "w": 12,
+      "h": 6,
+      "config": {
+        "name": "Error and fatal logs by service",
+        "source": "otel_logs",
+        "displayType": "stacked_bar",
+        "granularity": "auto",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "SeverityText:(ERROR OR FATAL OR Error OR error)",
+        "whereLanguage": "lucene",
+        "groupBy": "ServiceName"
+      }
+    }
+  ],
+  "tags": [
+    "dfe",
+    "provisioned",
+    "platform"
+  ]
+}
