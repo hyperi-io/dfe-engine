@@ -55,6 +55,43 @@ wildcard, so the otel_reader grant is db-wide on this database.
 BROAD_DATA_GRANT = f"SELECT ON {DATA_DATABASE}.*"  # SELECT ON dfe.*
 
 
+# ClickHouse's own introspection tables, granted to the platform reader so the
+# pre-canned ClickHouse dashboards (and an operator writing ad-hoc SQL) can ask
+# the server about itself. Named one by one rather than `system.*`: a tenant must
+# never reach these, and an explicit list is what the rest of the model does.
+#
+# `merge('system', '^metric_log')` SKIPS a table the user cannot read, so a
+# ClickHouse upgrade that rotates metric_log to metric_log_0 drops the older
+# history out of the charts until that name is added here.
+CH_SYSTEM_TABLES = (
+    "asynchronous_metric_log",
+    "asynchronous_metrics",
+    "clusters",
+    "columns",
+    "dashboards",
+    "databases",
+    "detached_parts",
+    "disks",
+    "error_log",
+    "errors",
+    "events",
+    "merges",
+    "metric_log",
+    "metrics",
+    "mutations",
+    "part_log",
+    "parts",
+    "processes",
+    "query_log",
+    "replicas",
+    "replication_queue",
+    "tables",
+    "text_log",
+)
+
+SYSTEM_INTROSPECTION_GRANTS = [f"SELECT ON system.{table}" for table in CH_SYSTEM_TABLES]
+
+
 TENANT_ROLE = "dfe_tenant_role"
 """The ONE shared role the tenant row policies target.
 
@@ -250,7 +287,10 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
     ChServiceRole(
         name="query_reader",
         mint_user=True,
-        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*"],
+        # Also reads ClickHouse's own system tables: this is the identity the
+        # platform team's HyperDX connection uses, and the ClickHouse dashboards
+        # are raw SQL over `system`.
+        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*", *SYSTEM_INTROSPECTION_GRANTS],
         settings={
             # readonly=2, not 1: queries only, but per-query output settings stay
             # changeable -- hyperdx sends date_time_output_format with every query

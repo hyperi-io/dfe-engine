@@ -35,6 +35,21 @@ Two consequences follow from that reconcile loop, and both are deliberate:
   gets the platform dashboards. There is no allow-list to maintain -- the source set
   IS the audience.
 
+Two kinds of tile appear here. A BUILDER tile names a source and lets HyperDX
+compose the SQL. A RAW-SQL tile (``"configType": "sql"``) carries its own
+``sqlTemplate`` and names a ``connection`` as well, which is what the ClickHouse
+dashboards use: they read ClickHouse's ``system`` tables directly, which no source
+models. Their fence is the same mechanism -- only the platform team holds a
+connection named ``platform`` -- and it is doubled at the data layer, since only
+the platform ClickHouse reader is granted ``system``.
+
+Raw SQL binds to the dashboard's time range through macros, expanded by HyperDX
+before execution: ``$__dateTimeFilter(event_date, event_time)`` for ClickHouse's
+partitioned system logs, ``$__timeFilter(col)`` elsewhere, and ``$__interval_s``
+for the bucket width. A time-series tile must return a Date/DateTime column, so
+never cast the bucket to an integer -- the chart infers its x-axis from the column
+TYPE and draws nothing for an Int.
+
 Adding a dashboard is dropping a ``.json`` file in this directory. Nothing indexes
 them by name, so no registry to update.
 """

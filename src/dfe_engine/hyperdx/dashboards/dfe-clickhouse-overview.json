@@ -1,0 +1,377 @@
+{
+  "version": "0.1.0",
+  "name": "DFE ClickHouse Overview",
+  "description": "The ClickHouse numbers an operator checks first, read straight from the server's own system tables.",
+  "tags": ["dfe", "provisioned", "platform", "clickhouse"],
+  "containers": [
+    {
+      "id": "now",
+      "title": "Right now",
+      "collapsed": false,
+      "collapsible": false
+    },
+    {
+      "id": "queries",
+      "title": "Query load",
+      "collapsed": false
+    },
+    {
+      "id": "ingest",
+      "title": "Ingest and merges",
+      "collapsed": false
+    },
+    {
+      "id": "host",
+      "title": "Host resources",
+      "collapsed": false
+    },
+    {
+      "id": "errors",
+      "title": "Errors",
+      "collapsed": false
+    }
+  ],
+  "tiles": [
+    {
+      "id": "now-queries-running",
+      "containerId": "now",
+      "x": 0,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Queries running",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT argMax(CurrentMetric_Query, event_time) AS \"Queries running\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)"
+      }
+    },
+    {
+      "id": "now-failed-queries",
+      "containerId": "now",
+      "x": 4,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Failed queries",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT countIf(type IN ('ExceptionBeforeStart', 'ExceptionWhileProcessing')) AS \"Failed queries\"\nFROM system.query_log\nWHERE $__dateTimeFilter(event_date, event_time)"
+      }
+    },
+    {
+      "id": "now-max-parts",
+      "containerId": "now",
+      "x": 8,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Max parts per partition",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT max(value) AS \"Max parts per partition\"\nFROM merge('system', '^asynchronous_metric_log')\nWHERE metric = 'MaxPartCountForPartition' AND $__dateTimeFilter(event_date, event_time)"
+      }
+    },
+    {
+      "id": "now-merges",
+      "containerId": "now",
+      "x": 12,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Merges running",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT argMax(CurrentMetric_Merge, event_time) AS \"Merges running\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)"
+      }
+    },
+    {
+      "id": "now-memory",
+      "containerId": "now",
+      "x": 16,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Memory tracked",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "numberFormat": { "output": "byte", "mantissa": 1 },
+        "sqlTemplate": "SELECT argMax(CurrentMetric_MemoryTracking, event_time) AS \"Memory tracked\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)"
+      }
+    },
+    {
+      "id": "now-disk-used",
+      "containerId": "now",
+      "x": 20,
+      "y": 0,
+      "w": 4,
+      "h": 2,
+      "config": {
+        "name": "Fullest disk",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "numberFormat": { "output": "percent", "mantissa": 1 },
+        "sqlTemplate": "SELECT max(1 - free_space / total_space) AS \"Disk used\"\nFROM system.disks\nWHERE total_space > 0"
+      }
+    },
+    {
+      "id": "queries-rate",
+      "containerId": "queries",
+      "x": 0,
+      "y": 2,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Queries per second",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(ProfileEvent_Query) AS \"All queries\",\n       avg(ProfileEvent_SelectQuery) AS \"SELECT\",\n       avg(ProfileEvent_InsertQuery) AS \"INSERT\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "queries-duration",
+      "containerId": "queries",
+      "x": 12,
+      "y": 2,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Query duration percentiles",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "numberFormat": { "output": "duration", "unit": "ms", "mantissa": 0 },
+        "sqlTemplate": "SELECT $__timeInterval(event_time) AS ts,\n       quantile(0.5)(query_duration_ms) AS \"p50\",\n       quantile(0.9)(query_duration_ms) AS \"p90\",\n       quantile(0.99)(query_duration_ms) AS \"p99\"\nFROM system.query_log\nWHERE type = 'QueryFinish' AND $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "queries-failures",
+      "containerId": "queries",
+      "x": 0,
+      "y": 6,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Query failures",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT $__timeInterval(event_time) AS ts,\n       countIf(type = 'ExceptionBeforeStart') AS \"Rejected before start\",\n       countIf(type = 'ExceptionWhileProcessing') AS \"Failed mid-flight\"\nFROM system.query_log\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "queries-rows",
+      "containerId": "queries",
+      "x": 12,
+      "y": 6,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Rows read and written per second",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(ProfileEvent_SelectedRows) AS \"Selected rows\",\n       avg(ProfileEvent_InsertedRows) AS \"Inserted rows\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "queries-top",
+      "containerId": "queries",
+      "x": 0,
+      "y": 10,
+      "w": 24,
+      "h": 6,
+      "config": {
+        "name": "Most expensive query shapes",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT normalizeQuery(any(query)) AS \"Query\",\n       count() AS \"Runs\",\n       round(sum(query_duration_ms) / 1000, 1) AS \"Total seconds\",\n       round(avg(query_duration_ms)) AS \"Avg ms\",\n       round(quantile(0.99)(query_duration_ms)) AS \"p99 ms\",\n       sum(read_rows) AS \"Rows read\",\n       formatReadableSize(sum(read_bytes)) AS \"Bytes read\"\nFROM system.query_log\nWHERE type = 'QueryFinish' AND $__dateTimeFilter(event_date, event_time)\nGROUP BY normalized_query_hash\nORDER BY \"Total seconds\" DESC\nLIMIT 20"
+      }
+    },
+    {
+      "id": "ingest-rows",
+      "containerId": "ingest",
+      "x": 0,
+      "y": 16,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Insert throughput",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(ProfileEvent_InsertedRows) AS \"Rows per second\",\n       avg(ProfileEvent_InsertedBytes) AS \"Bytes per second\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "ingest-backpressure",
+      "containerId": "ingest",
+      "x": 12,
+      "y": 16,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Insert back-pressure",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(CurrentMetric_DelayedInserts) AS \"Delayed inserts\",\n       sum(ProfileEvent_RejectedInserts) AS \"Rejected inserts\",\n       avg(CurrentMetric_PendingAsyncInsert) AS \"Pending async inserts\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "ingest-parts",
+      "containerId": "ingest",
+      "x": 0,
+      "y": 20,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Parts",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       maxIf(value, metric = 'MaxPartCountForPartition') AS \"Max per partition\",\n       avgIf(value, metric = 'TotalPartsOfMergeTreeTables') AS \"Total MergeTree parts\"\nFROM merge('system', '^asynchronous_metric_log')\nWHERE metric IN ('MaxPartCountForPartition', 'TotalPartsOfMergeTreeTables')\n  AND $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "ingest-merges",
+      "containerId": "ingest",
+      "x": 12,
+      "y": 20,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Merge activity",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(CurrentMetric_Merge) AS \"Merges running\",\n       avg(ProfileEvent_MergedRows) AS \"Merged rows per second\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "host-cpu",
+      "containerId": "host",
+      "x": 0,
+      "y": 24,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "CPU",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(ProfileEvent_OSCPUVirtualTimeMicroseconds) / 1000000 AS \"Cores used\",\n       avg(ProfileEvent_OSCPUWaitMicroseconds) / 1000000 AS \"CPU wait\",\n       avg(ProfileEvent_OSIOWaitMicroseconds) / 1000000 AS \"IO wait\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "host-memory",
+      "containerId": "host",
+      "x": 12,
+      "y": 24,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Memory",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "numberFormat": { "output": "byte", "mantissa": 1 },
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(CurrentMetric_MemoryTracking) AS \"Tracked by ClickHouse\",\n       avg(CurrentMetric_MergesMutationsMemoryTracking) AS \"Merges and mutations\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "host-io",
+      "containerId": "host",
+      "x": 0,
+      "y": 28,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Disk and filesystem reads",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "numberFormat": { "output": "byte", "mantissa": 1 },
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       avg(ProfileEvent_OSReadBytes) AS \"Read from disk\",\n       avg(ProfileEvent_OSReadChars) AS \"Read from filesystem\",\n       avg(ProfileEvent_OSWriteBytes) AS \"Written to disk\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "host-connections",
+      "containerId": "host",
+      "x": 12,
+      "y": 28,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Concurrent connections",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT toStartOfInterval(event_time, INTERVAL $__interval_s SECOND) AS ts,\n       max(CurrentMetric_TCPConnection) AS \"Native\",\n       max(CurrentMetric_HTTPConnection) AS \"HTTP\",\n       max(CurrentMetric_InterserverConnection) AS \"Interserver\"\nFROM merge('system', '^metric_log')\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "errors-over-time",
+      "containerId": "errors",
+      "x": 0,
+      "y": 32,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Errors over time",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT $__timeInterval(event_time) AS ts,\n       error AS \"Error\",\n       sum(value) AS \"Count\"\nFROM system.error_log\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY ts, error\nORDER BY ts"
+      }
+    },
+    {
+      "id": "errors-top",
+      "containerId": "errors",
+      "x": 12,
+      "y": 32,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Errors by name",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "clickhouse_system",
+        "sqlTemplate": "SELECT error AS \"Error\",\n       any(code) AS \"Code\",\n       sum(value) AS \"Count\",\n       max(last_error_time) AS \"Last seen\",\n       any(last_error_message) AS \"Last message\"\nFROM system.error_log\nWHERE $__dateTimeFilter(event_date, event_time)\nGROUP BY error\nORDER BY \"Count\" DESC\nLIMIT 20"
+      }
+    }
+  ]
+}
