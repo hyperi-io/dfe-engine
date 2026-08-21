@@ -195,6 +195,13 @@ class TestEnvOverrides:
         settings = load_settings()
         assert settings.clickhouse.hunts_database == "dfe_e2e_hunts"
 
+    def test_clickhouse_audit_database_default_and_override(self, monkeypatch):
+        """`make e2e-server` relies on this to keep its audit db out of the shared one."""
+        monkeypatch.delenv("DFE_CLICKHOUSE_AUDIT_DATABASE", raising=False)
+        assert load_settings().clickhouse.audit_database == "dfe_audit"
+        monkeypatch.setenv("DFE_CLICKHOUSE_AUDIT_DATABASE", "dfe_e2e_audit")
+        assert load_settings().clickhouse.audit_database == "dfe_e2e_audit"
+
     def test_e2e_server_env_override(self, monkeypatch):
         monkeypatch.setenv("DFE_ENV", "test")
         monkeypatch.setenv("DFE_E2E_SERVER", "true")

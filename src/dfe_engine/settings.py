@@ -212,6 +212,39 @@ class ClickHouseSettings(BaseModel):
             "databases (see governance.ch.models). Lets the connection authenticate "
             "against one database while DFE tables are qualified against another -- "
             "read it via `effective_data_database`, never directly."
+            "Database where DFE data tables live (landing table, per-source tables), "
+            "from DFE_CLICKHOUSE_DATA_DATABASE (default `dfe`). Lets the connection "
+            "authenticate against one database while DFE tables are qualified against "
+            "another -- read it via `effective_data_database`, never directly."
+        ),
+    )
+    hunts_database: str = Field(
+        default="dfe_hunts",
+        description=(
+            "Database holding hunt output (the `detection` table), from "
+            "DFE_CLICKHOUSE_HUNTS_DATABASE (default `dfe_hunts`). Separate from the "
+            "data database so the hunt-tier ClickHouse roles can be granted on it "
+            "alone -- a role granted on the data database would also see every "
+            "landing row."
+        ),
+    )
+    audit_database: str = Field(
+        default="dfe_audit",
+        description=(
+            "Database holding the query-log cost/attribution archive, from "
+            "DFE_CLICKHOUSE_AUDIT_DATABASE (default `dfe_audit`). Startup creates it, "
+            "so an isolated deployment (e.g. `make e2e-server`) must point it at its "
+            "own namespace or it writes into the shared one."
+        ),
+    )
+    otel_database: str = Field(
+        default="dfe",
+        description=(
+            "Database holding the OTel telemetry tables (otel_logs, otel_metrics_*, "
+            "otel_traces), from DFE_CLICKHOUSE_OTEL_DATABASE (default `dfe`). The "
+            "otel_reader service role's SELECT grant targets this database; mirrors "
+            "keda_shim.otel_database. Moved out of the CH-builtin `default` db so "
+            "one grant reaches every telemetry table."
         ),
     )
     landing_table: str = Field(
@@ -1260,6 +1293,8 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["otel_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_HUNTS_DATABASE"):
         overrides["clickhouse"]["hunts_database"] = val
+    if val := _get_env("DFE_CLICKHOUSE_AUDIT_DATABASE"):
+        overrides["clickhouse"]["audit_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
         overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
