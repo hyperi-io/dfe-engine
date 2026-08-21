@@ -86,7 +86,7 @@ def test_account_ensure_admin_creates_group_and_membership(tmp_path, monkeypatch
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 
-    assert seeder.seed_admin(name="playwright", password="e2e-secret") is True
+    assert seeder.seed_dfe_admin_user(name="playwright", password="e2e-secret") is True
     user = accounts.get("playwright")
     assert user is not None
     assert user.enabled is True
@@ -105,8 +105,8 @@ def test_account_ensure_admin_resets_existing(tmp_path, monkeypatch):
     accounts, groups, orgs = _stores(tmp_path)
     seeder = Accounts(account_store=accounts, group_store=groups, org_registry=orgs)
 
-    assert seeder.seed_admin(name="admin", password="first-pass") is True
-    assert seeder.seed_admin(name="admin", password="second-pass") is False
+    assert seeder.seed_dfe_admin_user(name="admin", password="first-pass") is True
+    assert seeder.seed_dfe_admin_user(name="admin", password="second-pass") is False
     assert accounts.verify_password("admin", "second-pass")
     assert not accounts.verify_password("admin", "first-pass")
 

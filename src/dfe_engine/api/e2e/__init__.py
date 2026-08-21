@@ -50,7 +50,14 @@ class E2EStatusResponse(BaseModel):
 
 
 class SeedRequest(BaseModel):
-    script: Literal["seed_admin", "seed_setup_complete"]
+    script: Literal[
+        "seed_setup_complete",
+        "seed_organisation",
+        "seed_dfe_admin_user",
+        "seed_dfe_analyst_user",
+        "seed_dfe_infra_user",
+        "seed_dfe_viewers_user",
+    ]
 
 
 class SeedResponse(BaseModel):
@@ -75,5 +82,5 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
     )
     success = seeder.seed_static(body.script)
     logger.warning("e2e seed", script=body.script, success=success)
-    message = "Seed successful" if success else f"Unknown seed script: {body.script}"
+    message = f"Seed {body.script} successful" if success else f"Unknown seed script: {body.script}"
     return SeedResponse(success=success, message=message)

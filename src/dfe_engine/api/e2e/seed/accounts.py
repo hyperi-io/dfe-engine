@@ -13,21 +13,22 @@ from __future__ import annotations
 from dfe_engine.api.e2e.seed.base import Seed
 
 _ADMIN_GROUP = "dfe-admins"
-_DEFAULT_ADMIN_NAME = "admin"
+_DFE_ANALYST_GROUP = "dfe-analysts"
+_DFE_INFRA_GROUP = "dfe-infra"
+_DFE_VIEWERS_GROUP = "dfe-viewers"
 _DEFAULT_PASSWORD = "changeme"
-_DEFAULT_INITIAL_USER_NAME = "initial_user"
 
 
 class Accounts(Seed):
     """Create or reset local accounts and their group memberships."""
 
-    def seed_admin(
+    def seed_initial_user(
         self,
-        name: str = _DEFAULT_ADMIN_NAME,
+        name: str = "initial_user",
         *,
         password: str | None = None,
     ) -> bool:
-        """Seed a local admin account in ``dfe-admins``.
+        """Seed local initial user account.
 
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
@@ -36,23 +37,52 @@ class Accounts(Seed):
             password=_DEFAULT_PASSWORD if password is None else password,
         )
 
-    def seed_initial_user(
-        self,
-        name: str = _DEFAULT_INITIAL_USER_NAME,
-        *,
-        password: str | None = None,
+    def seed_dfe_admin_user(
+        self, name: str = "dfe_admin", *, password: str | None = None
     ) -> bool:
-        """Seed a local admin account in ``dfe-admins``.
+        """Seed local DFE admin account.
 
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
         return self._ensure_admin(
-            name,
-            password=_DEFAULT_PASSWORD if password is None else password,
+            name, password=_DEFAULT_PASSWORD if password is None else password
+        )
+
+    def seed_dfe_analyst_user(
+        self, name: str = "dfe_analyst", *, password: str | None = None
+    ) -> bool:
+        """Seed local DFE analyst account.
+
+        Omitting *password* uses the well-known e2e password ``changeme``.
+        """
+        return self._ensure_dfe_analyst(
+            name, password=_DEFAULT_PASSWORD if password is None else password
+        )
+
+    def seed_dfe_infra_user(
+        self, name: str = "dfe_infra", *, password: str | None = None
+    ) -> bool:
+        """Seed local DFE infra account.
+
+        Omitting *password* uses the well-known e2e password ``changeme``.
+        """
+        return self._ensure_dfe_infra(
+            name, password=_DEFAULT_PASSWORD if password is None else password
+        )
+
+    def seed_dfe_viewers_user(
+        self, name: str = "dfe_viewers", *, password: str | None = None
+    ) -> bool:
+        """Seed local DFE viewers account.
+
+        Omitting *password* uses the well-known e2e password ``changeme``.
+        """
+        return self._ensure_dfe_viewers(
+            name, password=_DEFAULT_PASSWORD if password is None else password
         )
 
     def _ensure_admin(self, name: str = "admin", *, password: str) -> bool:
-        """Create or reset a local admin in ``dfe-admins``.
+        """Create or reset local break-glass admin account.
 
         Returns True when the account was created, False when it was reset.
         """
@@ -63,8 +93,44 @@ class Accounts(Seed):
         )
         return self._ensure(name, password, groups=[_ADMIN_GROUP])
 
+    def _ensure_dfe_analyst(self, name: str = "dfe_analyst", *, password: str) -> bool:
+        """Create or reset local DFE analyst account.
+
+        Returns True when the account was created, False when it was reset.
+        """
+        self._ensure_group(
+            _DFE_ANALYST_GROUP,
+            roles=["data_analysts"],
+            description="DFE analyst access",
+        )
+        return self._ensure(name, password, groups=[_DFE_ANALYST_GROUP])
+
+    def _ensure_dfe_infra(self, name: str = "dfe_infra", *, password: str) -> bool:
+        """Create or reset local DFE infra account.
+
+        Returns True when the account was created, False when it was reset.
+        """
+        self._ensure_group(
+            _DFE_INFRA_GROUP,
+            roles=["infra_admin"],
+            description="DFE infra access",
+        )
+        return self._ensure(name, password, groups=[_DFE_INFRA_GROUP])
+
+    def _ensure_dfe_viewers(self, name: str = "dfe_viewers", *, password: str) -> bool:
+        """Create or reset local DFE viewers account.
+
+        Returns True when the account was created, False when it was reset.
+        """
+        self._ensure_group(
+            _DFE_VIEWERS_GROUP,
+            roles=["data_viewer"],
+            description="DFE viewers access",
+        )
+        return self._ensure(name, password, groups=[_DFE_VIEWERS_GROUP])
+
     def _ensure(self, name: str, password: str, *, groups: list[str]) -> bool:
-        """Create or reset a local account and attach it to *groups*.
+        """Create or reset local account and attach it to *groups*.
 
         Groups must already exist (use ``_ensure_group`` from a sibling seeder
         that knows the role mapping). Returns True when created.
@@ -75,9 +141,9 @@ class Accounts(Seed):
         return created
 
     def _ensure_group(self, name: str, *, roles: list[str], description: str = "") -> None:
-        """Create *name* if missing. Does not change an existing group's roles."""
+        """Error on missing group."""
         if self._group_store.get(name) is None:
-            self._group_store.create(name, roles=roles, description=description)
+            raise ValueError(f"Group {name} does not exist")
 
     def _upsert_local_account(self, name: str, password: str, *, groups: list[str]) -> bool:
         """Create the account or reset password / merge groups / enable it."""

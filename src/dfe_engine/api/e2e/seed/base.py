@@ -68,13 +68,39 @@ class Seed:
 
     def seed_static(self, script: str) -> bool:
         """Dispatch *script* to child seeders. Returns False when unknown."""
-        if script == "seed_admin":
-            account = self.accounts.seed_admin()
+        if script == "seed_dfe_admin_user":
+            account = self.accounts.seed_dfe_admin_user()
+            logger.warning("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_analyst_user":
+            account = self.accounts.seed_dfe_analyst_user()
+            logger.warning("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_infra_user":
+            account = self.accounts.seed_dfe_infra_user()
+            logger.warning("e2e seed", script=script, account=account)
+            return True
+        if script == "seed_dfe_viewers_user":
+            account = self.accounts.seed_dfe_viewers_user()
             logger.warning("e2e seed", script=script, account=account)
             return True
         if script == "seed_setup_complete":
-            self.accounts.seed_admin("admin", password=_SETUP_ADMIN_PASSWORD)
-            self.accounts.seed_initial_user()
-            self.organisations.seed_organisation()
+            # ------------------------------------------------------------
+            # Pre-requisites before seeding the setup complete account
+            # - Seed the admin account
+            # - Seed the initial user
+            # ------------------------------------------------------------
+
+            # Resets admin account password (setup steps check if admin password is same as env provided/default)
+            admin = self.accounts.seed_dfe_admin_user("admin", password=_SETUP_ADMIN_PASSWORD)
+            initial_user = self.accounts.seed_initial_user()
+            organisation = self.organisations.seed_organisation()
+            logger.warning(
+                "e2e seed",
+                script=script,
+                admin=admin,
+                initial_user=initial_user,
+                organisation=organisation,
+            )
             return True
         return False
