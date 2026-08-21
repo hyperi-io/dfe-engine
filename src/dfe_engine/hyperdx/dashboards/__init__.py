@@ -16,12 +16,16 @@ Document dashboard carries, because there is no id to write until a team exists.
 How a file reaches a running HyperDX:
 
 1. ``python -m dfe_engine.hyperdx.dashboards --out DIR`` writes them to ``DIR``.
-   dfe-infra runs that as an init container beside the HyperDX pod; dfe-docker runs
-   it as a one-shot compose service. Both share the engine image, so there is one
-   copy of the JSON in the whole product.
+   dfe-infra runs that as an init container beside the HyperDX pod, on the engine
+   image, so there is one copy of the JSON in the whole product.
 2. HyperDX's own ``provision-dashboards`` task reads ``DASHBOARD_PROVISIONER_DIR``
    on a one-minute cron, resolves each source NAME against the team's sources, and
    upserts a dashboard marked ``provisioned``.
+
+Kubernetes only, for now. dfe-docker runs HyperDX with
+``NEXT_PUBLIC_IS_LOCAL_MODE=true``, where dashboards and sources live in the
+browser's localStorage rather than the database the provisioner writes -- so
+mounting the same directory there would seed nothing (dfe-docker#31).
 
 Two consequences follow from that reconcile loop, and both are deliberate:
 
