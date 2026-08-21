@@ -445,8 +445,8 @@
             "valueExpression": ""
           }
         ],
-        "where": "SeverityText:(ERROR OR FATAL OR Error OR error)",
-        "whereLanguage": "lucene",
+        "where": "SeverityNumber >= 17",
+        "whereLanguage": "sql",
         "groupBy": "ServiceName"
       }
     }
