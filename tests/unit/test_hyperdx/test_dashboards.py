@@ -32,9 +32,37 @@ from dfe_engine.hyperdx.dashboards import (
 TENANT_SOURCES = {"default", "hunts"}
 
 # Additionally seeded on the platform/admin team only.
-PLATFORM_SOURCES = {"otel_logs", "otel_traces", "otel_metrics"}
+PLATFORM_SOURCES = {"otel_logs", "otel_traces", "otel_metrics", "clickhouse_system"}
 
 KNOWN_SOURCES = TENANT_SOURCES | PLATFORM_SOURCES
+
+# The connection name the engine hands a platform caller (api/v1/hyperdx.py); a
+# tenant team's connection is named after its org, so this name resolves nowhere
+# else and is a second fence on the raw-SQL dashboards.
+PLATFORM_CONNECTION = "platform"
+
+# Every raw-SQL tile has to bind to the dashboard's time range, or it silently
+# ignores the picker and shows whatever the whole table holds.
+TIME_MACROS = ("$__timeFilter", "$__dateTimeFilter", "$__fromTime", "$__dateFilter")
+
+# Tiles whose whole answer is "right now" -- a server's version, its disks, the
+# merges in flight. The system tables behind them hold no history to filter.
+POINT_IN_TIME_TILES = {
+    "now-disk-used",
+    "server-info",
+    "server-clusters",
+    "merges-current",
+    "mutations-current",
+    "replication-replicas",
+    "replication-queue",
+    "storage-disks",
+    "storage-databases",
+    "storage-tables",
+    "storage-parts-per-partition",
+    "storage-detached",
+    "storage-engines",
+    "storage-widest",
+}
 
 
 def _tile_sources(dashboard: dict) -> set[str]:
@@ -43,6 +71,10 @@ def _tile_sources(dashboard: dict) -> set[str]:
         for tile in dashboard["tiles"]
         if "source" in tile.get("config", {})
     }
+
+
+def _sql_tiles(dashboard: dict) -> list[dict]:
+    return [t for t in dashboard["tiles"] if t["config"].get("configType") == "sql"]
 
 
 def _dashboards() -> dict[str, dict]:
@@ -123,7 +155,59 @@ def test_the_tenant_dashboard_uses_only_tenant_sources():
     assert _tile_sources(throughput) <= TENANT_SOURCES
 
 
-@pytest.mark.parametrize("filename", ["dfe-pipeline-health.json", "dfe-clickhouse-health.json"])
+@pytest.mark.parametrize("filename", sorted(dashboard_files()))
+def test_raw_sql_tiles_name_a_connection(filename):
+    """A raw-SQL tile without a connection has nothing to execute against.
+
+    ``connection`` is required by the schema and is also the RBAC fence: only the
+    platform team holds one named ``platform``, so under REQUIRE_REFS a tenant
+    team skips the whole dashboard rather than seeing operator SQL.
+    """
+    dashboard = json.loads(dashboard_files()[filename])
+
+    for tile in _sql_tiles(dashboard):
+        assert tile["config"].get("connection") == PLATFORM_CONNECTION, (
+            f"{filename}:{tile['id']} does not bind to the platform connection"
+        )
+
+
+@pytest.mark.parametrize("filename", sorted(dashboard_files()))
+def test_raw_sql_tiles_respect_the_time_range(filename):
+    """A tile that ignores the picker reads as live data and is not."""
+    dashboard = json.loads(dashboard_files()[filename])
+
+    for tile in _sql_tiles(dashboard):
+        if tile["id"] in POINT_IN_TIME_TILES:
+            continue
+        sql = tile["config"]["sqlTemplate"]
+        assert any(macro in sql for macro in TIME_MACROS), (
+            f"{filename}:{tile['id']} has no time-range macro"
+        )
+
+
+@pytest.mark.parametrize("filename", sorted(dashboard_files()))
+def test_tiles_reference_declared_containers(filename):
+    """A tile pointing at a container that does not exist renders unplaced."""
+    dashboard = json.loads(dashboard_files()[filename])
+    declared = {c["id"] for c in dashboard.get("containers", [])}
+
+    for tile in dashboard["tiles"]:
+        container = tile.get("containerId")
+        if container is not None:
+            assert container in declared, (
+                f"{filename}:{tile['id']} names undeclared container {container}"
+            )
+
+
+@pytest.mark.parametrize(
+    "filename",
+    [
+        "dfe-pipeline-health.json",
+        "dfe-clickhouse-health.json",
+        "dfe-clickhouse-overview.json",
+        "dfe-clickhouse-internals.json",
+    ],
+)
 def test_platform_dashboards_are_fenced_by_their_sources(filename):
     """Operator telemetry must not reach a tenant.
 

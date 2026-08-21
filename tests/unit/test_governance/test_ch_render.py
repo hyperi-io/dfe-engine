@@ -378,6 +378,25 @@ class TestDefaultServiceRoles:
         qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
         assert "SELECT ON dfe.*" in qr.grants
 
+    def test_query_reader_reads_the_clickhouse_system_tables(self):
+        """The platform reader backs the pre-canned ClickHouse dashboards.
+
+        Those tiles are raw SQL over ``system``, so without these grants every
+        one of them returns ACCESS_DENIED.
+        """
+        qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
+
+        for table in ("query_log", "metric_log", "asynchronous_metric_log", "parts"):
+            assert f"SELECT ON system.{table}" in qr.grants
+        # Named one by one: a blanket `system.*` would also hand over every
+        # future system table.
+        assert "SELECT ON system.*" not in qr.grants
+
+    def test_no_analyst_tier_reaches_the_system_database(self):
+        """A tenant's own CH user must not read ClickHouse's internals."""
+        for tier in DEFAULT_TIERS:
+            assert all("system." not in grant for grant in tier.grants)
+
     def test_loader_inserts_and_async(self):
         loader = {r.name: r for r in DEFAULT_SERVICE_ROLES}["loader"]
         assert any("INSERT" in g for g in loader.grants)
