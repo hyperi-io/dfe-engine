@@ -123,9 +123,7 @@ def test_the_tenant_dashboard_uses_only_tenant_sources():
     assert _tile_sources(throughput) <= TENANT_SOURCES
 
 
-@pytest.mark.parametrize(
-    "filename", ["dfe-pipeline-health.json", "dfe-clickhouse-health.json"]
-)
+@pytest.mark.parametrize("filename", ["dfe-pipeline-health.json", "dfe-clickhouse-health.json"])
 def test_platform_dashboards_are_fenced_by_their_sources(filename):
     """Operator telemetry must not reach a tenant.
 
