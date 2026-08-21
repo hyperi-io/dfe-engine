@@ -1,0 +1,405 @@
+{
+  "version": "0.1.0",
+  "name": "DFE Services",
+  "description": "Every scalo service side by side: what it processed, how hard it is working, and what it is waiting on.",
+  "tags": ["dfe", "provisioned", "platform", "services"],
+  "containers": [
+    { "id": "throughput", "title": "Throughput", "collapsed": false },
+    { "id": "saturation", "title": "Saturation and scaling", "collapsed": false },
+    { "id": "resources", "title": "Process and container", "collapsed": false },
+    { "id": "kafka", "title": "Kafka clients", "collapsed": true },
+    { "id": "loader", "title": "Loader sink", "collapsed": true },
+    { "id": "receiver", "title": "Receiver edge", "collapsed": true }
+  ],
+  "tiles": [
+    {
+      "id": "svc-inventory",
+      "containerId": "throughput",
+      "x": 0,
+      "y": 0,
+      "w": 24,
+      "h": 4,
+      "config": {
+        "name": "Services reporting",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "-- The Rust chassis registers `info` as a gauge and scalo-py as a counter, so\n-- an inventory that reads one table only ever sees half the fleet.\nSELECT ServiceName AS \"Service\",\n       any(version) AS \"Version\",\n       count(DISTINCT pod) AS \"Pods\",\n       max(seen) AS \"Last seen\",\n       toUInt64(dateDiff('second', max(seen), now())) AS \"Seconds ago\"\nFROM (\n  SELECT ServiceName, Attributes['version'] AS version,\n         ResourceAttributes['k8s.pod.name'] AS pod, TimeUnix AS seen\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n  UNION ALL\n  SELECT ServiceName, Attributes['version'] AS version,\n         ResourceAttributes['k8s.pod.name'] AS pod, TimeUnix AS seen\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'info' AND $__timeFilter(TimeUnix)\n)\nGROUP BY ServiceName\nORDER BY ServiceName"
+      }
+    },
+    {
+      "id": "svc-received",
+      "containerId": "throughput",
+      "x": 0,
+      "y": 4,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Records received per second",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Records/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'records_received_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-delivered",
+      "containerId": "throughput",
+      "x": 12,
+      "y": 4,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Records delivered per second",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Records/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'records_delivered_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-loss",
+      "containerId": "throughput",
+      "x": 0,
+      "y": 8,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Records lost to DLQ, filters and errors",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, '_total', '')) AS \"Service and outcome\",\n       max(Value) - min(Value) AS \"Records\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('records_dlq_total', 'records_filtered_total', 'records_error_total', 'dlq_pushed_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nHAVING \"Records\" > 0\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-balance",
+      "containerId": "throughput",
+      "x": 12,
+      "y": 8,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Received against delivered, by service",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       toUInt64(sumIf(span, MetricName = 'records_received_total')) AS \"Received\",\n       toUInt64(sumIf(span, MetricName = 'records_processed_total')) AS \"Processed\",\n       toUInt64(sumIf(span, MetricName = 'records_delivered_total')) AS \"Delivered\",\n       toUInt64(sumIf(span, MetricName IN ('records_dlq_total', 'dlq_pushed_total'))) AS \"To DLQ\"\nFROM (\n  SELECT ServiceName, MetricName, max(Value) - min(Value) AS span\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('records_received_total', 'records_processed_total', 'records_delivered_total', 'records_dlq_total', 'dlq_pushed_total')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ServiceName, MetricName, ResourceAttributes['k8s.pod.name']\n)\nGROUP BY ServiceName\nORDER BY \"Received\" DESC"
+      }
+    },
+    {
+      "id": "svc-saturation",
+      "containerId": "saturation",
+      "x": 0,
+      "y": 12,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Worker pool saturation",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "percent", "mantissa": 0 },
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       avg(Value) AS \"Saturation\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'worker_pool_saturation' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-threads",
+      "containerId": "saturation",
+      "x": 12,
+      "y": 12,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Worker threads: active against the scaler's target",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, 'worker_pool_', '')) AS \"Series\",\n       avg(Value) AS \"Threads\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('worker_pool_active_threads', 'worker_pool_target_threads', 'worker_pool_max_threads')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-utilisation",
+      "containerId": "saturation",
+      "x": 0,
+      "y": 16,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "What the scaler is reacting to",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "percent", "mantissa": 0 },
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(replaceOne(MetricName, 'worker_pool_', ''), '_utilisation', '')) AS \"Series\",\n       avg(Value) AS \"Utilisation\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('worker_pool_cpu_utilisation', 'worker_pool_memory_utilisation', 'worker_pool_memory_psi_some')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-scale-events",
+      "containerId": "saturation",
+      "x": 12,
+      "y": 16,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Pool scaling events",
+        "configType": "sql",
+        "displayType": "stacked_bar",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', Attributes['direction']) AS \"Service and direction\",\n       max(Value) - min(Value) AS \"Events\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'worker_pool_scale_events_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['direction']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-memory",
+      "containerId": "resources",
+      "x": 0,
+      "y": 20,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Container memory against its limit",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "byte", "mantissa": 1 },
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, if(MetricName = 'container_memory_limit_bytes', ' limit', ' used')) AS \"Series\",\n       avg(Value) AS \"Bytes\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('container_memory_usage_bytes', 'container_memory_limit_bytes')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-cpu",
+      "containerId": "resources",
+      "x": 12,
+      "y": 20,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Process CPU cores used",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Cores\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'process_cpu_seconds_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-fds",
+      "containerId": "resources",
+      "x": 0,
+      "y": 24,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Open file descriptors",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       ServiceName AS \"Service\",\n       max(Value) AS \"Descriptors\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'process_open_fds' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "svc-uptime",
+      "containerId": "resources",
+      "x": 12,
+      "y": 24,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Process uptime",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       ResourceAttributes['k8s.pod.name'] AS \"Pod\",\n       toDateTime(toUInt64(max(Value))) AS \"Started\",\n       toUInt64(now() - max(Value)) AS \"Uptime seconds\",\n       formatReadableTimeDelta(toUInt64(now() - max(Value))) AS \"Uptime\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'process_start_time_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, ResourceAttributes['k8s.pod.name']\nORDER BY ServiceName"
+      }
+    },
+    {
+      "id": "kafka-lag",
+      "containerId": "kafka",
+      "x": 0,
+      "y": 28,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Consumer lag by topic and partition",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', Attributes['topic'], '/', Attributes['partition']) AS \"Partition\",\n       max(Value) AS \"Lag\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_topic_partition_consumer_lag' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['topic'], Attributes['partition']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-queue",
+      "containerId": "kafka",
+      "x": 12,
+      "y": 28,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Client queue depth",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', replaceOne(MetricName, 'rdkafka_', '')) AS \"Series\",\n       max(Value) AS \"Messages\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('rdkafka_global_msg_cnt', 'rdkafka_broker_outbuf_cnt', 'rdkafka_broker_waitresp_cnt')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-rtt",
+      "containerId": "kafka",
+      "x": 0,
+      "y": 32,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Broker round-trip time",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "duration", "unit": "s", "mantissa": 1 },
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' ', Attributes['broker']) AS \"Client and broker\",\n       avg(Value) AS \"RTT\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_broker_rtt_avg_seconds' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName, Attributes['broker']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-offsets",
+      "containerId": "kafka",
+      "x": 12,
+      "y": 32,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Offsets committed and rebalances",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ServiceName AS \"Service\",\n       Attributes['topic'] AS \"Topic\",\n       Attributes['partition'] AS \"Partition\",\n       toUInt64(max(Value)) AS \"Committed offset\",\n       toUInt64(max(Value) - min(Value)) AS \"Advanced by\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'rdkafka_topic_partition_committed_offset' AND $__timeFilter(TimeUnix)\nGROUP BY ServiceName, Attributes['topic'], Attributes['partition']\nORDER BY \"Service\", \"Topic\", \"Partition\""
+      }
+    },
+    {
+      "id": "loader-rows",
+      "containerId": "loader",
+      "x": 0,
+      "y": 36,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Rows into ClickHouse",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       (max(Value) - min(Value)) / $__interval_s AS \"Rows/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'rows_inserted_total' AND $__timeFilter(TimeUnix)\nGROUP BY ts\nORDER BY ts"
+      }
+    },
+    {
+      "id": "loader-buffer",
+      "containerId": "loader",
+      "x": 12,
+      "y": 36,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Buffer waiting to flush",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       replaceOne(MetricName, 'buffer_', '') AS \"Series\",\n       avg(Value) AS \"Buffered\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName IN ('buffer_rows', 'buffer_tables', 'clickhouse_inserter_inflight')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "loader-inserts",
+      "containerId": "loader",
+      "x": 0,
+      "y": 40,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Insert batches and bytes",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       replaceOne(MetricName, '_total', '') AS \"Series\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Per second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('batches_flushed_total', 'insert_transactions_total', 'kafka_offsets_committed_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "loader-by-table",
+      "containerId": "loader",
+      "x": 12,
+      "y": 40,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Messages by destination table",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT Attributes['table'] AS \"Table\",\n       toUInt64(max(Value) - min(Value)) AS \"Messages\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'loader_messages_by_table_total' AND $__timeFilter(TimeUnix)\nGROUP BY Attributes['table']\nORDER BY \"Messages\" DESC\nLIMIT 25"
+      }
+    },
+    {
+      "id": "receiver-requests",
+      "containerId": "receiver",
+      "x": 0,
+      "y": 44,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Requests by transport",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(Attributes['transport'], if(MetricName = 'receiver_requests_success_total', ' ok', ' all')) AS \"Series\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Requests/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('receiver_requests_total', 'receiver_requests_success_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, Attributes['transport'], MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "receiver-bytes",
+      "containerId": "receiver",
+      "x": 12,
+      "y": 44,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Bytes in and out",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "numberFormat": { "output": "byte", "mantissa": 1 },
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       if(MetricName = 'receiver_kafka_bytes_sent_total', 'to Kafka', 'from clients') AS \"Direction\",\n       (max(Value) - min(Value)) / $__interval_s AS \"Bytes/second\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName IN ('receiver_bytes_received_total', 'receiver_kafka_bytes_sent_total')\n  AND $__timeFilter(TimeUnix)\nGROUP BY ts, MetricName\nORDER BY ts"
+      }
+    },
+    {
+      "id": "receiver-dlq",
+      "containerId": "receiver",
+      "x": 0,
+      "y": 48,
+      "w": 24,
+      "h": 4,
+      "config": {
+        "name": "Dead letter queue",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(ServiceName, ' pending') AS \"Series\",\n       max(Value) AS \"Records\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'dlq_pending' AND $__timeFilter(TimeUnix)\nGROUP BY ts, ServiceName\nORDER BY ts"
+      }
+    }
+  ]
+}
