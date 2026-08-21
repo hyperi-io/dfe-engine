@@ -1,0 +1,238 @@
+{
+  "version": "0.1.0",
+  "name": "DFE Kafka",
+  "description": "The broker's own view of the pipeline: topic sizes, consumer group lag, replication, and what is piling up in the dead letter queues.",
+  "tags": ["dfe", "provisioned", "platform", "kafka"],
+  "containers": [
+    { "id": "health", "title": "Broker and topics", "collapsed": false },
+    { "id": "lag", "title": "Consumer groups", "collapsed": false },
+    { "id": "flow", "title": "Message flow", "collapsed": false },
+    { "id": "dlq", "title": "Dead letter queues", "collapsed": false }
+  ],
+  "tiles": [
+    {
+      "id": "kafka-brokers",
+      "containerId": "health",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Brokers",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT max(Value) AS \"Brokers\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'kafka.brokers' AND $__timeFilter(TimeUnix)"
+      }
+    },
+    {
+      "id": "kafka-topics",
+      "containerId": "health",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Topics",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT count(DISTINCT Attributes['topic']) AS \"Topics\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'kafka.topic.partitions' AND $__timeFilter(TimeUnix)"
+      }
+    },
+    {
+      "id": "kafka-lag-now",
+      "containerId": "health",
+      "x": 12,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Total consumer lag",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT sum(latest) AS \"Messages behind\"\nFROM (\n  SELECT argMax(Value, TimeUnix) AS latest\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'kafka.consumer_group.lag_sum' AND $__timeFilter(TimeUnix)\n  GROUP BY Attributes['group'], Attributes['topic']\n)"
+      }
+    },
+    {
+      "id": "kafka-under-replicated",
+      "containerId": "health",
+      "x": 18,
+      "y": 0,
+      "w": 6,
+      "h": 2,
+      "config": {
+        "name": "Under-replicated partitions",
+        "configType": "sql",
+        "displayType": "number",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT countIf(replicas > in_sync) AS \"Partitions\"\nFROM (\n  SELECT Attributes['topic'] AS topic, Attributes['partition'] AS partition,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.replicas') AS replicas,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.replicas_in_sync') AS in_sync\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName IN ('kafka.partition.replicas', 'kafka.partition.replicas_in_sync')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY topic, partition\n)"
+      }
+    },
+    {
+      "id": "kafka-topic-table",
+      "containerId": "health",
+      "x": 0,
+      "y": 2,
+      "w": 24,
+      "h": 5,
+      "config": {
+        "name": "Topic sizes and replication",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "-- current minus oldest offset is what the broker is still holding, which is the\n-- retention window in messages rather than the total ever produced.\nSELECT topic AS \"Topic\",\n       count() AS \"Partitions\",\n       toUInt64(sum(current)) AS \"Latest offset\",\n       toUInt64(sum(current - oldest)) AS \"Messages retained\",\n       toUInt64(min(in_sync)) AS \"Min in-sync replicas\"\nFROM (\n  SELECT Attributes['topic'] AS topic, Attributes['partition'] AS partition,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.current_offset') AS current,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.oldest_offset') AS oldest\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName IN ('kafka.partition.current_offset', 'kafka.partition.oldest_offset')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY topic, partition\n) AS offsets\nLEFT JOIN (\n  SELECT Attributes['topic'] AS topic, Attributes['partition'] AS partition,\n         argMax(Value, TimeUnix) AS in_sync\n  FROM dfe.otel_metrics_sum\n  WHERE MetricName = 'kafka.partition.replicas_in_sync' AND $__timeFilter(TimeUnix)\n  GROUP BY topic, partition\n) AS replication USING (topic, partition)\nGROUP BY topic\nORDER BY \"Messages retained\" DESC"
+      }
+    },
+    {
+      "id": "kafka-lag-over-time",
+      "containerId": "lag",
+      "x": 0,
+      "y": 7,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Consumer lag by group and topic",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(Attributes['group'], ' / ', Attributes['topic']) AS \"Group and topic\",\n       max(Value) AS \"Messages behind\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'kafka.consumer_group.lag_sum' AND $__timeFilter(TimeUnix)\nGROUP BY ts, Attributes['group'], Attributes['topic']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-lag-partition",
+      "containerId": "lag",
+      "x": 12,
+      "y": 7,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Lag by partition (uneven lag means an uneven key)",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       concat(Attributes['topic'], '/', Attributes['partition']) AS \"Partition\",\n       max(Value) AS \"Messages behind\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'kafka.consumer_group.lag' AND $__timeFilter(TimeUnix)\nGROUP BY ts, Attributes['topic'], Attributes['partition']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-members",
+      "containerId": "lag",
+      "x": 0,
+      "y": 11,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Consumer group members",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n       Attributes['group'] AS \"Group\",\n       max(Value) AS \"Members\"\nFROM dfe.otel_metrics_sum\nWHERE MetricName = 'kafka.consumer_group.members' AND $__timeFilter(TimeUnix)\nGROUP BY ts, Attributes['group']\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-group-table",
+      "containerId": "lag",
+      "x": 12,
+      "y": 11,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Groups",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT Attributes['group'] AS \"Group\",\n       Attributes['topic'] AS \"Topic\",\n       toUInt64(argMax(Value, TimeUnix)) AS \"Messages behind\",\n       toUInt64(max(Value)) AS \"Worst in window\"\nFROM dfe.otel_metrics_gauge\nWHERE MetricName = 'kafka.consumer_group.lag_sum' AND $__timeFilter(TimeUnix)\nGROUP BY Attributes['group'], Attributes['topic']\nORDER BY \"Messages behind\" DESC"
+      }
+    },
+    {
+      "id": "kafka-produce-rate",
+      "containerId": "flow",
+      "x": 0,
+      "y": 15,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Messages produced per second, by topic",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "-- Rate from the partition head offset: the broker publishes no produce counter,\n-- so the offset's advance over the bucket IS the produce rate.\nSELECT ts, topic AS \"Topic\", sum(advance) / $__interval_s AS \"Messages/second\"\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n         Attributes['topic'] AS topic,\n         Attributes['partition'] AS partition,\n         max(Value) - min(Value) AS advance\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'kafka.partition.current_offset' AND $__timeFilter(TimeUnix)\n  GROUP BY ts, topic, partition\n)\nGROUP BY ts, topic\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-consume-rate",
+      "containerId": "flow",
+      "x": 12,
+      "y": 15,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Messages consumed per second, by group",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ts, grp AS \"Group\", sum(advance) / $__interval_s AS \"Messages/second\"\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n         Attributes['group'] AS grp,\n         concat(Attributes['topic'], '/', Attributes['partition']) AS part,\n         max(Value) - min(Value) AS advance\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName = 'kafka.consumer_group.offset' AND $__timeFilter(TimeUnix)\n  GROUP BY ts, grp, part\n)\nGROUP BY ts, grp\nORDER BY ts"
+      }
+    },
+    {
+      "id": "kafka-retention",
+      "containerId": "flow",
+      "x": 0,
+      "y": 19,
+      "w": 24,
+      "h": 4,
+      "config": {
+        "name": "Messages the broker is still holding",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ts, topic AS \"Topic\", sum(retained) AS \"Messages retained\"\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n         Attributes['topic'] AS topic,\n         Attributes['partition'] AS partition,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.current_offset')\n           - argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.oldest_offset') AS retained\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName IN ('kafka.partition.current_offset', 'kafka.partition.oldest_offset')\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ts, topic, partition\n)\nGROUP BY ts, topic\nORDER BY ts"
+      }
+    },
+    {
+      "id": "dlq-depth",
+      "containerId": "dlq",
+      "x": 0,
+      "y": 23,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Dead letter queue depth",
+        "configType": "sql",
+        "displayType": "line",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT ts, topic AS \"DLQ topic\", sum(retained) AS \"Messages\"\nFROM (\n  SELECT toStartOfInterval(TimeUnix, INTERVAL $__interval_s SECOND) AS ts,\n         Attributes['topic'] AS topic,\n         Attributes['partition'] AS partition,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.current_offset')\n           - argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.oldest_offset') AS retained\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName IN ('kafka.partition.current_offset', 'kafka.partition.oldest_offset')\n    AND Attributes['topic'] LIKE '%dlq%'\n    AND $__timeFilter(TimeUnix)\n  GROUP BY ts, topic, partition\n)\nGROUP BY ts, topic\nORDER BY ts"
+      }
+    },
+    {
+      "id": "dlq-table",
+      "containerId": "dlq",
+      "x": 12,
+      "y": 23,
+      "w": 12,
+      "h": 4,
+      "config": {
+        "name": "Dead letter queues",
+        "configType": "sql",
+        "displayType": "table",
+        "connection": "platform",
+        "source": "otel_metrics",
+        "sqlTemplate": "SELECT topic AS \"DLQ topic\",\n       toUInt64(sum(current - oldest)) AS \"Messages held\",\n       toUInt64(sum(current)) AS \"Ever written\"\nFROM (\n  SELECT Attributes['topic'] AS topic, Attributes['partition'] AS partition,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.current_offset') AS current,\n         argMaxIf(Value, TimeUnix, MetricName = 'kafka.partition.oldest_offset') AS oldest\n  FROM dfe.otel_metrics_gauge\n  WHERE MetricName IN ('kafka.partition.current_offset', 'kafka.partition.oldest_offset')\n    AND Attributes['topic'] LIKE '%dlq%'\n    AND $__timeFilter(TimeUnix)\n  GROUP BY topic, partition\n)\nGROUP BY topic\nORDER BY \"Messages held\" DESC"
+      }
+    }
+  ]
+}

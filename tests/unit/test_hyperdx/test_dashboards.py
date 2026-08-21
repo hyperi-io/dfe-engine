@@ -206,6 +206,8 @@ def test_tiles_reference_declared_containers(filename):
         "dfe-clickhouse-health.json",
         "dfe-clickhouse-overview.json",
         "dfe-clickhouse-internals.json",
+        "dfe-services.json",
+        "dfe-kafka.json",
     ],
 )
 def test_platform_dashboards_are_fenced_by_their_sources(filename):

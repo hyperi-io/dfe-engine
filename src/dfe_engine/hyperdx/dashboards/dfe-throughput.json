@@ -42,7 +42,7 @@
             "aggFn": "sum",
             "aggCondition": "",
             "aggConditionLanguage": "lucene",
-            "valueExpression": "length(_raw)"
+            "valueExpression": "coalesce(length(_raw), length(toString(_json)))"
           }
         ],
         "where": "",
@@ -273,7 +273,7 @@
             "aggFn": "sum",
             "aggCondition": "",
             "aggConditionLanguage": "lucene",
-            "valueExpression": "length(_raw)",
+            "valueExpression": "coalesce(length(_raw), length(toString(_json)))",
             "alias": "bytes"
           }
         ],
