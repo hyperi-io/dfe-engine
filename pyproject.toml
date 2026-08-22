@@ -20,17 +20,21 @@ dependencies = [
     #            a misspelt filter passed the UI's live validation (which calls
     #            straight through dfe_engine.cel.check_syntax) and then failed in
     #            the pipeline.
+    # >=2.29.15: [metrics] now carries the OTel SDK, so a missing SDK no longer
+    #            leaves a disabled backend that still reports backend=opentelemetry.
+    #            This is the fix for the metrics bug the extras note below describes.
     # Upper bound: <3 is the API-stability boundary. An unbounded `>=` is invisible
     # to Renovate -- the constraint is satisfied by every future release, so no PR
     # is ever raised and the version moves silently in the lock.
-    # [metrics] + [opentelemetry]: WITHOUT them scalo logs "Prometheus metrics
-    # disabled (prometheus_client not installed)" and then, on the very next line,
-    # "Metrics initialized: backend=prometheus" -- so the engine looked instrumented
-    # while exporting nothing and /metrics 404'd. The charts have been setting
-    # OTEL_EXPORTER_OTLP_ENDPOINT + prometheus scrape annotations on a process that
-    # could not honour either. Drop either extra and self-monitoring -- one of the
-    # two default E2E acceptance tests -- goes green while reporting nothing.
-    "scalo[expression,http,metrics,opentelemetry]>=2.29.14",
+    # [metrics]: scalo's default metrics backend dual-exports -- Prometheus (/metrics)
+    # AND OTLP -- and from 2.29.15 the single [metrics] extra pulls in both
+    # prometheus_client and the OTel SDK, so it honours both. WITHOUT it scalo logs
+    # "Prometheus metrics disabled (prometheus_client not installed)" yet still reports
+    # "backend=prometheus" -- the engine looks instrumented while exporting nothing and
+    # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
+    # goes green while reporting nothing. [opentelemetry] is no longer a separate
+    # extra: [metrics] carries the SDK.
+    "scalo[expression,http,metrics]>=2.29.15,<3",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",

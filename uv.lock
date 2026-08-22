@@ -693,7 +693,7 @@ wheels = [
 
 [[package]]
 name = "dfe-engine"
-version = "1.8.0"
+version = "0.0.0"
 source = { editable = "." }
 dependencies = [
     { name = "apprise" },
@@ -728,7 +728,7 @@ dependencies = [
     { name = "python-multipart" },
     { name = "requests" },
     { name = "ruamel-yaml" },
-    { name = "scalo", extra = ["expression", "http", "metrics", "opentelemetry"] },
+    { name = "scalo", extra = ["expression", "http", "metrics"] },
     { name = "scim2-models" },
     { name = "sse-starlette" },
     { name = "starlette" },
@@ -790,7 +790,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics", "opentelemetry"], specifier = ">=2.29.14" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.29.15,<3" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -2423,7 +2423,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.29.14"
+version = "2.29.15"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2441,9 +2441,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/71/96/269336f351126281d17c2dd1ee2bb26a6767ae117e6cb7af6fa6b9ed8f06/scalo-2.29.14.tar.gz", hash = "sha256:e33291c8feeb36c4868616fa510ab62d8a8fa000532dc4e52eb833575e399dcb", size = 332218, upload-time = "2026-08-18T22:54:24.301Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/1f/ee571ae355ec99c109bbf79493b780af36fbbed8f429543f940f0e258a22/scalo-2.29.15.tar.gz", hash = "sha256:33afdcc3a693374d8565872d35a45cf1d4f9226870ce3ef272a9858f2a69c055", size = 332409, upload-time = "2026-08-22T05:30:06.656Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/24/39/f75ecb7cdb4e7b4af3b6f4f9468691edfa2e988d6119eda7b82010e068eb/scalo-2.29.14-py3-none-any.whl", hash = "sha256:535de12c357e92d2139b18578a9bb0995da4e71c4148954ccadeb510fc4749cb", size = 403829, upload-time = "2026-08-18T22:54:23.003Z" },
+    { url = "https://files.pythonhosted.org/packages/de/36/77649aa98061c5fc16a19715cd4d8df2cabb7043bc00886f19c8d70ef3b5/scalo-2.29.15-py3-none-any.whl", hash = "sha256:57af9cab1a08efa03f6cd78e40cdbcef8ecf62d9a97040da2139df587c957b81", size = 403957, upload-time = "2026-08-22T05:30:04.824Z" },
 ]
 
 [package.optional-dependencies]
@@ -2456,14 +2456,12 @@ http = [
     { name = "stamina" },
 ]
 metrics = [
-    { name = "prometheus-client" },
-    { name = "psutil" },
-]
-opentelemetry = [
     { name = "opentelemetry-api" },
     { name = "opentelemetry-exporter-otlp" },
     { name = "opentelemetry-exporter-prometheus" },
     { name = "opentelemetry-sdk" },
+    { name = "prometheus-client" },
+    { name = "psutil" },
 ]
 
 [[package]]
