@@ -1,6 +1,9 @@
 [project]
 name = "dfe-engine"
-version = "1.8.0"
+# Placeholder: the real version is computed by semantic-release and stamped in
+# CI at release time (hyperi-ci#105). Never hand-bump this -- a committed
+# version here is a stale seed that a release can pick up by mistake.
+version = "0.0.0"
 description = "Config control plane for the HyperI Data Fusion Engine. Renders operator intent to git as YAML, Helm values and ClickHouse DDL for Argo CD to apply."
 authors = [{ name = "HYPERI PTY LIMITED", email = "engineering@hyperi.com.au" }]
 license = { text = "BUSL-1.1" }
