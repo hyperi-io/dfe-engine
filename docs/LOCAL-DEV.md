@@ -65,9 +65,11 @@ When Kay runs dfe-engine + dfe-hyperdx + dfe-ui + a local dfe-deploy clone toget
 (all as git clones, not containers), the wiring is:
 
 - **dfe-hyperdx (the fork)** trusts the engine's signing key over JWKS. Point the
-  fork at `DFE_ENGINE_JWKS_URL=http://localhost:8003/api/v1/auth/jwks` (its
-  `engineOrigin()` derives the engine base URL from that). The fork's `/dfe/*`
-  routes forward the caller's `dfe_token` to the engine.
+  fork at `DFE_ENGINE_JWKS_URL=http://localhost:8003/.well-known/jwks.json` (the
+  standard OIDC discovery path; its `engineOrigin()` derives the engine base URL
+  from that). Set `DFE_ENGINE_ISSUER=https://dfe.local/api` to match the engine's
+  advertised issuer (`/.well-known/openid-configuration`), enforced as the token
+  `iss`. The fork's `/dfe/*` routes forward the caller's `dfe_token` to the engine.
 - **dfe-ui** talks to the engine API at `http://localhost:8003/api` and embeds the
   fork; the fork's create-rule button opens `${DFE_UI_BASE_URL}/rules/{id}`.
 - **The deploy repo (dfe-deploy)** is the gitops target. Either disable gitops
