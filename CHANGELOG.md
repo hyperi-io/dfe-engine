@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.1](https://github.com/hyperi-io/dfe-engine/compare/v1.17.0...v1.17.1) (2026-08-23)
+
+### Bug Fixes
+
+* **deps:** adopt scalo 2.29.15 so [metrics] carries the OTel SDK ([8e3a4ce](https://github.com/hyperi-io/dfe-engine/commit/8e3a4ce63cbc98cb0efa6267b1877a532a1771b8))
+* **docs:** correct engine JWKS path and issuer in LOCAL-DEV ([c5ed201](https://github.com/hyperi-io/dfe-engine/commit/c5ed2015f9de0763fb2592422648778ca83ddae7))
+
 ## [1.16.3](https://github.com/hyperi-io/dfe-engine/compare/v1.16.2...v1.16.3) (2026-08-20)
 
 ### Bug Fixes
