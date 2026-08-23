@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.2](https://github.com/hyperi-io/dfe-engine/compare/v1.17.1...v1.17.2) (2026-08-23)
+
+### Bug Fixes
+
+* **deps:** adopt scalo 2.29.16 -- log format derives from otel presence ([#205](https://github.com/hyperi-io/dfe-engine/issues/205)) ([35f6572](https://github.com/hyperi-io/dfe-engine/commit/35f6572d13d75e7bd657ebeece6641ee488487e6))
+
 ## [1.17.1](https://github.com/hyperi-io/dfe-engine/compare/v1.17.0...v1.17.1) (2026-08-23)
 
 ### Bug Fixes
