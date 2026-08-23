@@ -54,7 +54,7 @@ RUN mkdir -p /app/schemas /app/config /app/secrets \
 # `FROM <base>` by substring, so ARG-parameterising the runtime base needs a
 # scalo-py change (hyperi-io/scalo-py#4) -- tracked, not worked around by deleting
 # the drift test.
-FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de AS runtime
+FROM python:3.12-slim@sha256:2c941e860699f878900b0edc2403613c234d4b32eda3cc9fa7036991a2a63c4a AS runtime
 
 # Static OCI labels (from contract)
 LABEL org.opencontainers.image.title="dfe-engine"
