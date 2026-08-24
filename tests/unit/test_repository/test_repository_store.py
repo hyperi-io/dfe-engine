@@ -53,8 +53,9 @@ class TestEnsureSchema:
     def test_runs_ddl_once_per_process(self, ch: FakeRepositoryCH, store: RepositoryStore):
         store.ensure_schema()
         assert len(ch.ddl) == 2
-        assert ch.ddl[0].startswith("CREATE DATABASE IF NOT EXISTS dfe_internal")
-        assert ch.ddl[1].startswith("CREATE TABLE IF NOT EXISTS dfe_internal.repository")
+        assert ch.ddl[0].startswith("CREATE DATABASE IF NOT EXISTS dfe")
+        # The rendered CREATE leads with its generated comment header.
+        assert "CREATE TABLE IF NOT EXISTS dfe.repository" in ch.ddl[1]
         # Second store instance in the same process: no re-run
         RepositoryStore(ch).ensure_schema()
         assert len(ch.ddl) == 2
@@ -62,8 +63,7 @@ class TestEnsureSchema:
     def test_database_override_substitutes_name(self, ch: FakeRepositoryCH):
         RepositoryStore(ch, database="custom_db").ensure_schema()
         assert "custom_db.repository" in ch.ddl[1]
-        assert "dfe_internal" not in ch.ddl[0]
-        assert "dfe_internal" not in ch.ddl[1]
+        assert "custom_db" in ch.ddl[0]
 
     def test_lazy_on_first_read(self, ch: FakeRepositoryCH, store: RepositoryStore):
         assert ch.ddl == []

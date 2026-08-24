@@ -92,11 +92,14 @@ class QueryShim:
         return self._client
 
     def _db(self, token: str) -> str:
-        """Resolve a query's ``database`` token to a validated CH identifier."""
-        resolved = {
-            "otel": self._settings.keda_shim.otel_database,
-            "data": self._settings.clickhouse.effective_data_database,
-        }.get(token, token)
+        """Resolve a query's ``database`` token to a validated CH identifier.
+
+        ``otel`` and ``data`` both resolve to the one DFE database -- the tokens
+        survive because the query catalogue names them, not because the tables
+        live apart. A literal passes through for a query pointed elsewhere.
+        """
+        dfe = self._settings.clickhouse.effective_data_database
+        resolved = {"otel": dfe, "data": dfe}.get(token, token)
         if not _IDENT.match(resolved):
             raise ValueError(f"unsafe database identifier: {resolved!r}")
         return resolved

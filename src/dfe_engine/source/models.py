@@ -133,6 +133,15 @@ class SchemaColumn(BaseModel):
         default=None,
         description="Explicit CODEC contents, emitted verbatim - required to set a codec with ch_override",
     )
+    max_dynamic_paths: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "JSON columns only: how many paths are stored as typed sub-columns. "
+            "Paths beyond it spill into a slower shared map. Renders as "
+            "JSON(max_dynamic_paths=N); ClickHouse's own default is 1024."
+        ),
+    )
 
     @field_validator("attribute", mode="before")
     @classmethod
