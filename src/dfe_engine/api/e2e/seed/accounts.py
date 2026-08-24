@@ -10,13 +10,23 @@
 
 from __future__ import annotations
 
+import os
+
 from dfe_engine.api.e2e.seed.base import Seed
 
 _ADMIN_GROUP = "dfe-admins"
 _DFE_ANALYST_GROUP = "dfe-analysts"
 _DFE_INFRA_GROUP = "dfe-infra"
 _DFE_VIEWERS_GROUP = "dfe-viewers"
-_DEFAULT_PASSWORD = "changeme"
+
+
+def _break_glass_admin_name() -> str:
+    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_NAME") or "admin"
+
+
+def _default_e2e_password() -> str:
+    """Well-known break-glass / e2e password (same fallbacks as auth bootstrap)."""
+    return os.environ.get("DFE_AUTH_LOCAL_ADMIN_PASSWORD") or "changeme"
 
 
 class Accounts(Seed):
@@ -34,7 +44,17 @@ class Accounts(Seed):
         """
         return self._ensure_admin(
             name,
-            password=_DEFAULT_PASSWORD if password is None else password,
+            password=_default_e2e_password() if password is None else password,
+        )
+
+    def reset_break_glass_admin(self) -> bool:
+        """Reset the break-glass admin account."""
+        name = _break_glass_admin_name()
+        password = _default_e2e_password()
+
+        return self._ensure_admin(
+            name,
+            password=password,
         )
 
     def seed_dfe_admin_user(self, name: str = "dfe_admin", *, password: str | None = None) -> bool:
@@ -43,7 +63,7 @@ class Accounts(Seed):
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
         return self._ensure_admin(
-            name, password=_DEFAULT_PASSWORD if password is None else password
+            name, password=_default_e2e_password() if password is None else password
         )
 
     def seed_dfe_analyst_user(
@@ -54,7 +74,7 @@ class Accounts(Seed):
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
         return self._ensure_dfe_analyst(
-            name, password=_DEFAULT_PASSWORD if password is None else password
+            name, password=_default_e2e_password() if password is None else password
         )
 
     def seed_dfe_infra_user(self, name: str = "dfe_infra", *, password: str | None = None) -> bool:
@@ -63,7 +83,7 @@ class Accounts(Seed):
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
         return self._ensure_dfe_infra(
-            name, password=_DEFAULT_PASSWORD if password is None else password
+            name, password=_default_e2e_password() if password is None else password
         )
 
     def seed_dfe_viewers_user(
@@ -74,8 +94,13 @@ class Accounts(Seed):
         Omitting *password* uses the well-known e2e password ``changeme``.
         """
         return self._ensure_dfe_viewers(
-            name, password=_DEFAULT_PASSWORD if password is None else password
+            name, password=_default_e2e_password() if password is None else password
         )
+
+    def delete_all(self) -> None:
+        """Clear all accounts from the YAML account registry."""
+        for account in self._account_store.list():
+            self._account_store.delete(account.username)
 
     def _ensure_admin(self, name: str = "admin", *, password: str) -> bool:
         """Create or reset local break-glass admin account.

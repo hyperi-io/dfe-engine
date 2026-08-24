@@ -57,6 +57,7 @@ class SeedRequest(BaseModel):
         "seed_dfe_analyst_user",
         "seed_dfe_infra_user",
         "seed_dfe_viewers_user",
+        "reset_all",
     ]
 
 

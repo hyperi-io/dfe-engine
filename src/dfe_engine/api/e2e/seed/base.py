@@ -70,19 +70,19 @@ class Seed:
         """Dispatch *script* to child seeders. Returns False when unknown."""
         if script == "seed_dfe_admin_user":
             account = self.accounts.seed_dfe_admin_user()
-            logger.warning("e2e seed", script=script, account=account)
+            logger.info("e2e seed", script=script, account=account)
             return True
         if script == "seed_dfe_analyst_user":
             account = self.accounts.seed_dfe_analyst_user()
-            logger.warning("e2e seed", script=script, account=account)
+            logger.info("e2e seed", script=script, account=account)
             return True
         if script == "seed_dfe_infra_user":
             account = self.accounts.seed_dfe_infra_user()
-            logger.warning("e2e seed", script=script, account=account)
+            logger.info("e2e seed", script=script, account=account)
             return True
         if script == "seed_dfe_viewers_user":
             account = self.accounts.seed_dfe_viewers_user()
-            logger.warning("e2e seed", script=script, account=account)
+            logger.info("e2e seed", script=script, account=account)
             return True
         if script == "seed_setup_complete":
             # ------------------------------------------------------------
@@ -95,12 +95,21 @@ class Seed:
             admin = self.accounts.seed_dfe_admin_user("admin", password=_SETUP_ADMIN_PASSWORD)
             initial_user = self.accounts.seed_initial_user()
             organisation = self.organisations.seed_organisation()
-            logger.warning(
+            logger.info(
                 "e2e seed",
                 script=script,
                 admin=admin,
                 initial_user=initial_user,
                 organisation=organisation,
             )
+            return True
+        if script == "reset_all":
+            # Delete all accounts and organisations
+            self.accounts.delete_all()
+            self.organisations.delete_all()
+
+            # Re-add the break-glass admin account
+            self.accounts.reset_break_glass_admin()
+            logger.info("e2e seed", script=script)
             return True
         return False

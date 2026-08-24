@@ -169,6 +169,30 @@ def test_organisation_seed_resets_existing(tmp_path, monkeypatch):
     assert org.org_ids == ["organisation"]
 
 
+def test_reset_all_recreates_break_glass_admin(tmp_path, monkeypatch):
+    """reset_all must leave a loginable break-glass admin (delete_all removes every account)."""
+    from dfe_engine.api.e2e.seed import Seed
+    from dfe_engine.auth.bootstrap import admin_account_name, admin_account_password
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+    monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    seeder.accounts.seed_dfe_admin_user(name="extra_user")
+    seeder.organisations.seed_organisation()
+    assert len(accounts.list()) >= 2
+
+    assert seeder.seed_static("reset_all") is True
+    admin_name = admin_account_name()
+    remaining = accounts.list()
+    assert len(remaining) == 1
+    assert remaining[0].username == admin_name
+    assert accounts.verify_password(admin_name, admin_account_password())
+
+
 def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     from dfe_engine.api.e2e.seed import Seed
 

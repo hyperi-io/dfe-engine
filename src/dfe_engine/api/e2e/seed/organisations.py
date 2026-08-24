@@ -26,6 +26,11 @@ class Organisations(Seed):
         """Seed a local organisation. Returns True when created, False when reset."""
         return self._ensure_organisation(name, display_name=display_name)
 
+    def delete_all(self) -> None:
+        """Clear all organisations from the YAML org registry."""
+        for org in self._org_registry.list():
+            self._org_registry.delete(org.name)
+
     def _ensure_organisation(self, name: str, *, display_name: str) -> bool:
         existing = self._org_registry.get(name)
         org_ids = [name]
