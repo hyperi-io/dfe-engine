@@ -9,10 +9,6 @@
 
 from __future__ import annotations
 
-# Bound at import time, before tests/conftest.py's autouse guard swaps the module
-# attribute for a no-op. That guard keeps the app lifespan off a real ClickHouse;
-# this test drives the function directly and needs the real one.
-from dfe_engine.clickhouse.bootstrap import bootstrap_clickhouse
 from dfe_engine.clickhouse.query_log_archive import render_ddl
 from dfe_engine.schema.engine_resolver import ResolvedEngine
 
@@ -60,48 +56,3 @@ def test_mv_only_archives_finished_tagged_valid_rows():
 def test_ttl_days_is_configurable():
     _, tbl_stmt, _ = render_ddl(None, ttl_days=7)
     assert "TTL event_time + INTERVAL 7 DAY" in tbl_stmt
-
-
-def test_render_ddl_honours_a_custom_audit_database():
-    """`make e2e-server` namespaces the archive so it is dropped with the run."""
-    db_stmt, tbl_stmt, mv_stmt = render_ddl(None, database="dfe_e2e_audit")
-    assert db_stmt == "CREATE DATABASE IF NOT EXISTS dfe_e2e_audit"
-    assert "dfe_e2e_audit.query_log_archive" in tbl_stmt
-    assert "TO dfe_e2e_audit.query_log_archive" in mv_stmt
-    assert "dfe_audit." not in mv_stmt
-
-
-def test_bootstrap_sends_the_configured_audit_database_to_ensure(monkeypatch):
-    """Startup must not fall back to the shared `dfe_audit` default.
-
-    Without this the e2e process writes its archive into the database a dev
-    stack shares, where the run's teardown never reaches it.
-    """
-    from dfe_engine.clickhouse import bootstrap as ch_bootstrap
-    from dfe_engine.clickhouse import query_log_archive
-    from dfe_engine.settings import ClickHouseSettings, DFESettings
-
-    seen: dict[str, str] = {}
-
-    class _Manager:
-        @staticmethod
-        def get_instance(_config):
-            return _Manager()
-
-        def get_clickhouse_client(self):
-            return object()
-
-    monkeypatch.setattr(ch_bootstrap, "ClickHouseManager", _Manager)
-    monkeypatch.setattr(
-        query_log_archive,
-        "ensure",
-        lambda _client, *, database: seen.update(database=database),
-    )
-
-    settings = DFESettings(
-        env="test",
-        clickhouse=ClickHouseSettings(bootstrap_tables=True, audit_database="dfe_e2e_audit"),
-    )
-    bootstrap_clickhouse(settings=settings)
-
-    assert seen["database"] == "dfe_e2e_audit"

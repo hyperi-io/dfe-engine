@@ -117,7 +117,7 @@ e2e-clean:
 e2e-server:
 	@test -f .env.e2e || { echo "Create .env.e2e first (copy .env and set DFE_ENV=test)"; exit 1; }
 	@echo "e2e workspace (fresh) -> $(E2E_WORKSPACE)"
-	@echo "ClickHouse databases -> $(E2E_CH_PREFIX)* (data, hunts, audit, otel)"
+	@echo "ClickHouse databases -> $(E2E_CH_PREFIX)* (data + audit archive)"
 	@echo "Swagger UI -> http://localhost:$${E2E_PORT:-8003}/docs  (select API or E2E)"
 	@echo "Playwright ready URL -> DFE_ENGINE_READY_URL=http://127.0.0.1:$${E2E_PORT:-8003}/readyz"
 	@echo "e2e seed -> POST http://localhost:$${E2E_PORT:-8003}/api/e2e/seed-static"
@@ -140,9 +140,6 @@ e2e-server:
 	export DFE_HUNT_LOG_PATH="$(E2E_WORKSPACE)/hunt-log"; \
 	export DFE_HUNTS_CHECKPOINT_PATH="$(E2E_WORKSPACE)/hunt-checkpoints"; \
 	export DFE_CLICKHOUSE_DATA_DATABASE="$(E2E_CH_DATA_DB)"; \
-	export DFE_CLICKHOUSE_HUNTS_DATABASE="$(E2E_CH_HUNTS_DB)"; \
-	export DFE_CLICKHOUSE_AUDIT_DATABASE="$(E2E_CH_AUDIT_DB)"; \
-	export DFE_CLICKHOUSE_OTEL_DATABASE="$(E2E_CH_OTEL_DB)"; \
 	export DFE_E2E_SERVER=true; \
 	export DFE_ENV_FILE=.env.e2e; \
 	uv run dfe-engine run
