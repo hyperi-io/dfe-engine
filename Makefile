@@ -64,9 +64,10 @@ E2E_CH_OTEL_DB := $(E2E_CH_PREFIX)_otel
 define e2e-ch-wipe
 	ch_host="$${DFE_CLICKHOUSE_HOST:-localhost}"; \
 	ch_port="$${DFE_CLICKHOUSE_PORT:-8123}"; \
-	ch_auth="$${DFE_CLICKHOUSE_USERNAME:-default}:$${DFE_CLICKHOUSE_PASSWORD}"; \
+	ch_user="$${DFE_CLICKHOUSE_USERNAME:-default}"; \
+	ch_pass="$${DFE_CLICKHOUSE_PASSWORD}"; \
 	echo "Dropping ClickHouse $(E2E_CH_PREFIX)* on $$ch_host:$$ch_port"; \
-	dbs=$$(curl -sf -u "$$ch_auth" "http://$$ch_host:$$ch_port/" \
+	dbs=$$(curl -sf --user "$$ch_user" --pass "$$ch_pass" "http://$$ch_host:$$ch_port/" \
 		--data-binary "SELECT name FROM system.databases WHERE name LIKE '$(E2E_CH_PREFIX)%'"); \
 	rc=$$?; \
 	if [ $$rc -eq 22 ]; then \
@@ -81,7 +82,7 @@ define e2e-ch-wipe
 		dbs=""; \
 	fi; \
 	for db in $$dbs; do \
-		curl -sf -u "$$ch_auth" "http://$$ch_host:$$ch_port/" \
+		curl -sf --user "$$ch_user" --pass "$$ch_pass" "http://$$ch_host:$$ch_port/" \
 			--data-binary "DROP DATABASE IF EXISTS $$db" \
 			&& echo "  dropped $$db" \
 			|| { echo "error: could not drop $$db"; exit 1; }; \

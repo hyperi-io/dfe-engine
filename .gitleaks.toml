@@ -28,6 +28,8 @@ regexes = [
     '''llamatron''',
     # DFE API key format used in documentation examples
     '''dfe_ak_live_8a3f''',
+    # Makefile e2e ClickHouse wipe: curl -u with Make/shell env refs, not credentials
+    '''DFE_CLICKHOUSE_USERNAME:-default\}:\$\$\{DFE_CLICKHOUSE_PASSWORD''',
 ]
 
 # Stopwords - findings containing these are likely false positives
