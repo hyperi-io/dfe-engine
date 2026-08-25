@@ -28,6 +28,10 @@ regexes = [
     '''llamatron''',
     # DFE API key format used in documentation examples
     '''dfe_ak_live_8a3f''',
+    # Makefile e2e ClickHouse wipe: curl -u takes shell variable references, never a
+    # literal credential. Both forms stay -- gitleaks scans the whole history.
+    '''DFE_CLICKHOUSE_USERNAME:-default\}:\$\$\{DFE_CLICKHOUSE_PASSWORD''',
+    '''\$\$ch_user:\$\$ch_pass''',
 ]
 
 # Stopwords - findings containing these are likely false positives

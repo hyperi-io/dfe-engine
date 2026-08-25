@@ -5,6 +5,8 @@
 # Creates a PR in: https://github.com/hyperi-io/dfe-ui
 # Target paths:
 #   packages/dfe-engine-types/specs/openapi.json
+#   packages/dfe-engine-types/specs/openapi.e2e.json
+#   packages/dfe-engine-types/types/e2e.d.ts
 #   packages/dfe-engine-types/scopes/index.ts
 #
 # Required secret: DFE_UI_TOKEN - PAT with PR open/close + push; must delete
@@ -19,6 +21,7 @@ on:
     branches: ["main", "master"]
     paths:
       - "openapi-spec/openapi.json"
+      - "openapi-spec/openapi.e2e.json"
       - "src/dfe_engine/auth/rbac_scopes/scope_constants.py"
   workflow_dispatch:
 
@@ -56,6 +59,7 @@ jobs:
           cd dfe-ui
           mkdir -p packages/dfe-engine-types/specs packages/dfe-engine-types/scopes
           cp ../openapi-spec/openapi.json packages/dfe-engine-types/specs/openapi.json
+          cp ../openapi-spec/openapi.e2e.json packages/dfe-engine-types/specs/openapi.e2e.json
           cp ../rbac-scopes-spec/scopes/index.ts packages/dfe-engine-types/scopes/index.ts
           cd packages/dfe-engine-types && yarn install --immutable && yarn generate
           cd "$GITHUB_WORKSPACE/dfe-ui"
@@ -88,4 +92,4 @@ jobs:
             --title "chore(dfe-engine-types): sync from dfe-engine" \
             --body "Auto-generated from ${{ github.repository }}@${{ github.sha }}
 
-          This PR syncs the OpenAPI specification and RBAC scope constants from the dfe-engine repository."
+          This PR syncs openapi.json, openapi.e2e.json, and RBAC scope constants from the dfe-engine repository."

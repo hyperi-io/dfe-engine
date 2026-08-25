@@ -15,7 +15,7 @@ dfe-engine is the source of truth for the HTTP API contract and the RBAC scope c
 | Item | Location |
 |------|----------|
 | Script | `openapi-spec/generate.py` |
-| Output | `openapi-spec/openapi.json` (committed) |
+| Output | `openapi-spec/openapi.json` and `openapi-spec/openapi.e2e.json` (committed) |
 
 Regenerate after API model or route changes:
 
@@ -52,12 +52,13 @@ Workflow: [`.github/workflows/sync-dfe-engine-types.yml`](../../.github/workflow
 
 ### Triggers
 
-- **Push** to `main` or `master` when either path changes:
+- **Push** to `main` or `master` when any of these paths change:
   - `openapi-spec/openapi.json`
+  - `openapi-spec/openapi.e2e.json`
   - `src/dfe_engine/auth/rbac_scopes/scope_constants.py`
 - **Manual:** `workflow_dispatch`
 
-Note: Changing only Python API files without regenerating and committing `openapi.json` will not trigger the workflow. Regenerate the OpenAPI spec locally (or in CI elsewhere) and commit `openapi-spec/openapi.json` when the contract changes.
+Note: Changing only Python API files without regenerating and committing the OpenAPI JSON will not trigger the workflow. Regenerate locally with `uv run python openapi-spec/generate.py` and commit `openapi-spec/openapi.json` and/or `openapi-spec/openapi.e2e.json` when the contract changes.
 
 ### What the job does
 
@@ -66,8 +67,9 @@ Note: Changing only Python API files without regenerating and committing `openap
 3. Clones **dfe-ui** (repo from `DFE_UI_REPO`, default `hyperi-io/dfe-ui`) using `DFE_UI_TOKEN`.
 4. Copies into dfe-ui’s types package:
    - `openapi-spec/openapi.json` → `packages/dfe-engine-types/specs/openapi.json`
+   - `openapi-spec/openapi.e2e.json` → `packages/dfe-engine-types/specs/openapi.e2e.json`
    - `rbac-scopes-spec/scopes/index.ts` → `packages/dfe-engine-types/scopes/index.ts`
-5. Runs `yarn install --immutable` and `yarn generate` in `packages/dfe-engine-types`.
+5. Runs `yarn install --immutable` and `yarn generate` in `packages/dfe-engine-types`, then generates `types/e2e.d.ts` from `openapi.e2e.json` and exports it as `@repo/dfe-engine-types/e2e`.
 6. Opens a PR in dfe-ui (closes older open sync PRs on the same branch naming pattern so only one sync PR is active).
 
 ### Secrets and configuration
@@ -81,7 +83,7 @@ Note: Changing only Python API files without regenerating and committing `openap
 2. Regenerate artifacts:
    - API: `uv run python openapi-spec/generate.py`
    - Scopes: `uv run python rbac-scopes-spec/generate.py`
-3. Commit the updated `openapi-spec/openapi.json` and/or `rbac-scopes-spec/scopes/index.ts` together with your code change.
+3. Commit the updated `openapi-spec/openapi.json`, `openapi-spec/openapi.e2e.json`, and/or `rbac-scopes-spec/scopes/index.ts` together with your code change.
 4. After merge to `main`/`master`, wait for **Sync dfe-engine-types** to open the dfe-ui PR; merge that PR to pick up types and scopes on the frontend.
 
 ## Developer workflow (dfe-ui)
