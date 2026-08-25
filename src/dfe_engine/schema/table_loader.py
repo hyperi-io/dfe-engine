@@ -26,8 +26,8 @@ from scalo.logger import logger
 
 from dfe_engine.schema.schema_ddl import DDLConfig, TableSpec
 from dfe_engine.schema.schema_loader import (
-    SchemaLoadError,
     SchemaLoader,
+    SchemaLoadError,
     _resolve_schemas_root,
 )
 from dfe_engine.source.models import SchemaColumn
