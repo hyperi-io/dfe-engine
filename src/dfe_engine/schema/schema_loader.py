@@ -45,6 +45,11 @@ _SUBMODULE_ROOT = "schemas"
 # Bundled profiles inside the package (fallback).
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
 
+# Where the container image ships the schemas. dfe_engine.bootstrap copies this
+# tree into the runtime schemas dir and imports these from here.
+DEFAULT_SCHEMAS_SEED_DIR = "/app/schemas-seed"
+SEED_DIR_ENV_VAR = "DFE_SCHEMAS_SEED_DIR"
+
 
 def _find_project_root() -> Path | None:
     """Walk up from this file to find the project root (contains pyproject.toml)."""
@@ -105,26 +110,37 @@ def _resolve_profiles_dir() -> Path:
     return _BUNDLED_PROFILES_DIR
 
 
-def _resolve_schemas_root() -> Path | None:
-    """Resolve the dfe-schemas root directory (submodule or env var).
+def _looks_like_schemas_root(candidate: Path) -> bool:
+    """Whether *candidate* is a full dfe-schemas tree rather than a partial one.
 
-    ``DFE_SCHEMAS_DIR`` is only accepted when it looks like a full dfe-schemas
-    checkout (contains ``common-header/``). Partial trees such as
-    ``config/schemas`` must not shadow the ``schemas/`` submodule.
+    Requiring ``common-header/`` stops a partial tree such as ``config/schemas``
+    -- or the empty directory the image seeds INTO -- shadowing a real checkout.
+    """
+    return candidate.is_dir() and (candidate / "common-header").is_dir()
+
+
+def _resolve_schemas_root() -> Path | None:
+    """Resolve the dfe-schemas root directory.
+
+    Order: ``DFE_SCHEMAS_DIR``, the ``schemas/`` submodule, then the image's
+    seed directory. The seed is last because a real checkout should win, and
+    present at all because the container ships the schemas there: every process
+    in the image needs to read them, while only the daemon runs the bootstrap
+    that copies them out. Without it, `dfe-schema` in a Job had no schemas.
 
     Returns None if only bundled profiles are available.
     """
     env_dir = os.getenv("DFE_SCHEMAS_DIR")
-    if env_dir:
-        candidate = Path(env_dir)
-        if candidate.is_dir() and (candidate / "common-header").is_dir():
-            return candidate
+    if env_dir and _looks_like_schemas_root(Path(env_dir)):
+        return Path(env_dir)
 
     root = _find_project_root()
-    if root:
-        candidate = root / _SUBMODULE_ROOT
-        if candidate.is_dir() and (candidate / "common-header").is_dir():
-            return candidate
+    if root and _looks_like_schemas_root(root / _SUBMODULE_ROOT):
+        return root / _SUBMODULE_ROOT
+
+    seed_dir = Path(os.getenv(SEED_DIR_ENV_VAR, DEFAULT_SCHEMAS_SEED_DIR))
+    if _looks_like_schemas_root(seed_dir):
+        return seed_dir
 
     return None
 
