@@ -1,0 +1,198 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "DFE Engine API \u2014 E2E",
+    "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode \u2014 not in the product spec.",
+    "version": "1.8.0"
+  },
+  "paths": {
+    "/api/e2e/status": {
+      "get": {
+        "tags": [
+          "E2E"
+        ],
+        "summary": "E2E Status",
+        "description": "Confirm this process mounted the e2e-server helpers.",
+        "operationId": "e2e_status_api_e2e_status_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/E2EStatusResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-cli": {
+          "enabled": false
+        }
+      }
+    },
+    "/api/e2e/seed-static": {
+      "post": {
+        "tags": [
+          "E2E"
+        ],
+        "summary": "Seed Static",
+        "description": "Run a named e2e seed script. Unauthenticated by design.",
+        "operationId": "seed_static_api_e2e_seed_static_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SeedRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SeedResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [],
+        "x-cli": {
+          "enabled": false
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "E2EStatusResponse": {
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "title": "Enabled"
+          }
+        },
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "title": "E2EStatusResponse"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "SeedRequest": {
+        "properties": {
+          "script": {
+            "type": "string",
+            "enum": [
+              "seed_setup_complete",
+              "seed_organisation",
+              "seed_dfe_admin_user",
+              "seed_dfe_analyst_user",
+              "seed_dfe_infra_user",
+              "seed_dfe_viewers_user",
+              "reset_all"
+            ],
+            "title": "Script"
+          }
+        },
+        "type": "object",
+        "required": [
+          "script"
+        ],
+        "title": "SeedRequest"
+      },
+      "SeedResponse": {
+        "properties": {
+          "success": {
+            "type": "boolean",
+            "title": "Success"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "success",
+          "message"
+        ],
+        "title": "SeedResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "E2E",
+      "description": "Playwright helpers for `make e2e-server`. Unauthenticated. Mounted and documented only in that mode \u2014 not in the product spec."
+    }
+  ]
+}

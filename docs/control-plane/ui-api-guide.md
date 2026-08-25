@@ -484,7 +484,7 @@ CI validates the committed spec matches the running app:
 
 ```bash
 uv run python openapi-spec/generate.py
-git diff --exit-code openapi-spec/openapi.json
+git diff --exit-code openapi-spec/openapi.json openapi-spec/openapi.e2e.json
 ```
 
 If this fails, the spec needs regenerating after route/model changes.

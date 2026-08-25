@@ -21,7 +21,7 @@ from fastapi.openapi.utils import get_openapi
 from scalo.health import HealthManager, create_health_router
 from scalo.logger import logger
 
-from dfe_engine.settings import DFESettings, is_dev_posture, load_settings
+from dfe_engine.settings import DFESettings, e2e_routes_enabled, is_dev_posture, load_settings
 
 
 @asynccontextmanager
@@ -352,14 +352,21 @@ def create_app(
         Configured FastAPI application.
     """
     settings = settings or load_settings()
+    e2e_docs = e2e_routes_enabled(settings)
 
+    openapi_tags = None
+    if e2e_docs:
+        from dfe_engine.api.e2e import E2E_OPENAPI_TAG
+
+        openapi_tags = [E2E_OPENAPI_TAG]
     app = FastAPI(
         title="DFE Engine API",
         description="Data Fusion Engine — configuration, scheduling, and query API",
         version=_get_version(),
         lifespan=lifespan,
-        docs_url="/docs",
+        docs_url=None if e2e_docs else "/docs",
         redoc_url="/redoc",
+        openapi_tags=openapi_tags,
     )
 
     app.state.settings = settings
@@ -406,6 +413,12 @@ def create_app(
 
     app.include_router(v1_router, prefix="/api")
 
+    if e2e_docs:
+        from dfe_engine.api.e2e import router as e2e_router
+
+        app.include_router(e2e_router, prefix="/api")
+        logger.warning("e2e-server routes mounted at /api/e2e")
+
     # JWKS + OIDC discovery (/.well-known/*) - public, so peers verify DFE tokens
     from dfe_engine.api.well_known import router as well_known_router
 
@@ -437,6 +450,7 @@ def create_app(
             version=app.version,
             description=app.description,
             routes=app.routes,
+            tags=app.openapi_tags,
         )
         schema.setdefault("components", {})["securitySchemes"] = {
             "BearerAuth": {
@@ -446,16 +460,30 @@ def create_app(
                 "description": "JWT Bearer token from /api/v1/auth/login",
             }
         }
-        # Apply BearerAuth to all /api/ routes by default
+        # Apply BearerAuth to all /api/ routes by default. The e2e-server
+        # helpers are unauthenticated and must stay that way in Swagger.
         for path_key, path_item in schema.get("paths", {}).items():
+            if path_key.startswith("/api/e2e"):
+                continue
             if path_key.startswith("/api/"):
                 for method_data in path_item.values():
                     if isinstance(method_data, dict):
                         method_data.setdefault("security", [{"BearerAuth": []}])
-        app.openapi_schema = schema
-        return schema
+        if e2e_docs:
+            from dfe_engine.api.e2e_docs import split_openapi
+
+            api_schema, _ = split_openapi(schema)
+            app.openapi_schema = api_schema
+        else:
+            app.openapi_schema = schema
+        return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
+
+    if e2e_docs:
+        from dfe_engine.api.e2e_docs import install_e2e_swagger
+
+        install_e2e_swagger(app)
 
     return app
 

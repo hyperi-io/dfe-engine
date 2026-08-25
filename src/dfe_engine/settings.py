@@ -86,6 +86,9 @@ Auth (local):
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
 - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 
+E2E server (Playwright host-run helpers; refused in production):
+- DFE_E2E_SERVER -> e2e_server
+
 Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
 - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
@@ -995,6 +998,15 @@ def is_dev_posture(env: str) -> bool:
     return env.strip().lower() in _NON_PROD_ENVS
 
 
+def e2e_routes_enabled(settings: "DFESettings") -> bool:
+    """True when the unauthenticated /api/e2e/* group may be mounted.
+
+    Requires both the explicit DFE_E2E_SERVER flag and a non-production posture.
+    ``make e2e-server`` sets the flag; a production DFE_ENV refuses it at load.
+    """
+    return bool(settings.e2e_server) and is_dev_posture(settings.env)
+
+
 class APISettings(BaseModel):
     """API server settings.
 
@@ -1142,12 +1154,25 @@ class DFESettings(BaseModel):
             "dev/development/local/test/ci for local development. DFE_ENV."
         ),
     )
+    e2e_server: bool = Field(
+        default=False,
+        description=(
+            "Mount the unauthenticated /api/e2e/* Playwright helpers "
+            "(seed-admin). DFE_E2E_SERVER. Refused in a production posture."
+        ),
+    )
 
     @model_validator(mode="after")
     def _reject_insecure_production_posture(self) -> "DFESettings":
         # Two ways a production posture can enforce nothing. Both are errors here
         # rather than warnings, because a warning leaves the process running.
         is_prod = not is_dev_posture(self.env)
+        if self.e2e_server and is_prod:
+            raise ValueError(
+                "e2e_server is True but env is production: the unauthenticated "
+                "/api/e2e/* seed endpoints must not ship. Set DFE_ENV to "
+                "dev/test/ci, or DFE_E2E_SERVER=false"
+            )
         if not is_prod:
             return self
 
@@ -1635,6 +1660,8 @@ def _get_env_overrides() -> dict:
     # Deployment posture (production|dev|test|...) - gates the placeholder-secret guard
     if val := _get_env("DFE_ENV"):
         overrides["env"] = val
+    if val := _get_env("DFE_E2E_SERVER"):
+        overrides["e2e_server"] = val.lower() in ("true", "1", "yes")
 
     # Config directory (dfe-devex submodule) — auto-resolves registry subdirs
     # Individual env vars (DFE_SOURCES_DIR, etc.) take precedence.
