@@ -74,28 +74,35 @@ class DDLFileWriter:
             return "1.0.0"
 
     @staticmethod
-    def _resolve_hunt_detection_checkpoint_path(schemas_root: Path | None = None) -> Path:
-        """Resolve the path to hunts/detection_checkpoint.yaml."""
+    def _resolve_hunt_schema_path(filename: str, schemas_root: Path | None = None) -> Path:
+        """Resolve a file under the dfe-schemas ``hunts/`` directory.
+
+        The unresolved case raises here rather than building a path from None,
+        which crashed the schema Job with a TypeError instead of saying what was
+        missing.
+        """
         schemas_root = schemas_root or _resolve_schemas_root()
-        candidate = schemas_root / "hunts" / "detection_checkpoint.yaml"
-        if schemas_root:
-            if candidate.exists():
-                return candidate
+        if schemas_root is None:
+            raise FileNotFoundError(
+                f"hunts/{filename} was not found: no dfe-schemas tree resolved. Set "
+                "DFE_SCHEMAS_DIR, or check out the schemas submodule"
+            )
+        candidate = schemas_root / "hunts" / filename
+        if candidate.exists():
+            return candidate
         raise FileNotFoundError(
             f"{str(candidate)!r} was not found. Ensure the dfe-schemas submodule is checked out"
         )
 
     @staticmethod
+    def _resolve_hunt_detection_checkpoint_path(schemas_root: Path | None = None) -> Path:
+        """Resolve the path to hunts/detection_checkpoint.yaml."""
+        return DDLFileWriter._resolve_hunt_schema_path("detection_checkpoint.yaml", schemas_root)
+
+    @staticmethod
     def _resolve_hunt_results_path(schemas_root: Path | None = None) -> Path:
-        """Resolve the path to hunt/results.yaml."""
-        schemas_root = schemas_root or _resolve_schemas_root()
-        candidate = schemas_root / "hunts" / "results.yaml"
-        if schemas_root:
-            if candidate.exists():
-                return candidate
-        raise FileNotFoundError(
-            f"{str(candidate)!r} was not found. Ensure the dfe-schemas submodule is checked out"
-        )
+        """Resolve the path to hunts/results.yaml."""
+        return DDLFileWriter._resolve_hunt_schema_path("results.yaml", schemas_root)
 
     def _profile_table_spec(
         self,
