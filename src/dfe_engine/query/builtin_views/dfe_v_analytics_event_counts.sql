@@ -1,4 +1,4 @@
-CREATE OR REPLACE VIEW dfe_v_analytics_event_counts AS
+CREATE OR REPLACE VIEW {db}.dfe_v_analytics_event_counts AS
 SELECT
     toDate(timestamp) AS event_date,
     event_type,

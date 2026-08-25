@@ -1,4 +1,4 @@
-CREATE OR REPLACE VIEW dfe_v_system_health AS
+CREATE OR REPLACE VIEW {db}.dfe_v_system_health AS
 SELECT
     hostname() AS host,
     version() AS version,

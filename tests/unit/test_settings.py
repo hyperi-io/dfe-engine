@@ -173,11 +173,22 @@ class TestEnvOverrides:
         assert settings.clickhouse.data_database == "dfe"
         assert settings.clickhouse.effective_data_database == "dfe"
 
-    def test_clickhouse_otel_database_default_and_override(self, monkeypatch):
-        monkeypatch.delenv("DFE_CLICKHOUSE_OTEL_DATABASE", raising=False)
-        assert load_settings().clickhouse.otel_database == "dfe"
-        monkeypatch.setenv("DFE_CLICKHOUSE_OTEL_DATABASE", "telemetry")
-        assert load_settings().clickhouse.otel_database == "telemetry"
+    def test_one_database_holds_everything(self, monkeypatch):
+        """There is ONE database setting, and telemetry is not a second one.
+
+        The otel, hunts and internal databases were separate knobs naming the
+        same place; a rename had to be applied to each or the grants and the
+        tables disagreed.
+        """
+        monkeypatch.delenv("DFE_CLICKHOUSE_DATA_DATABASE", raising=False)
+        clickhouse = load_settings().clickhouse
+        assert clickhouse.effective_data_database == "dfe"
+        for gone in ("otel_database", "hunts_database", "internal_database"):
+            assert not hasattr(clickhouse, gone)
+
+    def test_renaming_the_database_moves_everything(self, monkeypatch):
+        monkeypatch.setenv("DFE_CLICKHOUSE_DATA_DATABASE", "telemetry")
+        assert load_settings().clickhouse.effective_data_database == "telemetry"
 
     def test_effective_data_database_defaults_to_dfe(self, monkeypatch):
         monkeypatch.setenv("DFE_CLICKHOUSE_DATABASE", "analytics")

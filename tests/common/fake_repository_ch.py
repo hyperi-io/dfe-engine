@@ -8,15 +8,21 @@
 
 """In-memory stand-in for ClickHouseClientWrapper covering RepositoryStore SQL.
 
-Implements exactly what the store issues: the DDL CREATEs, the
-INSERT-with-data path, and the two SELECT shapes (get by key vs list a
-namespace). SELECT honours ReplacingMergeTree(updated_at, is_deleted)
-FINAL semantics: latest updated_at wins per key (last insert wins on
-ties, matching ClickHouse merge behaviour), tombstones hide the row.
+Implements exactly what the store issues: the schema applier's ``command`` /
+``query`` pair, the INSERT-with-data path, and the two SELECT shapes (get by key
+vs list a namespace). SELECT honours ReplacingMergeTree(updated_at, is_deleted)
+FINAL semantics: latest updated_at wins per key (last insert wins on ties,
+matching ClickHouse merge behaviour), tombstones hide the row.
+
+The applier's state reads are answered from what ``command`` has created, so a
+second ``ensure_schema`` sees the table and reports it unchanged rather than
+issuing the DDL twice.
 """
 
 from __future__ import annotations
 
+import re
+from types import SimpleNamespace
 from typing import Any
 
 _ROW_COLS = (
@@ -40,6 +46,42 @@ class FakeRepositoryCH:
         self.rows: list[dict[str, Any]] = []
         self.ddl: list[str] = []
         self.select_params: list[dict[str, Any]] = []
+        # What the store's schema apply has already created, so a second
+        # ensure_schema sees them and reports no change.
+        self.databases: set[str] = set()
+        self.tables: set[tuple[str, str]] = set()
+
+    # ── the applier's surface: command + query ────────────────
+
+    def command(self, statement: str, *args: Any, **kwargs: Any):
+        """DDL passthrough, recording what it created."""
+        self.ddl.append(statement.strip())
+        db = re.search(r"CREATE DATABASE IF NOT EXISTS (\S+)", statement)
+        if db:
+            self.databases.add(db.group(1))
+        tbl = re.search(r"CREATE TABLE IF NOT EXISTS (\S+)\.(\S+)", statement)
+        if tbl:
+            self.tables.add((tbl.group(1), tbl.group(2)))
+        return []
+
+    def query(self, sql: str, *args: Any, parameters: Any = None, **kwargs: Any):
+        """The applier's state reads, returning a QueryResult-shaped object."""
+        params = parameters or {}
+        # The engine resolver's sensing probes: no cloud_mode and no cluster
+        # macros, so it classifies this fake as a single node.
+        if "system.settings" in sql or "system.macros" in sql:
+            return SimpleNamespace(result_rows=[])
+        if "system.databases" in sql and "engine" in sql:
+            return SimpleNamespace(result_rows=[])
+        if "system.databases" in sql:
+            rows = [(1,)] if params.get("db") in self.databases else []
+        elif "system.tables" in sql:
+            rows = [(1,)] if (params.get("db"), params.get("tbl")) in self.tables else []
+        elif "system.columns" in sql:
+            rows = [(name,) for name in _ROW_COLS]
+        else:
+            raise AssertionError(f"unexpected applier query: {sql}")
+        return SimpleNamespace(result_rows=rows)
 
     def execute(self, query: str, *args: Any, parameters: Any = None, **kwargs: Any):
         q = query.strip()

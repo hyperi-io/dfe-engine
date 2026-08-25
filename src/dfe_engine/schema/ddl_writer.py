@@ -18,7 +18,7 @@ from typing import Any
 
 from ..source.type_registry import TypeRegistry
 from .engine_resolver import EngineResolver
-from .schema_ddl import DDLConfig, DDLGenerator
+from .schema_ddl import DDLConfig, DDLGenerator, TableSpec
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
 
 _PROFILES = ("timeseries", "minimal", "passthrough")
@@ -97,14 +97,14 @@ class DDLFileWriter:
             f"{str(candidate)!r} was not found. Ensure the dfe-schemas submodule is checked out"
         )
 
-    def _profile_table_create(
+    def _profile_table_spec(
         self,
         table_name: str,
         profile_name: str,
         profile_version: str | None = None,
         description: str | None = None,
-    ) -> str:
-        """Generate DDL for a profile-only reference table."""
+    ) -> TableSpec:
+        """Describe a profile-only table: its columns and its DDL config."""
         profile_version = profile_version or self._profile_version(profile_name)
 
         columns = SchemaLoader.load_profile(
@@ -117,41 +117,48 @@ class DDLFileWriter:
             description=description,
             topology=self._topology,
         )
-        ddl = self._ddl_gen.generate_create_table(
-            table_name=table_name, columns=columns, config=config, generated_time=None
-        )
-        return ddl
+        return TableSpec(name=table_name, columns=columns, config=config)
 
-    def generate_default_table(
+    def _render(self, spec: TableSpec) -> str:
+        """Render a spec's CREATE TABLE."""
+        return self._ddl_gen.generate_create_table(
+            table_name=spec.name, columns=spec.columns, config=spec.config, generated_time=None
+        )
+
+    def default_table_spec(
         self, profile_name: str = _DEFAULT_PROFILE, profile_version: str | None = None
-    ) -> str:
-        """Generate DDL for the default ingestion table (profile columns only)."""
-        table_name = "default"
-        return self._profile_table_create(
-            table_name=table_name,
+    ) -> TableSpec:
+        """Describe the default ingestion table (profile columns only)."""
+        return self._profile_table_spec(
+            table_name="default",
             profile_name=profile_name,
             profile_version=profile_version,
             description="Default ingestion table (profile columns only)",
         )
 
-    def generate_profile_table(self, profile_name: str, profile_version: str | None = None) -> str:
-        """Generate DDL for a profile-only reference table."""
-        table_name = f"_{profile_name}_profile"
-        return self._profile_table_create(
-            table_name=table_name,
-            profile_name=profile_name,
-            profile_version=profile_version,
-            description=f"Reference DDL for the {profile_name} common header profile",
+    def generate_default_table(
+        self, profile_name: str = _DEFAULT_PROFILE, profile_version: str | None = None
+    ) -> str:
+        """Generate DDL for the default ingestion table (profile columns only)."""
+        return self._render(
+            self.default_table_spec(profile_name=profile_name, profile_version=profile_version)
         )
 
-    def generate_detection_checkpoint_table(
-        self, detection_checkpoint_version: str | None = None, schemas_root_path: Path | None = None
-    ) -> str:
-        """Generate DDL for the hunt detection checkpoint table (no profile)."""
-        table_name = "detection_checkpoint"
-        table_description = "Hunt execution checkpoint tracking"
-        ttl_days = 365
+    def generate_profile_table(self, profile_name: str, profile_version: str | None = None) -> str:
+        """Generate DDL for a profile-only reference table."""
+        return self._render(
+            self._profile_table_spec(
+                table_name=f"_{profile_name}_profile",
+                profile_name=profile_name,
+                profile_version=profile_version,
+                description=f"Reference DDL for the {profile_name} common header profile",
+            )
+        )
 
+    def detection_checkpoint_table_spec(
+        self, detection_checkpoint_version: str | None = None, schemas_root_path: Path | None = None
+    ) -> TableSpec:
+        """Describe the hunt detection checkpoint table (no profile)."""
         detection_checkpoint_path = self._resolve_hunt_detection_checkpoint_path(
             schemas_root=schemas_root_path
         )
@@ -164,33 +171,38 @@ class DDLFileWriter:
             partition_column="query_checkpoint_time",
             partition_granularity="month",
             schema_version=detection_checkpoint_version,
-            description=table_description,
-            ttl_days=ttl_days,
+            description="Hunt execution checkpoint tracking",
+            ttl_days=365,
             topology=self._topology,
         )
-        return self._ddl_gen.generate_create_table(
-            table_name=table_name,
-            columns=detection_checkpoint_columns,
-            config=config,
-            generated_time=None,
+        return TableSpec(
+            name="detection_checkpoint", columns=detection_checkpoint_columns, config=config
         )
 
-    def generate_detection_table(
+    def generate_detection_checkpoint_table(
+        self, detection_checkpoint_version: str | None = None, schemas_root_path: Path | None = None
+    ) -> str:
+        """Generate DDL for the hunt detection checkpoint table (no profile)."""
+        return self._render(
+            self.detection_checkpoint_table_spec(
+                detection_checkpoint_version=detection_checkpoint_version,
+                schemas_root_path=schemas_root_path,
+            )
+        )
+
+    def detection_table_spec(
         self,
         profile_name: str = _DEFAULT_PROFILE,
         profile_version: str | None = None,
         hunt_results_version: str | None = None,
         schemas_root_path: Path | None = None,
-    ) -> str:
-        """Generate DDL for the hunt detection table.
+    ) -> TableSpec:
+        """Describe the hunt detection table.
 
         The table is ``detection`` and lives in the hunts database; the columns
         come from ``hunts/results.yaml`` composed onto the common header, minus
         whatever that schema's ``profile_exclude`` drops.
         """
-        table_name = "detection"
-        table_description = "Hunt detection results (profile and hunts.results columns)"
-        ttl_days = 365
         # Resolve so the table comment records the profile version it was built
         # from, the same as every other profile-composed table.
         profile_version = profile_version or self._profile_version(profile_name)
@@ -213,12 +225,27 @@ class DDLFileWriter:
             profile_name=profile_name,
             profile_version=profile_version,
             schema_version=hunt_results_version,
-            description=table_description,
-            ttl_days=ttl_days,
+            description="Hunt detection results (profile and hunts.results columns)",
+            ttl_days=365,
             topology=self._topology,
         )
-        return self._ddl_gen.generate_create_table(
-            table_name=table_name, columns=all_columns, config=config, generated_time=None
+        return TableSpec(name="detection", columns=all_columns, config=config)
+
+    def generate_detection_table(
+        self,
+        profile_name: str = _DEFAULT_PROFILE,
+        profile_version: str | None = None,
+        hunt_results_version: str | None = None,
+        schemas_root_path: Path | None = None,
+    ) -> str:
+        """Generate DDL for the hunt detection table."""
+        return self._render(
+            self.detection_table_spec(
+                profile_name=profile_name,
+                profile_version=profile_version,
+                hunt_results_version=hunt_results_version,
+                schemas_root_path=schemas_root_path,
+            )
         )
 
     def generate_all(self, schemas_root_path: Path | None = None) -> dict[str, Any]:

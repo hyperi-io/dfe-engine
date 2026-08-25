@@ -8,8 +8,8 @@
 
 """ClickHouse-backed store for scope-aligned small objects.
 
-Storage model (see ``resources/repository.sql``, canonical copy in the
-dfe-schemas submodule at ``ddl/repository.sql``):
+Storage model (the table spec lives in
+:func:`dfe_engine.schema.internal_tables.repository_spec`):
 
 - One ReplacingMergeTree(updated_at, is_deleted) table keyed by
   ``(scope, scope_id, namespace, key)``.
@@ -23,13 +23,17 @@ dfe-schemas submodule at ``ddl/repository.sql``):
 
 from __future__ import annotations
 
-import importlib.resources
 from datetime import UTC, datetime
 from typing import Any
 
 from scalo.logger import logger
 
-DEFAULT_DATABASE = "dfe_internal"
+from dfe_engine.schema.applier import SchemaApplier
+from dfe_engine.schema.engine_resolver import EngineResolver
+from dfe_engine.schema.internal_tables import repository_spec
+from dfe_engine.settings import default_data_database
+
+DEFAULT_DATABASE = default_data_database()
 
 # Record/metadata shapes returned by the store. Named because the
 # ``list`` method shadows the builtin inside the class body.
@@ -87,15 +91,6 @@ def json_merge_patch(target: Any, patch: Any) -> Any:
     return result
 
 
-def _load_ddl(database: str) -> str:
-    """Load the bundled DDL, substituting an overridden database name."""
-    pkg = importlib.resources.files("dfe_engine.repository.resources")
-    ddl = pkg.joinpath("repository.sql").read_text(encoding="utf-8")
-    if database != DEFAULT_DATABASE:
-        ddl = ddl.replace(DEFAULT_DATABASE, database)
-    return ddl
-
-
 def _now_ms() -> datetime:
     """UTC now truncated to millisecond precision (matches DateTime64(3))."""
     now = datetime.now(UTC)
@@ -134,19 +129,21 @@ class RepositoryStore:
     # ── Schema ────────────────────────────────────────────────
 
     def ensure_schema(self) -> None:
-        """Create database + table from the bundled DDL (idempotent)."""
+        """Create or reconcile database + table (idempotent).
+
+        Through the shared applier, so the engine clause is sensed from the
+        server rather than pinned: on a cluster the table is created ON CLUSTER
+        as ``ReplicatedReplacingMergeTree``, and a column added to the spec is
+        added to an existing table rather than silently skipped.
+        """
         if self._db in RepositoryStore._ensured_databases:
             return
-        # Strip SQL comment lines BEFORE splitting on ';' - the header
-        # comment itself contains a semicolon, and the client wrapper
-        # routes on the first keyword, which must be the CREATE itself.
-        lines = [ln for ln in _load_ddl(self._db).splitlines() if not ln.strip().startswith("--")]
-        for statement in "\n".join(lines).split(";"):
-            stmt = statement.strip()
-            if stmt:
-                self._client.execute(stmt)
+        spec = repository_spec(self._db)
+        applier = SchemaApplier(self._client, EngineResolver(client=self._client))
+        applier.ensure_database(self._db)
+        change = applier.ensure_table(self._db, spec.name, spec.columns, spec.config)
         RepositoryStore._ensured_databases.add(self._db)
-        logger.debug(f"RepositoryStore: ensured {self._db}.repository exists")
+        logger.debug(f"RepositoryStore: {change.describe()}")
 
     # ── CRUD ──────────────────────────────────────────────────
 

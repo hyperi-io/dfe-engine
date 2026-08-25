@@ -30,29 +30,32 @@ _GiB = 1024**3
 
 # ---- Data-scoping databases + grants (tenant isolation, spec 5.2) ----------
 #
-# These mirror the ClickHouseSettings defaults (data_database=`dfe`,
-# otel_database=`dfe`). They are the seed values the operator can edit; the
-# reconciler carries no runtime settings into this pure config layer, so the
-# seeds hold the canonical strings.
+# Seed values an operator can edit. They name no database: see DB below.
 
-DATA_DATABASE = "dfe"
-"""The database DFE data tables live in (landing table + per-source tables)."""
+DB = "{db}"
+"""Placeholder for THE DFE database, resolved at reconcile time.
 
-OTEL_DATABASE = "dfe"
-"""The database the OTel telemetry tables (``otel_logs`` etc.) now live in.
+Every table DFE writes lives in one database - the landing table, per-source
+tables, hunt output, the OTel telemetry tables and the engine's own state.
+Splitting them by purpose bought nothing: ClickHouse GRANT has no table-name
+wildcard, so a split only multiplies db-wide grants, and isolation is by ROW
+POLICY either way.
 
-Moved out of the CH-builtin ``default`` db to ``dfe`` (mirrors
-``ClickHouseSettings.otel_database``). ClickHouse GRANT has no table-name
-wildcard, so the otel_reader grant is db-wide on this database.
+The NAME is never written here. This layer is pure config with no runtime
+settings, so a literal would silently ignore a deployment that sets
+``DFE_CLICKHOUSE_DATA_DATABASE`` and grant on a database it does not have. The
+reconciler substitutes ``clickhouse.effective_data_database`` (see
+``resolve_grant_databases``).
 """
 
 # The analyst tier grants the WHOLE data database to EVERY user, org and platform
-# alike: an org_viewer sees every source table in `dfe.*` (dfe.default, dfe.syslog,
-# any NEW source table) with no admin action. Isolation is by ROW POLICY, not
-# grant scope - a RESTRICTIVE `_org_id` policy fences each org to its own rows, and
-# a `USING 0` deny policy hides the `dfe.*` tables that carry no `_org_id`
-# (otel_*, meta). (D9: reverses D8's per-table grant narrowing.)
-BROAD_DATA_GRANT = f"SELECT ON {DATA_DATABASE}.*"  # SELECT ON dfe.*
+# alike: an org_viewer sees every source table with no admin action. Isolation is
+# by ROW POLICY, not grant scope - a RESTRICTIVE `_org_id` policy fences each org
+# to its own rows, and a `USING 0` deny policy hides the tables that carry no
+# `_org_id` (otel_*, meta, the engine's own state). The reconciler DISCOVERS which
+# tables those are, so a new one is fenced without anyone remembering.
+# (D9: reverses D8's per-table grant narrowing.)
+BROAD_DATA_GRANT = f"SELECT ON {DB}.*"
 
 
 # ClickHouse's own introspection tables, granted to the platform reader so the
@@ -217,7 +220,7 @@ def _analyst_tier(name: str, mem: int, secs: int, queries: int, *, default: bool
         # `USING 0` deny policy on the non-`_org_id` tables (dfe.otel_*, meta) -
         # grant scope is broad, the row policies are the isolation control.
         default=default,
-        grants=[BROAD_DATA_GRANT, "SELECT ON dfe_hunts.*"],
+        grants=[BROAD_DATA_GRANT],
         settings={
             # readonly=2: queries only, but per-query output settings stay
             # changeable -- BI clients (hyperdx) send those with every query.
@@ -244,7 +247,7 @@ def _hunt_tier(name: str, mem: int, secs: int, queries: int, *, default: bool = 
         kind="hunt",
         default=default,
         # Hunts read the data and write detections; no readonly.
-        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*", "INSERT ON dfe_hunts.*"],
+        grants=[f"SELECT ON {DB}.*", f"INSERT ON {DB}.*"],
         settings={"max_memory_usage": mem, "max_execution_time": secs},
         quota={
             "interval": "1 hour",
@@ -269,11 +272,11 @@ DEFAULT_TIERS: list[ChTier] = [
 # Fixed service identities (spec 5.3) - single, not tiered. Seeded like the
 # tiers: non-destructive, operator-editable.
 DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
-    # dfe-loader: async-insert profile + INSERT on the data dbs.
+    # dfe-loader: async-insert profile + INSERT on the DFE database.
     ChServiceRole(
         name="loader",
         mint_user=True,
-        grants=["INSERT ON dfe.*", "INSERT ON dfe_hunts.*"],
+        grants=[f"INSERT ON {DB}.*"],
         settings={
             "async_insert": 1,
             "wait_for_async_insert": 1,
@@ -290,7 +293,7 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
         # Also reads ClickHouse's own system tables: this is the identity the
         # platform team's HyperDX connection uses, and the ClickHouse dashboards
         # are raw SQL over `system`.
-        grants=["SELECT ON dfe.*", "SELECT ON dfe_hunts.*", *SYSTEM_INTROSPECTION_GRANTS],
+        grants=[f"SELECT ON {DB}.*", *SYSTEM_INTROSPECTION_GRANTS],
         settings={
             # readonly=2, not 1: queries only, but per-query output settings stay
             # changeable -- hyperdx sends date_time_output_format with every query
@@ -308,16 +311,15 @@ DEFAULT_SERVICE_ROLES: list[ChServiceRole] = [
     ChServiceRole(
         name="hunt_runner",
         mint_user=False,
-        grants=["SELECT ON dfe_hunts.*", "INSERT ON dfe_hunts.*"],
+        grants=[f"SELECT ON {DB}.*", f"INSERT ON {DB}.*"],
     ),
     # Observability telemetry is platform-internal: composed onto admin and
-    # infra-admin group users at bind time, never part of an analyst tier. The
-    # otel tables moved from the CH-builtin `default` db to `dfe` (dfe.otel_logs,
-    # dfe.otel_metrics_*, ...); ClickHouse GRANT has no table-name wildcard, so
-    # the read is db-wide on the otel database rather than a `dfe.otel_*` prefix.
+    # infra-admin group users at bind time, never part of an analyst tier.
+    # ClickHouse GRANT has no table-name wildcard, so the read is db-wide rather
+    # than a `dfe.otel_*` prefix.
     ChServiceRole(
         name="otel_reader",
         mint_user=False,
-        grants=[f"SELECT ON {OTEL_DATABASE}.*"],
+        grants=[f"SELECT ON {DB}.*"],
     ),
 ]

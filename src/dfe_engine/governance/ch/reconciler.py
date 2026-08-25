@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 from scalo.logger import logger
 
-from .models import DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_user_name, tenant_policy_name
+from .models import DB, DEFAULT_SERVICE_ROLES, DEFAULT_TIERS, org_user_name, tenant_policy_name
 from .render import (
     _bq,
     render_materialise,
@@ -45,6 +45,26 @@ class ReconcileResult(BaseModel):
     dropped: list[str] = Field(default_factory=list)  # stale objects dropped
     minted: list[str] = Field(default_factory=list)  # identities whose secret was touched
     errors: list[str] = Field(default_factory=list)
+
+
+def resolve_grant_databases(items: list[Any], database: str) -> list[Any]:
+    """Copies of *items* with the ``{db}`` placeholder in their grants resolved.
+
+    The tier and service-role seeds name no database (``models.DB``), so this is
+    what turns them into grants against the deployment's actual one. Copies, so a
+    caller's config objects are never mutated and a second reconcile re-resolves
+    from the same source.
+    """
+    resolved: list[Any] = []
+    for item in items:
+        grants = getattr(item, "grants", None)
+        if not grants or not any(DB in g for g in grants):
+            resolved.append(item)
+            continue
+        resolved.append(
+            item.model_copy(update={"grants": [g.replace(DB, database) for g in grants]})
+        )
+    return resolved
 
 
 def _default_tier_name(tiers: list[Any], kind: str) -> str:
@@ -121,11 +141,28 @@ class ChRbacReconciler:
     ``.command(stmt)`` + ``.query(sql, parameters=...).result_rows``).
     ``secrets_store`` is the scalo.secrets seam (``DfeSecrets``): when absent, tiers
     / roles / org policies still reconcile but no group/service USERS are minted.
+    ``database`` is what the ``{db}`` placeholder in the seeded grants resolves to,
+    defaulting to the deployment's data database.
     """
 
-    def __init__(self, admin_client: Any, *, secrets_store: Any = None) -> None:
+    def __init__(
+        self, admin_client: Any, *, secrets_store: Any = None, database: str | None = None
+    ) -> None:
         self._client = admin_client
         self._secrets = secrets_store
+        self._database = database or self._settings_database()
+
+    @staticmethod
+    def _settings_database() -> str:
+        """The deployment's data database, or the model default when unloadable."""
+        try:
+            from dfe_engine.settings import get_settings
+
+            return get_settings().clickhouse.effective_data_database
+        except Exception:
+            from dfe_engine.settings import ClickHouseSettings
+
+            return str(ClickHouseSettings.model_fields["data_database"].default)
 
     # ---- discovery -------------------------------------------------------
 
@@ -211,7 +248,12 @@ class ChRbacReconciler:
         """Full ordered DDL (spec 7): tiers -> service roles -> tenant axis ->
         org users -> group users. Pure given the discovered ``org_tables`` and the
         minted ``*_hashes``.
+
+        Resolves ``{db}`` in the grants, so calling this directly on the seeds
+        renders the same DDL ``reconcile`` applies.
         """
+        tiers = resolve_grant_databases(tiers, self._database)
+        service_roles = resolve_grant_databases(service_roles, self._database)
         stmts: list[str] = []
         for t in tiers:
             stmts += render_tier(t)
@@ -260,6 +302,10 @@ class ChRbacReconciler:
     ) -> ReconcileResult:
         """Discover, mint, render, apply, and drop-stale, idempotently."""
         result = ReconcileResult()
+        # Resolve {db} before anything reads the grants: the granted-db list the
+        # deny policies are built from is parsed straight out of them.
+        tiers = resolve_grant_databases(tiers, self._database)
+        service_roles = resolve_grant_databases(service_roles, self._database)
         org_tables = self.discover_org_id_tables()
         org_set = set(org_tables)
         deny_tables = [

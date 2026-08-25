@@ -37,6 +37,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from dfe_engine.schema.applier import SchemaApplier
+from dfe_engine.schema.engine_resolver import EngineResolver
+from dfe_engine.schema.internal_tables import hunt_coordination_specs
+
 
 @dataclass(frozen=True, slots=True)
 class Lease:
@@ -104,25 +108,17 @@ class ChCoordinator:
     # ---- schema -------------------------------------------------------
 
     def ensure_schema(self) -> None:
-        """Create the three coordination tables if absent (idempotent)."""
-        self._ch.command(f"CREATE DATABASE IF NOT EXISTS `{self._db}`")
-        self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_lease ("
-            "hunt_id String, owner String, fire Int64, lease_until Int64, "
-            "claimed DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(claimed) ORDER BY hunt_id"
-        )
-        self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_watermark ("
-            "hunt_id String, watermark Int64, updated DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
-        )
-        self._ch.command(
-            f"CREATE TABLE IF NOT EXISTS `{self._db}`.hunt_state ("
-            "hunt_id String, overrun_count Int64, too_aggressive UInt8, "
-            "updated DateTime64(3) DEFAULT now64(3)) "
-            "ENGINE = ReplacingMergeTree(updated) ORDER BY hunt_id"
-        )
+        """Create or reconcile the three coordination tables (idempotent).
+
+        Through the shared applier so the engine is sensed, not pinned. A pinned
+        ``ReplacingMergeTree`` puts these on one replica only, and this worker
+        connects through a headless Service: a restart that lands elsewhere finds
+        no lease and no watermark, and silently re-runs a window already done.
+        """
+        applier = SchemaApplier(self._ch, EngineResolver(client=self._ch))
+        applier.ensure_database(self._db)
+        for spec in hunt_coordination_specs(self._db):
+            applier.ensure_table(self._db, spec.name, spec.columns, spec.config)
 
     # ---- lease (claim) ------------------------------------------------
 

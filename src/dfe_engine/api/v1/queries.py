@@ -274,7 +274,7 @@ async def query_cost_leaderboard(
     days: int = Query(7, ge=1, le=365, description="Lookback window in days"),
     limit: int = Query(50, ge=1, le=500, description="Max rows"),
 ) -> list[CostLeaderboardRow]:
-    """Top query-cost consumers from ``dfe_audit.query_log_archive``, heaviest first.
+    """Top query-cost consumers from ``dfe.query_log_archive``, heaviest first.
 
     Groups by the attribution id (the hunt id for feature='hunts') and returns the
     query count + summed read rows/bytes + duration + peak memory. Reads the MV the
@@ -285,10 +285,17 @@ async def query_cost_leaderboard(
     from dfe_engine.settings import get_clickhouse_config, get_settings
 
     try:
+        settings = get_settings()
         wrapper = ClickHouseManager.get_instance(
-            get_clickhouse_config(settings=get_settings())
+            get_clickhouse_config(settings=settings)
         ).get_clickhouse_client()
-        rows = query_log_archive.cost_leaderboard(wrapper, feature=feature, days=days, limit=limit)
+        rows = query_log_archive.cost_leaderboard(
+            wrapper,
+            feature=feature,
+            days=days,
+            limit=limit,
+            database=settings.clickhouse.effective_data_database,
+        )
     except Exception as exc:
         logger.error("cost leaderboard query failed", error=str(exc))
         raise HTTPException(

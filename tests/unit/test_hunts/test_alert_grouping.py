@@ -291,7 +291,7 @@ class TestAlertStateManager:
     def test_ddl_contains_expected_structure(self):
         mgr = AlertStateManager()
         ddl = mgr.get_ddl()
-        assert "CREATE TABLE IF NOT EXISTS dfe_audit.alert_state" in ddl
+        assert "CREATE TABLE IF NOT EXISTS dfe.alert_state" in ddl
         assert "hunt_name" in ddl
         assert "rule_name" in ddl
         assert "_org_id" in ddl
@@ -308,10 +308,13 @@ class TestAlertStateManager:
     def test_ensure_table_exists_idempotent(self):
         mgr = AlertStateManager()
         ch_client = MagicMock()
+        # Nothing exists yet, so the applier creates both.
+        ch_client.query.return_value.result_rows = []
         mgr.ensure_table_exists(ch_client)
+        first = ch_client.command.call_count
+        assert first == 2  # CREATE DATABASE + CREATE TABLE
         mgr.ensure_table_exists(ch_client)
-        # Should only execute DDL once (cached)
-        assert ch_client.execute.call_count == 2  # CREATE DATABASE + CREATE TABLE
+        assert ch_client.command.call_count == first  # cached, no re-run
 
     def test_check_cooldown_no_prior_fire(self):
         mgr = AlertStateManager()
@@ -372,13 +375,13 @@ class TestAlertStateManager:
         mgr.record_fire(ch_client, "hunt1", "rule1", "acme", fired_at=fired_at)
         ch_client.execute.assert_called_once()
         call_args = ch_client.execute.call_args
-        assert "INSERT INTO dfe_audit.alert_state" in call_args[0][0]
+        assert "INSERT INTO dfe.alert_state" in call_args[0][0]
 
     def test_ddl_contains_group_key(self):
         mgr = AlertStateManager()
         ddl = mgr.get_ddl()
         assert "group_key" in ddl
-        assert "_org_id, group_key)" in ddl  # ORDER BY includes group_key
+        assert "`_org_id`, `group_key`)" in ddl  # ORDER BY includes group_key
 
     def test_check_cooldown_with_group_key(self):
         """Different groups have independent cooldown state."""
