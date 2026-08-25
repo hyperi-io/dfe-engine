@@ -19,11 +19,10 @@ from pathlib import Path
 
 from scalo.logger import logger
 
+from dfe_engine.schema.schema_loader import DEFAULT_SCHEMAS_SEED_DIR, SEED_DIR_ENV_VAR
 from dfe_engine.settings import DFESettings
 
 DEFAULT_CONFIG_DIR = "/app/config"
-DEFAULT_SCHEMAS_SEED_DIR = "/app/schemas-seed"
-SEED_DIR_ENV_VAR = "DFE_SCHEMAS_SEED_DIR"
 SEED_MARKER_NAME = ".seeded"
 
 
