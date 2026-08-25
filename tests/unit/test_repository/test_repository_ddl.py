@@ -1,95 +1,67 @@
 #  Project:      dfe-engine
 #  File:         test_repository_ddl.py
-#  Purpose:      Guards for the bundled repository DDL (sync + invariants)
+#  Purpose:      Guards for the repository table spec (dedup invariants + topology)
 #  Language:     Python
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 
-"""Guard: bundled repository DDL must match the dfe-schemas submodule copy.
+"""Guards for ``dfe_internal.repository``, rendered from its spec.
 
-The bundled copy (``src/dfe_engine/repository/resources/repository.sql``)
-is the fallback the engine auto-creates from when the ``schemas``
-submodule is absent. It must never hand-drift from canonical
-``schemas/ddl/repository.sql``.
+The spec in :mod:`dfe_engine.schema.internal_tables` is the source of truth --
+there is no bundled ``.sql`` and no canonical copy in dfe-schemas to drift from,
+because the engine clause is not knowable until the target server is sensed.
 
-Regenerate with::
-
-    cp schemas/ddl/repository.sql src/dfe_engine/repository/resources/repository.sql
+What is asserted here are the invariants a rendering must never break: the dedup
+key, the absence of a partition, and the topology forms the resolver produces.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
+from dfe_engine.schema.engine_resolver import EngineResolver
+from dfe_engine.schema.internal_tables import repository_spec
+from dfe_engine.schema.schema_ddl import DDLGenerator
+from dfe_engine.source.type_registry import TypeRegistry
 
-import pytest
-
-_ROOT = Path(__file__).resolve().parents[3]
-_BUNDLED = _ROOT / "src" / "dfe_engine" / "repository" / "resources" / "repository.sql"
-_SUBMODULE = _ROOT / "schemas"
-_CANONICAL = _SUBMODULE / "ddl" / "repository.sql"
+_DB = "dfe_internal"
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "dfe-schemas has no ddl/ directory, so schemas/ddl/repository.sql does not exist "
-        "even with the submodule checked out (CI pins `submodules: schemas`), and the drift "
-        "guard below has nothing to compare against. Either dfe-schemas publishes the "
-        "canonical DDL under ddl/, or the bundled copy is declared the source of truth and "
-        "this guard removed. Remove this marker once the canonical file exists."
-    ),
-)
-def test_canonical_ddl_exists_in_schemas_submodule() -> None:
-    """The canonical DDL must exist whenever the submodule is checked out.
-
-    Unguarded on purpose: an absent canonical DDL is the failure mode this test
-    exists to report, so guarding on it would leave the test incapable of
-    failing. The submodule-absent case belongs to
-    test_bundled_ddl_matches_canonical.
-    """
-    assert _SUBMODULE.is_dir(), f"schemas submodule missing entirely: {_SUBMODULE}"
-    assert _CANONICAL.exists(), f"canonical DDL not found: {_CANONICAL}"
-
-
-def test_bundled_ddl_matches_canonical() -> None:
-    """Bundled DDL must be byte-identical to the schemas submodule copy."""
-    if not _CANONICAL.exists():
-        # An unchecked-out submodule is a legitimate local-only skip; a checked-out
-        # submodule missing the file is a defect, pinned by
-        # test_canonical_ddl_exists_in_schemas_submodule above.
-        if not _SUBMODULE.is_dir() or not any(_SUBMODULE.iterdir()):
-            pytest.skip("dfe-schemas submodule not checked out")
-        pytest.skip(
-            f"{_CANONICAL.relative_to(_ROOT)} absent from the checked-out dfe-schemas "
-            "submodule -- see test_canonical_ddl_exists_in_schemas_submodule"
-        )
-
-    assert _BUNDLED.read_text(encoding="utf-8") == _CANONICAL.read_text(encoding="utf-8"), (
-        "Bundled repository DDL drifted from schemas/ddl/repository.sql. "
-        "Regenerate: cp schemas/ddl/repository.sql "
-        "src/dfe_engine/repository/resources/repository.sql"
+def _render(resolver: EngineResolver | None = None) -> str:
+    spec = repository_spec(_DB)
+    generator = DDLGenerator(TypeRegistry.default(), resolver=resolver)
+    return generator.generate_create_table(
+        table_name=spec.name, columns=spec.columns, config=spec.config
     )
 
 
-def _ddl_without_comments() -> str:
-    """DDL statements only - the header comment mentions _org_id by design."""
-    lines = _BUNDLED.read_text(encoding="utf-8").splitlines()
-    return "\n".join(ln for ln in lines if not ln.strip().startswith("--"))
-
-
-def test_ddl_has_no_org_id_column() -> None:
+def test_no_org_id_column() -> None:
     """No _org_id by design - keeps ChRbacReconciler _org_id discovery away."""
-    assert "_org_id" not in _ddl_without_comments()
+    assert not any(col.name == "_org_id" for col in repository_spec(_DB).columns)
 
 
-def test_ddl_has_no_partition_by() -> None:
+def test_no_partition_by() -> None:
     """No PARTITION BY - ReplacingMergeTree dedup must stay within one part tree."""
-    assert "PARTITION BY" not in _BUNDLED.read_text(encoding="utf-8").upper()
+    assert "PARTITION BY" not in _render().upper()
 
 
-def test_ddl_engine_and_key() -> None:
+def test_no_projection() -> None:
+    """No projection - the data-table default would add one nothing reads."""
+    assert "PROJECTION" not in _render().upper()
+
+
+def test_engine_and_key() -> None:
     """Dedup invariants: ReplacingMergeTree(updated_at, is_deleted) + full scope key."""
-    ddl = _BUNDLED.read_text(encoding="utf-8")
-    assert "ReplacingMergeTree(updated_at, is_deleted)" in ddl
-    assert "ORDER BY (scope, scope_id, namespace, key)" in ddl
+    ddl = _render()
+    assert "ENGINE = ReplacingMergeTree(updated_at, is_deleted)" in ddl
+    assert "ORDER BY (`scope`, `scope_id`, `namespace`, `key`)" in ddl
+
+
+def test_engine_follows_topology() -> None:
+    """A replicated topology keeps the version columns on the Replicated variant."""
+    ddl = _render(EngineResolver(override="replicated"))
+    assert "ENGINE = ReplicatedReplacingMergeTree(updated_at, is_deleted)" in ddl
+
+
+def test_targets_the_internal_database() -> None:
+    """The table is qualified against whatever database the spec was built for."""
+    assert f"CREATE TABLE IF NOT EXISTS {_DB}.repository" in _render()

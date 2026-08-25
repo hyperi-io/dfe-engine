@@ -86,8 +86,7 @@ Auth (local):
 - DFE_AUTH_LOCAL_VIEWER_PASSWORD -> auth.local.viewer_password
 - DFE_AUTH_LOCAL_ORG_ID -> auth.local.org_id
 
-Repository (scope-aligned small-object store):
-- DFE_REPOSITORY_DATABASE -> repository.database
+Repository (scope-aligned small-object store; lives in the DFE database):
 - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
 - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
 
@@ -202,30 +201,13 @@ class ClickHouseSettings(BaseModel):
     data_database: str = Field(
         default="dfe",
         description=(
-            "Database where DFE data tables live (landing table, per-source tables), "
-            "from DFE_CLICKHOUSE_DATA_DATABASE (default `dfe`). Lets the connection "
-            "authenticate against one database while DFE tables are qualified against "
-            "another -- read it via `effective_data_database`, never directly."
-        ),
-    )
-    hunts_database: str = Field(
-        default="dfe_hunts",
-        description=(
-            "Database holding hunt output (the `detection` table), from "
-            "DFE_CLICKHOUSE_HUNTS_DATABASE (default `dfe_hunts`). Separate from the "
-            "data database so the hunt-tier ClickHouse roles can be granted on it "
-            "alone -- a role granted on the data database would also see every "
-            "landing row."
-        ),
-    )
-    otel_database: str = Field(
-        default="dfe",
-        description=(
-            "Database holding the OTel telemetry tables (otel_logs, otel_metrics_*, "
-            "otel_traces), from DFE_CLICKHOUSE_OTEL_DATABASE (default `dfe`). The "
-            "otel_reader service role's SELECT grant targets this database; mirrors "
-            "keda_shim.otel_database. Moved out of the CH-builtin `default` db so "
-            "one grant reaches every telemetry table."
+            "THE DFE database, from DFE_CLICKHOUSE_DATA_DATABASE (default `dfe`). "
+            "Everything DFE writes lives here: the landing table, per-source tables, "
+            "hunt output, the OTel telemetry tables, and the engine's own state. One "
+            "name, because org isolation is by ROW POLICY rather than by splitting "
+            "databases (see governance.ch.models). Lets the connection authenticate "
+            "against one database while DFE tables are qualified against another -- "
+            "read it via `effective_data_database`, never directly."
         ),
     )
     landing_table: str = Field(
@@ -666,7 +648,6 @@ class KedaShimSettings(BaseModel):
     - DFE_KEDA_SHIM_HOST -> keda_shim.host
     - DFE_KEDA_SHIM_PORT -> keda_shim.port
     - DFE_KEDA_SHIM_QUERY_CONFIG -> keda_shim.query_config (override catalogue path)
-    - DFE_KEDA_SHIM_OTEL_DATABASE -> keda_shim.otel_database (HyperDX otel CH db)
     """
 
     host: str = Field(default="0.0.0.0", description="Shim HTTP bind address")  # noqa: S104
@@ -678,26 +659,19 @@ class KedaShimSettings(BaseModel):
             "defaults (deep-merged). Empty = built-in pressure + backlog only."
         ),
     )
-    otel_database: str = Field(
-        default="dfe",
-        description="ClickHouse database holding HyperDX's otel_metrics_gauge (pressure source)",
-    )
 
 
 class RepositorySettings(BaseModel):
     """Repository (scope-aligned small-object store) settings.
 
+    The repository lives in ``clickhouse.data_database`` with every other DFE
+    table -- it carries no database of its own.
+
     Environment variables:
-    - DFE_REPOSITORY_DATABASE -> repository.database
     - DFE_REPOSITORY_MAX_PREFS_BYTES -> repository.max_prefs_bytes
     - DFE_REPOSITORY_MAX_OBJECT_BYTES -> repository.max_object_bytes
     """
 
-    database: str = Field(
-        default="dfe_internal",
-        description="ClickHouse database for the repository table (engine-only, hidden "
-        "from HyperDX per-group users)",
-    )
     max_prefs_bytes: int = Field(
         default=262144,
         ge=1,
@@ -1256,8 +1230,6 @@ def _get_env_overrides() -> dict:
         overrides["clickhouse"]["database"] = val
     if val := _get_env("DFE_CLICKHOUSE_DATA_DATABASE", "CLICKHOUSE_DATA_DATABASE"):
         overrides["clickhouse"]["data_database"] = val
-    if val := _get_env("DFE_CLICKHOUSE_OTEL_DATABASE", "CLICKHOUSE_OTEL_DATABASE"):
-        overrides["clickhouse"]["otel_database"] = val
     if val := _get_env("DFE_CLICKHOUSE_LANDING_TABLE", "CLICKHOUSE_LANDING_TABLE"):
         overrides["clickhouse"]["landing_table"] = val
     if val := _get_env("DFE_DEFAULT_TABLE_PROFILE"):
@@ -1493,8 +1465,6 @@ def _get_env_overrides() -> dict:
         overrides["keda_shim"]["port"] = int(val)
     if val := _get_env("DFE_KEDA_SHIM_QUERY_CONFIG"):
         overrides["keda_shim"]["query_config"] = val
-    if val := _get_env("DFE_KEDA_SHIM_OTEL_DATABASE"):
-        overrides["keda_shim"]["otel_database"] = val
 
     # Schemas settings (dfe-schemas submodule)
     if val := _get_env("DFE_SCHEMAS_DIR"):
@@ -1523,8 +1493,6 @@ def _get_env_overrides() -> dict:
         overrides["services"]["config_yaml_dir"] = val
 
     # Repository (small-object store) settings
-    if val := _get_env("DFE_REPOSITORY_DATABASE"):
-        overrides["repository"]["database"] = val
     if val := _get_env("DFE_REPOSITORY_MAX_PREFS_BYTES"):
         overrides["repository"]["max_prefs_bytes"] = int(val)
     if val := _get_env("DFE_REPOSITORY_MAX_OBJECT_BYTES"):
@@ -1740,6 +1708,19 @@ def load_settings(config_file: str | None = None) -> DFESettings:
     config = _deep_merge(config, env_overrides)
 
     return DFESettings(**config)
+
+
+def default_data_database() -> str:
+    """The DFE database name, read from the model default.
+
+    THE one place the name ``dfe`` is written is
+    ``ClickHouseSettings.data_database``; every module that needs a fallback
+    reads it through here rather than re-typing the literal, so the default
+    moves in one edit. A live caller passes
+    ``settings.clickhouse.effective_data_database`` instead -- this is only the
+    no-settings fallback.
+    """
+    return str(ClickHouseSettings.model_fields["data_database"].default)
 
 
 def get_clickhouse_config(settings: DFESettings | None = None) -> dict:

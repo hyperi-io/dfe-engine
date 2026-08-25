@@ -198,10 +198,16 @@ class TestTenantGrantedDbs:
 
     def test_default_analyst_tiers_discover_dfe(self):
         """The seeded analyst tiers grant broad dfe.* (D9), so dfe stays in the deny
-        set, or the dfe.otel_* tables (no _org_id) would get no backstop policy."""
-        from dfe_engine.governance.ch.models import DEFAULT_TIERS
+        set, or the tables carrying no _org_id (dfe.otel_*, the engine's own state)
+        would get no backstop policy.
 
-        assert "dfe" in _tenant_granted_dbs(DEFAULT_TIERS)
+        Resolved first: the seeds carry the {db} placeholder, and it is the
+        resolved grants the reconciler parses.
+        """
+        from dfe_engine.governance.ch.models import DEFAULT_TIERS
+        from dfe_engine.governance.ch.reconciler import resolve_grant_databases
+
+        assert "dfe" in _tenant_granted_dbs(resolve_grant_databases(DEFAULT_TIERS, "dfe"))
 
 
 class TestRenderAll:

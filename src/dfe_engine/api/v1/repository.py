@@ -98,7 +98,7 @@ class ObjectEntry(BaseModel):
 
 
 def _store(client: Any, settings: Any) -> RepositoryStore:
-    return RepositoryStore(client, database=settings.repository.database)
+    return RepositoryStore(client, database=settings.clickhouse.effective_data_database)
 
 
 def _validation_error(message: str) -> HTTPException:

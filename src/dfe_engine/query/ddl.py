@@ -40,12 +40,21 @@ class DDLManager:
         self._client = client
         self._database = database
 
+    def qualify(self, sql: str) -> str:
+        """Substitute the ``{db}`` placeholder with the target database.
+
+        The builtin ``.sql`` files never name a database, so a deployment that
+        renames its data database gets working views instead of views pointing
+        at a database it does not have.
+        """
+        return sql.replace("{db}", self._database)
+
     def apply_view(self, name: str, sql: str) -> None:
         """Apply a single parameterized view and grant access.
 
         Args:
             name: View name (must start with dfe_v_ prefix)
-            sql: CREATE OR REPLACE VIEW statement
+            sql: CREATE OR REPLACE VIEW statement, ``{db}``-templated.
 
         Raises:
             ValueError: If name doesn't match expected prefix
@@ -54,7 +63,7 @@ class DDLManager:
             raise ValueError(f"View name must start with '{VIEW_PREFIX}': {name}")
 
         try:
-            self._client.command(sql)
+            self._client.command(self.qualify(sql))
             self._grant_view(name)
             logger.info(f"Applied view: {self._database}.{name}")
         except Exception:

@@ -5,10 +5,10 @@
 # add a new scaling signal, with a config edit and NO rebuild.
 #
 # Per-query keys:
-#   database         otel | data | <literal db>. otel -> DFE_KEDA_SHIM_OTEL_DATABASE
-#                    (HyperDX's otel db); data -> the engine's effective data db.
-#                    The sentinel __DB__ in `sql` is replaced with the resolved,
-#                    validated database identifier.
+#   database         otel | data | <literal db>. Both otel and data resolve to the
+#                    engine's effective data db - everything DFE writes lives in the
+#                    one database. The sentinel __DB__ in `sql` is replaced with the
+#                    resolved, validated database identifier.
 #   sql              ClickHouse SQL. `params` + `binds` become CH-native bind
 #                    placeholders ({name:Type}) - safe against injection.
 #   builtin          instead of `sql`: a named in-code SQL provider. hunt_backlog ->

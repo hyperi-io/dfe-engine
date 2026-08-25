@@ -7,6 +7,11 @@ from typing import Any
 
 from scalo.logger import logger
 
+from dfe_engine.schema.applier import SchemaApplier
+from dfe_engine.schema.ddl_writer import DDLFileWriter
+from dfe_engine.schema.engine_resolver import EngineResolver
+from dfe_engine.settings import default_data_database
+
 _SAFE_IDENTIFIER = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
@@ -28,7 +33,7 @@ class Status(Enum):
 
 class HuntCheckpointManager:
     _DETECTION_CHECKPOINT_TABLE_NAME: str = "detection_checkpoint"
-    _AUDIT_DATABASE_NAME: str = "dfe_audit"
+    _DEFAULT_DATABASE_NAME: str = default_data_database()
 
     CLICKHOUSE = "clickhouse"
     FILE = "file"
@@ -46,7 +51,7 @@ class HuntCheckpointManager:
             database_name (Optional[str]): Custom database name.
         """
         self.database_name: str = _validate_identifier(
-            database_name or self._AUDIT_DATABASE_NAME, "database"
+            database_name or self._DEFAULT_DATABASE_NAME, "database"
         )
         self.table_name: str = _validate_identifier(
             table_name or self._DETECTION_CHECKPOINT_TABLE_NAME, "table"
@@ -133,97 +138,46 @@ class HuntCheckpointManager:
         ch_client,
         create_missing_tables: bool = True,
         create_missing_database: bool = True,
-        no_cluster_declarations_needed: bool = True,
     ) -> bool:
-        """
-        Ensure that the required table exists in ClickHouse.
+        """Create or reconcile the checkpoint table in ClickHouse.
+
+        The columns come from the dfe-schemas ``hunts/detection_checkpoint``
+        definition and the engine clause from sensing the target server, so a
+        column added to the schema is added to an existing table and a cluster
+        gets the table on every replica.
 
         Args:
             ch_client: ClickHouse client instance.
-            create_missing_tables (bool): Whether to create the table if it doesn't exist.
-            create_missing_database (bool): Whether to create the database if it doesn't exist.
-            no_cluster_declarations_needed (bool): Whether cluster declarations are needed.
+            create_missing_tables: Whether to create the table if it is absent.
+            create_missing_database: Whether to create the database if it is absent.
 
         Returns:
-            bool: True if the table exists or is created successfully, False otherwise.
+            True if the table exists or was created, False otherwise.
         """
-
-        if create_missing_database and not self.database_exists(ch_client, self.database_name):
-            try:
-                ch_client.execute(f"CREATE DATABASE IF NOT EXISTS {self.database_name};")
-            except Exception as e:
-                logger.error(f"Error creating database: {e}")
-                return False
-        elif not create_missing_database:
+        if not create_missing_database and not self.database_exists(ch_client, self.database_name):
             logger.info("Missing Database and not creating it")
             return False
-
-        if create_missing_tables and not self.table_exists(
+        if not create_missing_tables and not self.table_exists(
             ch_client, self.database_name, self.table_name
         ):
-            try:
-                engine = "MergeTree()" if no_cluster_declarations_needed else "SharedMergeTree()"
-                create_table_sql = f"""
-                CREATE TABLE IF NOT EXISTS {self.database_name}.{self.table_name} (
-                    _org_id LowCardinality(String) CODEC(LZ4),
-                    rule_name LowCardinality(String) CODEC(LZ4),
-                    thread_id LowCardinality(String) CODEC(LZ4),
-                    log_buffer UInt32 CODEC(Delta, ZSTD),
-                    query_schedule_time DateTime CODEC(DoubleDelta, LZ4),
-                    execution_time DateTime CODEC(DoubleDelta, LZ4),
-                    end_time DateTime CODEC(DoubleDelta, LZ4),
-                    previous_successful_checkpoint DateTime CODEC(DoubleDelta, LZ4),
-                    query_checkpoint_time DateTime CODEC(DoubleDelta, LZ4),
-                    execution_time_ms Int32 CODEC(Delta, ZSTD),
-                    hunt_name LowCardinality(String) CODEC(LZ4),
-                    query_id LowCardinality(String) CODEC(LZ4),
-                    explain_plan String DEFAULT '' CODEC(ZSTD),
-                    explain_duration_ms Int32 DEFAULT 0 CODEC(Delta, ZSTD),
-                    scheduling_mode LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4),
-                    read_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                    read_bytes UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                    memory_usage UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                    result_rows UInt64 DEFAULT 0 CODEC(Delta, ZSTD),
-                    query_fingerprint LowCardinality(String) DEFAULT '' CODEC(LZ4)
-                ) ENGINE = {engine}
-                PARTITION BY toYYYYMM(query_checkpoint_time)
-                ORDER BY (_org_id, hunt_name, rule_name, query_checkpoint_time);
-                """
-                ch_client.execute(create_table_sql)
-            except Exception as e:
-                logger.error(f"Error creating table: {e}", exc_info=True)
-                return False
-        elif not create_missing_tables:
-            logger.info(f"Table [{self.database_name}.{self.table_name}] already exists.")
+            logger.info(f"Table [{self.database_name}.{self.table_name}] is absent.")
             return False
 
-        return True
-
-    def migrate_table_if_needed(self, ch_client) -> None:
-        """Add new columns to existing checkpoint tables (idempotent).
-
-        Safe to call on tables created before the adaptive scheduling update
-        or before the execution profile update.
-        """
-        new_columns = [
-            ("explain_plan", "String DEFAULT '' CODEC(ZSTD)"),
-            ("explain_duration_ms", "Int32 DEFAULT 0 CODEC(Delta, ZSTD)"),
-            ("scheduling_mode", "LowCardinality(String) DEFAULT 'adaptive' CODEC(LZ4)"),
-            # Execution profile columns (from system.query_log)
-            ("read_rows", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
-            ("read_bytes", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
-            ("memory_usage", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
-            ("result_rows", "UInt64 DEFAULT 0 CODEC(Delta, ZSTD)"),
-            ("query_fingerprint", "LowCardinality(String) DEFAULT '' CODEC(LZ4)"),
-        ]
-        for col_name, col_def in new_columns:
-            try:
-                ch_client.execute(
-                    f"ALTER TABLE {self.database_name}.{self.table_name} "
-                    f"ADD COLUMN IF NOT EXISTS {col_name} {col_def}"
-                )
-            except Exception as e:
-                logger.warning(f"Checkpoint column migration {col_name}: {e}")
+        try:
+            spec = DDLFileWriter(
+                resolver=EngineResolver(client=ch_client), database=self.database_name
+            ).detection_checkpoint_table_spec()
+            applier = SchemaApplier(ch_client, EngineResolver(client=ch_client))
+            if create_missing_database:
+                applier.ensure_database(self.database_name)
+            change = applier.ensure_table(
+                self.database_name, self.table_name, spec.columns, spec.config
+            )
+            logger.debug(f"HuntCheckpointManager: {change.describe()}")
+            return True
+        except Exception as e:
+            logger.error(f"Error ensuring checkpoint table: {e}", exc_info=True)
+            return False
 
     def get_last_successful_run(
         self,

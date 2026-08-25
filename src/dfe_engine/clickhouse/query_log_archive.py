@@ -11,7 +11,7 @@ Every DFE query already carries a ``log_comment`` JSON of :class:`DfeQueryTags`
 (tenant / user / feature / kind / id). ClickHouse records that verbatim in
 ``system.query_log`` alongside the real cost columns (read rows/bytes, duration,
 memory). A materialised view lifts those rows - the moment CH flushes them - into
-``dfe_audit.query_log_archive``, exploding the ``log_comment`` JSON into typed,
+``dfe.query_log_archive``, exploding the ``log_comment`` JSON into typed,
 queryable columns. That table is the SSoT the cost views read: it DIRECTLY
 unblocks the parked hunt-cost leaderboard (which was blocked on
 "a worker-written real table"; see [[project_clickhouse_cloud_portability]]).
@@ -27,12 +27,11 @@ from __future__ import annotations
 from typing import Any
 
 from dfe_engine.schema.engine_resolver import EngineResolver, EngineSpec, ResolvedEngine
-from dfe_engine.settings import get_settings
+from dfe_engine.settings import default_data_database, get_settings
 
-# The only fixed engine-owned identifiers this module needs (the audit db + the
-# archive table). The wider engine hardcodes its db/table names at each call site;
-# a repo-wide identifier SSoT is a separate deliberate task, not this salvage.
-DFE_AUDIT = "dfe_audit"
+# The fallback for the no-settings render path; live callers pass
+# clickhouse.effective_data_database, which is the SSoT for this name.
+DFE_DATABASE = default_data_database()
 QUERY_LOG_ARCHIVE = "query_log_archive"
 
 _ARCHIVE_MV = f"{QUERY_LOG_ARCHIVE}_mv"
@@ -43,16 +42,15 @@ def render_ddl(
     engine: ResolvedEngine | None = None,
     *,
     ttl_days: int = _DEFAULT_TTL_DAYS,
-    database: str = DFE_AUDIT,
+    database: str = DFE_DATABASE,
 ) -> list[str]:
     """DDL to create the archive DB + table + the MV over ``system.query_log``.
 
     ``engine`` is a :class:`ResolvedEngine` from the sensing resolver (single ->
     MergeTree, cluster -> ReplicatedMergeTree + ON CLUSTER, Cloud -> Shared auto).
     None yields the single-node plain form (the resolver's own terminal default),
-    for the no-client render path. ``database`` defaults to the canonical
-    ``dfe_audit`` - override only for an isolated test target. Idempotent
-    (``IF NOT EXISTS``).
+    for the no-client render path. ``database`` defaults to ``dfe``; live callers
+    pass ``clickhouse.effective_data_database``. Idempotent (``IF NOT EXISTS``).
     """
     on_cluster = engine.on_cluster if engine is not None else ""
     clause = engine.clause if engine is not None else "MergeTree()"
@@ -109,7 +107,9 @@ def render_ddl(
     ]
 
 
-def ensure(wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = DFE_AUDIT) -> None:
+def ensure(
+    wrapper: Any, *, ttl_days: int = _DEFAULT_TTL_DAYS, database: str = DFE_DATABASE
+) -> None:
     """Create the archive DB + table + MV if absent (idempotent).
 
     ``wrapper`` is a :class:`ClickHouseClientWrapper`. The engine is SENSED from it,
@@ -142,7 +142,7 @@ def cost_leaderboard(
     feature: str = "hunts",
     days: int = 7,
     limit: int = 50,
-    database: str = DFE_AUDIT,
+    database: str = DFE_DATABASE,
 ) -> list[dict[str, Any]]:
     """Top cost consumers over the archive window - the hunt-cost leaderboard.
 

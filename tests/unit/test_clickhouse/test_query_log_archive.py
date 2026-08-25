@@ -15,12 +15,12 @@ from dfe_engine.schema.engine_resolver import ResolvedEngine
 
 def test_single_node_renders_plain_mergetree():
     db_stmt, tbl_stmt, mv_stmt = render_ddl(None)
-    assert db_stmt == "CREATE DATABASE IF NOT EXISTS dfe_audit"
+    assert db_stmt == "CREATE DATABASE IF NOT EXISTS dfe"
     assert "ENGINE = MergeTree()" in tbl_stmt
     assert " ON CLUSTER " not in tbl_stmt
     # The MV lifts system.query_log into the archive target.
-    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS dfe_audit.query_log_archive_mv" in mv_stmt
-    assert "TO dfe_audit.query_log_archive" in mv_stmt
+    assert "CREATE MATERIALIZED VIEW IF NOT EXISTS dfe.query_log_archive_mv" in mv_stmt
+    assert "TO dfe.query_log_archive" in mv_stmt
     assert "FROM system.query_log" in mv_stmt
 
 
@@ -32,9 +32,9 @@ def test_replicated_on_cluster_engine_and_clause():
         origin="sensed",
     )
     db_stmt, tbl_stmt, mv_stmt = render_ddl(engine)
-    assert db_stmt == "CREATE DATABASE IF NOT EXISTS dfe_audit ON CLUSTER default"
+    assert db_stmt == "CREATE DATABASE IF NOT EXISTS dfe ON CLUSTER default"
     assert "ENGINE = ReplicatedMergeTree" in tbl_stmt
-    assert "dfe_audit.query_log_archive ON CLUSTER default" in tbl_stmt
+    assert "dfe.query_log_archive ON CLUSTER default" in tbl_stmt
     # The MV must also carry ON CLUSTER so it lands on every replica.
     assert "query_log_archive_mv ON CLUSTER default" in mv_stmt
 

@@ -22,6 +22,7 @@ from dfe_engine.governance.ch.models import (
     org_user_name,
     tenant_policy_name,
 )
+from dfe_engine.governance.ch.reconciler import resolve_grant_databases
 from dfe_engine.governance.ch.render import (
     render_materialise,
     render_pinned_user,
@@ -323,11 +324,26 @@ class TestDefaultTiers:
         """D9: the analyst tier role grants the broad dfe.* for every user, so a new
         source table is visible automatically with no admin action. Isolation is by
         row policy, not by narrowing the grant to dfe.default."""
-        by_name = {t.name: t for t in DEFAULT_TIERS}
+        by_name = {t.name: t for t in resolve_grant_databases(DEFAULT_TIERS, "dfe")}
         for n in ("analyst_tier_1", "analyst_tier_2", "analyst_tier_3"):
             grants = by_name[n].grants
             assert "SELECT ON dfe.*" in grants
             assert "SELECT ON dfe.default" not in grants
+
+    def test_seeded_grants_name_no_database(self):
+        """The seeds carry the {db} placeholder, never a database name.
+
+        A literal here would silently ignore a deployment that renames its data
+        database and grant on one it does not have.
+        """
+        for tier in DEFAULT_TIERS:
+            for grant in tier.grants:
+                assert "dfe" not in grant
+
+    def test_resolution_targets_the_configured_database(self):
+        """A renamed data database reaches the grants."""
+        by_name = {t.name: t for t in resolve_grant_databases(DEFAULT_TIERS, "acme")}
+        assert "SELECT ON acme.*" in by_name["analyst_tier_2"].grants
 
     def test_every_default_tier_renders_profile_role_quota(self):
         for t in DEFAULT_TIERS:
@@ -356,10 +372,11 @@ class TestDefaultServiceRoles:
         assert by_name["otel_reader"].mint_user is False
 
     def test_otel_reader_reads_the_otel_database(self):
-        # The otel tables moved from the CH-builtin `default` db into `dfe`; the
-        # grant follows them. ClickHouse GRANT has no table-name wildcard, so it is
-        # db-wide on the otel database rather than a `dfe.otel_*` prefix.
-        otel = {r.name: r for r in DEFAULT_SERVICE_ROLES}["otel_reader"]
+        # The otel tables live in the one DFE database. ClickHouse GRANT has no
+        # table-name wildcard, so the read is db-wide rather than a `dfe.otel_*`
+        # prefix.
+        roles = resolve_grant_databases(DEFAULT_SERVICE_ROLES, "dfe")
+        otel = {r.name: r for r in roles}["otel_reader"]
         assert otel.grants == ["SELECT ON dfe.*"]
         # regression: never the old literal `otel` database (which never existed)
         assert otel.grants != ["SELECT ON otel.*"]
@@ -375,7 +392,8 @@ class TestDefaultServiceRoles:
     def test_query_reader_reads_the_whole_data_db_including_otel(self):
         """The platform reader keeps whole-db read of dfe - dfe.otel_* included.
         It holds no tenant role, so the deny row policies never target it."""
-        qr = {r.name: r for r in DEFAULT_SERVICE_ROLES}["query_reader"]
+        roles = resolve_grant_databases(DEFAULT_SERVICE_ROLES, "dfe")
+        qr = {r.name: r for r in roles}["query_reader"]
         assert "SELECT ON dfe.*" in qr.grants
 
     def test_query_reader_reads_the_clickhouse_system_tables(self):

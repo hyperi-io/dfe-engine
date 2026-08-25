@@ -1,4 +1,4 @@
-CREATE OR REPLACE VIEW dfe_v_system_table_sizes AS
+CREATE OR REPLACE VIEW {db}.dfe_v_system_table_sizes AS
 SELECT
     database,
     `table`,

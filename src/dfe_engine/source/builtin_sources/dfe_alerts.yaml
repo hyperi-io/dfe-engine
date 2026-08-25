@@ -4,7 +4,7 @@
 # Enables correlation hunts that query previous detection output,
 # field mapping views, and schema DDL generation.
 #
-# Table: dfe_hunts.detection
+# Table: dfe.detection
 # Profile: timeseries (minus _raw, _tags) + detection columns
 
 source: dfe_alerts

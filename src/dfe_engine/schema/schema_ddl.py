@@ -91,6 +91,16 @@ class DDLConfig:
     # "month" -> toYYYYMM. A low-volume audit table wants monthly, else it
     # accumulates a part per day holding very few rows.
     partition_granularity: str = "day"
+    # Raw clause overrides, for tables whose shape the column model cannot
+    # express: an ORDER BY over expressions rather than bare columns
+    # (toStartOfHour(TimeUnix), cityHash64(Attributes)), a PARTITION BY the
+    # granularity enum does not cover (toDate(Timestamp)), or an index over a
+    # map projection (mapKeys(ResourceAttributes) TYPE bloom_filter(0.01)).
+    # Each is emitted verbatim, so a caller supplying one owns its correctness.
+    partition_by: str | None = None
+    order_by: str | None = None
+    primary_key: str | None = None
+    extra_indexes: list[str] = field(default_factory=list)
     index_granularity: int = 2048
     ttl_only_drop_parts: bool = True
     cluster: str | None = None
@@ -100,6 +110,22 @@ class DDLConfig:
     profile_name: str | None = None
     profile_version: str | None = None
     description: str | None = None
+
+
+@dataclass(frozen=True)
+class TableSpec:
+    """One table, fully resolved: its name, its columns, and its DDL config.
+
+    The unit the live apply path works in. A rendered CREATE TABLE string is
+    enough to create a table that is absent, but not to reconcile one that
+    exists -- that needs the column list to diff against ``system.columns``.
+    Everything that can create a DFE table hands back one of these so both
+    paths read from the same description.
+    """
+
+    name: str
+    columns: list[SchemaColumn]
+    config: DDLConfig
 
 
 # ── Index templates ─────────────────────────────────────────────────
@@ -120,6 +146,18 @@ _INDEX_TEMPLATES_LEGACY: dict[str, str] = {
     "range": "INDEX {name} {col} TYPE minmax GRANULARITY 4",
     "bloom": "INDEX {name} {col} TYPE bloom_filter GRANULARITY 4",
 }
+
+
+def _with_max_dynamic_paths(ch_type: str, max_dynamic_paths: int | None) -> str:
+    """Apply a column's ``max_dynamic_paths`` to a bare ``JSON`` type.
+
+    A type that already carries parameters is left alone, and the setting is
+    meaningless on anything but JSON, so both cases pass through unchanged
+    rather than producing DDL ClickHouse will reject.
+    """
+    if not max_dynamic_paths or ch_type != "JSON":
+        return ch_type
+    return f"JSON(max_dynamic_paths={max_dynamic_paths})"
 
 
 def _build_column_comment(expr: str | None, comment: str | None) -> str | None:
@@ -178,6 +216,21 @@ class DDLGenerator:
         spec = parse_engine(cfg.engine)
         resolver = self._resolver or EngineResolver(override=cfg.topology)
         return resolver.resolve(spec, cfg.db)
+
+    def _on_cluster(self, cfg: DDLConfig) -> str:
+        """The ``ON CLUSTER`` suffix for any statement, or "".
+
+        An explicit ``cfg.cluster`` pin wins, else the resolver decides -- the
+        same order ``generate_create_table`` uses. Every statement that changes
+        a table's definition needs this, not just the CREATE: an ALTER or a
+        CREATE VIEW without it applies to the ONE node the connection landed on,
+        and the siblings behind a headless Service silently diverge. Without an
+        injected resolver this is always "" (a named topology from config
+        carries no ON CLUSTER intent), so the offline render paths are unchanged.
+        """
+        if cfg.cluster:
+            return f" ON CLUSTER {cfg.cluster}"
+        return self._resolve_engine(cfg).on_cluster
 
     # ── CREATE TABLE ────────────────────────────────────────────────
 
@@ -244,18 +297,27 @@ class DDLGenerator:
         # Replicated<variant>(params) (no double-parens, no dropped ver).
         lines.append(f")\nENGINE = {resolved.clause}")
 
-        # PARTITION BY
-        if any(column for column in columns if column.name == cfg.partition_column):
+        # PARTITION BY -- a raw expression wins over the column + granularity.
+        if cfg.partition_by:
+            lines.append(f"PARTITION BY {cfg.partition_by}")
+        elif any(column for column in columns if column.name == cfg.partition_column):
             lines.append(f"PARTITION BY {self._partition_expr(cfg)}")
 
-        # ORDER BY + PRIMARY KEY
-        order_cols = self._order_by_columns(columns)
-        if order_cols:
-            pk_str = ", ".join(order_cols)
-            lines.append(f"PRIMARY KEY ({pk_str})")
-            lines.append(f"ORDER BY ({pk_str})")
+        # ORDER BY + PRIMARY KEY. A raw ORDER BY sets no PRIMARY KEY of its own:
+        # ClickHouse then takes the sorting key as the primary key, which is what
+        # a table declaring only an ORDER BY expects.
+        if cfg.order_by:
+            if cfg.primary_key:
+                lines.append(f"PRIMARY KEY ({cfg.primary_key})")
+            lines.append(f"ORDER BY ({cfg.order_by})")
         else:
-            lines.append("ORDER BY tuple()")
+            order_cols = self._order_by_columns(columns)
+            if order_cols:
+                pk_str = ", ".join(order_cols)
+                lines.append(f"PRIMARY KEY ({pk_str})")
+                lines.append(f"ORDER BY ({pk_str})")
+            else:
+                lines.append("ORDER BY tuple()")
 
         # SAMPLE BY
         if cfg.sample_by:
@@ -303,7 +365,10 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
-        sql = f"ALTER TABLE {cfg.db}.{table_name} ADD COLUMN IF NOT EXISTS {col_def}"
+        sql = (
+            f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} "
+            f"ADD COLUMN IF NOT EXISTS {col_def}"
+        )
         if after:
             sql += f" AFTER `{after}`"
         return sql + ";\n"
@@ -326,7 +391,9 @@ class DDLGenerator:
         """
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
-        return f"ALTER TABLE {cfg.db}.{table_name} MODIFY COLUMN {col_def};\n"
+        return (
+            f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
+        )
 
     def generate_alter_add_index(
         self,
@@ -342,7 +409,7 @@ class DDLGenerator:
         idx = self._index_def(column)
         if not idx:
             return None
-        return f"ALTER TABLE {cfg.db}.{table_name} ADD {idx};\n"
+        return f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} ADD {idx};\n"
 
     # ── Standard Views ─────────────────────────────────────────────
 
@@ -382,7 +449,7 @@ class DDLGenerator:
             select_parts = "    *"
 
         return (
-            f"CREATE OR REPLACE VIEW {cfg.db}.{view_name} AS\n"
+            f"CREATE OR REPLACE VIEW {cfg.db}.{view_name}{self._on_cluster(cfg)} AS\n"
             f"SELECT\n"
             f"{select_parts}\n"
             f"FROM {cfg.db}.{table_name};\n"
@@ -456,6 +523,10 @@ class DDLGenerator:
             idx = self._index_def(col)
             if idx:
                 body.append(f"    {idx}")
+
+        # Raw index definitions, for shapes the use_case templates cannot express.
+        for idx_def in cfg.extra_indexes:
+            body.append(f"    {idx_def}")
 
         # Projection
         if cfg.projection_order_by:
@@ -535,7 +606,8 @@ class DDLGenerator:
         if col.codec:
             codec = col.codec
 
-        return resolved.ch_type, codec
+        ch_type = _with_max_dynamic_paths(resolved.ch_type, col.max_dynamic_paths)
+        return ch_type, codec
 
     @staticmethod
     def _default_expr(col: SchemaColumn) -> str | None:
