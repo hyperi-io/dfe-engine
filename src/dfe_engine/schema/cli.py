@@ -41,21 +41,20 @@ from dfe_engine.schema.core_schema import (
     apply_core_schema,
     apply_query_log_archive,
 )
-from dfe_engine.settings import DFESettings, load_settings
+from dfe_engine.settings import ClickHouseSettings, load_clickhouse_settings
 
 app = typer.Typer(help="dfe-schema: deploy the DFE ClickHouse schema.", no_args_is_help=False)
 
 _CONNECT_RETRY_SECONDS = 3.0
 
 
-def _client(settings: DFESettings) -> Any:
+def _client(ch: ClickHouseSettings) -> Any:
     """A raw clickhouse-connect client from settings.
 
     Raw rather than the pooled ``ClickHouseManager``: this process does one pass
     and exits, so the resilience layer's reconnect loop would only delay the
     failure a gate is meant to surface.
     """
-    ch = settings.clickhouse
     params: dict[str, Any] = {
         "host": ch.host,
         "port": ch.port,
@@ -69,7 +68,7 @@ def _client(settings: DFESettings) -> Any:
     return clickhouse_connect.get_client(**params)
 
 
-def _connect(settings: DFESettings, wait: float) -> Any:
+def _connect(ch: ClickHouseSettings, wait: float) -> Any:
     """Connect, retrying for up to *wait* seconds.
 
     A schema job starts the moment its wave does, which on a fresh deploy is
@@ -80,7 +79,7 @@ def _connect(settings: DFESettings, wait: float) -> Any:
     last: Exception | None = None
     while True:
         try:
-            return _client(settings)
+            return _client(ch)
         except Exception as exc:
             last = exc
             if time.monotonic() >= deadline:
@@ -138,14 +137,14 @@ def apply(
     ),
 ) -> None:
     """Create or reconcile every core table, and say what changed."""
-    settings = load_settings()
-    targets = CoreSchemaTargets.from_settings(settings)
+    ch = load_clickhouse_settings()
+    targets = CoreSchemaTargets.from_clickhouse(ch)
     try:
-        client = _connect(settings, wait)
+        client = _connect(ch, wait)
         report = apply_core_schema(
             client,
             targets,
-            topology_setting=settings.clickhouse.topology,
+            topology_setting=ch.topology,
             dry_run=dry_run,
         )
     except SchemaApplyError as exc:
@@ -166,14 +165,14 @@ def check(
     ),
 ) -> None:
     """Report schema drift without changing anything. Exits 2 when it finds any."""
-    settings = load_settings()
-    targets = CoreSchemaTargets.from_settings(settings)
+    ch = load_clickhouse_settings()
+    targets = CoreSchemaTargets.from_clickhouse(ch)
     try:
-        client = _connect(settings, wait)
+        client = _connect(ch, wait)
         report = apply_core_schema(
             client,
             targets,
-            topology_setting=settings.clickhouse.topology,
+            topology_setting=ch.topology,
             dry_run=True,
         )
     except SchemaApplyError as exc:
