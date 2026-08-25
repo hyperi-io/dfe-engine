@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.5](https://github.com/hyperi-io/dfe-engine/compare/v1.17.4...v1.17.5) (2026-08-25)
+
+### Bug Fixes
+
+* **schema:** find the schemas the image ships, from any process in it ([#212](https://github.com/hyperi-io/dfe-engine/issues/212)) ([7c1317d](https://github.com/hyperi-io/dfe-engine/commit/7c1317d31f28bc29d04401cbd4efcc5a6a9fcf42))
+
 ## [1.17.4](https://github.com/hyperi-io/dfe-engine/compare/v1.17.3...v1.17.4) (2026-08-25)
 
 ### Bug Fixes
