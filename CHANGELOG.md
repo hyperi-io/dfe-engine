@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.3](https://github.com/hyperi-io/dfe-engine/compare/v1.17.2...v1.17.3) (2026-08-25)
+
+### Bug Fixes
+
+* **schema:** one DDL writer, one database, and a dfe-schema entry point ([#210](https://github.com/hyperi-io/dfe-engine/issues/210)) ([83a29f1](https://github.com/hyperi-io/dfe-engine/commit/83a29f13f502e235e60c5fb0617e3b6e120335fd))
+
 ## [1.17.2](https://github.com/hyperi-io/dfe-engine/compare/v1.17.1...v1.17.2) (2026-08-23)
 
 ### Bug Fixes
