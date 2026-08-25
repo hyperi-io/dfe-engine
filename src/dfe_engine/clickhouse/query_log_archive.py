@@ -27,7 +27,7 @@ from __future__ import annotations
 from typing import Any
 
 from dfe_engine.schema.engine_resolver import EngineResolver, EngineSpec, ResolvedEngine
-from dfe_engine.settings import default_data_database, get_settings
+from dfe_engine.settings import default_data_database, load_clickhouse_settings
 
 # The fallback for the no-settings render path; live callers pass
 # clickhouse.effective_data_database, which is the SSoT for this name.
@@ -128,8 +128,10 @@ def ensure(
     that as a real error - the archive genuinely cannot work without query logging.
     """
     engine = EngineResolver(
+        # The narrow load: this runs from `dfe-schema` too, where the full
+        # settings model's API validators have no API to validate.
         client=wrapper,
-        topology_setting=get_settings().clickhouse.topology,
+        topology_setting=load_clickhouse_settings().topology,
     ).resolve(EngineSpec("MergeTree"), database)
     wrapper.command("SYSTEM FLUSH LOGS")
     for stmt in render_ddl(engine, ttl_days=ttl_days, database=database):
