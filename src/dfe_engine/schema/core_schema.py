@@ -52,7 +52,15 @@ class CoreSchemaTargets:
     @classmethod
     def from_settings(cls, settings: Any) -> CoreSchemaTargets:
         """Read the targets off ``settings.clickhouse``."""
-        ch = settings.clickhouse
+        return cls.from_clickhouse(settings.clickhouse)
+
+    @classmethod
+    def from_clickhouse(cls, ch: Any) -> CoreSchemaTargets:
+        """Read the targets off a ``ClickHouseSettings`` directly.
+
+        The schema tooling loads only that section, because the full settings
+        model validates an API posture it does not have.
+        """
         return cls(
             database=ch.effective_data_database,
             profile=ch.default_table_profile,

@@ -1710,6 +1710,36 @@ def load_settings(config_file: str | None = None) -> DFESettings:
     return DFESettings(**config)
 
 
+def load_clickhouse_settings(config_file: str | None = None) -> ClickHouseSettings:
+    """Just the ClickHouse section, off the same cascade as ``load_settings``.
+
+    ``DFESettings`` carries cross-field validators for the API posture -- auth
+    must be on outside dev, and the dev jwt_secret placeholder is rejected. They
+    are correct for the service and fatal for a tool that never serves a
+    request: ``dfe-schema`` connects to ClickHouse and applies DDL, so loading
+    the whole model made an unset ``DFE_API_JWT_SECRET`` fail a schema job that
+    has no API surface to secure.
+
+    Narrowing the load is the fix rather than relaxing the validators, which
+    exist because the insecure pairing used to be the DEFAULT one. Anything that
+    only touches ClickHouse should come through here.
+    """
+    from dfe_engine.env_files import load_env_files
+    from dfe_engine.ssl_ca import ensure_platform_ssl_ca_bundle
+
+    load_env_files()
+    ensure_platform_ssl_ca_bundle()
+
+    config = _load_defaults()
+    if config_file:
+        config_path = Path(config_file)
+        if config_path.exists():
+            config = _deep_merge(config, yaml_load(config_path) or {})
+    config = _deep_merge(config, _get_env_overrides())
+
+    return ClickHouseSettings(**(config.get("clickhouse") or {}))
+
+
 def default_data_database() -> str:
     """The DFE database name, read from the model default.
 
