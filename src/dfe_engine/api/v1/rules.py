@@ -13,8 +13,8 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field, field_validator
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from dfe_engine.api.deps import CurrentUser, HuntConfigReg, RuleReg, Settings, require_action
 from dfe_engine.api.pagination import PaginatedResponse, PaginationParams, apply_search, apply_sort
@@ -132,14 +132,25 @@ class RuleCreateResponse(BaseModel):
 class RuleFromHyperdxRequest(BaseModel):
     """Create a hunt rule from a live HyperDX view.
 
-    HyperDX posts the expanded ClickHouse SELECT; the create pipeline strips the UI
-    meta (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the HyperDX
-    sanitizer, and the engine derives a unique rule id from the saved-search name.
-    The caller gets that id back and opens ``/rules/{id}`` -- no id to invent, no
-    IndexedDB round-trip.
+    Supply ``saved_search_id`` and the engine asks HyperDX what SQL that view
+    actually runs. Supply ``raw_sql`` and the caller's string is taken on trust,
+    which on a SQL-mode search is whatever sits in the editor rather than the
+    query the view executes.
+
+    Either way the create pipeline strips the UI meta (time bounds, LIMIT,
+    ``__hdx_time_bucket``, SETTINGS) via the HyperDX sanitizer, and the engine
+    derives a unique rule id from the saved-search name. The caller gets that id
+    back and opens ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip.
     """
 
-    raw_sql: str = Field(description="Expanded HyperDX ClickHouse SELECT to turn into a rule")
+    saved_search_id: str | None = Field(
+        default=None,
+        description="HyperDX saved-search id; the engine resolves the SQL that view runs",
+    )
+    raw_sql: str | None = Field(
+        default=None,
+        description="Pre-rendered ClickHouse SELECT, trusted as given",
+    )
     saved_search_name: str | None = Field(
         default=None, description="HyperDX saved-search name; seeds the rule id and label"
     )
@@ -147,10 +158,20 @@ class RuleFromHyperdxRequest(BaseModel):
     hunt_name: str | None = Field(default=None, description="Parent hunt name")
     source: str | None = Field(default=None, description="Source label (e.g. windows_audit)")
 
+    @model_validator(mode="after")
+    def _one_sql_source(self):
+        """Require exactly one SQL source, so neither silently wins over the other."""
+        if bool(self.saved_search_id) == bool(self.raw_sql):
+            raise ValueError("supply exactly one of saved_search_id or raw_sql")
+        return self
+
 
 class RuleFromHyperdxResponse(BaseModel):
     id: str = Field(description="Created rule id (YAML stem); open at /rules/{id}")
     display_name: str
+    resolved_from: Literal["saved_search", "raw_sql"] = Field(
+        default="raw_sql", description="Which SQL source the rule was built from"
+    )
     sanitize_summary: dict = Field(default_factory=dict)
     warnings: list[str] = Field(default_factory=list)
     sql_errors: list[SqlValidationError] = Field(default_factory=list)
@@ -259,6 +280,7 @@ async def create_rule(
 )
 async def create_rule_from_hyperdx(
     body: RuleFromHyperdxRequest,
+    request: Request,
     user: CurrentUser,
     settings: Settings,
     registry: RuleReg,
@@ -278,15 +300,18 @@ async def create_rule_from_hyperdx(
     )
     from dfe_engine.settings import get_clickhouse_config
 
-    rule_id = _unique_rule_id(registry, body.saved_search_name)
-    display = body.saved_search_name or default_display_name(rule_id)
+    raw_sql, search_name = await _resolve_hyperdx_sql(request, body)
+    resolved_from = "raw_sql" if body.raw_sql else "saved_search"
+
+    rule_id = _unique_rule_id(registry, search_name)
+    display = search_name or default_display_name(rule_id)
 
     service = RuleCreationService(ch_config=get_clickhouse_config(settings))
     svc_request = SvcRequest(
         name=display,
         severity=body.severity,
         source_type="hyperdx",
-        user_sql=body.raw_sql,
+        user_sql=raw_sql,
         hunt_name=body.hunt_name,
         source=body.source,
     )
@@ -302,6 +327,7 @@ async def create_rule_from_hyperdx(
     return RuleFromHyperdxResponse(
         id=rule_id,
         display_name=result.rule.name,
+        resolved_from=resolved_from,
         sanitize_summary=result.sanitize_summary or {},
         warnings=list(getattr(result.rule, "warnings", []) or []),
         sql_errors=_map_sql_errors(result.sql_errors or []),
@@ -501,6 +527,41 @@ def _unique_rule_id(registry, saved_search_name: str | None) -> str:
         candidate = f"{base}-{n}"
         n += 1
     return candidate
+
+
+async def _resolve_hyperdx_sql(
+    request: Request, body: RuleFromHyperdxRequest
+) -> tuple[str, str | None]:
+    """Return the SQL to build the rule from, plus the saved-search name to label it.
+
+    A saved-search id is resolved by ASKING HyperDX what that view runs, rather
+    than re-rendering it here: the fork owns the chart-config renderer, and a
+    second renderer would be a second definition of what the view means.
+    """
+    if body.raw_sql:
+        return body.raw_sql, body.saved_search_name
+
+    client = getattr(request.app.state, "hyperdx_client", None)
+    if client is None:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "hyperdx_unconfigured",
+                "message": "saved_search_id needs a configured HyperDX; send raw_sql instead",
+            },
+        )
+
+    rendered = await client.saved_search_sql(body.saved_search_id or "")
+    sql = (rendered or {}).get("rawSql") or ""
+    if not (sql):
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "code": "hyperdx_render_failed",
+                "message": (f"HyperDX returned no SQL for saved search {body.saved_search_id!r}"),
+            },
+        )
+    return sql, body.saved_search_name or (rendered or {}).get("savedSearchName")
 
 
 def _build_create_response(result, cost_window_minutes: int) -> RuleCreateResponse:
