@@ -1,5 +1,7 @@
 """Tests for the rules router — RuleCreationService create + validate + CRUD."""
 
+import pytest
+
 
 def _sample_create_payload(**overrides):
     payload = {
@@ -316,6 +318,28 @@ class TestRulesCreate:
         assert isinstance(data["errors"], list)
 
 
+class _FakeHyperdx:
+    """Stands in for HyperDXClient, recording which saved search was asked for."""
+
+    def __init__(self) -> None:
+        self.rendered: dict | None = None
+        self.asked_for: str | None = None
+
+    async def saved_search_sql(self, saved_search_id: str) -> dict | None:
+        self.asked_for = saved_search_id
+        return self.rendered
+
+
+@pytest.fixture
+def fake_hyperdx(client):
+    """Install a stand-in HyperDX client on the app, and put back what was there."""
+    fake = _FakeHyperdx()
+    previous = getattr(client.app.state, "hyperdx_client", None)
+    client.app.state.hyperdx_client = fake
+    yield fake
+    client.app.state.hyperdx_client = previous
+
+
 class TestRulesFromHyperdx:
     """POST /api/v1/rules/from-hyperdx — create a rule from a HyperDX view."""
 
@@ -372,3 +396,94 @@ class TestRulesFromHyperdx:
             headers=admin_headers,
         )
         assert resp.status_code == 422
+
+    def test_from_hyperdx_rejects_both_sql_sources(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL, "saved_search_id": "abc123"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_raw_sql_path_reports_its_source(self, client, admin_headers):
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"raw_sql": self._RAW_SQL, "saved_search_name": "Trusted String"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["resolved_from"] == "raw_sql"
+
+
+class TestRulesFromHyperdxSavedSearch:
+    """POST /api/v1/rules/from-hyperdx with a saved-search id.
+
+    The point of the id path is that the rule is built from what the VIEW runs,
+    so these assert the engine asked HyperDX and used the answer.
+    """
+
+    _VIEW_SQL = "SELECT * FROM default.events WHERE action = 'delete'"
+
+    def test_builds_the_rule_from_the_views_sql(self, client, admin_headers, fake_hyperdx):
+        fake_hyperdx.rendered = {"rawSql": self._VIEW_SQL, "savedSearchName": "Mass Delete"}
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "srch_1"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert fake_hyperdx.asked_for == "srch_1"
+        assert data["resolved_from"] == "saved_search"
+        assert data["id"] == "mass-delete"
+        assert data["display_name"] == "Mass Delete"
+
+    def test_caller_name_wins_over_the_rendered_one(self, client, admin_headers, fake_hyperdx):
+        fake_hyperdx.rendered = {"rawSql": self._VIEW_SQL, "savedSearchName": "Rendered Name"}
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "srch_2", "saved_search_name": "Caller Name"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201
+        assert resp.json()["display_name"] == "Caller Name"
+
+    def test_unrenderable_view_is_502_not_a_rule(self, client, admin_headers, fake_hyperdx):
+        # A rule invented from no SQL would be worse than no rule.
+        fake_hyperdx.rendered = None
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "missing"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 502
+        assert resp.json()["code"] == "hyperdx_render_failed"
+
+    def test_blank_sql_is_treated_as_no_answer(self, client, admin_headers, fake_hyperdx):
+        fake_hyperdx.rendered = {"rawSql": "", "savedSearchName": "Empty"}
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "empty"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 502
+
+    def test_without_hyperdx_configured_is_503(self, client, admin_headers):
+        client.app.state.hyperdx_client = None
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "srch_3"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 503
+        assert resp.json()["code"] == "hyperdx_unconfigured"
+
+    def test_still_requires_write_permission(self, client, viewer_headers, fake_hyperdx):
+        fake_hyperdx.rendered = {"rawSql": self._VIEW_SQL, "savedSearchName": "Viewer Attempt"}
+        resp = client.post(
+            "/api/v1/rules/from-hyperdx",
+            json={"saved_search_id": "srch_4"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 403
+        assert fake_hyperdx.asked_for is None
