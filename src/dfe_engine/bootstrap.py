@@ -8,7 +8,7 @@
 
 """Ensure the schemas and config storage directories exist, seeding schemas once.
 
-Schemas are seeded from the image-baked ``dfe-schemas`` submodule only when the schemas directory has no ``.seeded`` marker, so redeployments never re-seed; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
+Schemas are seeded from the image-baked ``dfe-schemas`` submodule when the schemas directory's ``.seeded`` marker is absent or names a different engine version, so an upgrade refreshes the shipped defaults over a tree an older image seeded while leaving files the deployment added; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
 """
 
 from __future__ import annotations
@@ -19,11 +19,17 @@ from pathlib import Path
 
 from scalo.logger import logger
 
+from dfe_engine import __version__
 from dfe_engine.schema.schema_loader import DEFAULT_SCHEMAS_SEED_DIR, SEED_DIR_ENV_VAR
 from dfe_engine.settings import DFESettings
 
 DEFAULT_CONFIG_DIR = "/app/config"
 SEED_MARKER_NAME = ".seeded"
+
+
+def _seed_stamp() -> str:
+    """Identify the shipped tree, so a marker written by another version re-seeds."""
+    return f"dfe-engine {__version__}"
 
 
 def _copy_seed(*, schemas_dir: Path, seed_dir: Path) -> None:
@@ -69,13 +75,18 @@ def ensure_storage(*, settings: DFESettings) -> None:
     settings.schemas.schemas_dir = str(schemas_dir)
 
     marker = schemas_dir / SEED_MARKER_NAME
-    if marker.exists():
-        logger.info(f"Schemas already seeded (marker {str(marker)!r} present); skipping")
+    stamp = _seed_stamp()
+    seeded_by = marker.read_text().strip() if marker.exists() else ""
+    if seeded_by == stamp:
+        logger.info(f"Schemas already seeded by {stamp!r}; skipping")
         return
     if not (seed_dir.is_dir()):
         logger.warning(f"Schema seed {str(seed_dir)!r} not found; leaving schemas dir empty")
         return
 
     _copy_seed(schemas_dir=schemas_dir, seed_dir=seed_dir)
-    marker.write_text("Seeded by dfe_engine.bootstrap.ensure_storage.\n")
+    marker.write_text(f"{stamp}\n")
+    if seeded_by:
+        logger.info(f"Re-seeded schemas over a tree seeded by {seeded_by!r}; now {stamp!r}")
+        return
     logger.info(f"Seeded schemas from {str(seed_dir)!r} into {str(schemas_dir)!r}")
