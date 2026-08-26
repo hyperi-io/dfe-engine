@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.bootstrap import SEED_MARKER_NAME, ensure_storage
+from dfe_engine.bootstrap import SEED_MARKER_NAME, _seed_stamp, ensure_storage
 from dfe_engine.settings import DFESettings, SchemasSettings
 
 
@@ -55,13 +55,31 @@ class TestEnsureStorage:
         assert (schemas_dir / "meta" / "core.yaml").read_text() == "name: core\n"
         assert (schemas_dir / SEED_MARKER_NAME).exists()
 
-    def test_does_not_reseed_when_marker_present(self, config_dir, schemas_dir, seed_dir):
+    def test_does_not_reseed_when_marker_matches_this_version(
+        self, config_dir, schemas_dir, seed_dir
+    ):
         schemas_dir.mkdir(parents=True)
-        (schemas_dir / SEED_MARKER_NAME).write_text("")
+        (schemas_dir / SEED_MARKER_NAME).write_text(f"{_seed_stamp()}\n")
         (schemas_dir / "user.yaml").write_text("name: user\n")
         ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
         assert (schemas_dir / "user.yaml").read_text() == "name: user\n"
         assert not (schemas_dir / "top.yaml").exists()
+
+    def test_reseeds_when_marker_names_another_version(self, config_dir, schemas_dir, seed_dir):
+        # A tree seeded by an older image lacks whatever that image did not ship, so
+        # the marker must not suppress the refresh.
+        schemas_dir.mkdir(parents=True)
+        (schemas_dir / SEED_MARKER_NAME).write_text("dfe-engine 0.0.1\n")
+        (schemas_dir / "user.yaml").write_text("name: user\n")
+        ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
+        assert (schemas_dir / "top.yaml").read_text() == "name: top\n"
+        assert (schemas_dir / "meta" / "core.yaml").read_text() == "name: core\n"
+        assert (schemas_dir / "user.yaml").read_text() == "name: user\n"
+        assert (schemas_dir / SEED_MARKER_NAME).read_text().strip() == _seed_stamp()
+
+    def test_marker_records_the_seeding_version(self, config_dir, schemas_dir, seed_dir):
+        ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
+        assert (schemas_dir / SEED_MARKER_NAME).read_text().strip() == _seed_stamp()
 
     def test_config_is_never_seeded(self, config_dir, schemas_dir, seed_dir):
         ensure_storage(settings=make_settings(config_dir=config_dir, schemas_dir=schemas_dir))
