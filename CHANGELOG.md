@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.8](https://github.com/hyperi-io/dfe-engine/compare/v1.17.7...v1.17.8) (2026-08-26)
+
+### Bug Fixes
+
+* **bootstrap:** re-seed schemas when the marker names another engine version ([#217](https://github.com/hyperi-io/dfe-engine/issues/217)) ([3fdd4ef](https://github.com/hyperi-io/dfe-engine/commit/3fdd4efb147079ff22654952ec73fb35bbe90c52))
+
 ## [1.17.7](https://github.com/hyperi-io/dfe-engine/compare/v1.17.6...v1.17.7) (2026-08-26)
 
 ### Bug Fixes
