@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.7](https://github.com/hyperi-io/dfe-engine/compare/v1.17.6...v1.17.7) (2026-08-26)
+
+### Bug Fixes
+
+* **schema:** read the otel and engine-state tables from dfe-schemas ([#214](https://github.com/hyperi-io/dfe-engine/issues/214)) ([5adc138](https://github.com/hyperi-io/dfe-engine/commit/5adc138122f0616235ef9d8e35294c207f64dacb))
+
 ## [1.17.6](https://github.com/hyperi-io/dfe-engine/compare/v1.17.5...v1.17.6) (2026-08-26)
 
 ### Bug Fixes
