@@ -159,8 +159,20 @@ class TestRenderTenantAxis:
         assert s.count("CREATE ROW POLICY") == 2
         assert "`dfe_hunts`.`results`" in s
 
-    def test_no_tables_just_role(self):
-        assert render_tenant_axis([]) == ["CREATE ROLE IF NOT EXISTS `dfe_tenant_role`"]
+    def test_no_tables_just_role_and_its_system_grants(self):
+        assert render_tenant_axis([]) == [
+            "CREATE ROLE IF NOT EXISTS `dfe_tenant_role`",
+            "GRANT SELECT ON system.columns TO `dfe_tenant_role`",
+            "GRANT SELECT ON system.settings TO `dfe_tenant_role`",
+            "GRANT SELECT ON system.table_engines TO `dfe_tenant_role`",
+            "GRANT SELECT ON system.tables TO `dfe_tenant_role`",
+        ]
+
+    def test_tenant_gets_no_operational_system_tables(self):
+        """A tenant reads schema metadata, never the deployment or query history."""
+        s = _joined(render_tenant_axis([]))
+        for table in ("query_log", "processes", "clusters", "disks", "parts", "users"):
+            assert f"system.{table} TO" not in s
 
     def test_no_per_org_objects(self):
         """The whole point of the shared axis: org count never changes it."""

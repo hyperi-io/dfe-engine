@@ -20,10 +20,35 @@ pure rendering with no cluster or settings dependency.
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from scalo.logger import logger
 
 from .bindings import derive_group_bindings
 from .reconciler import ReconcileResult, reconcile_ch_rbac
+
+_ENABLED_VALUES = ("true", "1", "yes")
+_DISABLED_VALUES = ("false", "0", "no")
+
+TENANT_ISOLATION_ENV = "DFE_TENANT_ISOLATION_ENABLED"
+LEGACY_TENANT_ISOLATION_ENV = "DFE_ORG_PROVISIONING_ENABLED"
+
+
+def tenant_isolation_enabled() -> bool:
+    """Whether to reconcile the CH tenant fence, defaulting to ON.
+
+    The row policies this gates ARE the isolation, so a deployment that leaves it
+    unset gets enforcement rather than `_org_id` columns nothing reads.
+    """
+    for env in (TENANT_ISOLATION_ENV, LEGACY_TENANT_ISOLATION_ENV):
+        raw = os.environ.get(env, "").strip().lower()
+        if not raw:
+            continue
+        if env == LEGACY_TENANT_ISOLATION_ENV:
+            logger.warning(f"{env} is deprecated; use {TENANT_ISOLATION_ENV}")
+        return raw in _ENABLED_VALUES
+    return True
 
 
 def ch_admin_client(settings: Any) -> Any:

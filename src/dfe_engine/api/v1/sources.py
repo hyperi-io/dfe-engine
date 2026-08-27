@@ -22,6 +22,7 @@ from typing import Any, NoReturn
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from scalo.logger import logger
 
 from dfe_engine.api.deps import ClickHouseClient, CurrentUser, Settings, SourceReg, require_action
 from dfe_engine.api.errors import MatchConflictErrorResponse, SourceCreateConflictResponse
@@ -746,6 +747,15 @@ async def deploy_source_schema(
                 "message": f"ClickHouse rejected DDL after {applied} statement(s): {exc}",
             },
         ) from exc
+
+    # The tier grant is database-wide, so the new table is readable the moment it
+    # exists while its row policy would otherwise wait for the next reconcile.
+    try:
+        from dfe_engine.governance.ch.reconciler import fence_tables
+
+        fence_tables(ch._client, database=db)
+    except Exception as exc:
+        logger.warning(f"Tenant fence not applied after deploying '{name}': {exc}")
 
     store = SourceDeploymentStore.from_settings(settings)
     deploy_result = SchemaDeployResult(

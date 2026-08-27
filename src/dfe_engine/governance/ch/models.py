@@ -72,6 +72,7 @@ CH_SYSTEM_TABLES = (
     "clusters",
     "columns",
     "dashboards",
+    "data_skipping_indices",
     "databases",
     "detached_parts",
     "disks",
@@ -88,11 +89,31 @@ CH_SYSTEM_TABLES = (
     "query_log",
     "replicas",
     "replication_queue",
+    "settings",
+    "table_engines",
     "tables",
     "text_log",
 )
 
 SYSTEM_INTROSPECTION_GRANTS = [f"SELECT ON system.{table}" for table in CH_SYSTEM_TABLES]
+
+
+# The only system tables a TENANT reaches. HyperDX builds its field list from
+# system.columns and detects server capabilities from the other three, so a
+# tenant that cannot read these renders an empty source rather than its data.
+#
+# Deliberately a fraction of CH_SYSTEM_TABLES: nothing here describes the
+# deployment, the cluster, other tenants, or query history. ClickHouse filters
+# columns/tables rows by the caller's own grants, so a tenant sees metadata only
+# for tables its tier already grants SELECT on.
+TENANT_SYSTEM_TABLES = (
+    "columns",
+    "settings",
+    "table_engines",
+    "tables",
+)
+
+TENANT_SYSTEM_GRANTS = [f"SELECT ON system.{table}" for table in TENANT_SYSTEM_TABLES]
 
 
 TENANT_ROLE = "dfe_tenant_role"
