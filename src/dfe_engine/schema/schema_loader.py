@@ -274,12 +274,20 @@ class SchemaLoader:
         source: str | Path,
         *,
         version: str | None = None,
+        require_columns: bool = True,
     ) -> dict:
         """Load a schema YAML file's resolved version entry as a raw dict.
 
         Same file-layout and version resolution as :meth:`load_columns`.
         Returns the raw version mapping (``columns`` plus any sibling keys
         such as ``synthetic``); flat files are wrapped as ``{"columns": [...]}``.
+
+        Args:
+            source: Path to the schema YAML.
+            version: Version to resolve. Defaults to the file's ``current``.
+            require_columns: Reject a version entry that declares no columns. A
+                config-only definition (a core table whose columns come from
+                composition) passes ``False``.
 
         Raises:
             SchemaLoadError: If file missing or invalid.
@@ -300,7 +308,13 @@ class SchemaLoader:
         target_version = version or data.get("current")
 
         if target_version and "versions" in data:
-            _extract_version_columns(data, target_version, path)
+            if require_columns:
+                _extract_version_columns(data, target_version, path)
+            elif target_version not in data.get("versions", {}):
+                available = ", ".join(sorted(data.get("versions", {}))) or "(none)"
+                raise SchemaLoadError(
+                    f"Version {target_version!r} not found in {path}. Available: {available}"
+                )
             return data["versions"][target_version]
         if "columns" in data:
             # Flat layout (unversioned or no version requested)

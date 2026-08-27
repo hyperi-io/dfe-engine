@@ -13,6 +13,7 @@ Usage:
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,7 @@ from ..source.type_registry import TypeRegistry
 from .engine_resolver import EngineResolver
 from .schema_ddl import DDLConfig, DDLGenerator, TableSpec
 from .schema_loader import SchemaLoader, _resolve_profiles_dir, _resolve_schemas_root
+from .table_loader import load_table_config
 
 _PROFILES = ("timeseries", "minimal", "passthrough")
 _DEFAULT_PROFILE = "timeseries"
@@ -104,12 +106,21 @@ class DDLFileWriter:
         """Resolve the path to hunts/results.yaml."""
         return DDLFileWriter._resolve_hunt_schema_path("results.yaml", schemas_root)
 
+    def _core_config(self, ref: str, **overrides: Any) -> DDLConfig:
+        """A core table's declared config from dfe-schemas, with call-site fields set.
+
+        Retention and partitioning are declared in dfe-schemas so one definition
+        serves the engine, the ArgoCD Job and the docker one-shot alike.
+        """
+        return replace(load_table_config(ref, self._database), **overrides)
+
     def _profile_table_spec(
         self,
         table_name: str,
         profile_name: str,
         profile_version: str | None = None,
         description: str | None = None,
+        config_ref: str | None = None,
     ) -> TableSpec:
         """Describe a profile-only table: its columns and its DDL config."""
         profile_version = profile_version or self._profile_version(profile_name)
@@ -117,12 +128,16 @@ class DDLFileWriter:
         columns = SchemaLoader.load_profile(
             profile_name=profile_name, profile_version=profile_version
         )
-        config = DDLConfig(
-            db=self._database,
-            profile_name=profile_name,
-            profile_version=profile_version,
-            description=description,
-            topology=self._topology,
+        overrides: dict[str, Any] = {
+            "profile_name": profile_name,
+            "profile_version": profile_version,
+            "description": description,
+            "topology": self._topology,
+        }
+        config = (
+            self._core_config(config_ref, **overrides)
+            if config_ref
+            else DDLConfig(db=self._database, **overrides)
         )
         return TableSpec(name=table_name, columns=columns, config=config)
 
@@ -141,6 +156,7 @@ class DDLFileWriter:
             profile_name=profile_name,
             profile_version=profile_version,
             description="Default ingestion table (profile columns only)",
+            config_ref="tables/core/default",
         )
 
     def generate_default_table(
@@ -173,13 +189,10 @@ class DDLFileWriter:
             source=detection_checkpoint_path, version=detection_checkpoint_version
         )
 
-        config = DDLConfig(
-            db=self._database,
-            partition_column="query_checkpoint_time",
-            partition_granularity="month",
+        config = self._core_config(
+            "tables/core/detection_checkpoint",
             schema_version=detection_checkpoint_version,
             description="Hunt execution checkpoint tracking",
-            ttl_days=365,
             topology=self._topology,
         )
         return TableSpec(
@@ -227,13 +240,12 @@ class DDLFileWriter:
             exclude=SchemaLoader.load_profile_exclude(hunt_results_path, hunt_results_version),
         )
 
-        config = DDLConfig(
-            db=self._database,
+        config = self._core_config(
+            "tables/core/detection",
             profile_name=profile_name,
             profile_version=profile_version,
             schema_version=hunt_results_version,
             description="Hunt detection results (profile and hunts.results columns)",
-            ttl_days=365,
             topology=self._topology,
         )
         return TableSpec(name="detection", columns=all_columns, config=config)

@@ -23,7 +23,14 @@ from typing import Any
 
 from dfe_engine.clickhouse.quoting import quote_identifier, quote_literal
 
-from .models import TENANT_ROLE, TENANT_SETTING, ChServiceRole, ChTier, tenant_policy_name
+from .models import (
+    TENANT_ROLE,
+    TENANT_SETTING,
+    TENANT_SYSTEM_GRANTS,
+    ChServiceRole,
+    ChTier,
+    tenant_policy_name,
+)
 
 
 def _bq(identifier: str) -> str:
@@ -132,7 +139,8 @@ def render_tenant_axis(
     tables: list[tuple[str, str]],
     deny_tables: list[tuple[str, str]] | None = None,
 ) -> list[str]:
-    """DDL for the SHARED tenant axis: one role, one RESTRICTIVE policy per table.
+    """DDL for the SHARED tenant axis: one role, its system grants, one RESTRICTIVE
+    policy per table.
 
     The predicate reads the caller's pinned ``SQL_current_tenant_id`` (comma-joined
     tenant ids), so ONE policy set serves every org - adding an org adds a pinned
@@ -154,6 +162,11 @@ def render_tenant_axis(
     role = _bq(TENANT_ROLE)
     predicate = f"has(splitByChar(',', getSetting('{TENANT_SETTING}')), _org_id)"
     stmts: list[str] = [f"CREATE ROLE IF NOT EXISTS {role}"]
+    # Under select_from_system_db_requires_grant the system database is
+    # deny-by-default, so the embedded HyperDX cannot build a field list without
+    # these four; the server config alone would leave a tenant staring at an
+    # empty source.
+    stmts += [f"GRANT {grant} TO {role}" for grant in TENANT_SYSTEM_GRANTS]
     for db, table in tables:
         policy = _bq(tenant_policy_name(db, table))
         target = f"{_bq(db)}.{_bq(table)}"
