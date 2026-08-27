@@ -3,6 +3,13 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.9](https://github.com/hyperi-io/dfe-engine/compare/v1.17.8...v1.17.9) (2026-08-27)
+
+### Bug Fixes
+
+* **governance:** tenant fence on by default, retention aligned to the partition ([#219](https://github.com/hyperi-io/dfe-engine/issues/219)) ([ed6bb1a](https://github.com/hyperi-io/dfe-engine/commit/ed6bb1abf4cb5febc7efcc13df1fce6e9ae1e952))
+* **rules:** build a hyperdx rule from the view's SQL, not a caller's string ([#218](https://github.com/hyperi-io/dfe-engine/issues/218)) ([fe401f1](https://github.com/hyperi-io/dfe-engine/commit/fe401f1b507659abe0edfbdd5391fa51e6a3ed42)), closes [dfe-hyperdx#49](https://github.com/hyperi-io/dfe-hyperdx/issues/49)
+
 ## [1.17.8](https://github.com/hyperi-io/dfe-engine/compare/v1.17.7...v1.17.8) (2026-08-26)
 
 ### Bug Fixes
