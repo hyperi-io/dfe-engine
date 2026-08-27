@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.10](https://github.com/hyperi-io/dfe-engine/compare/v1.17.9...v1.17.10) (2026-08-27)
+
+### Bug Fixes
+
+* scalo 2.29.18 + startup version check, schemas submodule to retention head ([4f33bc9](https://github.com/hyperi-io/dfe-engine/commit/4f33bc9ec35bebf68cb790a549b6182d9fe3de62))
+
 ## [1.17.9](https://github.com/hyperi-io/dfe-engine/compare/v1.17.8...v1.17.9) (2026-08-27)
 
 ### Bug Fixes
