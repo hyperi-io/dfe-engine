@@ -37,14 +37,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     ensure_storage(settings=settings)
 
-    # Fire-and-forget startup version check; no-op unless the cascade sets
-    # version_check.enabled + api_url. Must never break startup.
+    # Fire-and-forget startup version check; on by default, any
+    # version_check.* cascade key overrides (enabled: false kills it).
+    # Must never break startup.
     try:
         from scalo.version_check import check_on_startup
+        from scalo.version_check.checker import VersionCheckConfig
 
         from dfe_engine import __version__
 
-        check_on_startup(product="dfe-engine", version=__version__)
+        check_on_startup(
+            product="dfe-engine",
+            version=__version__,
+            config=VersionCheckConfig.from_cascade_or(
+                api_url="https://releases.hyperi.io/api/v1/check",
+            ),
+        )
     except Exception as exc:
         logger.debug("version check unavailable", error=str(exc))
 

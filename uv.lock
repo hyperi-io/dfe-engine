@@ -790,7 +790,7 @@ requires-dist = [
     { name = "python-multipart", specifier = ">=0.0.32" },
     { name = "requests", specifier = ">=2.34.2" },
     { name = "ruamel-yaml", specifier = ">=0.19.1" },
-    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.29.18" },
+    { name = "scalo", extras = ["expression", "http", "metrics"], specifier = ">=2.30.0" },
     { name = "scim2-models", specifier = ">=0.6.12" },
     { name = "sse-starlette", specifier = ">=3.4.5" },
     { name = "starlette", specifier = ">=1.3.1" },
@@ -2423,7 +2423,7 @@ wheels = [
 
 [[package]]
 name = "scalo"
-version = "2.29.18"
+version = "2.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anyio" },
@@ -2441,9 +2441,9 @@ dependencies = [
     { name = "tomli-w" },
     { name = "typer" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6a/3c/66e8248c9fff0ce0c522a400ea0a1a54787bc17a51b7c8109793c9dd3340/scalo-2.29.18.tar.gz", hash = "sha256:95cbbd0e1256d948bf62ad0961bf5198cba182d58e2fa2d54ae640f2d646bf71", size = 337312, upload-time = "2026-08-27T07:57:38.54Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/2e/88/9b6405dcc0bc3aa8178bd90754a9a452e168dc5e7d6f57c2d2cbfccaf733/scalo-2.30.0.tar.gz", hash = "sha256:d0bf1fe5b5fb1870236a49ef13f018f5bd58c083cef7a8e22d75325dbf4e5a4f", size = 337665, upload-time = "2026-08-27T22:56:05.278Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/77/67/b92146f6d7a38b66f063183cc3eda196033e21d05d3eac69057b770ce9d6/scalo-2.29.18-py3-none-any.whl", hash = "sha256:a024bb3e853cf573b10900a8b03adf3487d1ece92377ecb0a8bc51bd0c1d1366", size = 409969, upload-time = "2026-08-27T07:57:37.198Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/c0/53e8745fbcfdff8485cd8840bcb2502ee9264daf40971f4a4e928ab5e91d/scalo-2.30.0-py3-none-any.whl", hash = "sha256:323043d5617bf9ddc231ee2cbdb5105b3138b1fc245efd1a03f755683444e542", size = 410306, upload-time = "2026-08-27T22:56:03.439Z" },
 ]
 
 [package.optional-dependencies]
