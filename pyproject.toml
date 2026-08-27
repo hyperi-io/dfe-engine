@@ -34,7 +34,7 @@ dependencies = [
     # /metrics 404s, and self-monitoring (one of the two default E2E acceptance tests)
     # goes green while reporting nothing. [opentelemetry] is no longer a separate
     # extra: [metrics] carries the SDK.
-    "scalo[expression,http,metrics]>=2.29.18",
+    "scalo[expression,http,metrics]>=2.30.0",
     # Data processing
     "pandas>=3.0.3",
     "numpy>=2.5.0",
