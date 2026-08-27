@@ -232,12 +232,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         logger.info("HyperDX client initialized", base_url=settings.hyperdx.base_url)
 
-    # Org ClickHouse RBAC reconcile (opt-in via DFE_ORG_PROVISIONING_ENABLED).
     # Reconciles the seeded quota tiers + service roles + per-org roles/row
     # policies on _org_id into ClickHouse, plus one CH user per RBAC group
-    # holding that group's org role. Default-off so startup is unaffected;
-    # fully non-fatal.
-    if os.environ.get("DFE_ORG_PROVISIONING_ENABLED", "").lower() in ("true", "1", "yes"):
+    # holding that group's org role. On by default: these policies ARE the tenant
+    # fence, so a deployment that skipped them would carry _org_id on every row
+    # and enforce none of it. Fully non-fatal.
+    from dfe_engine.governance.ch import tenant_isolation_enabled
+
+    if tenant_isolation_enabled():
         try:
             from dfe_engine.governance.ch import ch_admin_client, reconcile_from_stores
 

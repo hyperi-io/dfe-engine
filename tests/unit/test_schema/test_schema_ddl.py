@@ -147,13 +147,25 @@ class TestGenerateCreateTable:
     def test_ttl(self, gen: DDLGenerator):
         cfg = DDLConfig(ttl_days=30)
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
-        assert "_timestamp + INTERVAL 30 DAY DELETE WHERE _timestamp >= 0" in ddl
         assert "_timestamp_load + INTERVAL 30 DAY DELETE WHERE _timestamp_load >= 0" in ddl
+
+    def test_ttl_names_only_the_partition_column(self, gen: DDLGenerator):
+        """A rule over event time would only ever delay a ttl_only_drop_parts drop."""
+        cfg = DDLConfig(ttl_days=30)
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
+        assert "PARTITION BY toYYYYMMDD(_timestamp_load)" in ddl
+        assert "_timestamp + INTERVAL" not in ddl
 
     def test_ttl_none(self, gen: DDLGenerator):
         cfg = DDLConfig(ttl_days=None)
         ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "TTL" not in ddl
+
+    def test_ttl_over_absent_column_raises(self, gen: DDLGenerator):
+        """A declared retention that renders no clause would keep every row forever."""
+        cfg = DDLConfig(ttl_days=30, ttl_columns=["query_checkpoint_time"])
+        with pytest.raises(DDLGenerationError, match="keep every row forever"):
+            gen.generate_create_table("t", _basic_columns(), cfg)
 
     def test_engine_single_topology(self, gen: DDLGenerator):
         # single topology -> plain <variant>()
@@ -201,7 +213,20 @@ class TestGenerateCreateTable:
     def test_settings(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
         assert "index_granularity = 2048" in ddl
+        assert "ttl_only_drop_parts" not in ddl
+
+    def test_drop_parts_on_when_ttl_matches_the_partition(self, gen: DDLGenerator):
+        cfg = DDLConfig(ttl_days=30)
+        ddl = gen.generate_create_table("t", _basic_columns(), cfg)
         assert "ttl_only_drop_parts = 1" in ddl
+
+    def test_drop_parts_off_when_the_table_has_no_partition(self, gen: DDLGenerator):
+        """Whole-part drop on an unpartitioned table retains every row forever."""
+        cols = [_col(name="last_fired_at", type="datetime"), _col(name="x", type="string")]
+        cfg = DDLConfig(ttl_days=30, ttl_columns=["last_fired_at"])
+        ddl = gen.generate_create_table("t", cols, cfg)
+        assert "PARTITION BY" not in ddl
+        assert "ttl_only_drop_parts = 0" in ddl
 
     def test_projection(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("t", _basic_columns())
@@ -504,7 +529,8 @@ class TestDDLConfig:
         cfg = DDLConfig()
         assert cfg.db == "{db}"
         assert cfg.engine == "MergeTree"
-        assert cfg.ttl_days == 90
+        assert cfg.ttl_days is None
+        assert cfg.ttl_columns == ["_timestamp_load"]
         assert cfg.partition_column == "_timestamp_load"
         assert cfg.partition_granularity == "day"
         assert cfg.index_granularity == 2048

@@ -121,6 +121,7 @@ def _config(table: dict[str, Any], database: str) -> DDLConfig:
     data-table defaults, which would add clauses over columns these do not
     have.
     """
+    defaults = DDLConfig()
     return DDLConfig(
         db=database,
         engine=table.get("engine", "MergeTree"),
@@ -128,10 +129,31 @@ def _config(table: dict[str, Any], database: str) -> DDLConfig:
         ttl_columns=list(table.get("ttl_columns") or []),
         projection_order_by=table.get("projection_order_by"),
         partition_by=table.get("partition_by"),
+        partition_column=table.get("partition_column", defaults.partition_column),
+        partition_granularity=table.get("partition_granularity", defaults.partition_granularity),
         order_by=table.get("order_by"),
         extra_indexes=list(table.get("indexes") or []),
         index_granularity=int(table.get("index_granularity", 2048)),
     )
+
+
+def load_table_config(ref: str, database: str, *, version: str | None = None) -> DDLConfig:
+    """The DDL config a ``tables/...`` definition declares, without its columns.
+
+    The core tables compose their columns from a header profile and a hunts
+    schema, so their definitions carry a ``table`` block and nothing else.
+
+    Args:
+        ref: Path under the schemas root without a suffix, e.g. ``tables/core/default``.
+        database: The database the table lands in.
+        version: Version to load. Defaults to the file's ``current`` marker.
+    """
+    path = _table_yaml_path(ref)
+    entry = SchemaLoader.load_version_entry(path, version=version, require_columns=False)
+    table = entry.get("table") or {}
+    if "name" not in table:
+        raise SchemaLoadError(f"Table definition {path} does not name its table")
+    return _config(table, database)
 
 
 def load_table_spec(ref: str, database: str, *, version: str | None = None) -> TableSpec:

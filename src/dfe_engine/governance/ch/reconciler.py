@@ -377,6 +377,40 @@ class ChRbacReconciler:
         return result
 
 
+def fence_tables(admin_client: Any, *, tiers: list[Any] | None = None, database: str = "") -> int:
+    """Re-apply the tenant row policies alone, and report how many statements ran.
+
+    Sources create their table one-per-source at deploy time, and the tier grant is
+    database-wide, so a new table is readable the instant it exists; only its row
+    policy waits for a reconcile. Running this on deploy closes that window. Mints
+    nothing and touches no user, so it is cheap enough to run every time.
+    """
+    reconciler = ChRbacReconciler(admin_client, database=database or None)
+    resolved = resolve_grant_databases(list(tiers or DEFAULT_TIERS), reconciler._database)
+    org_tables = reconciler.discover_org_id_tables()
+    org_set = set(org_tables)
+    deny_tables = [
+        t
+        for t in reconciler.discover_tenant_reachable_tables(_tenant_granted_dbs(resolved))
+        if t not in org_set
+    ]
+
+    applied = 0
+    for stmt in render_tenant_axis(org_tables, deny_tables):
+        try:
+            admin_client.command(stmt)
+            applied += 1
+        except Exception as exc:
+            logger.warning("tenant fence statement failed", statement=stmt[:60], error=str(exc))
+    logger.info(
+        "tenant fence applied",
+        statements=applied,
+        org_tables=len(org_tables),
+        deny_tables=len(deny_tables),
+    )
+    return applied
+
+
 def reconcile_ch_rbac(
     admin_client: Any,
     *,

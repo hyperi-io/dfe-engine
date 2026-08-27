@@ -84,8 +84,14 @@ class DDLConfig:
     # generator has no injected resolver - it carries no ON CLUSTER intent, so a
     # multi-node cluster needs the sensing resolver (see DDLGenerator.resolver).
     topology: str = "single"
-    ttl_days: int | None = 90
-    ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp", "_timestamp_load"])
+    # Retention is DECLARED, in dfe-schemas or a source's config, never defaulted
+    # here: a default no operator can see is how a table ends up keeping
+    # everything or dropping what it should not.
+    ttl_days: int | None = None
+    # TTL rides the partition column alone: ttl_only_drop_parts drops a part only
+    # once every row in it has expired, so a second rule over event time can only
+    # ever delay the drop.
+    ttl_columns: list[str] = field(default_factory=lambda: ["_timestamp_load"])
     partition_column: str = "_timestamp_load"
     # Partition granularity for *partition_column*: "day" -> toYYYYMMDD,
     # "month" -> toYYYYMM. A low-volume audit table wants monthly, else it
@@ -298,10 +304,13 @@ class DDLGenerator:
         lines.append(f")\nENGINE = {resolved.clause}")
 
         # PARTITION BY -- a raw expression wins over the column + granularity.
+        partition = None
         if cfg.partition_by:
-            lines.append(f"PARTITION BY {cfg.partition_by}")
+            partition = cfg.partition_by
         elif any(column for column in columns if column.name == cfg.partition_column):
-            lines.append(f"PARTITION BY {self._partition_expr(cfg)}")
+            partition = self._partition_expr(cfg)
+        if partition:
+            lines.append(f"PARTITION BY {partition}")
 
         # ORDER BY + PRIMARY KEY. A raw ORDER BY sets no PRIMARY KEY of its own:
         # ClickHouse then takes the sorting key as the primary key, which is what
@@ -330,8 +339,10 @@ class DDLGenerator:
 
         # SETTINGS
         settings_parts = [f"index_granularity = {cfg.index_granularity}"]
-        if cfg.ttl_only_drop_parts:
-            settings_parts.append("ttl_only_drop_parts = 1")
+        if ttl and cfg.ttl_only_drop_parts:
+            settings_parts.append(
+                f"ttl_only_drop_parts = {int(self._ttl_drops_whole_parts(cfg, partition))}"
+            )
         lines.append("SETTINGS\n    " + ",\n    ".join(settings_parts))
 
         # COMMENT
@@ -670,18 +681,45 @@ class DDLGenerator:
     # ── Internal: TTL ───────────────────────────────────────────────
 
     @staticmethod
+    def _ttl_drops_whole_parts(cfg: DDLConfig, partition: str | None) -> bool:
+        """Whether every TTL column is carried by the partition expression.
+
+        ``ttl_only_drop_parts`` waits for EVERY row in a part to expire, so on a
+        table the TTL is not aligned to it silently retains data forever; those
+        tables need the row-level delete instead.
+        """
+        if not partition:
+            return False
+        return all(col in partition for col in cfg.ttl_columns)
+
+    @staticmethod
     def _ttl_clause(cfg: DDLConfig, columns: list[SchemaColumn]) -> str | None:
-        """Build the TTL clause."""
-        if cfg.ttl_days is None or not cfg.ttl_columns:
-            return None
+        """Build the TTL clause.
 
-        parts = []
-        for col in cfg.ttl_columns:
-            if any(column for column in columns if column.name == col):
-                parts.append(f"{col} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {col} >= 0")
-
-        if len(parts) == 0:
+        Raises:
+            DDLGenerationError: Retention was declared over columns the table does
+                not carry, which would otherwise render as a table that silently
+                keeps everything forever.
+        """
+        if cfg.ttl_days is None:
             return None
+        if not cfg.ttl_columns:
+            raise DDLGenerationError(
+                f"ttl_days={cfg.ttl_days} declared with no ttl_columns to apply it to"
+            )
+
+        present = {column.name for column in columns}
+        missing = [col for col in cfg.ttl_columns if col not in present]
+        if missing:
+            raise DDLGenerationError(
+                f"ttl_days={cfg.ttl_days} declared over absent column(s) "
+                f"{', '.join(missing)}; the table would keep every row forever"
+            )
+
+        parts = [
+            f"{col} + INTERVAL {cfg.ttl_days} DAY DELETE WHERE {col} >= 0"
+            for col in cfg.ttl_columns
+        ]
         return "TTL " + ",\n    ".join(parts)
 
     # ── Internal: table comment ─────────────────────────────────────
