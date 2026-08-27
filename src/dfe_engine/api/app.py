@@ -37,6 +37,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     ensure_storage(settings=settings)
 
+    # Fire-and-forget startup version check; no-op unless the cascade sets
+    # version_check.enabled + api_url. Must never break startup.
+    try:
+        from scalo.version_check import check_on_startup
+
+        from dfe_engine import __version__
+
+        check_on_startup(product="dfe-engine", version=__version__)
+    except Exception as exc:
+        logger.debug("version check unavailable", error=str(exc))
+
     from dfe_engine.api.deps import bootstrap_registries, shutdown_registries
 
     # Governed Ops engine (Tier-1/Tier-2 over the gitops deploy repo). Built
