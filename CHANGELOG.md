@@ -3,6 +3,12 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.11](https://github.com/hyperi-io/dfe-engine/compare/v1.17.10...v1.17.11) (2026-08-27)
+
+### Bug Fixes
+
+* version check on by default via the releases endpoint ([0d00257](https://github.com/hyperi-io/dfe-engine/commit/0d00257b59792f97c01be43cd80d5d76cc6b192a))
+
 ## [1.17.10](https://github.com/hyperi-io/dfe-engine/compare/v1.17.9...v1.17.10) (2026-08-27)
 
 ### Bug Fixes
