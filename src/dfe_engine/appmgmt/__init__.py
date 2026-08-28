@@ -35,6 +35,7 @@ from .catalogue import (
     file_set,
     services,
 )
+from .dryrun import DryRunResult, DryRunStatus, EventOutcome, run_language
 from .files import AppFile, FileNotInSetError, InvalidContentError, InvalidFilenameError
 from .instances import (
     HELMVARS_CLASS,
@@ -76,7 +77,10 @@ __all__ = [
     "ArtifactVersion",
     "ConsumedFileSet",
     "DeployTarget",
+    "DryRunResult",
+    "DryRunStatus",
     "Encoding",
+    "EventOutcome",
     "FileNotInSetError",
     "InstanceExistsError",
     "InvalidArtifactError",
@@ -107,6 +111,7 @@ __all__ = [
     "instance_of",
     "list_instances",
     "parse_overlay_name",
+    "run_language",
     "services",
     "validate",
     "validate_language",

@@ -46,7 +46,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, require_action
+from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
 from dfe_engine.appmgmt import (
     AppInstance,
     DeployTarget,
@@ -60,6 +60,7 @@ from dfe_engine.appmgmt import (
     UnknownAppError,
     ValidationResult,
     catalogue,
+    dryrun,
     files,
     instances,
     library,
@@ -81,6 +82,7 @@ from dfe_engine.gitcrud.commit_policy import (
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
+from dfe_engine.sampling import SampleRequest, SamplerError
 
 router = APIRouter(prefix="/apps", tags=["App Management"])
 
@@ -196,6 +198,52 @@ class FileDetail(FileSummary):
 
 class FileWriteRequest(BaseModel):
     content: str
+
+
+class DryRunRequest(BaseModel):
+    """Run a file over sampled events without saving or deploying anything."""
+
+    name: str = Field(description="File in the set to run")
+    content: str | None = Field(
+        default=None,
+        description="Unsaved content to run instead of what is committed. Nothing is written.",
+    )
+    source: str = Field(
+        default="",
+        description="Source to sample from. Defaults to the instance, which for a "
+        "source-bound app IS the source.",
+    )
+    limit: int = Field(
+        default=10, ge=1, le=dryrun.MAX_EVENTS, description="Events to sample and run over"
+    )
+
+
+class DryRunEventModel(BaseModel):
+    """What the program did to one event."""
+
+    index: int
+    before: str
+    after: str = ""
+    error: str = ""
+    dropped: bool = False
+    changed: bool = False
+
+
+class DryRunResponse(BaseModel):
+    """A dry run's per-event outcomes and totals."""
+
+    status: str = Field(description="completed | unavailable | disabled | unsupported | failed")
+    backend: str = ""
+    message: str = ""
+    source: str = ""
+    sampled: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    dropped: int = 0
+    truncated: bool = Field(
+        default=False, description="Events were cut by the count or output-size ceiling"
+    )
+    events: list[DryRunEventModel] = Field(default_factory=list)
 
 
 class CopyFilesRequest(BaseModel):
@@ -1110,6 +1158,117 @@ async def delete_app_file(
     protected = _enforce(request, user, app.overlay_name, doc)
     result = _commit(request, user, app, doc, summary=f"remove {filename}", protected=protected)
     return result.model_copy(update={"reload": str(fs.reload)})
+
+
+# ── dry run ───────────────────────────────────────────────────
+
+
+def _require_dry_run(request: Request, user: Any) -> None:
+    """Gate a dry run on its own grant, not on reading a config value.
+
+    It executes caller-supplied code, which is a strictly higher privilege than
+    anything else on this router.
+    """
+    action = scopes_dict["dryrun_execute"]
+    if not authorize(user, action, role_config=request.app.state.role_config).allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+
+
+def _require_sampler_read(request: Request, user: Any) -> None:
+    """Gate a dry run on the sampler grant as well as its own.
+
+    A dry run returns real events, so it must not become a way to read rows the
+    caller could not have sampled directly.
+    """
+    action = scopes_dict["sampler_read"]
+    if not authorize(user, action, role_config=request.app.state.role_config).allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+
+
+async def _sample_events(
+    request: Request, source: str, limit: int, ch: Any, source_registry: Any
+) -> list[str]:
+    """Pull raw event strings from the source this instance is bound to."""
+    sampler = getattr(request.app.state, "sampler", None)
+    if sampler is None:
+        raise HTTPException(
+            503, detail={"code": "not_configured", "message": "Sampler not initialised"}
+        )
+    req = SampleRequest(source=source, limit=limit)
+    try:
+        sampler.resolve_or_raise(req, source_registry)
+        result = await sampler.run(req, ch, source_registry)
+    except SamplerError as exc:
+        raise HTTPException(
+            400, detail={"code": "bad_sample_request", "message": str(exc)}
+        ) from exc
+    lines = getattr(result, "lines", None) or []
+    return [str(line) for line in lines]
+
+
+@router.post("/{service}/{instance}/files/{set_name}/dry-run", response_model=DryRunResponse)
+async def dry_run_app_file(
+    service: str,
+    instance: str,
+    set_name: str,
+    body: DryRunRequest,
+    user: CurrentUser,
+    request: Request,
+    ch: ClickHouseClient,
+    source_registry: SourceReg,
+) -> DryRunResponse:
+    """Run an authored file over real events from the source, and report each one.
+
+    Nothing is written: no topic, no table, no commit. ``content`` runs unsaved
+    content, which is what makes this useful in an editor; omitted, the file
+    already in the overlay runs instead.
+    """
+    app = _resolve(service, instance)
+    _require_dry_run(request, user)
+    _require_sampler_read(request, user)
+    fs = _file_set(service, set_name)
+
+    content = body.content
+    if content is None:
+        doc = _overlay(_gitcrud(request), app)
+        try:
+            content = files.read_file(doc, fs, body.name).content
+        except FileNotInSetError:
+            raise HTTPException(
+                404, detail={"code": "no_such_file", "message": f"{body.name} is not in {set_name}"}
+            ) from None
+
+    source = body.source or app.instance
+    events = await _sample_events(request, source, body.limit, ch, source_registry)
+    result = dryrun.run_language(
+        fs.language,
+        content,
+        events,
+        enabled=request.app.state.settings.transform_validation.dry_run,
+    )
+    audit_resource_change(user.user_id, "dryrun", f"{service}/{instance}/{body.name}", "executed")
+    return DryRunResponse(
+        status=str(result.status),
+        backend=result.backend,
+        message=result.message,
+        source=source,
+        sampled=len(events),
+        succeeded=result.succeeded,
+        failed=result.failed,
+        dropped=result.dropped,
+        truncated=result.truncated,
+        events=[
+            DryRunEventModel(
+                index=e.index,
+                before=e.before,
+                after=e.after,
+                error=e.error,
+                dropped=e.dropped,
+                changed=e.changed,
+            )
+            for e in result.events
+        ],
+    )
 
 
 # ── operational surface ───────────────────────────────────────

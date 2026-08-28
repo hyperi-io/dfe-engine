@@ -714,6 +714,7 @@ class TransformValidationSettings(BaseModel):
     Environment variables:
     - DFE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
     - DFE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
+    - DFE_TRANSFORM_DRY_RUN_ENABLED -> transform_validation.dry_run
     """
 
     enabled: bool = Field(
@@ -730,6 +731,14 @@ class TransformValidationSettings(BaseModel):
         description=(
             "Refuse a write whose content fails validation. Only an explicit failure "
             "blocks; an unavailable backend never does."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "Allow running an authored transform over sampled events. Off by default: "
+            "it executes caller-supplied code, so a deployment opts in rather than "
+            "inherits it from the validation switch."
         ),
     )
 
@@ -1574,6 +1583,8 @@ def _get_env_overrides() -> dict:
         overrides["transform_validation"]["enabled"] = val.lower() in ("true", "1", "yes")
     if val := _get_env("DFE_TRANSFORM_VALIDATION_BLOCKING"):
         overrides["transform_validation"]["blocking"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_TRANSFORM_DRY_RUN_ENABLED"):
+        overrides["transform_validation"]["dry_run"] = val.lower() in ("true", "1", "yes")
 
     # Helm settings
     if val := _get_env("DFE_HELM_OUTPUT_DIR"):
