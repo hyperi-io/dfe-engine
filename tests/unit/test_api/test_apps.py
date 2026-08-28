@@ -415,3 +415,137 @@ class TestNotDeployed:
         resp = client.get(f"{BASE}{suffix}", headers=admin_headers)
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_deployed"
+
+
+class TestDryRun:
+    """Running an authored file over sampled events, and the gates on doing it."""
+
+    @staticmethod
+    def _sampler(app, lines: list[str] | None = None):
+        """A stand-in sampler returning fixed lines, so no backing service is needed."""
+
+        class _Result:
+            def __init__(self, lines):
+                self.lines = lines
+
+        class _Sampler:
+            def resolve_or_raise(self, req, registry):
+                return None
+
+            async def run(self, req, ch, registry):
+                return _Result(lines if lines is not None else ['{"message": "hi"}'])
+
+        app.state.sampler = _Sampler()
+
+    def _deployed(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        client.put(
+            f"{BASE}/files/transforms/000.vrl",
+            json={"content": VRL_SOURCE},
+            headers=admin_headers,
+        )
+        return gc
+
+    def test_disabled_by_default_and_says_so(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["status"] == "disabled"
+        assert body["events"] == []
+
+    def test_an_absent_backend_reports_unavailable_never_a_pass(
+        self, client, app, admin_headers, tmp_path
+    ):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        app.state.settings.transform_validation.dry_run = True
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["status"] == "unavailable"
+
+    def test_it_samples_the_instances_own_source_by_default(
+        self, client, app, admin_headers, tmp_path
+    ):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app, ['{"a": 1}', '{"a": 2}'])
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers=admin_headers,
+        )
+        body = resp.json()
+        assert body["source"] == "edge"
+        assert body["sampled"] == 2
+
+    def test_unsaved_content_runs_without_being_committed(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        before = gc.get("helmvars", f"{VRL}-edge-values")
+        client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl", "content": ".completely = different\n"},
+            headers=admin_headers,
+        )
+        assert gc.get("helmvars", f"{VRL}-edge-values") == before
+
+    def test_a_missing_file_is_404(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "nope.vrl"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404
+        assert resp.json()["code"] == "no_such_file"
+
+    def test_the_event_ceiling_is_enforced_at_the_edge(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl", "limit": 5000},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422
+
+    def test_a_viewer_holding_sampler_read_still_cannot_execute(
+        self, client, app, admin_headers, viewer_headers, tmp_path
+    ):
+        # data_viewer has sampler:read but not dryrun:execute - reading source data
+        # is not the same privilege as running code over it.
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers=viewer_headers,
+        )
+        assert resp.status_code == 403
+
+    def test_an_operator_holding_both_grants_may_execute(
+        self, client, app, admin_headers, operator_headers, tmp_path
+    ):
+        # A dry run needs dryrun:execute (infra_admin) AND sampler:read
+        # (data_analyst); the operator resolves both, so both gates pass.
+        self._deployed(client, app, admin_headers, tmp_path)
+        self._sampler(app)
+        resp = client.post(
+            f"{BASE}/files/transforms/dry-run",
+            json={"name": "000.vrl"},
+            headers=operator_headers,
+        )
+        assert resp.status_code == 200, resp.text

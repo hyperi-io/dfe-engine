@@ -12324,6 +12324,82 @@
         ]
       }
     },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/dry-run": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Dry Run App File",
+        "description": "Run an authored file over real events from the source, and report each one.\n\nNothing is written: no topic, no table, no commit. ``content`` runs unsaved\ncontent, which is what makes this useful in an editor; omitted, the file\nalready in the overlay runs instead.",
+        "operationId": "dry_run_app_file_api_v1_apps__service___instance__files__set_name__dry_run_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DryRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/apps/{service}/{instance}/status": {
       "get": {
         "tags": [
@@ -17100,6 +17176,149 @@
         ],
         "title": "DraftColumn",
         "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type; for a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
+      },
+      "DryRunEventModel": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "before": {
+            "type": "string",
+            "title": "Before"
+          },
+          "after": {
+            "type": "string",
+            "title": "After",
+            "default": ""
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "dropped": {
+            "type": "boolean",
+            "title": "Dropped",
+            "default": false
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "before"
+        ],
+        "title": "DryRunEventModel",
+        "description": "What the program did to one event."
+      },
+      "DryRunRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "File in the set to run"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Unsaved content to run instead of what is committed. Nothing is written."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source to sample from. Defaults to the instance, which for a source-bound app IS the source.",
+            "default": ""
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Events to sample and run over",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DryRunRequest",
+        "description": "Run a file over sampled events without saving or deploying anything."
+      },
+      "DryRunResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "completed | unavailable | disabled | unsupported | failed"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": ""
+          },
+          "sampled": {
+            "type": "integer",
+            "title": "Sampled",
+            "default": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped",
+            "default": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "Events were cut by the count or output-size ceiling",
+            "default": false
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunEventModel"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DryRunResponse",
+        "description": "A dry run's per-event outcomes and totals."
       },
       "EmittedRecord": {
         "properties": {

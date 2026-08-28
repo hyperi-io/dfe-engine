@@ -194,6 +194,13 @@ library_scopes = {
     "library_write": "library:write",
 }
 
+# Running an authored program over sampled source data is a higher privilege than
+# reading a config value: it executes caller-supplied code AND returns real event
+# data, so it gets its own scope rather than riding helmvars:read.
+dryrun_scopes = {
+    "dryrun_execute": "dryrun:execute",
+}
+
 lifecycle_scopes = {
     "lifecycle_read": "lifecycle:read",
 }
