@@ -30,6 +30,7 @@ from ruamel.yaml import (
     YAML,
     YAMLError,  # noqa: F401 - re-exported
 )
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 # ruamel YAML instances carry mutable parser/emitter state and are NOT
 # thread-safe: a single shared instance dumped/loaded from two threads at once
@@ -139,6 +140,23 @@ def yaml_dump_string(data: Any) -> str:
     stream = StringIO()
     _rt().dump(data, stream)
     return stream.getvalue()
+
+
+def literal_block(text: str) -> LiteralScalarString:
+    """Mark a string to be emitted as a ``|`` block scalar.
+
+    Without this a multi-line string dumps as one quoted line full of ``\\n``
+    escapes, which is unreadable in a diff and unusable as a file body carried
+    inside a values document. A block scalar needs a trailing newline to round-trip,
+    so one is added when absent.
+
+    Args:
+        text: The content to emit verbatim.
+
+    Returns:
+        The same content, tagged for literal block style.
+    """
+    return LiteralScalarString(text if text.endswith("\n") else text + "\n")
 
 
 def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> dict:

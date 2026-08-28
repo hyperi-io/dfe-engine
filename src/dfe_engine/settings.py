@@ -692,9 +692,20 @@ class DeploymentSettings(BaseModel):
 
     Environment variables:
     - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
+    - DFE_DEPLOYMENT_TARGET -> deployment.target
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
+    target: Literal["kubernetes", "docker", "unknown"] = Field(
+        default="unknown",
+        description=(
+            "Where this deployment runs. Gates the scaling dials: a Compose "
+            "deployment has no KEDA and sets CPU and memory stack-wide, so the "
+            "dials are reported unsupported rather than silently accepted. "
+            "Defaults to unknown so an unset deployment refuses rather than "
+            "guesses. Injected by the deployer, not detected."
+        ),
+    )
 
 
 class SchemasSettings(BaseModel):
@@ -1526,6 +1537,8 @@ def _get_env_overrides() -> dict:
     # Deployment settings
     if val := _get_env("DFE_DEPLOYMENT_CONFIG_DIR"):
         overrides["deployment"]["config_dir"] = val
+    if val := _get_env("DFE_DEPLOYMENT_TARGET"):
+        overrides["deployment"]["target"] = val.strip().lower()
 
     # Helm settings
     if val := _get_env("DFE_HELM_OUTPUT_DIR"):
