@@ -708,6 +708,32 @@ class DeploymentSettings(BaseModel):
     )
 
 
+class TransformValidationSettings(BaseModel):
+    """Syntax validation for authored transform files.
+
+    Environment variables:
+    - DFE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
+    - DFE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Check authored VRL and Vector transforms before committing them. Off by "
+            "default: the VRL backend links against compiled Vector artifacts a "
+            "deployment need not have, and an absent backend must not look like a "
+            "passing check."
+        ),
+    )
+    blocking: bool = Field(
+        default=True,
+        description=(
+            "Refuse a write whose content fails validation. Only an explicit failure "
+            "blocks; an unavailable backend never does."
+        ),
+    )
+
+
 class SchemasSettings(BaseModel):
     """Shared schemas settings (dfe-schemas submodule).
 
@@ -1151,6 +1177,9 @@ class DFESettings(BaseModel):
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     repository: RepositorySettings = Field(default_factory=RepositorySettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
+    transform_validation: TransformValidationSettings = Field(
+        default_factory=TransformValidationSettings
+    )
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
@@ -1539,6 +1568,12 @@ def _get_env_overrides() -> dict:
         overrides["deployment"]["config_dir"] = val
     if val := _get_env("DFE_DEPLOYMENT_TARGET"):
         overrides["deployment"]["target"] = val.strip().lower()
+
+    # Transform validation
+    if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
+        overrides["transform_validation"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_TRANSFORM_VALIDATION_BLOCKING"):
+        overrides["transform_validation"]["blocking"] = val.lower() in ("true", "1", "yes")
 
     # Helm settings
     if val := _get_env("DFE_HELM_OUTPUT_DIR"):

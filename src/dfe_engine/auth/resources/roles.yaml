@@ -66,6 +66,8 @@ roles:
     permissions:
       - "governance:read"
       - "action:invoke:*"
+      - "deployment:read"
+      - "service:*:metrics:read"
   infra_viewer:
     description: "Infrastructure read-only"
     resource_type: core

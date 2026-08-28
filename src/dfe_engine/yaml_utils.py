@@ -142,20 +142,40 @@ def yaml_dump_string(data: Any) -> str:
     return stream.getvalue()
 
 
-def literal_block(text: str) -> LiteralScalarString:
-    """Mark a string to be emitted as a ``|`` block scalar.
+def block_scalar_safe(text: str) -> bool:
+    """Whether ``text`` round-trips through a ``|`` block scalar unchanged.
 
-    Without this a multi-line string dumps as one quoted line full of ``\\n``
-    escapes, which is unreadable in a diff and unusable as a file body carried
-    inside a values document. A block scalar needs a trailing newline to round-trip,
-    so one is added when absent.
+    A block scalar cannot represent a carriage return, cannot end a line in
+    whitespace, and takes its indentation from the first non-empty line - so
+    content whose first line is indented further than a later one silently
+    terminates the block early and the remainder parses as sibling YAML.
+    """
+    if "\r" in text:
+        return False
+    lines = text.split("\n")
+    if any(line != line.rstrip() for line in lines):
+        return False
+    first = next((line for line in lines if line.strip()), "")
+    return not (first[:1].isspace())
+
+
+def literal_block(text: str) -> LiteralScalarString | str:
+    """Emit ``text`` as a ``|`` block scalar where that is safe, else unchanged.
+
+    A block scalar keeps a file body readable in a diff instead of collapsing it
+    into one quoted line of ``\\n`` escapes. Content the block form would corrupt
+    is returned as a plain string so the emitter quotes it instead: correctness
+    outranks the nicer diff, and forcing the block form on unsafe content lets a
+    file body break out of its own scalar and forge sibling keys.
 
     Args:
-        text: The content to emit verbatim.
+        text: The content to emit.
 
     Returns:
-        The same content, tagged for literal block style.
+        The content, tagged for block style only when that is lossless.
     """
+    if not text or not block_scalar_safe(text):
+        return text
     return LiteralScalarString(text if text.endswith("\n") else text + "\n")
 
 

@@ -18,13 +18,21 @@ GET    /api/v1/apps/{service}/{instance}/files/{set}  list the files it consumes
 GET    ...        /files/{set}/{filename}             read one
 PUT    ...        /files/{set}/{filename}             write one
 DELETE ...        /files/{set}/{filename}             remove one
+POST   ...        /files/{set}/copy                   reuse them on another instance
+GET    /api/v1/apps/{service}/{instance}/history      every change, and whether Argo has it
 GET    /api/v1/apps/{service}/{instance}/status       is it reporting, since when
 GET    /api/v1/apps/{service}/{instance}/metrics      throughput, cpu, memory
+GET    ...        /metrics/series                     cpu and memory min/max/avg/p95 over time
 
 Every mutation is a git commit into the deploy repo through the same gitcrud path
 ``api/v1/helm.py`` uses, so the protected-var policy, review routing and audit apply
-unchanged. RBAC binds to the ``helmvars`` class because that is the resource being
-written; a separate class would have to be granted everywhere for no gain.
+unchanged, and every write reports the same state Argo later acts on.
+
+RBAC follows the privilege each route actually exercises rather than one blanket
+class: the overlay's contents are the ``helmvars`` resource, standing an instance up
+or tearing it down is ``deployment:write`` / ``deployment:delete``, and the
+operational surface is ``service:{service}:metrics:read`` - reading telemetry is not
+the same privilege as reading configuration.
 """
 
 from __future__ import annotations
@@ -40,17 +48,19 @@ from dfe_engine.appmgmt import (
     AppInstance,
     DeployTarget,
     FileNotInSetError,
-    InstanceExistsError,
+    InvalidContentError,
     InvalidDialError,
     InvalidFilenameError,
     InvalidInstanceError,
     MetricsUnavailableError,
     OperationalReader,
     UnknownAppError,
+    ValidationResult,
     catalogue,
     files,
     instances,
     scaling,
+    validate,
 )
 from dfe_engine.auth.audit import audit_resource_change
 from dfe_engine.auth.engine import authorize
@@ -63,18 +73,37 @@ from dfe_engine.gitcrud.commit_policy import (
     build_message,
     validate_change,
 )
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 
 router = APIRouter(prefix="/apps", tags=["App Management"])
 
 _CLASS = instances.HELMVARS_CLASS
+
+# The overlay's own contents are the helmvars resource, so they keep that class's
+# actions. Standing an app up or tearing it down is a deployment action, not a var
+# edit, and undeploy carries its own so it can be withheld separately.
 _READ = Depends(require_action(scopes_dict["helmvars_read"]))
 _WRITE = Depends(require_action(scopes_dict["helmvars_write"]))
+_DEPLOY_READ = Depends(require_action(scopes_dict["deployment_read"]))
+_DEPLOY_WRITE = Depends(require_action(scopes_dict["deployment_write"]))
+_DEPLOY_DELETE = Depends(require_action(scopes_dict["deployment_delete"]))
 
 
 # ── request and response models ───────────────────────────────
+
+
+class ValidationModel(BaseModel):
+    status: str = Field(
+        description=(
+            "'valid' or 'invalid' when a backend answered, 'unavailable' when none "
+            "could, 'disabled' when validation is off for this deployment."
+        )
+    )
+    backend: str = ""
+    message: str = ""
+    errors: list[str] = Field(default_factory=list)
 
 
 class WriteResult(BaseModel):
@@ -83,6 +112,7 @@ class WriteResult(BaseModel):
     auto_merged: bool = False
     review_required: bool = False
     pr_url: str | None = None
+    validation: ValidationModel | None = None
     reload: str | None = Field(
         default=None,
         description=(
@@ -113,14 +143,14 @@ class AppSummary(BaseModel):
     instance: str
     telemetry_name: str
     scale_deployed: bool
-    multi_instance: bool
+    multiplicity: str
     file_sets: list[FileSetSummary]
 
 
 class CatalogueEntry(BaseModel):
     service: str
     scale_deployed: bool
-    multi_instance: bool
+    multiplicity: str
     file_sets: list[FileSetSummary]
     instances: list[str]
 
@@ -163,13 +193,62 @@ class FileWriteRequest(BaseModel):
     content: str
 
 
+class CopyFilesRequest(BaseModel):
+    target_instance: str = Field(
+        description="Instance to copy into. For a source-bound app this is the source."
+    )
+    overwrite: bool = Field(
+        default=False,
+        description="Replace files of the same name in the target instead of refusing.",
+    )
+
+
+class CopyFilesResult(WriteResult):
+    copied: list[str] = Field(default_factory=list)
+    skipped: list[str] = Field(default_factory=list)
+
+
+class HistoryEntry(BaseModel):
+    sha: str
+    timestamp: int
+    actor: str = ""
+    summary: str = ""
+    state: str = Field(
+        description=(
+            "'committed' when no Argo revision was supplied, otherwise 'applied' if "
+            "the cluster has synced this commit or 'pending' if it has not yet."
+        )
+    )
+
+
 class StatusResponse(BaseModel):
     telemetry_name: str
     reporting: bool
-    replicas: int
     last_seen_epoch: float | None = None
     started_epoch: float | None = None
     uptime_seconds: float | None = None
+
+
+class ResourceBucketModel(BaseModel):
+    metric: str
+    bucket_epoch: float
+    minimum: float
+    maximum: float
+    average: float
+    p95: float
+    samples: int
+
+
+class ResourceSeriesResponse(BaseModel):
+    telemetry_name: str
+    window_seconds: int
+    bucket_seconds: int
+    buckets: list[ResourceBucketModel] = Field(
+        description=(
+            "One entry per metric per time bucket, aggregated across every pod "
+            "reporting for this instance."
+        )
+    )
 
 
 class MetricsResponse(BaseModel):
@@ -198,6 +277,58 @@ def _policy(request: Request) -> PolicyStore | None:
 
 def _forge(request: Request):
     return getattr(request.app.state, "forge", None)
+
+
+def _require_metrics_read(request: Request, user: Any, service: str) -> None:
+    """Gate the operational surface on the per-service metrics action.
+
+    Reading telemetry is a different privilege from reading configuration, so it
+    binds to ``service:{service}:metrics:read`` - the per-service action the shipped
+    roles already grant to infra_viewer and infra_admin.
+    """
+    action = f"service:{service}:metrics:read"
+    if not authorize(user, action, role_config=request.app.state.role_config).allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+
+
+def _require_source(request: Request, app: AppInstance) -> None:
+    """For a source-bound app, refuse an instance that names no defined source.
+
+    The instance IS the source, and its topics are derived from that name, so a
+    typo would otherwise deploy a transform consuming a topic nothing writes.
+    """
+    if not catalogue.descriptor(app.service).source_bound:
+        return
+    registry = getattr(request.app.state, "source_registry", None)
+    if registry is None:
+        return
+    try:
+        registry.get_source(app.instance)
+    except Exception as exc:
+        raise HTTPException(
+            404,
+            detail={
+                "code": "unknown_source",
+                "message": (
+                    f"{app.service} instances are named for the source they transform, "
+                    f"and no source {app.instance!r} is defined"
+                ),
+            },
+        ) from exc
+
+
+def _validate(request: Request, fs, content: str) -> ValidationResult:
+    """Check authored content against this deployment's validation posture."""
+    return validate(fs, content, enabled=request.app.state.settings.transform_validation.enabled)
+
+
+def _validation_model(result: ValidationResult) -> ValidationModel:
+    return ValidationModel(
+        status=str(result.status),
+        backend=result.backend,
+        message=result.message,
+        errors=list(result.errors),
+    )
 
 
 def _deploy_target(request: Request) -> DeployTarget:
@@ -229,14 +360,33 @@ def _overlay(gc: GitCrud, app: AppInstance) -> dict:
         ) from None
 
 
-def _enforce(request: Request, user: Any, name: str, changes: dict[str, Any]) -> bool:
-    """Gate every path a write touches, and report whether any was protected.
+def _fit_subject(app: AppInstance, summary: str) -> tuple[str, str]:
+    """Trim the commit scope and summary so the rendered subject fits the policy cap.
+
+    The commit standard caps a subject at 50 characters, and a service plus a legal
+    40-character instance name overruns that on its own. The scope drops to the bare
+    instance before anything is truncated, because the service is already in the
+    file path the commit touches.
+    """
+    budget = SUBJECT_MAX - len("cfg(): ")
+    summary = summary[:budget]
+    for candidate in (f"{app.service}/{app.instance}", app.instance):
+        if len(candidate) + len(summary) <= budget:
+            return candidate, summary
+    scope = app.instance[: max(1, budget - 1)]
+    return scope, summary[: max(1, budget - len(scope))]
+
+
+def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
+    """Gate every leaf the finished document carries, and report whether any is protected.
 
     This layer writes whole documents rather than one dot-path at a time, so the
     per-path commit policy that ``api/v1/helm.py`` applies on the way in has to be
-    applied explicitly here - otherwise a controller-owned field or a floating image
-    ref would reach the deploy repo through the whole-document path.
+    applied explicitly here. It runs over the FLATTENED result, not over the request
+    keys: a caller supplying ``{"image": {"tag": "latest"}}`` nests the leaf out of
+    sight of a check that only inspects what was sent.
     """
+    changes = flatten(doc)
     for path, value in changes.items():
         try:
             validate_change(path, value)
@@ -276,14 +426,12 @@ def _commit(
     gc = _gitcrud(request)
     settings = request.app.state.settings
     name = app.overlay_name
-    # The commit standard caps the subject at 50 characters, and the scope here is
-    # a service plus an instance, so the summary takes whatever room is left.
-    scope = f"{app.service}/{app.instance}"
+    scope, subject_summary = _fit_subject(app, summary)
     message = build_message(
         CommitContext(
             ctype="cfg",
             scope=scope,
-            summary=summary[: max(1, SUBJECT_MAX - len(f"cfg({scope}): "))],
+            summary=subject_summary,
             actor=user.user_id,
             role="helmvars:write",
             base_revision=if_match or "",
@@ -351,7 +499,7 @@ def _file_sets(service: str) -> list[FileSetSummary]:
 # ── catalogue and lifecycle ───────────────────────────────────
 
 
-@router.get("", dependencies=[_READ])
+@router.get("", dependencies=[_DEPLOY_READ])
 async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]:
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
@@ -360,7 +508,7 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
         CatalogueEntry(
             service=service,
             scale_deployed=catalogue.descriptor(service).scale_deployed,
-            multi_instance=catalogue.descriptor(service).multi_instance,
+            multiplicity=str(catalogue.descriptor(service).multiplicity),
             file_sets=_file_sets(service),
             instances=[i.instance for i in deployed if i.service == service],
         )
@@ -368,7 +516,7 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
     ]
 
 
-@router.post("/{service}/instances", response_model=WriteResult, dependencies=[_WRITE])
+@router.post("/{service}/instances", response_model=WriteResult, dependencies=[_DEPLOY_WRITE])
 async def create_instance(
     service: str, body: CreateInstanceRequest, user: CurrentUser, request: Request
 ) -> WriteResult:
@@ -387,15 +535,19 @@ async def create_instance(
                 "message": f"{service}/{body.instance} is already deployed",
             },
         )
+    allowed, reason = instances.additional_instance_allowed(gc, app)
+    if not allowed:
+        raise HTTPException(409, detail={"code": "single_instance_app", "message": reason})
+    _require_source(request, app)
     try:
         doc = instances.initial_overlay(app, body.values)
-    except (InstanceExistsError, ValueError) as exc:
+    except ValueError as exc:
         raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
-    protected = _enforce(request, user, app.overlay_name, body.values)
+    protected = _enforce(request, user, app.overlay_name, doc)
     return _commit(request, user, app, doc, summary="deploy instance", protected=protected)
 
 
-@router.get("/{service}/{instance}", dependencies=[_READ])
+@router.get("/{service}/{instance}", dependencies=[_DEPLOY_READ])
 async def get_app(service: str, instance: str, user: CurrentUser, request: Request) -> AppSummary:
     """One instance's identity and shape."""
     app = _resolve(service, instance)
@@ -406,12 +558,12 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
         instance=app.instance,
         telemetry_name=app.telemetry_name,
         scale_deployed=desc.scale_deployed,
-        multi_instance=desc.multi_instance,
+        multiplicity=str(desc.multiplicity),
         file_sets=_file_sets(service),
     )
 
 
-@router.delete("/{service}/{instance}", response_model=WriteResult, dependencies=[_WRITE])
+@router.delete("/{service}/{instance}", response_model=WriteResult, dependencies=[_DEPLOY_DELETE])
 async def delete_instance(
     service: str, instance: str, user: CurrentUser, request: Request
 ) -> WriteResult:
@@ -425,12 +577,12 @@ async def delete_instance(
         )
     settings = request.app.state.settings
     name = app.overlay_name
-    scope = f"{app.service}/{app.instance}"
+    scope, subject_summary = _fit_subject(app, "undeploy")
     message = build_message(
         CommitContext(
             ctype="cfg",
             scope=scope,
-            summary="undeploy",
+            summary=subject_summary,
             actor=user.user_id,
             role="helmvars:write",
         )
@@ -462,6 +614,38 @@ async def delete_instance(
         review_required=outcome.review_required,
         pr_url=outcome.pr_url,
     )
+
+
+@router.get("/{service}/{instance}/history", dependencies=[_READ])
+async def get_history(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    applied_revision: str | None = None,
+    limit: int = 20,
+) -> list[HistoryEntry]:
+    """Every change to this instance, newest first.
+
+    Supply the revision Argo has synced as ``applied_revision`` to see which
+    commits have reached the cluster and which are still pending.
+    """
+    app = _resolve(service, instance)
+    gc = _gitcrud(request)
+    _overlay(gc, app)
+    entries = instances.history(
+        gc, app, applied_revision=applied_revision, limit=min(max(limit, 1), 200)
+    )
+    return [
+        HistoryEntry(
+            sha=e.sha,
+            timestamp=e.timestamp,
+            actor=e.actor,
+            summary=e.summary,
+            state=e.state,
+        )
+        for e in entries
+    ]
 
 
 @router.get("/{service}/{instance}/values", dependencies=[_READ])
@@ -512,9 +696,9 @@ async def set_scaling(
     if not changes:
         return WriteResult(changed=False)
 
-    protected = _enforce(request, user, app.overlay_name, changes)
     for path, value in changes.items():
         set_path(doc, path, value)
+    protected = _enforce(request, user, app.overlay_name, doc)
     return _commit(
         request,
         user,
@@ -548,6 +732,66 @@ async def list_app_files(
         FileSummary(name=f.name, language=f.language, size_bytes=f.size_bytes)
         for f in files.list_files(doc, fs)
     ]
+
+
+@router.post(
+    "/{service}/{instance}/files/{set_name}/copy",
+    response_model=CopyFilesResult,
+    dependencies=[_WRITE],
+)
+async def copy_app_files(
+    service: str,
+    instance: str,
+    set_name: str,
+    body: CopyFilesRequest,
+    user: CurrentUser,
+    request: Request,
+) -> CopyFilesResult:
+    """Copy this instance's authored files onto another instance of the same app.
+
+    A transform is written against one source; reusing it on another should not mean
+    retyping it. Only the files move - the target keeps its own source binding,
+    scaling and identity.
+    """
+    source_app = _resolve(service, instance)
+    target_app = _resolve(service, body.target_instance)
+    if source_app == target_app:
+        raise HTTPException(
+            400, detail={"code": "same_instance", "message": "source and target are the same"}
+        )
+    fs = _file_set(service, set_name)
+    gc = _gitcrud(request)
+    source_doc = _overlay(gc, source_app)
+    target_doc = _overlay(gc, target_app)
+
+    existing = {f.name for f in files.list_files(target_doc, fs)}
+    copied: list[str] = []
+    skipped: list[str] = []
+    for candidate in files.list_files(source_doc, fs):
+        if candidate.name in existing and not body.overwrite:
+            skipped.append(candidate.name)
+            continue
+        files.upsert_file(target_doc, fs, candidate.name, candidate.content)
+        copied.append(candidate.name)
+
+    if not copied:
+        return CopyFilesResult(changed=False, reload=str(fs.reload), copied=[], skipped=skipped)
+
+    protected = _enforce(request, user, target_app.overlay_name, target_doc)
+    result = _commit(
+        request,
+        user,
+        target_app,
+        target_doc,
+        summary=f"copy {set_name} from {instance}",
+        protected=protected,
+    )
+    return CopyFilesResult(
+        **result.model_dump(exclude={"reload", "validation"}),
+        reload=str(fs.reload),
+        copied=copied,
+        skipped=skipped,
+    )
 
 
 @router.get("/{service}/{instance}/files/{set_name}/{filename}", dependencies=[_READ])
@@ -596,13 +840,29 @@ async def write_app_file(
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
     doc = _overlay(_gitcrud(request), app)
+
+    checked = _validate(request, fs, body.content)
+    if checked.blocks_write and request.app.state.settings.transform_validation.blocking:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "invalid_transform",
+                "message": checked.message,
+                "errors": list(checked.errors),
+                "backend": checked.backend,
+            },
+        )
+
     try:
         changed = files.upsert_file(doc, fs, filename, body.content)
     except InvalidFilenameError as exc:
         raise HTTPException(400, detail={"code": "invalid_filename", "message": str(exc)}) from exc
+    except InvalidContentError as exc:
+        raise HTTPException(400, detail={"code": "invalid_content", "message": str(exc)}) from exc
+    reported = _validation_model(checked)
     if not changed:
-        return WriteResult(changed=False, reload=str(fs.reload))
-    protected = _enforce(request, user, app.overlay_name, {fs.values_path: filename})
+        return WriteResult(changed=False, reload=str(fs.reload), validation=reported)
+    protected = _enforce(request, user, app.overlay_name, doc)
     result = _commit(
         request,
         user,
@@ -612,7 +872,7 @@ async def write_app_file(
         protected=protected,
         if_match=if_match,
     )
-    return result.model_copy(update={"reload": str(fs.reload)})
+    return result.model_copy(update={"reload": str(fs.reload), "validation": reported})
 
 
 @router.delete(
@@ -638,7 +898,7 @@ async def delete_app_file(
         raise HTTPException(
             404, detail={"code": "no_such_file", "message": f"{filename} is not in {set_name}"}
         ) from None
-    protected = _enforce(request, user, app.overlay_name, {fs.values_path: filename})
+    protected = _enforce(request, user, app.overlay_name, doc)
     result = _commit(request, user, app, doc, summary=f"remove {filename}", protected=protected)
     return result.model_copy(update={"reload": str(fs.reload)})
 
@@ -651,12 +911,13 @@ def _reader(request: Request, client: Any) -> OperationalReader:
     return OperationalReader(client, settings.clickhouse.effective_data_database)
 
 
-@router.get("/{service}/{instance}/status", dependencies=[_READ])
+@router.get("/{service}/{instance}/status")
 async def get_status(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
 ) -> StatusResponse:
     """Whether the instance is reporting telemetry, and since when."""
     app = _resolve(service, instance)
+    _require_metrics_read(request, user, service)
     try:
         status = _reader(request, client).status(app.telemetry_name)
     except MetricsUnavailableError as exc:
@@ -666,19 +927,19 @@ async def get_status(
     return StatusResponse(
         telemetry_name=status.telemetry_name,
         reporting=status.reporting,
-        replicas=status.replicas,
         last_seen_epoch=status.last_seen_epoch,
         started_epoch=status.started_epoch,
         uptime_seconds=status.uptime_seconds,
     )
 
 
-@router.get("/{service}/{instance}/metrics", dependencies=[_READ])
+@router.get("/{service}/{instance}/metrics")
 async def get_metrics(
     service: str, instance: str, user: CurrentUser, request: Request, client: ClickHouseClient
 ) -> MetricsResponse:
     """Throughput, CPU, memory and saturation for the instance."""
     app = _resolve(service, instance)
+    _require_metrics_read(request, user, service)
     try:
         found = _reader(request, client).metrics(app.telemetry_name)
     except MetricsUnavailableError as exc:
@@ -690,4 +951,40 @@ async def get_metrics(
         window_seconds=found.window_seconds,
         gauges=found.gauges,
         rates=found.rates,
+    )
+
+
+@router.get("/{service}/{instance}/metrics/series")
+async def get_resource_series(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    client: ClickHouseClient,
+    window_seconds: int = 3600,
+    bucket_seconds: int = 60,
+) -> ResourceSeriesResponse:
+    """CPU and memory over time as min, max, average and p95 per bucket.
+
+    Each bucket aggregates across every pod reporting for this instance. A
+    per-config app deploys each config under its own service name, so one instance
+    is already one config.
+    """
+    app = _resolve(service, instance)
+    _require_metrics_read(request, user, service)
+    window = min(max(window_seconds, 60), 7 * 24 * 3600)
+    bucket = min(max(bucket_seconds, 10), window)
+    try:
+        buckets = _reader(request, client).resource_series(
+            app.telemetry_name, window_seconds=window, bucket_seconds=bucket
+        )
+    except MetricsUnavailableError as exc:
+        raise HTTPException(
+            503, detail={"code": "metrics_unavailable", "message": str(exc)}
+        ) from exc
+    return ResourceSeriesResponse(
+        telemetry_name=app.telemetry_name,
+        window_seconds=window,
+        bucket_seconds=bucket,
+        buckets=[ResourceBucketModel(**asdict(b)) for b in buckets],
     )

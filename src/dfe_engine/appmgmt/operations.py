@@ -41,6 +41,9 @@ ACTIVE_THREADS = "worker_pool_active_threads"
 OPEN_FDS = "process_open_fds"
 START_TIME = "process_start_time_seconds"
 SCALING_PRESSURE = "dfe_scaling_pressure"
+# scalo registers this through `gauge!`, so it lands in otel_metrics_gauge and
+# holds a CPU percentage rather than cumulative seconds despite the name.
+CPU_SECONDS = "process_cpu_seconds_total"
 
 GAUGE_METRICS = (
     CPU_UTILISATION,
@@ -51,6 +54,7 @@ GAUGE_METRICS = (
     OPEN_FDS,
     START_TIME,
     SCALING_PRESSURE,
+    CPU_SECONDS,
 )
 
 # Counters forming the scalo pipeline contract, shared by every data-path app.
@@ -58,14 +62,12 @@ RECORDS_RECEIVED = "records_received_total"
 RECORDS_PROCESSED = "records_processed_total"
 RECORDS_DELIVERED = "records_delivered_total"
 RECORDS_DLQ = "records_dlq_total"
-CPU_SECONDS = "process_cpu_seconds_total"
 
 COUNTER_METRICS = (
     RECORDS_RECEIVED,
     RECORDS_PROCESSED,
     RECORDS_DELIVERED,
     RECORDS_DLQ,
-    CPU_SECONDS,
 )
 
 
@@ -79,7 +81,6 @@ class AppStatus:
 
     telemetry_name: str
     reporting: bool
-    replicas: int = 0
     last_seen_epoch: float | None = None
     started_epoch: float | None = None
 
@@ -88,6 +89,30 @@ class AppStatus:
         if self.started_epoch is None or self.last_seen_epoch is None:
             return None
         return max(0.0, self.last_seen_epoch - self.started_epoch)
+
+
+# The resource dimensions a capacity decision is made from.
+RESOURCE_METRICS = (
+    MEMORY_USAGE,
+    MEMORY_LIMIT,
+    CPU_UTILISATION,
+    CPU_SECONDS,
+    SATURATION,
+    SCALING_PRESSURE,
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ResourceBucket:
+    """One time bucket of a metric, aggregated across every pod of the instance."""
+
+    metric: str
+    bucket_epoch: float
+    minimum: float
+    maximum: float
+    average: float
+    p95: float
+    samples: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,7 +144,7 @@ class OperationalReader:
         cfg = self._queries[name]
         sql = str(cfg["sql"]).replace("__DB__", self._database)
         binds: dict[str, Any] = dict(cfg.get("binds", {}))
-        binds["window_seconds"] = self._window
+        binds.setdefault("window_seconds", self._window)
         binds.update(params)
         timeout = int(cfg.get("timeout_seconds", 10))
         try:
@@ -134,13 +159,12 @@ class OperationalReader:
         """Whether the instance is reporting telemetry, and its replica count."""
         service = self._safe_identifier(telemetry_name)
         rows = self._run("liveness", {"service": service})
-        last_seen, replicas = (rows[0][0], rows[0][1]) if rows else (None, 0)
+        last_seen = _epoch(rows[0][0]) if rows and rows[0][0] is not None else None
         started = self._gauges(service).get(START_TIME)
         return AppStatus(
             telemetry_name=telemetry_name,
-            reporting=bool(replicas),
-            replicas=int(replicas or 0),
-            last_seen_epoch=_epoch(last_seen),
+            reporting=last_seen is not None,
+            last_seen_epoch=last_seen,
             started_epoch=float(started) if started is not None else None,
         )
 
@@ -153,6 +177,38 @@ class OperationalReader:
             gauges=self._gauges(service),
             rates=self._rates(service),
         )
+
+    def resource_series(
+        self,
+        telemetry_name: str,
+        *,
+        window_seconds: int,
+        bucket_seconds: int,
+        metrics: tuple[str, ...] = RESOURCE_METRICS,
+    ) -> list[ResourceBucket]:
+        """CPU and memory over time, aggregated across every pod of the instance."""
+        service = self._safe_identifier(telemetry_name)
+        rows = self._run(
+            "resource_series",
+            {
+                "service": service,
+                "names": list(metrics),
+                "window_seconds": window_seconds,
+                "bucket_seconds": bucket_seconds,
+            },
+        )
+        return [
+            ResourceBucket(
+                metric=str(name),
+                bucket_epoch=_epoch(bucket) or 0.0,
+                minimum=float(lo),
+                maximum=float(hi),
+                average=float(mean),
+                p95=float(p95),
+                samples=int(samples),
+            )
+            for bucket, name, lo, hi, mean, p95, samples in rows
+        ]
 
     def _gauges(self, service: str) -> dict[str, float]:
         rows = self._run("latest_gauges", {"service": service, "names": list(GAUGE_METRICS)})

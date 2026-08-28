@@ -7,8 +7,9 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """What the app-management layer needs to know about each deployed DFE app.
 
-Everything generic lives as module constants; the per-app table carries only what
-genuinely differs - which files an app reads, and how a change to them takes effect.
+The per-app facts are DATA, read from the ``apps.yaml`` manifest whose source of
+truth is dfe-infra, so adding or changing an app is an edit there rather than a
+change here. Everything generic stays as module constants.
 
 The scaling dials are deliberately NOT per-app: every dfe-infra chart routes KEDA
 through the shared ``dfe-common.scaledobject`` helper, so one set of key paths covers
@@ -18,8 +19,12 @@ deploys the dfe-infra family, so those names are the ones that reach a cluster.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
+
+from dfe_engine.yaml_utils import yaml_load
 
 # dfe-infra chart key paths. Uniform across every chart because they all call the
 # same KEDA library template - see helm/library/dfe-common/templates/_keda.tpl.
@@ -48,10 +53,31 @@ SCALING_PATHS = (
 DEPLOY_SERVICE_PATH = "deploy.service"
 DEPLOY_INSTANCE_PATH = "deploy.instance"
 
-# scalo resolves the OTel `service.name` resource attribute from OTEL_SERVICE_NAME
-# first, then config, then the app's own binary name - so two instances of one app
-# are indistinguishable in the otel database unless we set this per instance.
-OTEL_SERVICE_NAME_PATH = "env.OTEL_SERVICE_NAME"
+# Feeds dfe-common.fullname, so a per-config app carries its instance here to keep
+# each deployment's Kubernetes object names distinct.
+COMPONENT_PATH = "component"
+
+# The chart's dial for the OTel service.name. scalo otherwise falls back to the
+# app's binary name, leaving two instances of one app indistinguishable in the
+# otel database. `env` is NOT the place for this: in the dfe-infra charts that key
+# is a string (the deployment environment) feeding labels and the namespace, so a
+# map there renders an invalid label value and every object is rejected.
+OTEL_SERVICE_NAME_PATH = "otelServiceName"
+
+
+class Multiplicity(StrEnum):
+    """How many deployments of an app a stack runs.
+
+    Independent of whether those deployments scale: a transform is per-config AND
+    KEDA-scaled, since there may be hundreds of them, one per source, each
+    replicating on its own load.
+    """
+
+    SINGLE = "single"
+    """One deployment for the whole stack."""
+
+    PER_CONFIG = "per_config"
+    """One deployment per config, many side by side."""
 
 
 class ReloadMode(StrEnum):
@@ -104,60 +130,100 @@ class AppDescriptor:
     scale_deployed: bool
     """Whether the app carries the scaling dials at all."""
 
-    multi_instance: bool
-    """Whether more than one instance is a normal deployment."""
+    multiplicity: Multiplicity
+    """Whether the stack runs one deployment of this app, or one per config."""
 
     files: tuple[ConsumedFileSet, ...] = field(default_factory=tuple)
 
+    source_binding: dict[str, object] = field(default_factory=dict)
+    """Overlay dot-paths to set from the source name, ``{source}`` substituted."""
 
-_VRL_TRANSFORMS = ConsumedFileSet(
-    name="transforms",
-    values_path="transformFiles",
-    dir_path="config.transforms.dir",
-    suffixes=(".vrl",),
-    language="vrl",
-    # dfe-transform-vrl compiles every .vrl into one program at startup and holds it
-    # immutable for the process lifetime, so only a pod roll applies an edit.
-    reload=ReloadMode.ROLL,
-)
+    @property
+    def component_is_per_instance(self) -> bool:
+        """Whether the chart's component name has to carry the instance.
 
-_VECTOR_TRANSFORMS = ConsumedFileSet(
-    name="transforms",
-    values_path="transformFiles",
-    dir_path="config.transforms.dir",
-    suffixes=(".yaml", ".yml"),
-    language="yaml",
-    # dfe-transform-vector polls mtimes, re-assembles, runs `vector validate` and
-    # SIGHUPs, rolling back if validation fails. Transform files are the only diff
-    # it accepts hot; every other section is rejected as unsafe.
-    reload=ReloadMode.HOT,
-)
+        ``dfe-common.fullname`` is ``{project}-{component}`` with no instance, so
+        every deployment of a per-config app would otherwise render identical
+        Kubernetes object names and fight over them under Argo self-heal.
+        """
+        return self.multiplicity is Multiplicity.PER_CONFIG
+
+    @property
+    def source_bound(self) -> bool:
+        """Whether an instance of this app IS a source's processing step."""
+        return bool(self.source_binding)
 
 
-APP_CATALOGUE: dict[str, AppDescriptor] = {
-    app.service: app
-    for app in (
-        AppDescriptor("dfe-loader", scale_deployed=True, multi_instance=False),
-        AppDescriptor("dfe-receiver", scale_deployed=True, multi_instance=False),
-        AppDescriptor("dfe-archiver", scale_deployed=True, multi_instance=False),
-        AppDescriptor("dfe-fetcher", scale_deployed=True, multi_instance=True),
-        AppDescriptor(
-            "dfe-transform-vrl",
-            scale_deployed=True,
-            multi_instance=True,
-            files=(_VRL_TRANSFORMS,),
-        ),
-        AppDescriptor(
-            "dfe-transform-vector",
-            scale_deployed=True,
-            multi_instance=True,
-            files=(_VECTOR_TRANSFORMS,),
-        ),
-        # dfe-transform-elastic selects a compiled-in transform by `source.name`;
-        # it reads no user-authored files at all.
-        AppDescriptor("dfe-transform-elastic", scale_deployed=True, multi_instance=True),
+class CatalogueError(ValueError):
+    """Raised when the app manifest cannot be read or is malformed."""
+
+
+BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
+"""Snapshot shipped in the image, pinned to the dfe-infra manifest it came from."""
+
+
+def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
+    try:
+        return ConsumedFileSet(
+            name=str(raw["name"]),
+            values_path=str(raw["values_path"]),
+            dir_path=str(raw.get("dir_setting", "")),
+            suffixes=tuple(str(s) for s in raw["suffixes"]),
+            language=str(raw["language"]),
+            reload=ReloadMode(str(raw.get("reload", ReloadMode.RESTART))),
+        )
+    except (KeyError, ValueError) as exc:
+        raise CatalogueError(f"{service}: invalid file set {raw!r}: {exc}") from exc
+
+
+def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
+    try:
+        multiplicity = Multiplicity(str(raw.get("multiplicity", Multiplicity.SINGLE)))
+    except ValueError as exc:
+        raise CatalogueError(
+            f"{service}: unknown multiplicity {raw.get('multiplicity')!r}"
+        ) from exc
+    binding = raw.get("source_binding") or {}
+    if not isinstance(binding, dict):
+        raise CatalogueError(f"{service}: source_binding must be a mapping")
+    return AppDescriptor(
+        service=service,
+        scale_deployed=bool(raw.get("scale_deployed", True)),
+        multiplicity=multiplicity,
+        files=tuple(_file_set_from(service, f) for f in raw.get("files") or ()),
+        source_binding=dict(binding),
     )
-}
+
+
+def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
+    """Read the app manifest into descriptors.
+
+    The manifest is the source of truth for what apps exist and what kind of app
+    each one is, so adding or changing an app is an edit there rather than a change
+    here. Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
+    snapshot bundled in the image.
+    """
+    source = Path(path or os.getenv("DFE_APP_CATALOGUE_FILE") or BUNDLED_MANIFEST)
+    if not source.is_file():
+        raise CatalogueError(f"app manifest not found: {source}")
+    try:
+        doc = yaml_load(source) or {}
+    except Exception as exc:
+        raise CatalogueError(f"app manifest {source} is not readable: {exc}") from exc
+    apps = doc.get("apps")
+    if not isinstance(apps, dict) or not apps:
+        raise CatalogueError(f"app manifest {source} declares no apps")
+    return {name: _descriptor_from(name, raw or {}) for name, raw in apps.items()}
+
+
+APP_CATALOGUE: dict[str, AppDescriptor] = load_catalogue()
+
+
+def reload_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
+    """Re-read the manifest in place, so a remounted file takes effect."""
+    APP_CATALOGUE.clear()
+    APP_CATALOGUE.update(load_catalogue(path))
+    return APP_CATALOGUE
 
 
 class UnknownAppError(KeyError):
@@ -170,6 +236,19 @@ def descriptor(service: str) -> AppDescriptor:
         return APP_CATALOGUE[service]
     except KeyError:
         raise UnknownAppError(service) from None
+
+
+def render_source_binding(app: AppDescriptor, source: str) -> dict[str, object]:
+    """The overlay values that tie an instance of this app to ``source``."""
+
+    def _fill(value: object) -> object:
+        if isinstance(value, str):
+            return value.format(source=source)
+        if isinstance(value, list):
+            return [_fill(v) for v in value]
+        return value
+
+    return {path: _fill(template) for path, template in app.source_binding.items()}
 
 
 def file_set(service: str, name: str) -> ConsumedFileSet:
