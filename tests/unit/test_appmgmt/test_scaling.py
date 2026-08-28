@@ -133,7 +133,28 @@ def test_no_supplied_dials_produces_no_changes():
     assert scaling.changes({}) == {}
 
 
-def test_every_catalogued_app_is_scale_deployed():
-    # All seven ride the shared dfe-common.scaledobject helper, so the dial set is
-    # uniform and the facade needs no per-app special casing.
-    assert all(app.scale_deployed for app in catalogue.APP_CATALOGUE.values())
+def test_scale_deployed_apps_ride_one_uniform_dial_set():
+    # Every scale-deployed app uses the shared dfe-common.scaledobject helper, so
+    # the facade needs no per-app special casing.
+    scaled = [a for a in catalogue.APP_CATALOGUE.values() if a.scale_deployed]
+    assert scaled
+    assert all(scaling.support(app, DeployTarget.KUBERNETES)[0] for app in scaled)
+
+
+def test_an_app_that_does_not_scale_reports_the_dials_unsupported():
+    # dfe-fetcher polls its upstream rather than draining a queue, so it carries no
+    # KEDA dials and the surface must say so rather than offering dials that do
+    # nothing.
+    fetcher = catalogue.descriptor("dfe-fetcher")
+    assert fetcher.scale_deployed is False
+    supported, reason = scaling.support(fetcher, DeployTarget.KUBERNETES)
+    assert supported is False
+    assert "dfe-fetcher" in reason
+
+
+def test_multiplicity_is_independent_of_scaling():
+    # A transform is both per-config and KEDA-scaled: there may be hundreds, one
+    # per source, each replicating on its own load.
+    vrl = catalogue.descriptor("dfe-transform-vrl")
+    assert vrl.multiplicity is catalogue.Multiplicity.PER_CONFIG
+    assert vrl.scale_deployed is True

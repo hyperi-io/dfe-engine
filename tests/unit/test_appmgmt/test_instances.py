@@ -78,7 +78,9 @@ def test_initial_overlay_carries_what_the_appset_needs(crud):
     doc = instances.initial_overlay(app)
     # Without the deploy block the ApplicationSet produces no Application at all.
     assert doc["deploy"] == {"service": VRL, "instance": "edge"}
-    assert doc["env"]["OTEL_SERVICE_NAME"] == "dfe-transform-vrl-edge"
+    # The chart's own dial. `env` is a string there (the deployment environment)
+    # feeding labels and the namespace, so a map would render an invalid label.
+    assert doc["otelServiceName"] == "dfe-transform-vrl-edge"
 
 
 def test_initial_overlay_applies_caller_values_as_dot_paths():

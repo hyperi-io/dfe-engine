@@ -69,7 +69,10 @@ class TestLifecycle:
 
         doc = gc.get("helmvars", f"{VRL}-edge-values")
         assert doc["deploy"] == {"service": VRL, "instance": "edge"}
-        assert doc["env"]["OTEL_SERVICE_NAME"] == f"{VRL}-edge"
+        # The chart's own top-level dial. `env` there is a string (the deployment
+        # environment) feeding labels and the namespace, so it must stay untouched.
+        assert doc["otelServiceName"] == f"{VRL}-edge"
+        assert "env" not in doc
 
         listed = client.get("/api/v1/apps", headers=admin_headers)
         by_service = {e["service"]: e for e in listed.json()}
@@ -248,8 +251,9 @@ class TestFiles:
         assert resp.status_code == 404
         assert resp.json()["code"] == "unknown_file_set"
 
-    def test_vector_reports_a_hot_reload(self, client, app, admin_headers, tmp_path):
-        # dfe-transform-vector re-assembles and SIGHUPs, so no roll is needed.
+    def test_vector_reports_a_roll(self, client, app, admin_headers, tmp_path):
+        # The supervisor's reload compares config structs, and its transform config
+        # holds only paths, so a content edit needs a pod roll to take effect.
         _wire(app, tmp_path)
         client.post(
             "/api/v1/apps/dfe-transform-vector/instances",
@@ -262,7 +266,7 @@ class TestFiles:
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
-        assert resp.json()["reload"] == "hot"
+        assert resp.json()["reload"] == "roll"
 
     def test_viewer_cannot_write_a_file(self, client, app, admin_headers, viewer_headers, tmp_path):
         _wire(app, tmp_path)
@@ -273,6 +277,133 @@ class TestFiles:
             headers=viewer_headers,
         )
         assert resp.status_code == 403
+
+
+class TestAdversarialRegressions:
+    """Router-level cover for the defects an adversarial review turned up."""
+
+    @pytest.mark.parametrize("bad", ["\x00", "\x0c"])
+    def test_control_characters_in_content_are_400(self, client, app, admin_headers, tmp_path, bad):
+        # A control character produces an overlay the emitter writes and the parser
+        # then refuses, so the instance is left unreadable and unrepairable.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.put(
+            f"{BASE}/files/transforms/000_parse.vrl",
+            json={"content": f".a = 1{bad}\n"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 400, resp.text
+        assert resp.json()["code"] == "invalid_content"
+
+    @pytest.mark.parametrize(
+        "values",
+        [
+            {"image": {"tag": "latest"}},
+            {"replicaCount": 5},
+            {"keda": {"enabled": True}, "image": {"tag": "latest"}},
+        ],
+        ids=["nested-image-tag", "nested-replica-count", "nested-among-legal-values"],
+    )
+    def test_nested_values_cannot_walk_past_the_commit_policy(
+        self, client, app, admin_headers, tmp_path, values
+    ):
+        # The policy runs over the FLATTENED document: checking only the request keys
+        # lets a caller nest the offending leaf one level down and out of sight.
+        _wire(app, tmp_path)
+        resp = _deploy(client, admin_headers, values=values)
+        assert resp.status_code == 403, resp.text
+        assert resp.json()["code"] == "policy_violation"
+
+    def test_a_long_instance_name_deploys_and_undeploys(self, client, app, admin_headers, tmp_path):
+        # A service plus a legal 40-character instance overruns the 50-character
+        # commit subject on its own, so the scope has to be trimmed before it does.
+        _wire(app, tmp_path)
+        service = "dfe-transform-vector"
+        instance = "customer-alpha-primary"
+        created = client.post(
+            f"/api/v1/apps/{service}/instances",
+            json={"instance": instance, "values": {}},
+            headers=admin_headers,
+        )
+        assert created.status_code == 200, created.text
+        assert created.json()["commit_sha"]
+
+        # Undeploy carried a tighter budget than create, so it failed on names that
+        # created cleanly - leaving an instance that could not be removed.
+        removed = client.delete(f"/api/v1/apps/{service}/{instance}", headers=admin_headers)
+        assert removed.status_code == 200, removed.text
+        assert (
+            client.get(
+                f"/api/v1/apps/{service}/{instance}/values", headers=admin_headers
+            ).status_code
+            == 404
+        )
+
+    def test_the_longest_legal_instance_name_deploys(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        service = "dfe-transform-vector"
+        instance = "c" * 40
+        created = client.post(
+            f"/api/v1/apps/{service}/instances",
+            json={"instance": instance, "values": {}},
+            headers=admin_headers,
+        )
+        assert created.status_code == 200, created.text
+        assert (
+            client.delete(f"/api/v1/apps/{service}/{instance}", headers=admin_headers).status_code
+            == 200
+        )
+
+    def test_a_scale_pool_app_refuses_a_second_instance(self, client, app, admin_headers, tmp_path):
+        # dfe-loader's chart names its objects from the component alone, so a second
+        # config renders the same names and the two Applications fight under self-heal.
+        _wire(app, tmp_path)
+        first = client.post(
+            "/api/v1/apps/dfe-loader/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        assert first.status_code == 200, first.text
+        second = client.post(
+            "/api/v1/apps/dfe-loader/instances",
+            json={"instance": "spare"},
+            headers=admin_headers,
+        )
+        assert second.status_code == 409
+        assert second.json()["code"] == "single_instance_app"
+
+    def test_a_per_config_app_accepts_a_second_instance(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        for instance in ("alpha", "beta"):
+            resp = client.post(
+                "/api/v1/apps/dfe-fetcher/instances",
+                json={"instance": instance},
+                headers=admin_headers,
+            )
+            assert resp.status_code == 200, resp.text
+
+        # The component is the only thing keeping the two deployments' Kubernetes
+        # object names apart, because dfe-common.fullname carries no instance.
+        alpha = gc.get("helmvars", "dfe-fetcher-alpha-values")
+        beta = gc.get("helmvars", "dfe-fetcher-beta-values")
+        assert alpha["component"] == "fetcher-alpha"
+        assert beta["component"] == "fetcher-beta"
+
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        by_service = {e["service"]: e for e in listed}
+        assert by_service["dfe-fetcher"]["instances"] == ["alpha", "beta"]
+
+    def test_a_scale_pool_overlay_leaves_the_component_alone(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/dfe-loader/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        assert "component" not in gc.get("helmvars", "dfe-loader-default-values")
 
 
 class TestNotDeployed:

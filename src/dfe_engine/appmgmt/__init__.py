@@ -21,18 +21,19 @@ from .catalogue import (
     APP_CATALOGUE,
     AppDescriptor,
     ConsumedFileSet,
+    Multiplicity,
     ReloadMode,
     UnknownAppError,
     descriptor,
     file_set,
     services,
 )
-from .files import AppFile, FileNotInSetError, InvalidFilenameError
+from .files import AppFile, FileNotInSetError, InvalidContentError, InvalidFilenameError
 from .instances import (
     HELMVARS_CLASS,
     AppInstance,
-    InstanceExistsError,
     InvalidInstanceError,
+    additional_instance_allowed,
     initial_overlay,
     instance_of,
     list_instances,
@@ -40,6 +41,7 @@ from .instances import (
 )
 from .operations import AppMetrics, AppStatus, MetricsUnavailableError, OperationalReader
 from .scaling import DeployTarget, InvalidDialError, ScalingDials
+from .validation import ValidationResult, ValidationStatus, validate
 
 __all__ = [
     "APP_CATALOGUE",
@@ -50,8 +52,10 @@ __all__ = [
     "AppMetrics",
     "AppStatus",
     "ConsumedFileSet",
+    "Multiplicity",
     "DeployTarget",
     "FileNotInSetError",
+    "InvalidContentError",
     "InstanceExistsError",
     "InvalidDialError",
     "InvalidFilenameError",
@@ -61,6 +65,9 @@ __all__ = [
     "ReloadMode",
     "ScalingDials",
     "UnknownAppError",
+    "ValidationResult",
+    "ValidationStatus",
+    "additional_instance_allowed",
     "descriptor",
     "file_set",
     "initial_overlay",
@@ -68,4 +75,5 @@ __all__ = [
     "list_instances",
     "parse_overlay_name",
     "services",
+    "validate",
 ]

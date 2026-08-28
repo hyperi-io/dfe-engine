@@ -11419,6 +11419,93 @@
         ]
       }
     },
+    "/api/v1/apps/{service}/{instance}/history": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get History",
+        "description": "Every change to this instance, newest first.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
+        "operationId": "get_history_api_v1_apps__service___instance__history_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "applied_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Applied Revision"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEntry"
+                  },
+                  "title": "Response Get History Api V1 Apps  Service   Instance  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/apps/{service}/{instance}/values": {
       "get": {
         "tags": [
@@ -11664,6 +11751,82 @@
                     "$ref": "#/components/schemas/FileSummary"
                   },
                   "title": "Response List App Files Api V1 Apps  Service   Instance  Files  Set Name  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/copy": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Copy App Files",
+        "description": "Copy this instance's authored files onto another instance of the same app.\n\nA transform is written against one source; reusing it on another should not mean\nretyping it. Only the files move - the target keeps its own source binding,\nscaling and identity.",
+        "operationId": "copy_app_files_api_v1_apps__service___instance__files__set_name__copy_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyFilesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopyFilesResult"
                 }
               }
             }
@@ -12025,6 +12188,83 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/metrics/series": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Resource Series",
+        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.",
+        "operationId": "get_resource_series_api_v1_apps__service___instance__metrics_series_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "window_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3600,
+              "title": "Window Seconds"
+            }
+          },
+          {
+            "name": "bucket_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Bucket Seconds"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceSeriesResponse"
                 }
               }
             }
@@ -14127,9 +14367,9 @@
             "type": "boolean",
             "title": "Scale Deployed"
           },
-          "multi_instance": {
-            "type": "boolean",
-            "title": "Multi Instance"
+          "multiplicity": {
+            "type": "string",
+            "title": "Multiplicity"
           },
           "file_sets": {
             "items": {
@@ -14145,7 +14385,7 @@
           "instance",
           "telemetry_name",
           "scale_deployed",
-          "multi_instance",
+          "multiplicity",
           "file_sets"
         ],
         "title": "AppSummary"
@@ -14533,9 +14773,9 @@
             "type": "boolean",
             "title": "Scale Deployed"
           },
-          "multi_instance": {
-            "type": "boolean",
-            "title": "Multi Instance"
+          "multiplicity": {
+            "type": "string",
+            "title": "Multiplicity"
           },
           "file_sets": {
             "items": {
@@ -14556,7 +14796,7 @@
         "required": [
           "service",
           "scale_deployed",
-          "multi_instance",
+          "multiplicity",
           "file_sets",
           "instances"
         ],
@@ -14973,6 +15213,107 @@
         "type": "object",
         "title": "ConfigSurfaceEntry",
         "description": "A single configurable setting for a Rust service."
+      },
+      "CopyFilesRequest": {
+        "properties": {
+          "target_instance": {
+            "type": "string",
+            "title": "Target Instance",
+            "description": "Instance to copy into. For a source-bound app this is the source."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Replace files of the same name in the target instead of refusing.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_instance"
+        ],
+        "title": "CopyFilesRequest"
+      },
+      "CopyFilesResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "copied": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Copied"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "CopyFilesResult"
       },
       "CostEstimate": {
         "properties": {
@@ -16448,6 +16789,40 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HistoryEntry": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "default": ""
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "'committed' when no Argo revision was supplied, otherwise 'applied' if the cluster has synced this commit or 'pending' if it has not yet."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "timestamp",
+          "state"
+        ],
+        "title": "HistoryEntry"
       },
       "HuntCreateRequest": {
         "properties": {
@@ -20732,6 +21107,81 @@
         "title": "ResetPasswordResponse",
         "description": "Reset outcome plus where the change stands in the durable deploy repo."
       },
+      "ResourceBucketModel": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "bucket_epoch": {
+            "type": "number",
+            "title": "Bucket Epoch"
+          },
+          "minimum": {
+            "type": "number",
+            "title": "Minimum"
+          },
+          "maximum": {
+            "type": "number",
+            "title": "Maximum"
+          },
+          "average": {
+            "type": "number",
+            "title": "Average"
+          },
+          "p95": {
+            "type": "number",
+            "title": "P95"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "bucket_epoch",
+          "minimum",
+          "maximum",
+          "average",
+          "p95",
+          "samples"
+        ],
+        "title": "ResourceBucketModel"
+      },
+      "ResourceSeriesResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "bucket_seconds": {
+            "type": "integer",
+            "title": "Bucket Seconds"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBucketModel"
+            },
+            "type": "array",
+            "title": "Buckets",
+            "description": "One entry per metric per time bucket, aggregated across every pod reporting for this instance."
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "bucket_seconds",
+          "buckets"
+        ],
+        "title": "ResourceSeriesResponse"
+      },
       "ReviewRequest": {
         "properties": {
           "sql": {
@@ -24066,10 +24516,6 @@
             "type": "boolean",
             "title": "Reporting"
           },
-          "replicas": {
-            "type": "integer",
-            "title": "Replicas"
-          },
           "last_seen_epoch": {
             "anyOf": [
               {
@@ -24107,8 +24553,7 @@
         "type": "object",
         "required": [
           "telemetry_name",
-          "reporting",
-          "replicas"
+          "reporting"
         ],
         "title": "StatusResponse"
       },
@@ -25010,6 +25455,37 @@
         ],
         "title": "ValidationError"
       },
+      "ValidationModel": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'valid' or 'invalid' when a backend answered, 'unavailable' when none could, 'disabled' when validation is off for this deployment."
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ValidationModel"
+      },
       "VarChange": {
         "properties": {
           "cls": {
@@ -25519,6 +25995,16 @@
               }
             ],
             "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reload": {
             "anyOf": [

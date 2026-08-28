@@ -24,12 +24,16 @@ from dataclasses import dataclass
 
 from dfe_engine.gitcrud import GitCrud
 from dfe_engine.gitcrud.engine import ResourceNotFoundError, set_path
+from dfe_engine.gitcrud.log import LogEntry, read_log
 
 from .catalogue import (
+    COMPONENT_PATH,
     DEPLOY_INSTANCE_PATH,
     DEPLOY_SERVICE_PATH,
     OTEL_SERVICE_NAME_PATH,
+    Multiplicity,
     descriptor,
+    render_source_binding,
     services,
 )
 
@@ -66,6 +70,11 @@ class AppInstance:
     def telemetry_name(self) -> str:
         """The OTel ``service.name`` that distinguishes this instance's metrics."""
         return f"{self.service}-{self.instance}"
+
+    @property
+    def component(self) -> str:
+        """The chart's component name for this service, without the project prefix."""
+        return self.service.removeprefix("dfe-")
 
 
 def validate_instance(instance: str) -> None:
@@ -115,6 +124,25 @@ def list_instances(gc: GitCrud, service: str | None = None) -> list[AppInstance]
     )
 
 
+def additional_instance_allowed(gc: GitCrud, app: AppInstance) -> tuple[bool, str]:
+    """Whether this app's shape permits another instance alongside the ones deployed.
+
+    A scale-pool app is one config scaled by KEDA, and its chart names Kubernetes
+    objects from the component alone, so a second config would render the same object
+    names and the two Argo Applications would fight over them under self-heal.
+    """
+    if descriptor(app.service).multiplicity is not Multiplicity.SINGLE:
+        return True, ""
+    deployed = [i for i in list_instances(gc, service=app.service) if i != app]
+    if not deployed:
+        return True, ""
+    running = ", ".join(i.instance for i in deployed)
+    return False, (
+        f"{app.service} runs one deployment for the whole stack (already deployed: "
+        f"{running}). Raise its replica ceiling rather than deploying another."
+    )
+
+
 def exists(gc: GitCrud, app: AppInstance) -> bool:
     """Whether this instance's overlay is present."""
     try:
@@ -122,6 +150,32 @@ def exists(gc: GitCrud, app: AppInstance) -> bool:
     except ResourceNotFoundError:
         return False
     return True
+
+
+def overlay_file(gc: GitCrud, app: AppInstance) -> str:
+    """Repo-relative path of the instance's overlay, as the git log reports it."""
+    cls = gc.resource_class(HELMVARS_CLASS)
+    return f"{cls.directory}/{app.overlay_name}{cls.suffix}"
+
+
+def history(
+    gc: GitCrud,
+    app: AppInstance,
+    *,
+    applied_revision: str | None = None,
+    limit: int = 20,
+) -> list[LogEntry]:
+    """Commits touching this instance's overlay, newest first.
+
+    Every mutation to an instance is a commit, so this is its whole audit trail.
+    Passing the revision Argo has synced marks each entry ``applied`` or
+    ``pending`` instead of the bare ``committed``, which is what tells a caller
+    whether a change has actually reached the cluster yet.
+    """
+    path = overlay_file(gc, app)
+    # Over-read, because the walk is repo-wide and most commits touch other files.
+    entries, _ = read_log(gc, limit=limit * 20, applied_revision=applied_revision)
+    return [e for e in entries if path in e.files][:limit]
 
 
 def read_overlay(gc: GitCrud, app: AppInstance) -> dict:
@@ -137,10 +191,17 @@ def initial_overlay(app: AppInstance, values: dict | None = None) -> dict:
     it is the only thing that makes this instance's telemetry distinguishable from
     another instance of the same app.
     """
+    desc = descriptor(app.service)
     doc: dict = {}
     set_path(doc, DEPLOY_SERVICE_PATH, app.service)
     set_path(doc, DEPLOY_INSTANCE_PATH, app.instance)
     set_path(doc, OTEL_SERVICE_NAME_PATH, app.telemetry_name)
+    if desc.component_is_per_instance:
+        set_path(doc, COMPONENT_PATH, f"{app.component}-{app.instance}")
+    # A source-bound app's instance IS the source, so the binding is derived from
+    # the instance name rather than asked for separately.
+    for path, value in render_source_binding(desc, app.instance).items():
+        set_path(doc, path, value)
     for path, value in (values or {}).items():
         set_path(doc, path, value)
     return doc

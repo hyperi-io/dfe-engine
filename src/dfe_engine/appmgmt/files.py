@@ -37,8 +37,18 @@ _CONTENT_FIELD = "content"
 _FILENAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 
+# YAML carries no C0 control character except tab and newline, so content holding
+# one produces a document the emitter writes and the parser then refuses, leaving
+# an overlay nothing can read or repair.
+_FORBIDDEN_CONTENT = frozenset(chr(c) for c in range(0x20)) - {"\t", "\n", "\r"}
+
+
 class InvalidFilenameError(ValueError):
     """Raised when a filename is unsafe or carries an extension the app cannot read."""
+
+
+class InvalidContentError(ValueError):
+    """Raised when file content cannot be stored in the overlay without corrupting it."""
 
 
 class FileNotInSetError(KeyError):
@@ -72,6 +82,17 @@ def validate_filename(file_set: ConsumedFileSet, name: str) -> None:
         )
 
 
+def validate_content(content: str) -> None:
+    """Reject content the overlay cannot carry without being corrupted."""
+    found = sorted(_FORBIDDEN_CONTENT.intersection(content))
+    if found:
+        codes = ", ".join(f"\\x{ord(c):02x}" for c in found)
+        raise InvalidContentError(
+            f"content contains control characters YAML cannot carry ({codes}); "
+            "remove them or upload the file as text"
+        )
+
+
 def _entries(doc: dict, file_set: ConsumedFileSet) -> list[dict]:
     raw = get_path(doc, file_set.values_path, default=None)
     if raw is None:
@@ -81,7 +102,15 @@ def _entries(doc: dict, file_set: ConsumedFileSet) -> list[dict]:
             f"{file_set.values_path} holds {type(raw).__name__}, expected a list of "
             "{name, content} entries"
         )
-    return [e for e in raw if isinstance(e, dict) and _NAME_FIELD in e]
+    # Refused rather than filtered: both mutators write this list back over the
+    # whole key, so silently dropping an entry deletes a hand-authored file.
+    for entry in raw:
+        if not isinstance(entry, dict) or _NAME_FIELD not in entry:
+            raise ValueError(
+                f"{file_set.values_path} holds an entry without a {_NAME_FIELD!r} key; "
+                "repair the overlay before editing its files"
+            )
+    return list(raw)
 
 
 def list_files(doc: dict, file_set: ConsumedFileSet) -> list[AppFile]:
@@ -112,6 +141,7 @@ def upsert_file(doc: dict, file_set: ConsumedFileSet, name: str, content: str) -
     regardless, so ordering here is presentation, not behaviour.
     """
     validate_filename(file_set, name)
+    validate_content(content)
     entries = _entries(doc, file_set)
     body = literal_block(content)
     for entry in entries:
