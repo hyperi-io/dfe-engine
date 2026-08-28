@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from .models import ResourceClass
+from .models import Layout, ResourceClass
 
 
 class UnknownResourceClassError(KeyError):
@@ -58,6 +58,7 @@ def default_registry() -> ResourceClassRegistry:
 
     Typed entries sharing RBAC class prefixes. Scope here is the deploy repo:
     `helmvars` (overlays), the `governance` class (rbac + actions + policies),
+    `library` (versioned artefacts an instance links its consumed files to),
     and `sources` (the all-in-one source-definition doc under config/sources -
     the first datamodel class to land in the deploy repo). The remaining
     datamodel types (schemas/fieldmaps) and `hunts` (defs/rules/alert-dests)
@@ -72,6 +73,18 @@ def default_registry() -> ResourceClassRegistry:
             # model owns its own semver version envelope (current/versions/
             # deployed_version), which is what versioned=True declares here.
             ResourceClass("sources", "config/sources", rbac_prefix="sources", versioned=True),
+            # library class - the versioned artefact library an app instance links
+            # its consumed files to. Versioned because a linked artefact is only
+            # useful if an earlier version can be pointed at again, and a BUNDLE
+            # because it stores authored content: every version is a real file
+            # with a real extension, so a reviewer diffs the language itself.
+            ResourceClass(
+                "library",
+                "config/library",
+                rbac_prefix="library",
+                versioned=True,
+                layout=Layout.BUNDLE,
+            ),
             # governance class - RBAC + curated actions + protected-var policies
             ResourceClass("accounts", "governance/rbac/accounts", rbac_prefix="governance"),
             ResourceClass("groups", "governance/rbac/groups", rbac_prefix="governance"),

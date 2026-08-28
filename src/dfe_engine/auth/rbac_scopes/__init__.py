@@ -28,6 +28,7 @@ from dfe_engine.auth.rbac_scopes.scope_constants import (
     group_attributes_scopes,
     helmvars_scopes,
     hunt_scopes,
+    library_scopes,
     lifecycle_scopes,
     oidc_scopes,
     org_scopes,
@@ -82,6 +83,7 @@ scopes_dict = {
     **transform_scopes,
     **governance_scopes,
     **helmvars_scopes,
+    **library_scopes,
     **lifecycle_scopes,
     **config_scopes,
 }

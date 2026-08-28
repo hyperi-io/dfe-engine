@@ -19,6 +19,9 @@ GET    ...        /files/{set}/{filename}             read one
 PUT    ...        /files/{set}/{filename}             write one
 DELETE ...        /files/{set}/{filename}             remove one
 POST   ...        /files/{set}/copy                   reuse them on another instance
+GET    ...        /files/{set}/links                  where linked files came from, and drift
+POST   ...        /files/{set}/link                   link a file to a library artefact
+POST   ...        /files/{set}/relink                 re-resolve every link
 GET    /api/v1/apps/{service}/{instance}/history      every change, and whether Argo has it
 GET    /api/v1/apps/{service}/{instance}/status       is it reporting, since when
 GET    /api/v1/apps/{service}/{instance}/metrics      throughput, cpu, memory
@@ -59,6 +62,8 @@ from dfe_engine.appmgmt import (
     catalogue,
     files,
     instances,
+    library,
+    links,
     scaling,
     validate,
 )
@@ -206,6 +211,44 @@ class CopyFilesRequest(BaseModel):
 class CopyFilesResult(WriteResult):
     copied: list[str] = Field(default_factory=list)
     skipped: list[str] = Field(default_factory=list)
+
+
+class LinkRequest(BaseModel):
+    name: str = Field(description="Filename the artefact's content resolves into.")
+    artifact: str
+    version: int | None = Field(
+        default=None, description="Pin this version. Omit for the artefact's current one."
+    )
+    tag: str = Field(
+        default="",
+        description="Follow this tag instead of a version; the resolved version is recorded.",
+    )
+
+
+class LinkModel(BaseModel):
+    name: str
+    artifact: str
+    version: int
+    digest: str
+    tag: str = ""
+
+
+class LinkStatusModel(LinkModel):
+    resolved_digest: str = Field(description="Digest of the content sitting in the file set.")
+    available_version: int | None = Field(
+        default=None, description="The version re-resolving would move this link to."
+    )
+    missing: bool = Field(description="The artefact or its linked version is gone.")
+    drift: bool = Field(description="The content here is not what the linked version holds.")
+    outdated: bool = Field(description="The link's target has moved on since it resolved.")
+
+
+class LinkResult(WriteResult):
+    link: LinkModel | None = None
+
+
+class RelinkResult(WriteResult):
+    relinked: list[LinkModel] = Field(default_factory=list)
 
 
 class HistoryEntry(BaseModel):
@@ -734,6 +777,166 @@ async def list_app_files(
     ]
 
 
+def _require_library_read(request: Request, user: Any) -> None:
+    """Gate a route that reads the artefact library on the library's own grant.
+
+    Linking resolves content out of the library, which is a different resource
+    from the overlay the resolved content lands in.
+    """
+    action = f"{links.LIBRARY_CLASS}:read"
+    if not authorize(user, action, role_config=request.app.state.role_config).allowed:
+        raise HTTPException(403, detail={"code": "forbidden", "message": f"requires {action}"})
+
+
+def _link_model(link: links.Link) -> LinkModel:
+    return LinkModel(
+        name=link.name,
+        artifact=link.artifact,
+        version=link.version,
+        digest=link.digest,
+        tag=link.tag,
+    )
+
+
+@router.get("/{service}/{instance}/files/{set_name}/links", dependencies=[_READ])
+async def list_app_links(
+    service: str, instance: str, set_name: str, user: CurrentUser, request: Request
+) -> list[LinkStatusModel]:
+    """Where each linked file came from, and whether it still matches.
+
+    ``drift`` means the content beside the link is no longer what the linked
+    version holds - a local edit over a linked file. ``outdated`` means the link
+    resolved cleanly but its target has moved since.
+    """
+    app = _resolve(service, instance)
+    _require_library_read(request, user)
+    fs = _file_set(service, set_name)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    try:
+        checked = links.status(doc, fs, links.crud_source(gc))
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "invalid_links", "message": str(exc)}) from exc
+    return [
+        LinkStatusModel(
+            **_link_model(s.link).model_dump(),
+            resolved_digest=s.resolved_digest,
+            available_version=s.available_version,
+            missing=s.missing,
+            drift=s.drift,
+            outdated=s.outdated,
+        )
+        for s in checked
+    ]
+
+
+@router.post(
+    "/{service}/{instance}/files/{set_name}/link",
+    response_model=LinkResult,
+    dependencies=[_WRITE],
+)
+async def link_app_file(
+    service: str,
+    instance: str,
+    set_name: str,
+    body: LinkRequest,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> LinkResult:
+    """Link a file in the set to a library artefact.
+
+    The artefact's content is resolved into the file set, because a chart can only
+    render what is already in the values, and the provenance is recorded beside it
+    so the link is recoverable.
+    """
+    app = _resolve(service, instance)
+    _require_library_read(request, user)
+    fs = _file_set(service, set_name)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    source = links.crud_source(gc)
+    env = source.envelope(body.artifact)
+    if env is None:
+        raise HTTPException(
+            404,
+            detail={"code": "no_such_artifact", "message": f"no artefact {body.artifact!r}"},
+        )
+    try:
+        changed = links.resolve(
+            doc,
+            fs,
+            name=body.name,
+            artifact=body.artifact,
+            env=env,
+            source=source,
+            version=body.version,
+            tag=body.tag,
+        )
+    except (links.ArtifactNotLinkableError, InvalidFilenameError) as exc:
+        raise HTTPException(400, detail={"code": "not_linkable", "message": str(exc)}) from exc
+    except library.TagNotFoundError as exc:
+        raise HTTPException(
+            404, detail={"code": "no_such_tag", "message": f"no tag {exc.args[0]!r}"}
+        ) from None
+    except library.VersionNotFoundError as exc:
+        raise HTTPException(
+            404, detail={"code": "no_such_version", "message": f"no version {exc.args[0]}"}
+        ) from None
+
+    link = _link_model(links.read_link(doc, fs, body.name))
+    if not changed:
+        return LinkResult(changed=False, reload=str(fs.reload), link=link)
+    protected = _enforce(request, user, app.overlay_name, doc)
+    result = _commit(
+        request,
+        user,
+        app,
+        doc,
+        summary=f"link {body.name}",
+        protected=protected,
+        if_match=if_match,
+    )
+    return LinkResult(
+        **result.model_dump(exclude={"reload", "validation"}),
+        reload=str(fs.reload),
+        link=link,
+    )
+
+
+@router.post(
+    "/{service}/{instance}/files/{set_name}/relink",
+    response_model=RelinkResult,
+    dependencies=[_WRITE],
+)
+async def relink_app_files(
+    service: str, instance: str, set_name: str, user: CurrentUser, request: Request
+) -> RelinkResult:
+    """Re-resolve every link in the set to what its target now names.
+
+    A tag link follows its tag; a version-pinned link advances to the artefact's
+    current version. This is the fix-once-roll-everywhere half of the library.
+    """
+    app = _resolve(service, instance)
+    _require_library_read(request, user)
+    fs = _file_set(service, set_name)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    try:
+        moved = links.relink(doc, fs, links.crud_source(gc))
+    except ValueError as exc:
+        raise HTTPException(400, detail={"code": "invalid_links", "message": str(exc)}) from exc
+    if not moved:
+        return RelinkResult(changed=False, reload=str(fs.reload))
+    protected = _enforce(request, user, app.overlay_name, doc)
+    result = _commit(request, user, app, doc, summary=f"relink {set_name}", protected=protected)
+    return RelinkResult(
+        **result.model_dump(exclude={"reload", "validation"}),
+        reload=str(fs.reload),
+        relinked=[_link_model(link) for link in moved],
+    )
+
+
 @router.post(
     "/{service}/{instance}/files/{set_name}/copy",
     response_model=CopyFilesResult,
@@ -888,7 +1091,7 @@ async def delete_app_file(
     user: CurrentUser,
     request: Request,
 ) -> WriteResult:
-    """Remove a file the app consumes."""
+    """Remove a file the app consumes, and any link that produced it."""
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
     doc = _overlay(_gitcrud(request), app)
@@ -898,6 +1101,12 @@ async def delete_app_file(
         raise HTTPException(
             404, detail={"code": "no_such_file", "message": f"{filename} is not in {set_name}"}
         ) from None
+    # Provenance for a file that is gone would be re-resolved by the next relink,
+    # putting the deleted file back.
+    try:
+        links.remove_link(doc, fs, filename)
+    except links.LinkNotFoundError:
+        pass
     protected = _enforce(request, user, app.overlay_name, doc)
     result = _commit(request, user, app, doc, summary=f"remove {filename}", protected=protected)
     return result.model_copy(update={"reload": str(fs.reload)})

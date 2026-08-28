@@ -53,6 +53,7 @@ roles:
       - "service:*:metrics:read"
       - "helm:*"
       - "helmvars:*"
+      - "library:*"
       - "governance:*"
       - "action:invoke:*"
       - "deployment:*"
@@ -67,6 +68,7 @@ roles:
       - "governance:read"
       - "action:invoke:*"
       - "deployment:read"
+      - "library:read"
       - "service:*:metrics:read"
   infra_viewer:
     description: "Infrastructure read-only"

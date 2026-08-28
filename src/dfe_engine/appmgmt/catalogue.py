@@ -108,6 +108,9 @@ class ConsumedFileSet:
     values_path: str
     """Dot-path in the overlay holding the filename -> content map."""
 
+    links_path: str
+    """Dot-path in the overlay holding the library links that resolved into the set."""
+
     dir_path: str
     """Dot-path of the app's own setting naming the directory it reads."""
 
@@ -154,6 +157,32 @@ class AppDescriptor:
         return bool(self.source_binding)
 
 
+class Encoding(StrEnum):
+    """How an artefact's content travels through the API and sits in the overlay."""
+
+    TEXT = "text"
+    """Stored and transported verbatim."""
+
+    BASE64 = "base64"
+    """Transported base64-encoded; the digest is taken over the decoded bytes."""
+
+
+@dataclass(frozen=True, slots=True)
+class ArtifactKind:
+    """One kind of thing the versioned library can hold."""
+
+    name: str
+    """Identifier used in the API and recorded on every version."""
+
+    language: str
+    """Editor hint, and the key a syntax validator registers under."""
+
+    suffixes: tuple[str, ...]
+    """Extensions a file of this kind may carry."""
+
+    encoding: Encoding
+
+
 class CatalogueError(ValueError):
     """Raised when the app manifest cannot be read or is malformed."""
 
@@ -164,9 +193,11 @@ BUNDLED_MANIFEST = Path(__file__).parent / "apps.yaml"
 
 def _file_set_from(service: str, raw: dict) -> ConsumedFileSet:
     try:
+        values_path = str(raw["values_path"])
         return ConsumedFileSet(
             name=str(raw["name"]),
-            values_path=str(raw["values_path"]),
+            values_path=values_path,
+            links_path=str(raw.get("links_path") or f"{values_path}Links"),
             dir_path=str(raw.get("dir_setting", "")),
             suffixes=tuple(str(s) for s in raw["suffixes"]),
             language=str(raw["language"]),
@@ -195,12 +226,22 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     )
 
 
-def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
-    """Read the app manifest into descriptors.
+def _kind_from(name: str, raw: dict) -> ArtifactKind:
+    try:
+        return ArtifactKind(
+            name=name,
+            language=str(raw["language"]),
+            suffixes=tuple(str(s) for s in raw["suffixes"]),
+            encoding=Encoding(str(raw.get("encoding", Encoding.TEXT))),
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise CatalogueError(f"invalid kind {name!r}: {exc}") from exc
 
-    The manifest is the source of truth for what apps exist and what kind of app
-    each one is, so adding or changing an app is an edit there rather than a change
-    here. Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
+
+def _read_manifest(path: Path | str | None) -> dict:
+    """Load the manifest document.
+
+    Resolution order: the given path, then ``DFE_APP_CATALOGUE_FILE``, then the
     snapshot bundled in the image.
     """
     source = Path(path or os.getenv("DFE_APP_CATALOGUE_FILE") or BUNDLED_MANIFEST)
@@ -210,19 +251,49 @@ def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
         doc = yaml_load(source) or {}
     except Exception as exc:
         raise CatalogueError(f"app manifest {source} is not readable: {exc}") from exc
+    if not isinstance(doc, dict):
+        raise CatalogueError(f"app manifest {source} is not a mapping")
+    return doc
+
+
+def load_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
+    """Read the app manifest into descriptors.
+
+    The manifest is the source of truth for what apps exist and what kind of app
+    each one is, so adding or changing an app is an edit there rather than a change
+    here.
+    """
+    doc = _read_manifest(path)
     apps = doc.get("apps")
     if not isinstance(apps, dict) or not apps:
-        raise CatalogueError(f"app manifest {source} declares no apps")
+        raise CatalogueError("app manifest declares no apps")
     return {name: _descriptor_from(name, raw or {}) for name, raw in apps.items()}
 
 
+def load_kinds(path: Path | str | None = None) -> dict[str, ArtifactKind]:
+    """Read the artefact kinds the versioned library accepts.
+
+    Declared in the same manifest as the apps, so supporting a new authored
+    language is an edit there. A manifest with no ``kinds`` block yields none, and
+    the library then refuses every publish rather than guessing a kind.
+    """
+    kinds = _read_manifest(path).get("kinds") or {}
+    if not isinstance(kinds, dict):
+        raise CatalogueError("app manifest 'kinds' must be a mapping")
+    return {name: _kind_from(name, raw or {}) for name, raw in kinds.items()}
+
+
 APP_CATALOGUE: dict[str, AppDescriptor] = load_catalogue()
+
+ARTIFACT_KINDS: dict[str, ArtifactKind] = load_kinds()
 
 
 def reload_catalogue(path: Path | str | None = None) -> dict[str, AppDescriptor]:
     """Re-read the manifest in place, so a remounted file takes effect."""
     APP_CATALOGUE.clear()
     APP_CATALOGUE.update(load_catalogue(path))
+    ARTIFACT_KINDS.clear()
+    ARTIFACT_KINDS.update(load_kinds(path))
     return APP_CATALOGUE
 
 

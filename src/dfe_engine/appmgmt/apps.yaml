@@ -30,6 +30,8 @@
 #   source. Fields:
 #     name         identifier used in the API path
 #     values_path  dot-path in the overlay holding the list of {name, content}
+#     links_path   dot-path in the overlay holding the library links that produced
+#                  that content. Optional; defaults to values_path + "Links".
 #     dir_setting  the app's own config key naming the directory it reads
 #     suffixes     extensions the app will actually load; anything else is refused
 #     language     editor syntax hint
@@ -43,6 +45,18 @@
 #   template with {source} substituted, so an app binds through whatever its own
 #   config calls for without the engine knowing which app it is. The platform
 #   topic convention is {source}_land in, {source}_load out.
+#
+# kinds
+#   What KIND of thing an artefact in the versioned library is. The library CRUD
+#   is generic over these, so supporting a new authored language is an edit here
+#   rather than engine code. Fields:
+#     language   editor syntax hint, and the key the syntax validator registers
+#                under; a kind with no validator is simply not checked
+#     suffixes   extensions a linked file of this kind may carry; the file set it
+#                links into must also accept the extension
+#     encoding   text    the content is stored and transported verbatim
+#                base64  the content is transported base64-encoded, and the
+#                        digest is taken over the decoded bytes
 
 apps:
   dfe-receiver:
@@ -77,6 +91,7 @@ apps:
     files:
       - name: transforms
         values_path: transformFiles
+        links_path: transformFileLinks
         dir_setting: config.transforms.dir
         suffixes: [".vrl"]
         language: vrl
@@ -93,6 +108,7 @@ apps:
     files:
       - name: transforms
         values_path: transformFiles
+        links_path: transformFileLinks
         dir_setting: config.transforms.dir
         suffixes: [".yaml", ".yml"]
         language: yaml
@@ -106,3 +122,20 @@ apps:
       config.source.topics: ["{source}_land"]
       config.sink.topic: "{source}_load"
       config.source.group_id: "dfe-transform-elastic-{source}"
+
+kinds:
+  vrl:
+    language: vrl
+    suffixes: [".vrl"]
+    encoding: text
+
+  vector-yaml:
+    language: yaml
+    suffixes: [".yaml", ".yml"]
+    encoding: text
+
+  # A compiled module has no text form, so it travels base64-encoded.
+  wasm:
+    language: wasm
+    suffixes: [".wasm"]
+    encoding: base64

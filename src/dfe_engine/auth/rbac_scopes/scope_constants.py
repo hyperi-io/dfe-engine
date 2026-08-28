@@ -189,6 +189,11 @@ helmvars_scopes = {
     "helmvars_write": "helmvars:write",
 }
 
+library_scopes = {
+    "library_read": "library:read",
+    "library_write": "library:write",
+}
+
 lifecycle_scopes = {
     "lifecycle_read": "lifecycle:read",
 }
