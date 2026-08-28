@@ -6724,7 +6724,7 @@
           "queries"
         ],
         "summary": "Query Cost Leaderboard",
-        "description": "Top query-cost consumers from ``dfe_audit.query_log_archive``, heaviest first.\n\nGroups by the attribution id (the hunt id for feature='hunts') and returns the\nquery count + summed read rows/bytes + duration + peak memory. Reads the MV the\nCH wrapper's log_comment attribution feeds - returns [] until it has data.",
+        "description": "Top query-cost consumers from ``dfe.query_log_archive``, heaviest first.\n\nGroups by the attribution id (the hunt id for feature='hunts') and returns the\nquery count + summed read rows/bytes + duration + peak memory. Reads the MV the\nCH wrapper's log_comment attribution feeds - returns [] until it has data.",
         "operationId": "query_cost_leaderboard_api_v1_queries_cost_leaderboard_get",
         "parameters": [
           {
@@ -11140,7 +11140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WriteResult"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
                 }
               }
             }
@@ -11195,7 +11195,836 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WriteResult"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List Apps",
+        "description": "Every manageable app, with the instances currently deployed.",
+        "operationId": "list_apps_api_v1_apps_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogueEntry"
+                  },
+                  "type": "array",
+                  "title": "Response List Apps Api V1 Apps Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/instances": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Create Instance",
+        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step.",
+        "operationId": "create_instance_api_v1_apps__service__instances_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInstanceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App",
+        "description": "One instance's identity and shape.",
+        "operationId": "get_app_api_v1_apps__service___instance__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Delete Instance",
+        "description": "Undeploy an instance by removing its values overlay.",
+        "operationId": "delete_instance_api_v1_apps__service___instance__delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/values": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Values",
+        "description": "The instance's overlay document as stored.",
+        "operationId": "get_values_api_v1_apps__service___instance__values_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Values Api V1 Apps  Service   Instance  Values Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/scaling": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Scaling",
+        "description": "The scaling dials, or why they do not apply here.",
+        "operationId": "get_scaling_api_v1_apps__service___instance__scaling_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Set Scaling",
+        "description": "Set the scaling dials. Refused when the deploy target has no such dials.",
+        "operationId": "set_scaling_api_v1_apps__service___instance__scaling_put",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScalingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List App Files",
+        "description": "Every file in the set, without their contents.",
+        "operationId": "list_app_files_api_v1_apps__service___instance__files__set_name__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileSummary"
+                  },
+                  "title": "Response List App Files Api V1 Apps  Service   Instance  Files  Set Name  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/{filename}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Read App File",
+        "description": "One file's content.",
+        "operationId": "read_app_file_api_v1_apps__service___instance__files__set_name___filename__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Write App File",
+        "description": "Add or replace a file the app consumes.",
+        "operationId": "write_app_file_api_v1_apps__service___instance__files__set_name___filename__put",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Delete App File",
+        "description": "Remove a file the app consumes.",
+        "operationId": "delete_app_file_api_v1_apps__service___instance__files__set_name___filename__delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/status": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Status",
+        "description": "Whether the instance is reporting telemetry, and since when.",
+        "operationId": "get_status_api_v1_apps__service___instance__status_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/metrics": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Metrics",
+        "description": "Throughput, CPU, memory and saturation for the instance.",
+        "operationId": "get_metrics_api_v1_apps__service___instance__metrics_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
                 }
               }
             }
@@ -13280,6 +14109,47 @@
         ],
         "title": "AlertDestinationSummary"
       },
+      "AppSummary": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "scale_deployed": {
+            "type": "boolean",
+            "title": "Scale Deployed"
+          },
+          "multi_instance": {
+            "type": "boolean",
+            "title": "Multi Instance"
+          },
+          "file_sets": {
+            "items": {
+              "$ref": "#/components/schemas/FileSetSummary"
+            },
+            "type": "array",
+            "title": "File Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "telemetry_name",
+          "scale_deployed",
+          "multi_instance",
+          "file_sets"
+        ],
+        "title": "AppSummary"
+      },
       "AuthKind": {
         "type": "string",
         "enum": [
@@ -13652,6 +14522,45 @@
         ],
         "title": "CatalogRuleSummary",
         "description": "A catalogue row (no detection payload) for the paginated list."
+      },
+      "CatalogueEntry": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "scale_deployed": {
+            "type": "boolean",
+            "title": "Scale Deployed"
+          },
+          "multi_instance": {
+            "type": "boolean",
+            "title": "Multi Instance"
+          },
+          "file_sets": {
+            "items": {
+              "$ref": "#/components/schemas/FileSetSummary"
+            },
+            "type": "array",
+            "title": "File Sets"
+          },
+          "instances": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instances"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "scale_deployed",
+          "multi_instance",
+          "file_sets",
+          "instances"
+        ],
+        "title": "CatalogueEntry"
       },
       "CelCheckBatchRequest": {
         "properties": {
@@ -14265,6 +15174,25 @@
           "roles"
         ],
         "title": "CreateGroupRequest"
+      },
+      "CreateInstanceRequest": {
+        "properties": {
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Values",
+            "description": "Initial helm values as dot-path keys, merged over the defaults."
+          }
+        },
+        "type": "object",
+        "required": [
+          "instance"
+        ],
+        "title": "CreateInstanceRequest"
       },
       "CreateOrgRequest": {
         "properties": {
@@ -14967,6 +15895,106 @@
         ],
         "title": "FieldMapping",
         "description": "A single Sigma field -> column mapping."
+      },
+      "FileDetail": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "size_bytes",
+          "content"
+        ],
+        "title": "FileDetail"
+      },
+      "FileSetSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "suffixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suffixes"
+          },
+          "reload": {
+            "type": "string",
+            "title": "Reload"
+          },
+          "directory_setting": {
+            "type": "string",
+            "title": "Directory Setting"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "suffixes",
+          "reload",
+          "directory_setting"
+        ],
+        "title": "FileSetSummary"
+      },
+      "FileSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "size_bytes"
+        ],
+        "title": "FileSummary"
+      },
+      "FileWriteRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "FileWriteRequest"
       },
       "FilterTier": {
         "type": "string",
@@ -16990,6 +18018,40 @@
         ],
         "title": "MetricEntry",
         "description": "A single metric from the service's manifest."
+      },
+      "MetricsResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "gauges": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Gauges"
+          },
+          "rates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Rates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "gauges",
+          "rates"
+        ],
+        "title": "MetricsResponse"
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
@@ -19884,10 +20946,29 @@
       },
       "RuleFromHyperdxRequest": {
         "properties": {
+          "saved_search_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Search Id",
+            "description": "HyperDX saved-search id; the engine resolves the SQL that view runs"
+          },
           "raw_sql": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Raw Sql",
-            "description": "Expanded HyperDX ClickHouse SELECT to turn into a rule"
+            "description": "Pre-rendered ClickHouse SELECT, trusted as given"
           },
           "saved_search_name": {
             "anyOf": [
@@ -19933,11 +21014,8 @@
           }
         },
         "type": "object",
-        "required": [
-          "raw_sql"
-        ],
         "title": "RuleFromHyperdxRequest",
-        "description": "Create a hunt rule from a live HyperDX view.\n\nHyperDX posts the expanded ClickHouse SELECT; the create pipeline strips the UI\nmeta (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the HyperDX\nsanitizer, and the engine derives a unique rule id from the saved-search name.\nThe caller gets that id back and opens ``/rules/{id}`` -- no id to invent, no\nIndexedDB round-trip."
+        "description": "Create a hunt rule from a live HyperDX view.\n\nSupply ``saved_search_id`` and the engine asks HyperDX what SQL that view\nactually runs. Supply ``raw_sql`` and the caller's string is taken on trust,\nwhich on a SQL-mode search is whatever sits in the editor rather than the\nquery the view executes.\n\nEither way the create pipeline strips the UI meta (time bounds, LIMIT,\n``__hdx_time_bucket``, SETTINGS) via the HyperDX sanitizer, and the engine\nderives a unique rule id from the saved-search name. The caller gets that id\nback and opens ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
       },
       "RuleFromHyperdxResponse": {
         "properties": {
@@ -19949,6 +21027,16 @@
           "display_name": {
             "type": "string",
             "title": "Display Name"
+          },
+          "resolved_from": {
+            "type": "string",
+            "enum": [
+              "saved_search",
+              "raw_sql"
+            ],
+            "title": "Resolved From",
+            "description": "Which SQL source the rule was built from",
+            "default": "raw_sql"
           },
           "sanitize_summary": {
             "additionalProperties": true,
@@ -20683,6 +21771,200 @@
           "table"
         ],
         "title": "ScaffoldRequest"
+      },
+      "ScalingRequest": {
+        "properties": {
+          "min_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Replicas"
+          },
+          "max_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Replicas"
+          },
+          "keda_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keda Enabled"
+          },
+          "cpu_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request"
+          },
+          "memory_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request"
+          },
+          "cpu_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          }
+        },
+        "type": "object",
+        "title": "ScalingRequest"
+      },
+      "ScalingResponse": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "deploy_target": {
+            "type": "string",
+            "title": "Deploy Target"
+          },
+          "replica_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Count"
+          },
+          "min_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Replicas"
+          },
+          "max_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Replicas"
+          },
+          "keda_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keda Enabled"
+          },
+          "cpu_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request"
+          },
+          "memory_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request"
+          },
+          "cpu_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "supported",
+          "deploy_target"
+        ],
+        "title": "ScalingResponse"
       },
       "SchemaColumnWrite": {
         "properties": {
@@ -22774,6 +24056,62 @@
         ],
         "title": "SqlValidationResponse"
       },
+      "StatusResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "reporting": {
+            "type": "boolean",
+            "title": "Reporting"
+          },
+          "replicas": {
+            "type": "integer",
+            "title": "Replicas"
+          },
+          "last_seen_epoch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen Epoch"
+          },
+          "started_epoch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started Epoch"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "reporting",
+          "replicas"
+        ],
+        "title": "StatusResponse"
+      },
       "StreamRequest": {
         "properties": {
           "schema": {
@@ -23988,51 +25326,6 @@
         ],
         "title": "VrlRequest"
       },
-      "WriteResult": {
-        "properties": {
-          "changed": {
-            "type": "boolean",
-            "title": "Changed"
-          },
-          "commit_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Commit Sha"
-          },
-          "auto_merged": {
-            "type": "boolean",
-            "title": "Auto Merged",
-            "default": false
-          },
-          "review_required": {
-            "type": "boolean",
-            "title": "Review Required",
-            "default": false
-          },
-          "pr_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "changed"
-        ],
-        "title": "WriteResult"
-      },
       "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
         "properties": {
           "items": {
@@ -24189,6 +25482,63 @@
         "title": "AttributesRequest",
         "description": "Full-replace body for an account's attribute blob (non-sensitive or sensitive)."
       },
+      "dfe_engine__api__v1__apps__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
+      },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {
           "seeded": {
@@ -24241,6 +25591,51 @@
           "seeded"
         ],
         "title": "SeedResponse"
+      },
+      "dfe_engine__api__v1__helm__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
       },
       "dfe_engine__api__v1__oidc_providers__SyncResponse": {
         "properties": {

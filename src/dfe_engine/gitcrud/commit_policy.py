@@ -31,7 +31,7 @@ _CLASS_TYPE = {
     "datamodel": "schema",
 }
 
-_SUBJECT_MAX = 50
+SUBJECT_MAX = 50
 
 # A resource name is BOTH a file-path component (values/<name>.yaml) and a commit
 # subject input (scope). Keep it boring: letters/digits/dot/underscore/dash only.
@@ -113,8 +113,8 @@ def validate_subject(subject: str) -> None:
     # DFE-* audit trailers -- reject CR/LF outright.
     if "\n" in subject or "\r" in subject:
         raise CommitPolicyError(f"newline in subject: {subject!r}")
-    if len(subject) > _SUBJECT_MAX:
-        raise CommitPolicyError(f"subject > {_SUBJECT_MAX} chars: {subject!r}")
+    if len(subject) > SUBJECT_MAX:
+        raise CommitPolicyError(f"subject > {SUBJECT_MAX} chars: {subject!r}")
     ctype = subject.split("(", 1)[0].split(":", 1)[0]
     if ctype not in ALLOWED_TYPES:
         raise CommitPolicyError(f"type {ctype!r} not in {sorted(ALLOWED_TYPES)}")
