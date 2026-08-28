@@ -162,18 +162,24 @@ _BACKENDS = {
 }
 
 
-def validate(file_set: ConsumedFileSet, content: str, *, enabled: bool) -> ValidationResult:
-    """Validate content for the app that will consume it.
+def validate_language(language: str, content: str, *, enabled: bool) -> ValidationResult:
+    """Validate content written in a language.
 
     ``enabled`` is the deployment's switch. Off returns ``disabled`` rather than
     silently passing, so a caller can tell "checked and fine" from "not checked".
+    A language with no registered backend reports ``unavailable``.
     """
     if not enabled:
         return ValidationResult(status=ValidationStatus.DISABLED)
-    backend = _BACKENDS.get(file_set.language)
+    backend = _BACKENDS.get(language)
     if backend is None:
         return ValidationResult(
             status=ValidationStatus.UNAVAILABLE,
-            message=f"no validator for {file_set.language!r}",
+            message=f"no validator for {language!r}",
         )
     return backend(content)
+
+
+def validate(file_set: ConsumedFileSet, content: str, *, enabled: bool) -> ValidationResult:
+    """Validate content for the app that will consume it."""
+    return validate_language(file_set.language, content, enabled=enabled)

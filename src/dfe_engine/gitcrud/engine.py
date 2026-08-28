@@ -5,12 +5,18 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""One engine for every YAML resource class.
+"""One engine for every resource class.
 
-Enumerate files, read + flatten to dot-paths, set/delete a single path, write a
-whole doc, delete a resource - every mutation ends in ONE git commit via
+Enumerate resources, read + flatten to dot-paths, set/delete a single path, write
+a whole doc, delete a resource - every mutation ends in ONE git commit via
 GitopsRepo (dulwich, no git CLI). This is the single common path the survey called
 for and the foundation Tier-1/Tier-2/operations build on.
+
+A class declares its layout (see ``models.Layout``). FILE is one YAML document per
+resource and the default. BUNDLE is a directory per resource - a manifest plus
+payload files - for a class storing authored content that some tool other than the
+engine parses; ``put_bundle`` writes the manifest and its files in one commit, and
+every doc-level operation keeps working against the manifest unchanged.
 """
 
 from __future__ import annotations
@@ -30,6 +36,10 @@ _MISSING = object()
 
 class ResourceNotFoundError(FileNotFoundError):
     """Raised when a named resource does not exist in its class."""
+
+
+class UnsafePathError(ValueError):
+    """Raised when a bundle payload path would escape the resource's directory."""
 
 
 class ConcurrencyConflictError(Exception):
@@ -149,19 +159,51 @@ class GitCrud:
 
     def _rel(self, cls: ResourceClass, name: str) -> str:
         # Single chokepoint for every read/write path: the name must be safe to
-        # splice into a file path AND a commit subject (see validate_name).
+        # splice into a file path AND a commit subject (see validate_name). For a
+        # bundle this is the manifest, so every existing doc-level operation keeps
+        # working against a directory-per-resource class unchanged.
         validate_name(name)
+        if cls.is_bundle:
+            return f"{cls.directory}/{name}/{cls.manifest}"
         return f"{cls.directory}/{name}{cls.suffix}"
+
+    def _rel_dir(self, cls: ResourceClass, name: str) -> str:
+        """A bundle resource's directory, repo-relative."""
+        validate_name(name)
+        return f"{cls.directory}/{name}"
+
+    def _rel_payload(self, cls: ResourceClass, name: str, relpath: str) -> str:
+        """A payload file inside a bundle, repo-relative and proven to stay inside.
+
+        A payload path is caller-supplied, so it is resolved against the bundle
+        directory and rejected unless it lands underneath it.
+        """
+        base = (self._repo.path / self._rel_dir(cls, name)).resolve()
+        if not relpath or relpath != relpath.strip() or "\\" in relpath:
+            raise UnsafePathError(f"invalid bundle path {relpath!r}")
+        target = (base / relpath).resolve()
+        if target == base or base not in target.parents:
+            raise UnsafePathError(f"bundle path {relpath!r} escapes {self._rel_dir(cls, name)}")
+        if target.name == cls.manifest and target.parent == base:
+            raise UnsafePathError(f"{cls.manifest} is the manifest, not a payload file")
+        return f"{self._rel_dir(cls, name)}/{Path(relpath).as_posix()}"
 
     def _file(self, cls: ResourceClass, name: str) -> Path:
         return self._repo.path / self._rel(cls, name)
 
     def list(self, cls_name: str) -> builtins.list[str]:
-        """Enumerate resource names in a class (filenames minus the suffix)."""
+        """Enumerate resource names in a class.
+
+        FILE layout: filenames minus the suffix. BUNDLE layout: subdirectories
+        holding a manifest, so a half-written directory is not reported as a
+        resource.
+        """
         cls = self._cls(cls_name)
         directory = self._repo.path / cls.directory
         if not directory.is_dir():
             return []
+        if cls.is_bundle:
+            return sorted(p.name for p in directory.iterdir() if (p / cls.manifest).is_file())
         n = len(cls.suffix)
         return sorted(p.name[:-n] for p in directory.glob(f"*{cls.suffix}") if p.is_file())
 
@@ -236,6 +278,64 @@ class GitCrud:
             artifacts[self._rel(cls, name)] = yaml_dump_string(doc)
         return self._repo.publish(artifacts, message, branch=branch or None)
 
+    def payloads(self, cls_name: str, name: str) -> builtins.list[str]:
+        """Every payload file in a bundle, as bundle-relative posix paths."""
+        cls = self._require_bundle(cls_name)
+        base = self._repo.path / self._rel_dir(cls, name)
+        if not base.is_dir():
+            raise ResourceNotFoundError(self._rel_dir(cls, name))
+        return sorted(
+            p.relative_to(base).as_posix()
+            for p in base.rglob("*")
+            if p.is_file() and p.relative_to(base).as_posix() != cls.manifest
+        )
+
+    def read_payload_bytes(self, cls_name: str, name: str, relpath: str) -> bytes:
+        """Read one payload file out of a bundle, verbatim."""
+        cls = self._require_bundle(cls_name)
+        rel = self._rel_payload(cls, name, relpath)
+        target = self._repo.path / rel
+        if not target.is_file():
+            raise ResourceNotFoundError(rel)
+        return target.read_bytes()
+
+    def read_payload(self, cls_name: str, name: str, relpath: str) -> str:
+        """Read one text payload file out of a bundle."""
+        return self.read_payload_bytes(cls_name, name, relpath).decode("utf-8")
+
+    def put_bundle(
+        self,
+        cls_name: str,
+        name: str,
+        doc: dict,
+        actor: str,
+        writes: dict[str, str | bytes] | None = None,
+        removals: builtins.list[str] | None = None,
+        message: str | None = None,
+        base_revision: str | None = None,
+        branch: str = "",
+    ) -> PublishResult:
+        """Write a bundle's manifest and payload files in ONE commit.
+
+        The manifest and the files it describes move together, so a reader never
+        sees a manifest naming content that is not there yet. ``writes`` and
+        ``removals`` are bundle-relative paths.
+        """
+        cls = self._require_bundle(cls_name)
+        self._guard_revision(cls_name, name, base_revision)
+        artifacts: dict[str, str | bytes] = {self._rel(cls, name): yaml_dump_string(doc)}
+        for relpath, content in (writes or {}).items():
+            artifacts[self._rel_payload(cls, name, relpath)] = content
+        deletions = [self._rel_payload(cls, name, r) for r in (removals or [])]
+        msg = message or f"{cls.name}({name}): update by {actor}"
+        return self._repo.publish(artifacts, msg, deletions=deletions, branch=branch or None)
+
+    def _require_bundle(self, cls_name: str) -> ResourceClass:
+        cls = self._cls(cls_name)
+        if not cls.is_bundle:
+            raise ValueError(f"resource class {cls_name!r} is not a bundle class")
+        return cls
+
     def set_key(
         self,
         cls_name: str,
@@ -279,9 +379,17 @@ class GitCrud:
         message: str | None = None,
         branch: str = "",
     ) -> PublishResult:
-        """Delete a whole resource and commit."""
+        """Delete a whole resource and commit.
+
+        A bundle takes its payload files with it, in the same commit as its
+        manifest - a directory left holding orphaned content would be enumerated
+        as neither present nor absent.
+        """
         cls = self._cls(cls_name)
         if not self._file(cls, name).is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
+        deletions = [self._rel(cls, name)]
+        if cls.is_bundle:
+            deletions += [self._rel_payload(cls, name, p) for p in self.payloads(cls_name, name)]
         msg = message or f"{cls.name}({name}): delete by {actor}"
-        return self._repo.publish({}, msg, deletions=[self._rel(cls, name)], branch=branch or None)
+        return self._repo.publish({}, msg, deletions=deletions, branch=branch or None)

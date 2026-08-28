@@ -56,20 +56,49 @@ surface small and the policy readable.
 ## GitCrud -- the generic engine
 
 `src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
-because every resource is just YAML in git. A `ResourceClass` says where a class
-lives (a directory) and which RBAC prefix governs it. The default registry covers
-the deploy repo: `helmvars` (the overlays under `values/`), `sources` (the
-all-in-one source-definition docs under `config/sources/` - the first datamodel
-class in the deploy repo) and the `governance` class (`accounts`, `groups`,
-`roles`, `actions`, `policies` under `governance/`, plus the CH RBAC types).
+because every resource is git-backed config. A `ResourceClass` says where a class
+lives (a directory), how one resource is laid out, and which RBAC prefix governs
+it. The default registry covers the deploy repo: `helmvars` (the overlays under
+`values/`), `sources` (the all-in-one source-definition docs under
+`config/sources/` - the first datamodel class in the deploy repo), `library` (the
+versioned artefact library under `config/library/`) and the `governance` class
+(`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`, plus
+the CH RBAC types).
+
+### Layouts -- one document, or a directory
+
+Most classes are `FILE`: one YAML document, one file. The fields ARE the resource,
+so one doc keeps them consistent and gives one conflict domain per write.
+`helmvars` cannot be anything else -- Argo and Helm read the overlay as one values
+file.
+
+A class storing authored CONTENT declares `BUNDLE`: a directory per resource,
+holding a `manifest.yaml` plus payload files. `library` is the first consumer, and
+its shape is the general one::
+
+    config/library/<name>/manifest.yaml
+    config/library/<name>/versions/0001.vrl
+    config/library/<name>/current.vrl
+
+Content in files rather than in the manifest means a reviewer diffs the language
+itself, a validator runs against a real path, reading one version does not parse
+the whole history, and no YAML emitter touches the bytes. `put_bundle` writes the
+manifest and its files in ONE commit, so a manifest never names a version whose
+content has not landed. Payload paths are refused if they escape the bundle or
+collide with the manifest.
+
+Nothing else moves to `BUNDLE` by default: the other versioned classes hold small
+structured payloads that already diff well, so migrating them would cost a data
+migration in every deployed gitops repo for no gain.
 
 The engine is small on purpose. Read, flatten to dot-paths, set or delete a path,
 write a whole doc, delete a resource -- every mutation ends in one commit via
-`GitopsRepo` (which uses dulwich, so there is no shell-out to `git`). Two extras
+`GitopsRepo` (which uses dulwich, so there is no shell-out to `git`). Three extras
 earn their keep:
 
 - `put_many` writes several resources in ONE commit, so an action that touches N
   files is atomic.
+- `put_bundle` does the same for one bundle's manifest plus its content files.
 - The HEAD commit SHA is the optimistic-concurrency token. A read returns it, a
   write may require it, and a stale one raises `ConcurrencyConflictError` carrying
   the current doc -- so two editors never silently clobber each other.

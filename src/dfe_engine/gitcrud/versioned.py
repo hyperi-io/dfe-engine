@@ -34,8 +34,12 @@ from typing import Any
 
 from .engine import GitCrud, ResourceNotFoundError
 
-_VERSIONS = "versions"
-_SPEC = "spec"
+VERSIONS_KEY = "versions"
+"""Envelope key holding the version map. Public so a caller building an envelope
+for this same lifecycle shares the name rather than restating it."""
+
+SPEC_KEY = "spec"
+"""Per-version key holding the immutable payload."""
 
 
 class VersionConflictError(Exception):
@@ -84,7 +88,7 @@ class VersionedDoc:
         except ResourceNotFoundError:
             return None
         try:
-            for key in env.get(_VERSIONS) or {}:
+            for key in env.get(VERSIONS_KEY) or {}:
                 int(key)
         except (TypeError, ValueError) as e:
             # e.g. the `sources` class: semver keys, envelope owned by the
@@ -101,7 +105,7 @@ class VersionedDoc:
 
         Key validity is guaranteed by _envelope; None/missing still reads as {}.
         """
-        return {int(k): v for k, v in (env.get(_VERSIONS) or {}).items()}
+        return {int(k): v for k, v in (env.get(VERSIONS_KEY) or {}).items()}
 
     def _save(self, cls: str, name: str, env: dict, actor: str, msg: str):
         self._require_versioned(cls)
@@ -118,7 +122,7 @@ class VersionedDoc:
         if cur is None:
             return None
         entry = self._versions(env).get(int(cur))
-        return copy.deepcopy(entry.get(_SPEC)) if entry else None
+        return copy.deepcopy(entry.get(SPEC_KEY)) if entry else None
 
     def get_draft(self, cls: str, name: str) -> dict | None:
         """The working draft payload, or None."""
@@ -131,7 +135,7 @@ class VersionedDoc:
         if env is None:
             return None
         entry = self._versions(env).get(int(version))
-        return copy.deepcopy(entry.get(_SPEC)) if entry else None
+        return copy.deepcopy(entry.get(SPEC_KEY)) if entry else None
 
     def list_versions(self, cls: str, name: str) -> list[int]:
         """Ascending list of published version numbers."""
@@ -167,7 +171,7 @@ class VersionedDoc:
             "deployed": None,
             "status": "published",
             "draft": None,
-            _VERSIONS: {},
+            VERSIONS_KEY: {},
         }
         env["draft"] = doc
         env["status"] = "draft"
@@ -182,8 +186,8 @@ class VersionedDoc:
         new_ver = (max(versions) + 1) if versions else 1
         if new_ver in versions:  # never overwrite a published snapshot
             raise VersionConflictError(f"{cls}/{name}: version {new_ver} already exists")
-        versions[new_ver] = {"by": actor, "message": message, _SPEC: copy.deepcopy(env["draft"])}
-        env[_VERSIONS] = versions
+        versions[new_ver] = {"by": actor, "message": message, SPEC_KEY: copy.deepcopy(env["draft"])}
+        env[VERSIONS_KEY] = versions
         env["current"] = new_ver
         env["draft"] = None
         env["status"] = "published"

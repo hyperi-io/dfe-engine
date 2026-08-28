@@ -11773,6 +11773,234 @@
         ]
       }
     },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/links": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List App Links",
+        "description": "Where each linked file came from, and whether it still matches.\n\n``drift`` means the content beside the link is no longer what the linked\nversion holds - a local edit over a linked file. ``outdated`` means the link\nresolved cleanly but its target has moved since.",
+        "operationId": "list_app_links_api_v1_apps__service___instance__files__set_name__links_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LinkStatusModel"
+                  },
+                  "title": "Response List App Links Api V1 Apps  Service   Instance  Files  Set Name  Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/link": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Link App File",
+        "description": "Link a file in the set to a library artefact.\n\nThe artefact's content is resolved into the file set, because a chart can only\nrender what is already in the values, and the provenance is recorded beside it\nso the link is recoverable.",
+        "operationId": "link_app_file_api_v1_apps__service___instance__files__set_name__link_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/relink": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Relink App Files",
+        "description": "Re-resolve every link in the set to what its target now names.\n\nA tag link follows its tag; a version-pinned link advances to the artefact's\ncurrent version. This is the fix-once-roll-everywhere half of the library.",
+        "operationId": "relink_app_files_api_v1_apps__service___instance__files__set_name__relink_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelinkResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/apps/{service}/{instance}/files/{set_name}/copy": {
       "post": {
         "tags": [
@@ -12027,7 +12255,7 @@
           "App Management"
         ],
         "summary": "Delete App File",
-        "description": "Remove a file the app consumes.",
+        "description": "Remove a file the app consumes, and any link that produced it.",
         "operationId": "delete_app_file_api_v1_apps__service___instance__files__set_name___filename__delete",
         "parameters": [
           {
@@ -12265,6 +12493,818 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ResourceSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/kinds": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Kinds",
+        "description": "Every artefact kind the manifest declares.",
+        "operationId": "list_kinds_api_v1_library_kinds_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KindModel"
+                  },
+                  "type": "array",
+                  "title": "Response List Kinds Api V1 Library Kinds Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Artifacts",
+        "description": "Every artefact, filtered. Different filters AND together.",
+        "operationId": "list_artifacts_api_v1_library_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Group"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "State"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Repeatable 'key' or 'key=value' selector; all must match.",
+              "title": "Label"
+            },
+            "description": "Repeatable 'key' or 'key=value' selector; all must match."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Substring of the name or the description.",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "Substring of the name or the description."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactModel"
+                  },
+                  "title": "Response List Artifacts Api V1 Library Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Create Artifact",
+        "description": "Create an artefact, with or without its first version.\n\nCreating one empty is what lets its kind, group and labels be settled before\nany content can enter.",
+        "operationId": "create_artifact_api_v1_library_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Artifact",
+        "description": "One artefact's metadata and pointers.",
+        "operationId": "get_artifact_api_v1_library__artifact__get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Patch Artifact",
+        "description": "Edit the classification metadata. Never produces a version.",
+        "operationId": "patch_artifact_api_v1_library__artifact__patch",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Delete Artifact",
+        "description": "Remove an artefact. Refused while any instance links to it.\n\nRetiring an artefact that is still in use is a state change, not a delete, so\nthe history behind a deployed file is never destroyed.",
+        "operationId": "delete_artifact_api_v1_library__artifact__delete",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/state": {
+      "put": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Set State",
+        "description": "Set the lifecycle state.",
+        "operationId": "set_state_api_v1_library__artifact__state_put",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/versions": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Versions",
+        "description": "Every version, oldest first, without their content.",
+        "operationId": "list_versions_api_v1_library__artifact__versions_get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VersionSummary"
+                  },
+                  "title": "Response List Versions Api V1 Library  Artifact  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Publish Version",
+        "description": "Publish content as a version.\n\nRe-sending identical content is a no-op naming the version that already holds\nit; sending different content at an existing version number is refused.",
+        "operationId": "publish_version_api_v1_library__artifact__versions_post",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/versions/{version}": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Version",
+        "description": "One immutable version, with its digest as a strong ETag.",
+        "operationId": "get_version_api_v1_library__artifact__versions__version__get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/rollback": {
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Rollback",
+        "description": "Point ``current`` back at an earlier version, keeping the newer ones.",
+        "operationId": "rollback_api_v1_library__artifact__rollback_post",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/tags/{tag}": {
+      "put": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Set Tag",
+        "description": "Point a tag at a version. Repointing is explicit, never a side effect.",
+        "operationId": "set_tag_api_v1_library__artifact__tags__tag__put",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Delete Tag",
+        "description": "Remove a tag. The versions it named are untouched.",
+        "operationId": "delete_tag_api_v1_library__artifact__tags__tag__delete",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/usage": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Usage",
+        "description": "Every instance file that links to this artefact.",
+        "operationId": "get_usage_api_v1_library__artifact__usage_get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UsageModel"
+                  },
+                  "title": "Response Get Usage Api V1 Library  Artifact  Usage Get"
                 }
               }
             }
@@ -14390,6 +15430,78 @@
         ],
         "title": "AppSummary"
       },
+      "ArtifactModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "versions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Tags",
+            "description": "Mutable names pointing at a version."
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest",
+            "description": "Digest of the current version.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "state"
+        ],
+        "title": "ArtifactModel"
+      },
       "AuthKind": {
         "type": "string",
         "enum": [
@@ -15472,6 +16584,60 @@
           "password"
         ],
         "title": "CreateAccountRequest"
+      },
+      "CreateArtifactRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "A kind declared in the app manifest."
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "description": "Optional namespace, e.g. 'network'.",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Publish this as version 1. Omit to create the artefact empty."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "CreateArtifactRequest"
       },
       "CreateGroupRequest": {
         "properties": {
@@ -17669,6 +18835,37 @@
         "title": "JsonPathsResponse",
         "description": "Discovered JSON paths for a source."
       },
+      "KindModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "suffixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suffixes"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "suffixes",
+          "encoding"
+        ],
+        "title": "KindModel"
+      },
       "LifecycleRequest": {
         "properties": {
           "state": {
@@ -17729,6 +18926,222 @@
         ],
         "title": "LifecycleState",
         "description": "The gitops state dial value."
+      },
+      "LinkModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact",
+          "version",
+          "digest"
+        ],
+        "title": "LinkModel"
+      },
+      "LinkRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Filename the artefact's content resolves into."
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Pin this version. Omit for the artefact's current one."
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "description": "Follow this tag instead of a version; the resolved version is recorded.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact"
+        ],
+        "title": "LinkRequest"
+      },
+      "LinkResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "LinkResult"
+      },
+      "LinkStatusModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          },
+          "resolved_digest": {
+            "type": "string",
+            "title": "Resolved Digest",
+            "description": "Digest of the content sitting in the file set."
+          },
+          "available_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Version",
+            "description": "The version re-resolving would move this link to."
+          },
+          "missing": {
+            "type": "boolean",
+            "title": "Missing",
+            "description": "The artefact or its linked version is gone."
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "description": "The content here is not what the linked version holds."
+          },
+          "outdated": {
+            "type": "boolean",
+            "title": "Outdated",
+            "description": "The link's target has moved on since it resolved."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact",
+          "version",
+          "digest",
+          "resolved_digest",
+          "missing",
+          "drift",
+          "outdated"
+        ],
+        "title": "LinkStatusModel"
       },
       "LogEntryModel": {
         "properties": {
@@ -20097,6 +21510,48 @@
         "title": "ParamSpec",
         "description": "A constrained invoke-time parameter.\n\nEvery param carries a CLOSED constraint - an enum carries its full value\nlist, a numeric carries both bounds. There is deliberately NO free-string\ntype: an unconstrained param would reopen the hole curation closed."
       },
+      "PatchArtifactRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "title": "PatchArtifactRequest"
+      },
       "PathTree_SchemaSummaryObject_": {
         "properties": {
           "items": {
@@ -20815,6 +22270,42 @@
         "title": "ProviderResponse",
         "description": "Provider config \u2014 env var names are shown, never actual secret values."
       },
+      "PublishVersionRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Fixed to this version at publish.",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Publish at this exact version. Omit for the next in the series."
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "PublishVersionRequest"
+      },
       "QueryOptions": {
         "properties": {
           "limit": {
@@ -21074,6 +22565,80 @@
         "title": "RawQueryRequest",
         "description": "Request for raw query execution against a datasource adapter."
       },
+      "RelinkResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "relinked": {
+            "items": {
+              "$ref": "#/components/schemas/LinkModel"
+            },
+            "type": "array",
+            "title": "Relinked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "RelinkResult"
+      },
       "ResetPasswordRequest": {
         "properties": {
           "new_password": {
@@ -21236,6 +22801,19 @@
           "resource_type"
         ],
         "title": "RoleResponse"
+      },
+      "RollbackRequest": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "RollbackRequest"
       },
       "RuleCreateRequest": {
         "properties": {
@@ -24506,6 +26084,20 @@
         ],
         "title": "SqlValidationResponse"
       },
+      "StateRequest": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "enabled | disabled | deprecated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "StateRequest"
+      },
       "StatusResponse": {
         "properties": {
           "telemetry_name": {
@@ -24892,6 +26484,19 @@
         ],
         "title": "TableInfo",
         "description": "Summary of a ClickHouse table."
+      },
+      "TagRequest": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "TagRequest"
       },
       "TaskInfo": {
         "properties": {
@@ -25336,6 +26941,44 @@
         "type": "object",
         "title": "UpdateRoleRequest"
       },
+      "UsageModel": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "file_set": {
+            "type": "string",
+            "title": "File Set"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "file_set",
+          "name",
+          "version"
+        ],
+        "title": "UsageModel"
+      },
       "UserResponse": {
         "properties": {
           "org_id": {
@@ -25554,6 +27197,64 @@
         "title": "VarEntry",
         "description": "One flattened dot-path var in a resource doc."
       },
+      "VersionDetail": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "published_by": {
+            "type": "string",
+            "title": "Published By",
+            "default": ""
+          },
+          "published_at": {
+            "type": "integer",
+            "title": "Published At",
+            "default": 0
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "digest",
+          "size_bytes",
+          "kind",
+          "encoding",
+          "content"
+        ],
+        "title": "VersionDetail"
+      },
       "VersionResponse": {
         "properties": {
           "version": {
@@ -25573,6 +27274,49 @@
           "python_version"
         ],
         "title": "VersionResponse"
+      },
+      "VersionSummary": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "published_by": {
+            "type": "string",
+            "title": "Published By",
+            "default": ""
+          },
+          "published_at": {
+            "type": "integer",
+            "title": "Published At",
+            "default": 0
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "digest",
+          "size_bytes"
+        ],
+        "title": "VersionSummary"
       },
       "ViewDefinition": {
         "properties": {
@@ -26115,6 +27859,73 @@
               }
             ],
             "title": "Pr Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
+      },
+      "dfe_engine__api__v1__library__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The version this write published or repointed to."
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",
