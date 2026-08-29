@@ -133,6 +133,10 @@ class TestBounds:
 
 
 class TestVectorYaml:
+    """Vector's own file shape: a `transforms` map of named components."""
+
+    REMAP = 'transforms:\n  parse:\n    type: remap\n    inputs: ["dfe_source"]\n    source: |\n      . = parse_json!(.message)\n'
+
     def test_a_remap_transform_runs_its_inline_vrl(self, fake_backend):
         captured = {}
 
@@ -141,20 +145,43 @@ class TestVectorYaml:
             return list(events)
 
         fake_backend(record)
-        content = "type: remap\nsource: |\n  .a = 1\n"
-        result = dryrun.run_language("yaml", content, EVENTS, enabled=True)
+        result = dryrun.run_language("yaml", self.REMAP, EVENTS, enabled=True)
         assert result.status is dryrun.DryRunStatus.COMPLETED
-        assert ".a = 1" in captured["program"]
+        assert "parse_json" in captured["program"]
 
-    def test_a_non_remap_transform_says_why_it_cannot_run(self):
-        content = "type: filter\ncondition: .a > 1\n"
+    def test_several_remaps_run_in_declaration_order(self, fake_backend):
+        captured = {}
+
+        def record(program, events, max_events):
+            captured["program"] = program
+            return list(events)
+
+        fake_backend(record)
+        content = (
+            "transforms:\n"
+            "  first:\n    type: remap\n    source: |\n      .a = 1\n"
+            "  second:\n    type: remap\n    source: |\n      .b = 2\n"
+        )
+        dryrun.run_language("yaml", content, EVENTS, enabled=True)
+        assert captured["program"].index(".a = 1") < captured["program"].index(".b = 2")
+
+    def test_a_non_remap_component_says_why_it_cannot_run(self):
+        content = "transforms:\n  drop:\n    type: filter\n    condition: 'true'\n"
         result = dryrun.run_language("yaml", content, EVENTS, enabled=True)
         assert result.status is dryrun.DryRunStatus.UNSUPPORTED
         assert "filter" in result.message
 
     def test_a_remap_with_no_inline_source_is_unsupported(self):
-        result = dryrun.run_language("yaml", "type: remap\nfile: /x.vrl\n", EVENTS, enabled=True)
+        content = "transforms:\n  parse:\n    type: remap\n    file: /x.vrl\n"
+        result = dryrun.run_language("yaml", content, EVENTS, enabled=True)
         assert result.status is dryrun.DryRunStatus.UNSUPPORTED
+
+    def test_a_bare_component_without_the_transforms_key_is_refused(self):
+        # The pre-0.6 shape. Vector never loads it, so running it would report a
+        # pass for something that could not deploy.
+        result = dryrun.run_language("yaml", "type: remap\nsource: .a = 1\n", EVENTS, enabled=True)
+        assert result.status is dryrun.DryRunStatus.UNSUPPORTED
+        assert "transforms" in result.message
 
     def test_invalid_yaml_is_unsupported_not_a_crash(self):
         result = dryrun.run_language("yaml", "type: [unclosed\n", EVENTS, enabled=True)
