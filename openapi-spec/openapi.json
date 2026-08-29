@@ -12324,6 +12324,136 @@
         ]
       }
     },
+    "/api/v1/apps/{service}/{instance}/routing": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App Routing",
+        "description": "What the sources compile to, against what the overlay actually carries.\n\nAn absent block is called out separately from drift: it means the app is\nrunning on its built-in defaults, which is how a receiver silently ignores\nevery source rule ever defined.",
+        "operationId": "get_app_routing_api_v1_apps__service___instance__routing_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/routing/sync": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Sync App Routing",
+        "description": "Rewrite the overlay's routing to what the sources currently compile to.",
+        "operationId": "sync_app_routing_api_v1_apps__service___instance__routing_sync_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
     "/api/v1/apps/{service}/{instance}/files/{set_name}/dry-run": {
       "post": {
         "tags": [
@@ -23033,6 +23163,49 @@
           "version"
         ],
         "title": "RollbackRequest"
+      },
+      "RoutingResponse": {
+        "properties": {
+          "compiler": {
+            "type": "string",
+            "title": "Compiler",
+            "description": "Manifest-declared compiler that derives this block"
+          },
+          "values_path": {
+            "type": "string",
+            "title": "Values Path",
+            "description": "Overlay dot-path the block is written to"
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "description": "The overlay disagrees with the current sources"
+          },
+          "absent": {
+            "type": "boolean",
+            "title": "Absent",
+            "description": "The overlay carries no routing, so the app runs on built-in defaults"
+          },
+          "compiled": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Compiled"
+          },
+          "deployed": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Deployed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "compiler",
+          "values_path",
+          "drift",
+          "absent"
+        ],
+        "title": "RoutingResponse",
+        "description": "Source-derived routing: what it should be, and what the overlay carries."
       },
       "RuleCreateRequest": {
         "properties": {

@@ -65,6 +65,7 @@ from dfe_engine.appmgmt import (
     instances,
     library,
     links,
+    routing,
     scaling,
     validate,
 )
@@ -198,6 +199,19 @@ class FileDetail(FileSummary):
 
 class FileWriteRequest(BaseModel):
     content: str
+
+
+class RoutingResponse(BaseModel):
+    """Source-derived routing: what it should be, and what the overlay carries."""
+
+    compiler: str = Field(description="Manifest-declared compiler that derives this block")
+    values_path: str = Field(description="Overlay dot-path the block is written to")
+    drift: bool = Field(description="The overlay disagrees with the current sources")
+    absent: bool = Field(
+        description="The overlay carries no routing, so the app runs on built-in defaults"
+    )
+    compiled: dict[str, Any] = Field(default_factory=dict)
+    deployed: dict[str, Any] = Field(default_factory=dict)
 
 
 class DryRunRequest(BaseModel):
@@ -1158,6 +1172,94 @@ async def delete_app_file(
     protected = _enforce(request, user, app.overlay_name, doc)
     result = _commit(request, user, app, doc, summary=f"remove {filename}", protected=protected)
     return result.model_copy(update={"reload": str(fs.reload)})
+
+
+# ── source-derived routing ────────────────────────────────────
+
+
+def _routing_app(service: str, instance: str) -> AppInstance:
+    app = _resolve(service, instance)
+    if not app.descriptor.has_compiled_routing:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "routing_not_compiled",
+                "message": f"{service} routing is not derived from the source definitions",
+            },
+        )
+    return app
+
+
+def _routing_status(request: Request, app: AppInstance, doc: dict, source_registry: Any):
+    try:
+        return routing.status(app.descriptor, doc, source_registry, request.app.state.settings)
+    except routing.UnknownRoutingCompilerError as exc:
+        raise HTTPException(
+            500,
+            detail={
+                "code": "unknown_routing_compiler",
+                "message": f"the app manifest names compiler {exc.args[0]!r}, which this "
+                f"engine does not implement (known: {', '.join(routing.compilers())})",
+            },
+        ) from None
+
+
+@router.get("/{service}/{instance}/routing", response_model=RoutingResponse, dependencies=[_READ])
+async def get_app_routing(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    source_registry: SourceReg,
+) -> RoutingResponse:
+    """What the sources compile to, against what the overlay actually carries.
+
+    An absent block is called out separately from drift: it means the app is
+    running on its built-in defaults, which is how a receiver silently ignores
+    every source rule ever defined.
+    """
+    app = _routing_app(service, instance)
+    doc = _overlay(_gitcrud(request), app)
+    found = _routing_status(request, app, doc, source_registry)
+    return RoutingResponse(
+        compiler=found.compiler,
+        values_path=found.values_path,
+        drift=found.drift,
+        absent=found.absent,
+        compiled=found.compiled,
+        deployed=found.deployed,
+    )
+
+
+@router.post(
+    "/{service}/{instance}/routing/sync", response_model=WriteResult, dependencies=[_WRITE]
+)
+async def sync_app_routing(
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    source_registry: SourceReg,
+    if_match: str | None = Header(default=None, alias="If-Match"),
+) -> WriteResult:
+    """Rewrite the overlay's routing to what the sources currently compile to."""
+    app = _routing_app(service, instance)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
+    found = _routing_status(request, app, doc, source_registry)
+    if not found.drift:
+        return WriteResult(changed=False)
+    set_path(doc, app.descriptor.routing_path, found.compiled)
+    protected = _enforce(request, user, app.overlay_name, doc)
+    return _commit(
+        request,
+        user,
+        app,
+        doc,
+        summary="sync routing",
+        protected=protected,
+        if_match=if_match,
+    )
 
 
 # ── dry run ───────────────────────────────────────────────────
