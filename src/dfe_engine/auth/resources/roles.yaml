@@ -54,9 +54,10 @@ roles:
       - "helm:*"
       - "helmvars:*"
       - "library:*"
-      # Running an authored transform over sampled events also needs sampler:read,
-      # which this role does not hold - a dry run is deliberately two grants.
+      # A dry run is two grants: executing authored code, and reading the sampled
+      # events it runs over. This role authors transforms, so it holds both.
       - "dryrun:execute"
+      - "sampler:read"
       - "governance:*"
       - "action:invoke:*"
       - "deployment:*"
