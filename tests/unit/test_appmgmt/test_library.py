@@ -39,11 +39,19 @@ def artifact(vrl_kind):
 
 class TestKinds:
     def test_kinds_come_from_the_manifest(self):
+        # Membership is not pinned: a kind arrives as a manifest edit, so an
+        # exact-set assertion would break on every one of them.
         by_name = {k.name: k for k in library.kinds()}
-        assert set(by_name) == {"vrl", "vector-yaml", "wasm"}
+        assert {"vrl", "vector-yaml", "wasm"} <= set(by_name)
         assert by_name["vrl"].suffixes == (".vrl",)
         assert by_name["vector-yaml"].suffixes == (".yaml", ".yml")
         assert by_name["wasm"].encoding is catalogue.Encoding.BASE64
+
+    def test_every_declared_kind_is_well_formed(self):
+        for kind in library.kinds():
+            assert kind.name and kind.language
+            assert kind.suffixes, f"{kind.name} declares no suffixes"
+            assert all(s.startswith(".") for s in kind.suffixes)
 
     def test_an_undeclared_kind_raises(self):
         with pytest.raises(library.UnknownKindError):

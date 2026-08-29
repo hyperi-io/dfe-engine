@@ -62,8 +62,10 @@ class TestKinds:
         _wire(app, tmp_path)
         resp = client.get(f"{LIB}/kinds", headers=admin_headers)
         assert resp.status_code == 200, resp.text
+        # Membership is not pinned: a kind arrives as a manifest edit, so an
+        # exact-set assertion would break on every one of them.
         by_name = {k["name"]: k for k in resp.json()}
-        assert set(by_name) == {"vrl", "vector-yaml", "wasm"}
+        assert {"vrl", "vector-yaml", "wasm"} <= set(by_name)
         assert by_name["wasm"]["encoding"] == "base64"
         assert by_name["vector-yaml"]["suffixes"] == [".yaml", ".yml"]
 
