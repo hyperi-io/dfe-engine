@@ -59,6 +59,7 @@ from .library import (
 )
 from .links import ArtifactNotLinkableError, Link, LinkNotFoundError, LinkStatus, Usage
 from .operations import AppMetrics, AppStatus, MetricsUnavailableError, OperationalReader
+from .routing import RoutingNotCompiledError, RoutingStatus, UnknownRoutingCompilerError
 from .scaling import DeployTarget, InvalidDialError, ScalingDials
 from .validation import ValidationResult, ValidationStatus, validate, validate_language
 
@@ -110,6 +111,9 @@ __all__ = [
     "initial_overlay",
     "instance_of",
     "list_instances",
+    "RoutingNotCompiledError",
+    "RoutingStatus",
+    "UnknownRoutingCompilerError",
     "parse_overlay_name",
     "run_language",
     "services",

@@ -31,6 +31,7 @@ from .catalogue import (
     DEPLOY_INSTANCE_PATH,
     DEPLOY_SERVICE_PATH,
     OTEL_SERVICE_NAME_PATH,
+    AppDescriptor,
     Multiplicity,
     descriptor,
     render_source_binding,
@@ -75,6 +76,11 @@ class AppInstance:
     def component(self) -> str:
         """The chart's component name for this service, without the project prefix."""
         return self.service.removeprefix("dfe-")
+
+    @property
+    def descriptor(self) -> AppDescriptor:
+        """What the manifest says this app IS."""
+        return descriptor(self.service)
 
 
 def validate_instance(instance: str) -> None:

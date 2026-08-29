@@ -417,6 +417,67 @@ class TestNotDeployed:
         assert resp.json()["code"] == "not_deployed"
 
 
+class TestRouting:
+    """Source-derived routing reaching the overlay Argo actually applies."""
+
+    RECEIVER = "/api/v1/apps/dfe-receiver/default"
+
+    def _deployed(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/dfe-receiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        return gc
+
+    def test_a_fresh_overlay_reports_absent_routing(self, client, app, admin_headers, tmp_path):
+        # The devex regression: a receiver running on built-in defaults while
+        # every source rule ever defined is ignored.
+        self._deployed(client, app, admin_headers, tmp_path)
+        resp = client.get(f"{self.RECEIVER}/routing", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["absent"] is True
+        assert body["drift"] is True
+        assert body["compiler"] == "receiver"
+        assert body["values_path"] == "config.routing"
+
+    def test_sync_writes_the_block_and_commits(self, client, app, admin_headers, tmp_path):
+        gc = self._deployed(client, app, admin_headers, tmp_path)
+        resp = client.post(f"{self.RECEIVER}/routing/sync", headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+        assert resp.json()["commit_sha"]
+
+        doc = gc.get("helmvars", "dfe-receiver-default-values")
+        assert "source_rules" in doc["config"]["routing"]
+
+    def test_after_sync_there_is_no_drift(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        client.post(f"{self.RECEIVER}/routing/sync", headers=admin_headers)
+        body = client.get(f"{self.RECEIVER}/routing", headers=admin_headers).json()
+        assert (body["drift"], body["absent"]) == (False, False)
+
+    def test_syncing_twice_is_not_a_second_commit(self, client, app, admin_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        client.post(f"{self.RECEIVER}/routing/sync", headers=admin_headers)
+        second = client.post(f"{self.RECEIVER}/routing/sync", headers=admin_headers)
+        assert second.json()["changed"] is False
+
+    def test_an_app_without_derived_routing_is_400(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.get(f"{BASE}/routing", headers=admin_headers)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "routing_not_compiled"
+
+    def test_a_viewer_cannot_sync(self, client, app, admin_headers, viewer_headers, tmp_path):
+        self._deployed(client, app, admin_headers, tmp_path)
+        resp = client.post(f"{self.RECEIVER}/routing/sync", headers=viewer_headers)
+        assert resp.status_code == 403
+
+
 class TestDryRun:
     """Running an authored file over sampled events, and the gates on doing it."""
 

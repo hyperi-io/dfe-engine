@@ -141,6 +141,22 @@ class AppDescriptor:
     source_binding: dict[str, object] = field(default_factory=dict)
     """Overlay dot-paths to set from the source name, ``{source}`` substituted."""
 
+    routing_compiler: str = ""
+    """Name of the compiler that derives this app's routing from the sources."""
+
+    routing_path: str = ""
+    """Overlay dot-path the compiled routing is written to."""
+
+    @property
+    def has_compiled_routing(self) -> bool:
+        """Whether this app's routing is derived from the source definitions.
+
+        A derived block is not hand-editable: it is recompiled from the sources,
+        so the API reports drift against them rather than treating an edit as
+        intent.
+        """
+        return bool(self.routing_compiler and self.routing_path)
+
     @property
     def component_is_per_instance(self) -> bool:
         """Whether the chart's component name has to carry the instance.
@@ -217,12 +233,17 @@ def _descriptor_from(service: str, raw: dict) -> AppDescriptor:
     binding = raw.get("source_binding") or {}
     if not isinstance(binding, dict):
         raise CatalogueError(f"{service}: source_binding must be a mapping")
+    routing = raw.get("routing") or {}
+    if not isinstance(routing, dict):
+        raise CatalogueError(f"{service}: routing must be a mapping")
     return AppDescriptor(
         service=service,
         scale_deployed=bool(raw.get("scale_deployed", True)),
         multiplicity=multiplicity,
         files=tuple(_file_set_from(service, f) for f in raw.get("files") or ()),
         source_binding=dict(binding),
+        routing_compiler=str(routing.get("compiler", "")),
+        routing_path=str(routing.get("values_path", "")),
     )
 
 
