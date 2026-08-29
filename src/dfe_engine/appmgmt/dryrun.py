@@ -174,25 +174,44 @@ def _as_text(value: object) -> str:
 
 
 def _vector_remap_source(content: str) -> tuple[str, str]:
-    """The VRL inside a Vector transform, or an explanation of why there is none.
+    """The VRL inside a Vector transform file, or why there is none to run.
 
-    Only ``remap`` carries a VRL program. Every other transform type is a Vector
-    component whose behaviour lives in Vector itself, so running it needs Vector,
-    not a VRL interpreter.
+    A file is Vector's own shape - a ``transforms`` map of named components, which
+    is what dfe-transform-vector loads and passes through to Vector verbatim. Only
+    ``remap`` carries a VRL program; every other type is a component whose
+    behaviour lives in Vector itself, so running it needs Vector rather than a VRL
+    interpreter.
+
+    Several remaps in one file are concatenated in declaration order, which is the
+    order Vector would run them in when they are chained.
     """
     try:
         parsed = yaml_load_string(content)
     except YAMLError as exc:
         return "", f"not valid YAML: {exc}"
     if not isinstance(parsed, dict):
-        return "", "a Vector transform must be a mapping"
-    kind = str(parsed.get("type", ""))
-    if kind != "remap":
-        return "", f"a {kind or 'typeless'} Vector transform cannot be dry run here"
-    source = parsed.get("source")
-    if not isinstance(source, str) or not source.strip():
-        return "", "the remap transform declares no inline 'source' program"
-    return source, ""
+        return "", "a Vector transform file must be a mapping"
+    components = parsed.get("transforms")
+    if not isinstance(components, dict) or not components:
+        return "", "the file declares no 'transforms' components"
+
+    programs: list[str] = []
+    skipped: list[str] = []
+    for name, component in components.items():
+        if not isinstance(component, dict):
+            return "", f"transform {name!r} is not a mapping"
+        kind = str(component.get("type", ""))
+        if kind != "remap":
+            skipped.append(f"{name} ({kind or 'typeless'})")
+            continue
+        source = component.get("source")
+        if not isinstance(source, str) or not source.strip():
+            return "", f"remap {name!r} declares no inline 'source' program"
+        programs.append(source)
+
+    if not programs:
+        return "", f"no remap to run; the file declares {', '.join(skipped)}"
+    return "\n".join(programs), ""
 
 
 def run_language(

@@ -126,11 +126,15 @@ def _interpret_vrl(outcome: object) -> ValidationResult:
 
 
 def _validate_vector_yaml(content: str) -> ValidationResult:
-    """Check a Vector transform fragment parses and declares a transform type.
+    """Check a Vector transform file has the shape dfe-transform-vector loads.
 
-    Only the shape this layer can be sure of without Vector itself: a fragment
-    missing `type` is rejected by `vector validate` at assembly time, which the
-    supervisor turns into a rolled-back reload rather than a visible error.
+    That shape is Vector's own: a ``transforms`` map of named components, each
+    declaring a ``type``. A file missing it loads no components at all, and the
+    supervisor turns the failed assembly into a rolled-back reload rather than a
+    visible error - so it is worth catching before the write.
+
+    Only the structure is checked here. Whether the type exists and its options
+    are valid is Vector's own answer, and needs Vector to give it.
     """
     try:
         parsed = yaml_load_string(content)
@@ -145,13 +149,27 @@ def _validate_vector_yaml(content: str) -> ValidationResult:
         return ValidationResult(
             status=ValidationStatus.INVALID,
             backend="yaml",
-            message="a Vector transform must be a mapping",
+            message="a Vector transform file must be a mapping",
         )
-    if "type" not in parsed:
+    components = parsed.get("transforms")
+    if not isinstance(components, dict) or not components:
         return ValidationResult(
             status=ValidationStatus.INVALID,
             backend="yaml",
-            message="a Vector transform must declare a 'type'",
+            message="a Vector transform file must declare a 'transforms' mapping of "
+            "named components",
+        )
+    errors = tuple(
+        f"transform {name!r} declares no 'type'"
+        for name, component in components.items()
+        if not isinstance(component, dict) or not str(component.get("type", "")).strip()
+    )
+    if errors:
+        return ValidationResult(
+            status=ValidationStatus.INVALID,
+            backend="yaml",
+            message="; ".join(errors),
+            errors=errors,
         )
     return ValidationResult(status=ValidationStatus.VALID, backend="yaml")
 

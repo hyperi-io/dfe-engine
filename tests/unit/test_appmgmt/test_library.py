@@ -49,7 +49,8 @@ class TestKinds:
 
     def test_every_declared_kind_is_well_formed(self):
         for kind in library.kinds():
-            assert kind.name and kind.language
+            assert kind.name
+            assert kind.language, f"{kind.name} declares no language"
             assert kind.suffixes, f"{kind.name} declares no suffixes"
             assert all(s.startswith(".") for s in kind.suffixes)
 
