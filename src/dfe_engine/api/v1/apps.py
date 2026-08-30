@@ -146,12 +146,23 @@ class FileSetSummary(BaseModel):
     directory_setting: str
 
 
+def _routing_flag() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        description=(
+            "Whether this app's routing is compiled from the source definitions. "
+            "False means the /routing routes answer 400 for every instance of it."
+        )
+    )
+
+
 class AppSummary(BaseModel):
     service: str
     instance: str
     telemetry_name: str
     scale_deployed: bool
     multiplicity: str
+    has_compiled_routing: bool = _routing_flag()
     file_sets: list[FileSetSummary]
 
 
@@ -159,6 +170,7 @@ class CatalogueEntry(BaseModel):
     service: str
     scale_deployed: bool
     multiplicity: str
+    has_compiled_routing: bool = _routing_flag()
     file_sets: list[FileSetSummary]
     instances: list[str]
 
@@ -178,6 +190,14 @@ class ScalingResponse(BaseModel):
 
 
 class ScalingRequest(BaseModel):
+    replica_count: int | None = Field(
+        default=None,
+        description=(
+            "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is "
+            "explicitly enabled, because the chart omits `replicas` and the "
+            "ScaledObject owns the count."
+        ),
+    )
     min_replicas: int | None = None
     max_replicas: int | None = None
     keda_enabled: bool | None = None
@@ -494,7 +514,7 @@ def _enforce(request: Request, user: Any, name: str, doc: dict) -> bool:
     changes = flatten(doc)
     for path, value in changes.items():
         try:
-            validate_change(path, value)
+            validate_change(path, value, doc)
         except CommitPolicyError as exc:
             raise HTTPException(
                 403, detail={"code": "policy_violation", "message": str(exc)}
@@ -609,16 +629,20 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
     """Every manageable app, with the instances currently deployed."""
     gc = _gitcrud(request)
     deployed = instances.list_instances(gc)
-    return [
-        CatalogueEntry(
-            service=service,
-            scale_deployed=catalogue.descriptor(service).scale_deployed,
-            multiplicity=str(catalogue.descriptor(service).multiplicity),
-            file_sets=_file_sets(service),
-            instances=[i.instance for i in deployed if i.service == service],
+    entries: list[CatalogueEntry] = []
+    for service in catalogue.services():
+        desc = catalogue.descriptor(service)
+        entries.append(
+            CatalogueEntry(
+                service=service,
+                scale_deployed=desc.scale_deployed,
+                multiplicity=str(desc.multiplicity),
+                has_compiled_routing=desc.has_compiled_routing,
+                file_sets=_file_sets(service),
+                instances=[i.instance for i in deployed if i.service == service],
+            )
         )
-        for service in catalogue.services()
-    ]
+    return entries
 
 
 @router.post("/{service}/instances", response_model=WriteResult, dependencies=[_DEPLOY_WRITE])
@@ -664,6 +688,7 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
         telemetry_name=app.telemetry_name,
         scale_deployed=desc.scale_deployed,
         multiplicity=str(desc.multiplicity),
+        has_compiled_routing=desc.has_compiled_routing,
         file_sets=_file_sets(service),
     )
 

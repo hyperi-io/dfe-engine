@@ -24,19 +24,25 @@ any file it matches becomes an Argo application.
 Reads are DECLARED values, never observed ones. The engine has no Kubernetes
 client, so nothing here reports a pod phase, a running replica count or actual
 disk use - only what the deploy repo says the deployment asked for.
+
+Node and broker counts are UP-ONLY here, and not out of caution: both stores place
+data per member, so removing one takes its copy with it unless something moves the
+data off first. CPU and memory move freely both ways.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+import copy
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import Any, TypeGuard
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from dfe_engine.api.deps import CurrentUser, require_action
 from dfe_engine.auth.rbac_scopes import scopes_dict
-from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path
+from dfe_engine.gitcrud.engine import ResourceNotFoundError, get_path, set_path
 
 from .helm import (
     SetVarRequest,
@@ -57,6 +63,22 @@ _CLASS = "infravars"
 _COMMON = "common"
 
 
+class BackingReload(StrEnum):
+    """What Argo syncing this change actually does to the running store."""
+
+    APPLY = "apply"
+    """The operator reconciles it in place; nothing restarts."""
+
+    ROLL = "roll"
+    """The pod template or server config changed, so the operator restarts pods."""
+
+    RECREATE = "recreate"
+    """Needs the StatefulSet recreated by hand - volumeClaimTemplates are immutable."""
+
+    REDEPLOY = "redeploy"
+    """The Application's object set changes shape; the store may be deployed or removed."""
+
+
 @dataclass(frozen=True)
 class BackingService:
     """One backing service: where its values live and what they are called.
@@ -71,6 +93,11 @@ class BackingService:
     replicas: str
     storage_size: str
     storage_class: str
+    scale_down_reason: str
+    """Why lowering a member count here loses data. Returned verbatim on refusal."""
+
+    extra_member_counts: tuple[str, ...] = field(default_factory=tuple)
+    """Further member counts under `prefix` that are up-only for the same reason."""
 
 
 CATALOGUE: tuple[BackingService, ...] = (
@@ -81,6 +108,14 @@ CATALOGUE: tuple[BackingService, ...] = (
         replicas="replicas",
         storage_size="storage.size",
         storage_class="storage.storageClass",
+        scale_down_reason=(
+            "removing a ClickHouse node drops a copy of the data, or the data itself "
+            "when the cluster is sharded. Move or re-replicate it first, then lower "
+            "the count in the deploy repo"
+        ),
+        # A Keeper ensemble is a Raft quorum: shrinking it can lose the quorum
+        # outright, which takes every ReplicatedMergeTree table read-only with it.
+        extra_member_counts=("keeper.replicas",),
     ),
     BackingService(
         service="kafka",
@@ -89,6 +124,11 @@ CATALOGUE: tuple[BackingService, ...] = (
         replicas="replicas",
         storage_size="storage.size",
         storage_class="storage.storageClass",
+        scale_down_reason=(
+            "every partition on a Kafka broker must be reassigned off it before the "
+            "broker goes, or the replicas it held go with it. Reassign first, then "
+            "lower the count in the deploy repo"
+        ),
     ),
 )
 
@@ -100,6 +140,21 @@ _RESOURCE_PATHS = (
     "resources.limits.cpu",
     "resources.limits.memory",
 )
+
+# What a written key does once Argo has it, keyed by the first segment below the
+# service prefix. Matched by segment equality, not string prefix, so `storage` and
+# `storageModel` stay distinct. Anything unlisted falls to APPLY.
+_RELOAD_BY_SEGMENT: dict[str, BackingReload] = {
+    # mode=external removes the store's objects; mode=cluster creates them.
+    "mode": BackingReload.REDEPLOY,
+    # Server or broker config -- the operator restarts pods onto the new settings.
+    "storageModel": BackingReload.ROLL,
+    "s3": BackingReload.ROLL,
+    "tiered": BackingReload.ROLL,
+    "resources": BackingReload.ROLL,
+    # volumeClaimTemplates are immutable, so no sync can apply a size or class change.
+    "storage": BackingReload.RECREATE,
+}
 
 
 class DeclaredValue(BaseModel):
@@ -122,12 +177,29 @@ class BackingServiceConfig(BaseModel):
     service: str
     chart: str
     overlay: str
+    prefix: str = Field(
+        description=(
+            "Values-key prefix every path below sits under. Read it rather than "
+            "deriving one from `service` or `chart` - neither is guaranteed to match."
+        )
+    )
     mode: DeclaredValue
     storage_model: DeclaredValue
     replicas: DeclaredValue
     storage_size: DeclaredValue
     storage_class: DeclaredValue
     resources: dict[str, DeclaredValue] = Field(default_factory=dict)
+
+
+class BackingWriteResult(WriteResult):
+    """A governed write plus what syncing it does to the running store."""
+
+    reload: str = Field(
+        description=(
+            "'apply' reconciles in place, 'roll' restarts pods, 'recreate' needs the "
+            "StatefulSet recreated by hand, 'redeploy' changes which objects exist."
+        )
+    )
 
 
 def _docs(request: Request, chart: str) -> list[tuple[str, dict]]:
@@ -167,6 +239,7 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
         service=spec.service,
         chart=spec.chart,
         overlay=f"{spec.chart}.yaml",
+        prefix=spec.prefix,
         mode=at("mode"),
         storage_model=at("storageModel"),
         replicas=at(spec.replicas),
@@ -174,6 +247,92 @@ def _config(request: Request, spec: BackingService) -> BackingServiceConfig:
         storage_class=at(spec.storage_class),
         resources={p: at(p) for p in _RESOURCE_PATHS},
     )
+
+
+def _owner(path: str) -> BackingService | None:
+    """The backing service whose values prefix owns this dot-path."""
+    head = path.split(".", 1)[0]
+    for spec in CATALOGUE:
+        if spec.prefix == head:
+            return spec
+    return None
+
+
+def _reload_for(path: str) -> BackingReload:
+    """What syncing a write to this path does to the running store."""
+    spec = _owner(path)
+    if spec is None:
+        return BackingReload.APPLY
+    segments = path.split(".")
+    if len(segments) < 2:
+        return BackingReload.APPLY
+    return _RELOAD_BY_SEGMENT.get(segments[1], BackingReload.APPLY)
+
+
+def _resolved(docs: list[tuple[str, dict]], path: str) -> Any | None:
+    """The value the overlay stack declares for a path, last declaration winning."""
+    found: Any | None = None
+    for _name, doc in docs:
+        value = get_path(doc, path, default=None)
+        if value is not None:
+            found = value
+    return found
+
+
+def _is_count(value: Any) -> TypeGuard[int]:
+    """A member count is a plain int; bool is an int in Python and is not one."""
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _stack_with(
+    request: Request, spec: BackingService, name: str, path: str, value: Any
+) -> list[tuple[str, dict]]:
+    """The overlay stack as it would read with this write applied to ``name``."""
+    gc = gitcrud_of(request)
+    out: list[tuple[str, dict]] = []
+    for candidate in (_COMMON, spec.chart):
+        try:
+            doc = copy.deepcopy(gc.get(_CLASS, candidate))
+        except ResourceNotFoundError:
+            if candidate != name:
+                continue
+            doc = {}
+        if candidate == name:
+            set_path(doc, path, value)
+        out.append((candidate, doc))
+    return out
+
+
+def _guard_member_count(request: Request, name: str, path: str, value: Any) -> None:
+    """Refuse a write that lowers a declared node or broker count.
+
+    Compares the value the overlay stack declares BEFORE the write with what it
+    would declare after, so writing into the shared file cannot be refused for a
+    drop the per-chart file goes on to override anyway. Nothing declared means
+    nothing to compare against, and the write is accepted.
+    """
+    spec = _owner(path)
+    if spec is None:
+        return
+    counts = {f"{spec.prefix}.{leaf}" for leaf in (spec.replicas, *spec.extra_member_counts)}
+    if path not in counts or name not in (_COMMON, spec.chart):
+        return
+
+    before = _resolved(_docs(request, spec.chart), path)
+    if not _is_count(before):
+        return
+    after = _resolved(_stack_with(request, spec, name, path, value), path)
+    if _is_count(after) and after < before:
+        raise HTTPException(
+            400,
+            detail={
+                "code": "scale_down_refused",
+                "message": (
+                    f"{path} is up-only: {before} -> {after} would remove a member. "
+                    f"{spec.scale_down_reason}."
+                ),
+            },
+        )
 
 
 @router.get("", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
@@ -230,7 +389,7 @@ async def get_backing_service(
 
 @router.put(
     "/overlays/{name}/vars/{path}",
-    response_model=WriteResult,
+    response_model=BackingWriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 async def set_overlay_var(
@@ -240,21 +399,32 @@ async def set_overlay_var(
     user: CurrentUser,
     request: Request,
     if_match: str | None = Header(default=None, alias="If-Match"),
-) -> WriteResult:
-    """Set a substrate/platform value. 403 with the policy that blocked it when the
-    var is protected - the storage model and the data-layer modes are decided at
-    deploy, and moving one on a live deployment is a data migration.
+) -> BackingWriteResult:
+    """Set a substrate/platform value.
+
+    403 with the policy that blocked it when the var is protected - the storage
+    model, the data-layer modes and the disk size are decided at deploy, and moving
+    one on a live deployment is a data migration. 400 when the value would lower a
+    declared node or broker count, which loses data rather than capacity.
     """
-    return set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
+    check_name(name)
+    _guard_member_count(request, name, path, body.value)
+    result = set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
+    return BackingWriteResult(**result.model_dump(), reload=str(_reload_for(path)))
 
 
 @router.delete(
     "/overlays/{name}/vars/{path}",
-    response_model=WriteResult,
+    response_model=BackingWriteResult,
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 async def delete_overlay_var(
     name: str, path: str, user: CurrentUser, request: Request
-) -> WriteResult:
-    """Revert a substrate/platform value to its chart default. Protected vars refuse."""
-    return delete_var_governed(_CLASS, name, path, user, request)
+) -> BackingWriteResult:
+    """Revert a substrate/platform value to its chart default. Protected vars refuse.
+
+    Not guarded up-only: reverting a count hands it back to the chart or profile
+    default, which the engine cannot read, so there is no after-value to compare.
+    """
+    result = delete_var_governed(_CLASS, name, path, user, request)
+    return BackingWriteResult(**result.model_dump(), reload=str(_reload_for(path)))

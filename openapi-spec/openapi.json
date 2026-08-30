@@ -11387,7 +11387,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Set Overlay Var",
-        "description": "Set a substrate/platform value. 403 with the policy that blocked it when the\nvar is protected - the storage model and the data-layer modes are decided at\ndeploy, and moving one on a live deployment is a data migration.",
+        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, which loses data rather than capacity.",
         "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
         "parameters": [
           {
@@ -11441,7 +11441,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
+                  "$ref": "#/components/schemas/BackingWriteResult"
                 }
               }
             }
@@ -11468,7 +11468,7 @@
           "Governed Ops: Backing Services"
         ],
         "summary": "Delete Overlay Var",
-        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.",
+        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\nNot guarded up-only: reverting a count hands it back to the chart or profile\ndefault, which the engine cannot read, so there is no after-value to compare.",
         "operationId": "delete_overlay_var_api_v1_backing_services_overlays__name__vars__path__delete",
         "parameters": [
           {
@@ -11496,7 +11496,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
+                  "$ref": "#/components/schemas/BackingWriteResult"
                 }
               }
             }
@@ -15918,6 +15918,11 @@
             "type": "string",
             "title": "Multiplicity"
           },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -15933,6 +15938,7 @@
           "telemetry_name",
           "scale_deployed",
           "multiplicity",
+          "has_compiled_routing",
           "file_sets"
         ],
         "title": "AppSummary"
@@ -16074,6 +16080,11 @@
             "type": "string",
             "title": "Overlay"
           },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "description": "Values-key prefix every path below sits under. Read it rather than deriving one from `service` or `chart` - neither is guaranteed to match."
+          },
           "mode": {
             "$ref": "#/components/schemas/DeclaredValue"
           },
@@ -16102,6 +16113,7 @@
           "service",
           "chart",
           "overlay",
+          "prefix",
           "mode",
           "storage_model",
           "replicas",
@@ -16110,6 +16122,58 @@
         ],
         "title": "BackingServiceConfig",
         "description": "A backing service's deploy configuration AS DECLARED, not as observed."
+      },
+      "BackingWriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "reload": {
+            "type": "string",
+            "title": "Reload",
+            "description": "'apply' reconciles in place, 'roll' restarts pods, 'recreate' needs the StatefulSet recreated by hand, 'redeploy' changes which objects exist."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed",
+          "reload"
+        ],
+        "title": "BackingWriteResult",
+        "description": "A governed write plus what syncing it does to the running store."
       },
       "BindingSummary": {
         "properties": {
@@ -16447,6 +16511,11 @@
             "type": "string",
             "title": "Multiplicity"
           },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -16467,6 +16536,7 @@
           "service",
           "scale_deployed",
           "multiplicity",
+          "has_compiled_routing",
           "file_sets",
           "instances"
         ],
@@ -24578,6 +24648,18 @@
       },
       "ScalingRequest": {
         "properties": {
+          "replica_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Count",
+            "description": "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is explicitly enabled, because the chart omits `replicas` and the ScaledObject owns the count."
+          },
           "min_replicas": {
             "anyOf": [
               {

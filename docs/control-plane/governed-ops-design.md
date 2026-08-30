@@ -169,7 +169,18 @@ sequenceDiagram
 
 A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked
 `cls:name:path` globs that even Tier-1 must respect unless the caller holds the
-override grant. It is a policy object, not a per-var ACL.
+override grant. It is a policy object, not a per-var ACL. Two policies ship and
+seed into every deploy repo: `baseline` locks image references, and
+`storage-model` locks the data-layer modes, both storage models, the object-store
+blocks and the disk size and class.
+
+Not everything unsafe is a protected var. A lower node or broker count is refused
+by the backing-services router itself, with a 400 that names the reason, and the
+override grant does NOT get past it: the hazard is data loss rather than
+governance, and there is no correct way to grant your way through it. The same
+distinction applies to `replicaCount`, which the commit standard refuses unless
+the document being written explicitly disables KEDA -- with a controller owning
+the count, writing one renders nothing.
 
 ### Constrained params -- a dial with detents, or a bounded knob
 
