@@ -76,11 +76,11 @@ def sources():
         _make_source("filebeat", match_field="agent.type", match_value="filebeat"),
         _make_source("syslog", match_field="tags.event.category", match_value="syslog"),
         _make_source(
-            "crowdstrike_edr", match_field="_source_fetcher", match_value="crowdstrike"
+            "crowdstrike-edr", match_field="_source_fetcher", match_value="crowdstrike"
         ),  # SaaS fetcher source — still carries a match
-        _make_source("present_src", match_field="tags.present_marker", match_operator="exists"),
-        _make_source("disabled_src", match_field="x", match_value="y", state="disabled"),
-        _make_source("dormant_src", match_field="d", match_value="d", state="dormant"),
+        _make_source("present-src", match_field="tags.present_marker", match_operator="exists"),
+        _make_source("disabled-src", match_field="x", match_value="y", state="disabled"),
+        _make_source("dormant-src", match_field="d", match_value="d", state="dormant"),
     ]
 
 
@@ -138,7 +138,7 @@ class TestCompileReceiverRouting:
 
         # active sources with a match (disabled + dormant excluded)
         by_source = {r.source: r for r in config.source_rules}
-        assert set(by_source) == {"filebeat", "syslog", "crowdstrike_edr", "present_src"}
+        assert set(by_source) == {"filebeat", "syslog", "crowdstrike-edr", "present-src"}
 
     def test_equals_maps_to_key_value_set(self, registry):
         config = compile_receiver_routing(registry)
@@ -149,7 +149,7 @@ class TestCompileReceiverRouting:
 
     def test_exists_maps_to_key_present(self, registry):
         config = compile_receiver_routing(registry)
-        pr = next(r for r in config.source_rules if r.source == "present_src")
+        pr = next(r for r in config.source_rules if r.source == "present-src")
         assert pr.mode == "key_present"
         assert pr.field == "tags.present_marker"
         assert pr.match_value is None
@@ -157,8 +157,8 @@ class TestCompileReceiverRouting:
     def test_excludes_disabled_and_dormant_sources(self, registry):
         config = compile_receiver_routing(registry)
         stamped = {r.source for r in config.source_rules}
-        assert "disabled_src" not in stamped
-        assert "dormant_src" not in stamped
+        assert "disabled-src" not in stamped
+        assert "dormant-src" not in stamped
 
     def test_no_topic_overrides_for_default_derivation(self, registry):
         # topic_land == f"{source}{topic_suffix}" for every source, so no
@@ -254,10 +254,10 @@ class TestCompileLoaderRouting:
         # All ACTIVE sources should appear
         assert "filebeat" in config.category_to_table
         assert "syslog" in config.category_to_table
-        assert "crowdstrike_edr" in config.category_to_table
+        assert "crowdstrike-edr" in config.category_to_table
         # Disabled + dormant excluded
-        assert "disabled_src" not in config.category_to_table
-        assert "dormant_src" not in config.category_to_table
+        assert "disabled-src" not in config.category_to_table
+        assert "dormant-src" not in config.category_to_table
 
     def test_custom_db(self, registry):
         config = compile_loader_routing(registry, db="prod")

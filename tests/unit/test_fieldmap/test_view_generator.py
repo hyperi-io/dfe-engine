@@ -61,7 +61,7 @@ def gen(registry):
 
 class TestGenerateView:
     def test_returns_none_when_no_maps(self, gen: ViewGenerator):
-        result = gen.generate_view("sigma", "windows_audit", "windows_audit")
+        result = gen.generate_view("sigma", "windows-audit", "windows-audit")
         assert result is None
 
     def test_generates_view_from_default_map(self, gen: ViewGenerator, registry: FieldMapRegistry):
@@ -71,13 +71,13 @@ class TestGenerateView:
                 mappings={"EventID": "event_id", "User": "user_name"},
             )
         )
-        ddl = gen.generate_view("sigma", "windows_audit", "windows_audit")
+        ddl = gen.generate_view("sigma", "windows-audit", "windows-audit")
         assert ddl is not None
         assert "CREATE OR REPLACE VIEW" in ddl
-        assert "windows_audit_sigma" in ddl
+        assert "windows-audit_sigma" in ddl
         assert "`event_id` AS `EventID`" in ddl
         assert "`user_name` AS `User`" in ddl
-        assert "FROM {db}.windows_audit" in ddl
+        assert "FROM `{db}`.`windows-audit`" in ddl
 
     def test_generates_view_from_source_map(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
@@ -116,10 +116,10 @@ class TestGenerateView:
     def test_custom_config(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         cfg = DDLConfig(db="analytics")
-        ddl = gen.generate_view("sigma", "test_src", "test_table", cfg)
+        ddl = gen.generate_view("sigma", "test-src", "test_table", cfg)
         assert ddl is not None
-        assert "analytics.test_table_sigma" in ddl
-        assert "FROM analytics.test_table" in ddl
+        assert "`analytics`.`test_table_sigma`" in ddl
+        assert "FROM `analytics`.`test_table`" in ddl
 
     def test_view_includes_star(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
@@ -135,7 +135,7 @@ class TestGenerateView:
 
 class TestGenerateViewsForSource:
     def test_empty_when_no_maps(self, gen: ViewGenerator):
-        views = gen.generate_views_for_source("windows_audit", "windows_audit")
+        views = gen.generate_views_for_source("windows-audit", "windows-audit")
         assert views == {}
 
     def test_generates_for_all_discovered_standards(
@@ -143,11 +143,11 @@ class TestGenerateViewsForSource:
     ):
         registry.save_map(_make_field_map(standard="sigma", mappings={"EventID": "event_id"}))
         registry.save_map(_make_field_map(standard="ecs", mappings={"source.ip": "source_ip"}))
-        views = gen.generate_views_for_source("windows_audit", "windows_audit")
+        views = gen.generate_views_for_source("windows-audit", "windows-audit")
         assert "sigma" in views
         assert "ecs" in views
-        assert "windows_audit_sigma" in views["sigma"]
-        assert "windows_audit_ecs" in views["ecs"]
+        assert "windows-audit_sigma" in views["sigma"]
+        assert "windows-audit_ecs" in views["ecs"]
 
     def test_includes_source_specific_standard(
         self, gen: ViewGenerator, registry: FieldMapRegistry
@@ -190,7 +190,7 @@ class TestGenerateViewsForSource:
         registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         cfg = DDLConfig(db="mydb")
         views = gen.generate_views_for_source("src", "tbl", config=cfg)
-        assert "mydb.tbl_sigma" in views["sigma"]
+        assert "`mydb`.`tbl_sigma`" in views["sigma"]
 
 
 # ---------------------------------------------------------------
@@ -200,8 +200,8 @@ class TestGenerateViewsForSource:
 
 class TestGenerateDropView:
     def test_drop_view(self, gen: ViewGenerator):
-        ddl = gen.generate_drop_view("sigma", "windows_audit")
-        assert ddl == "DROP VIEW IF EXISTS {db}.windows_audit_sigma;\n"
+        ddl = gen.generate_drop_view("sigma", "windows-audit")
+        assert ddl == "DROP VIEW IF EXISTS {db}.windows-audit_sigma;\n"
 
     def test_drop_view_custom_db(self, gen: ViewGenerator):
         cfg = DDLConfig(db="analytics")
@@ -245,7 +245,7 @@ class TestDiscoverStandards:
 
 class TestResolveMap:
     def test_returns_empty_when_no_maps(self, gen: ViewGenerator):
-        result = gen._resolve_map("sigma", "windows_audit")
+        result = gen._resolve_map("sigma", "windows-audit")
         assert result == {}
 
     def test_default_only(self, gen: ViewGenerator, registry: FieldMapRegistry):
@@ -255,7 +255,7 @@ class TestResolveMap:
                 mappings={"EventID": "event_id", "User": "user_name"},
             )
         )
-        result = gen._resolve_map("sigma", "windows_audit")
+        result = gen._resolve_map("sigma", "windows-audit")
         assert result == {"EventID": "event_id", "User": "user_name"}
 
     def test_source_overrides_default(self, gen: ViewGenerator, registry: FieldMapRegistry):

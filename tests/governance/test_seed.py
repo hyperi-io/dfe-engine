@@ -41,6 +41,16 @@ class TestEmptyRepo:
         assert actions, "an empty deploy repo must be given the shipped actions"
         assert policies, "an empty deploy repo must be given the baseline policy"
 
+    def test_ships_the_storage_model_lock(self, tmp_path: Path):
+        """Every deployment gets the storage lock, not just a hand-seeded one."""
+        artifacts = pending_seed(repo_root=tmp_path)
+        names = {Path(k).stem for k in artifacts if k.startswith(POLICIES_SUBDIR)}
+        assert names == {"baseline", "storage-model"}
+
+        doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-model.yaml"])
+        assert "infravars:*:kafka.storage.size" in doc["protected"]
+        assert "infravars:*:clickhouse.storage.storageClass" in doc["protected"]
+
     def test_ships_the_documented_dials(self, tmp_path: Path):
         artifacts = pending_seed(repo_root=tmp_path)
         names = {Path(k).stem for k in artifacts if k.startswith(ACTIONS_SUBDIR)}
@@ -132,4 +142,4 @@ class TestDeletionTombstone:
         ignore.parent.mkdir(parents=True, exist_ok=True)
         ignore.write_text(f"{line}\n", encoding="utf-8")
 
-        assert len(pending_seed(repo_root=tmp_path)) == 6
+        assert len(pending_seed(repo_root=tmp_path)) == 7

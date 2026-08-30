@@ -66,9 +66,9 @@ def test_json_derived_subset():
 
 def test_view_name_uses_standard_suffix():
     ecs = build_remap_view_ddl(_ecs_def(), db="default")
-    assert "CREATE OR REPLACE VIEW default.filebeat_aws_ecs AS" in ecs
+    assert "CREATE OR REPLACE VIEW `default`.`filebeat_aws_ecs` AS" in ecs
     cim = build_remap_view_ddl(_ecs_def(standard="cim"), db="default")
-    assert "CREATE OR REPLACE VIEW default.filebeat_aws_cim AS" in cim
+    assert "CREATE OR REPLACE VIEW `default`.`filebeat_aws_cim` AS" in cim
 
 
 def test_source_column_alias():
@@ -80,7 +80,7 @@ def test_source_column_alias():
     )
     ddl = build_remap_view_ddl(d, db="default")
     assert "`host_name` AS `host.name`" in ddl
-    assert "FROM default.win;" in ddl
+    assert "FROM `default`.`win`;" in ddl
     assert "\n    *" not in ddl  # include_source_columns=False -> no trailing *
 
 
@@ -96,7 +96,7 @@ def test_json_derived_extract_and_cast():
 
 def test_empty_definition_selects_star():
     d = RemapViewDefinition(standard="cim", source_name="win", include_source_columns=False)
-    assert "SELECT\n    *\nFROM {db}.win;" in build_remap_view_ddl(d)
+    assert "SELECT\n    *\nFROM `{db}`.`win`;" in build_remap_view_ddl(d)
 
 
 def test_default_db_placeholder():
@@ -106,8 +106,8 @@ def test_default_db_placeholder():
         columns=[RemapColumn(field="X", source_column="x")],
     )
     ddl = build_remap_view_ddl(d)
-    assert "{db}.win_sigma" in ddl
-    assert "FROM {db}.win;" in ddl
+    assert "`{db}`.`win_sigma`" in ddl
+    assert "FROM `{db}`.`win`;" in ddl
 
 
 # -- Injection safety (shared across every standard) ---------

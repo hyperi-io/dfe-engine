@@ -208,6 +208,42 @@ def test_seed_setup_complete_seeds_organisation(tmp_path, monkeypatch):
     assert orgs.get("organisation") is not None
 
 
+def test_seed_organisation_dispatches_to_the_organisation_seeder(tmp_path, monkeypatch):
+    """The script is offered in the request Literal, so it has to reach a seeder."""
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    assert seeder.seed_static("seed_organisation") is True
+    assert orgs.get("organisation") is not None
+
+
+def test_an_app_seed_without_a_deploy_repo_names_the_setting(tmp_path, monkeypatch):
+    """A misconfigured e2e-server must say what is missing, not seed nothing quietly."""
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    with pytest.raises(RuntimeError, match="DFE_GITOPS_ENABLED"):
+        seeder.seed_static("seed_app_scaling_state")
+
+
+def test_reset_all_is_safe_without_a_deploy_repo(tmp_path, monkeypatch):
+    """The auth-only e2e specs run on a process with gitops off; reset must not raise."""
+    from dfe_engine.api.e2e.seed import Seed
+
+    monkeypatch.setenv("DFE_ENV", "test")
+    accounts, groups, orgs = _stores(tmp_path)
+    seeder = Seed(account_store=accounts, group_store=groups, org_registry=orgs)
+
+    seeder.accounts.seed_dfe_admin_user()
+    assert seeder.seed_static("reset_all") is True
+
+
 def test_seeders_never_create_groups_themselves(tmp_path, monkeypatch):
     """Groups are startup-bootstrap territory: a seeder refuses an unknown one.
 

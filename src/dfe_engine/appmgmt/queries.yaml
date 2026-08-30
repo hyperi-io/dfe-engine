@@ -1,0 +1,106 @@
+# Operational query catalogue for the app-management layer. Same conventions as
+# keda_shim/queries.yaml - `database` resolves otel|data to the engine's effective
+# data database, `__DB__` is substituted with the validated identifier, and `params`
+# become ClickHouse-native bind placeholders so nothing is string-interpolated.
+#
+# Column names come from dfe-schemas tables/otel/*.yaml, which is the DDL SSoT.
+# Every query filters ServiceName then MetricName then TimeUnix, matching the
+# metrics tables' ORDER BY prefix so the primary key does the work.
+#
+# Per-query keys:
+#   database         otel | data | <literal db>
+#   table            the otel table to read
+#   sql              ClickHouse SQL; __DB__ is the resolved database
+#   params           request params bound into the SQL (validated identifiers)
+#   binds            fixed CH bind params
+#   timeout_seconds  ClickHouse max_execution_time
+queries:
+  # One row per gauge carrying its most recent reading, so the whole gauge set
+  # costs one round trip rather than one per metric.
+  latest_gauges:
+    database: otel
+    sql: >
+      SELECT MetricName, argMax(Value, TimeUnix) AS value
+      FROM __DB__.otel_metrics_gauge
+      WHERE ServiceName = {service:String}
+        AND MetricName IN {names:Array(String)}
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      GROUP BY MetricName
+    params: [service]
+    binds:
+      window_seconds: 300
+    timeout_seconds: 10
+
+  # Counters as a per-second rate for the instance as a whole. The fleet total is
+  # summed per timestamp first, then differenced across the window, because the
+  # OTel resource scalo emits carries no pod identity - service.name and
+  # deployment.environment only - so individual replicas cannot be told apart and
+  # differencing one pod's counter against another's would report the gap between
+  # them as traffic.
+  # A pod restart resets its counter, which under-reports until the window rolls
+  # past it, so this is an operational estimate rather than an exact count.
+  counter_rates:
+    database: otel
+    sql: >
+      SELECT
+        MetricName,
+        (argMax(total, ts) - argMin(total, ts))
+          / greatest(1, dateDiff('second', min(ts), max(ts))) AS value
+      FROM (
+        SELECT MetricName, TimeUnix AS ts, sum(Value) AS total
+        FROM __DB__.otel_metrics_sum
+        WHERE ServiceName = {service:String}
+          AND MetricName IN {names:Array(String)}
+          AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+        GROUP BY MetricName, ts
+      )
+      GROUP BY MetricName
+    params: [service]
+    binds:
+      window_seconds: 300
+    timeout_seconds: 10
+
+  # Bucketed resource usage for graphing. Each bucket aggregates ACROSS every pod
+  # reporting for this instance, which is also the only grouping the data supports:
+  # the OTel resource carries no pod identity. A per-config app deploys each config
+  # as its own service name, so querying one instance already scopes to one config.
+  # p95 rides alongside min/max/avg because a ceiling set from the average
+  # under-provisions anything with a spiky profile.
+  resource_series:
+    database: otel
+    sql: >
+      SELECT
+        toStartOfInterval(TimeUnix, INTERVAL {bucket_seconds:UInt32} SECOND) AS bucket,
+        MetricName,
+        min(Value) AS min_value,
+        max(Value) AS max_value,
+        avg(Value) AS avg_value,
+        quantile(0.95)(Value) AS p95_value,
+        count() AS samples
+      FROM __DB__.otel_metrics_gauge
+      WHERE ServiceName = {service:String}
+        AND MetricName IN {names:Array(String)}
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+      GROUP BY bucket, MetricName
+      ORDER BY bucket
+    params: [service]
+    binds:
+      window_seconds: 3600
+      bucket_seconds: 60
+    timeout_seconds: 20
+
+  # Every scalo app emits `info`, so a recent row means the app is reporting.
+  # Replica count is deliberately absent: the OTel resource carries no pod
+  # identity, so every replica of one instance is indistinguishable here.
+  liveness:
+    database: otel
+    sql: >
+      SELECT max(TimeUnix) AS last_seen
+      FROM __DB__.otel_metrics_gauge
+      WHERE ServiceName = {service:String}
+        AND MetricName = 'info'
+        AND TimeUnix >= now() - INTERVAL {window_seconds:UInt32} SECOND
+    params: [service]
+    binds:
+      window_seconds: 300
+    timeout_seconds: 10

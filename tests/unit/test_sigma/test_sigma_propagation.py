@@ -75,7 +75,7 @@ def env(tmp_path):
     )
 
 
-def _add_windows_source(env, name: str = "windows_audit") -> None:
+def _add_windows_source(env, name: str = "windows-audit") -> None:
     env.sources.save_source(
         {
             "source": name,
@@ -129,10 +129,10 @@ def test_convert_raises_on_unconvertible_detection():
 
 
 def test_binding_rule_id_is_deterministic_and_source_scoped():
-    a = binding_rule_id(_ID, "windows_audit")
-    assert a == binding_rule_id(_ID, "windows_audit")  # deterministic
-    assert a != binding_rule_id(_ID, "linux_syslog")  # source-scoped
-    assert "-" not in a.removeprefix("sigma_windows_audit_")  # uuid hyphens stripped
+    a = binding_rule_id(_ID, "windows-audit")
+    assert a == binding_rule_id(_ID, "windows-audit")  # deterministic
+    assert a != binding_rule_id(_ID, "linux-syslog")  # source-scoped
+    assert "-" not in a.removeprefix("sigma_windows-audit_")  # uuid hyphens stripped
 
 
 def test_sigma_level_maps_informational_to_low():
@@ -149,35 +149,35 @@ def test_propagate_creates_binding_over_sigma_view(env):
     _import_and_select(env, _rule_yaml(), _ID)
 
     report = _propagator(env).propagate()
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
     assert report.created == [rid]
     assert report.total_selected == 1
 
     rule = env.rules.get(rid)
     # targets the sigma VIEW, references Sigma field names, carries the back-ref
-    assert rule.source_table == "windows_audit_sigma"
-    assert rule.source == "windows_audit"
+    assert rule.source_table == "windows-audit_sigma"
+    assert rule.source == "windows-audit"
     assert "Image ILIKE" in rule.where_clause
     assert rule.sigma_rule_id == _ID
     assert rule.severity == "high"
-    assert rule.sigma_provenance["source"] == "windows_audit"
+    assert rule.sigma_provenance["source"] == "windows-audit"
     assert rule.sigma_provenance["upstream_modified"] == "2023-05-01"
     assert rule.sigma_provenance["generated_hash"]
 
 
 def test_propagate_binds_one_rule_to_every_matching_source(env):
-    _add_windows_source(env, "windows_audit")
-    _add_windows_source(env, "windows_sysmon")
+    _add_windows_source(env, "windows-audit")
+    _add_windows_source(env, "windows-sysmon")
     _import_and_select(env, _rule_yaml(), _ID)
 
     report = _propagator(env).propagate()
     assert set(report.created) == {
-        binding_rule_id(_ID, "windows_audit"),
-        binding_rule_id(_ID, "windows_sysmon"),
+        binding_rule_id(_ID, "windows-audit"),
+        binding_rule_id(_ID, "windows-sysmon"),
     }
     assert set(report.hunts_touched) == {
-        sigma_hunt_name("windows_audit"),
-        sigma_hunt_name("windows_sysmon"),
+        sigma_hunt_name("windows-audit"),
+        sigma_hunt_name("windows-sysmon"),
     }
 
 
@@ -189,7 +189,7 @@ def test_deselect_then_repropagate_reports_stale_binding(env):
     _import_and_select(env, _rule_yaml(), _ID)
     prop = _propagator(env)
     prop.propagate()
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
 
     env.selection.deselect(_ID, actor="tester")
     report = prop.propagate()
@@ -205,9 +205,9 @@ def test_propagate_skips_rule_with_no_matching_source(env):
     # source taxonomy 'linux' does not match the rule's product 'windows'
     env.sources.save_source(
         {
-            "source": "linux_syslog",
+            "source": "linux-syslog",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": "linux_syslog"},
+            "match": {"field": "tags.collector.type", "value": "linux-syslog"},
             "schema": {"engine": "MergeTree"},
             "views": [{"standard": "sigma", "taxonomy": "linux"}],
         }
@@ -261,11 +261,11 @@ def test_propagate_skips_drifted_sigma_rule_not_clobbering(env):
     # operator adopts the sigma rule (local_edited=True) -> a re-propagate must skip
     env.catalog.adopt_rule(_ID, actor="op")
     report = prop.propagate()
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
     assert report.updated == []
     assert [s["rule_id"] for s in report.skipped_drifted] == [rid]
     # the binding still runs in the hunt (not deleted)
-    assert rid in [r["rule_name"] for r in env.hunts.get(sigma_hunt_name("windows_audit"))["rules"]]
+    assert rid in [r["rule_name"] for r in env.hunts.get(sigma_hunt_name("windows-audit"))["rules"]]
 
 
 def test_force_regenerates_a_drifted_rule(env):
@@ -276,7 +276,7 @@ def test_force_regenerates_a_drifted_rule(env):
     env.catalog.adopt_rule(_ID, actor="op")
 
     report = prop.propagate(force=True)
-    assert report.updated == [binding_rule_id(_ID, "windows_audit")]
+    assert report.updated == [binding_rule_id(_ID, "windows-audit")]
     assert report.skipped_drifted == []
 
 
@@ -287,7 +287,7 @@ def test_propagate_skips_hand_edited_binding(env):
     prop.propagate()
 
     # operator hand-edits the generated binding's WHERE clause
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
     edited = env.rules.get(rid).model_copy(update={"where_clause": "hacked = 1"})
     env.rules.save(edited)
 
@@ -303,7 +303,7 @@ def test_first_generation_of_a_drifted_rule_still_generates(env):
 
     report = _propagator(env).propagate()
     # nothing to clobber on first generation -> created, not skipped
-    assert report.created == [binding_rule_id(_ID, "windows_audit")]
+    assert report.created == [binding_rule_id(_ID, "windows-audit")]
     assert report.skipped_drifted == []
 
 
@@ -312,7 +312,7 @@ def test_clean_repropagate_is_idempotent_content(env):
     _import_and_select(env, _rule_yaml(), _ID)
     prop = _propagator(env)
     prop.propagate()
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
     created_at = env.rules.get(rid).created_at
 
     prop.propagate()  # clean re-run regenerates but preserves created_at
@@ -327,12 +327,12 @@ def test_propagate_creates_per_source_hunt_including_binding(env):
     _import_and_select(env, _rule_yaml(), _ID)
 
     _propagator(env).propagate(hunt_cron="*/5 * * * *", hunt_customers=["acme"])
-    hunt = env.hunts.get(sigma_hunt_name("windows_audit"))
-    rid = binding_rule_id(_ID, "windows_audit")
+    hunt = env.hunts.get(sigma_hunt_name("windows-audit"))
+    rid = binding_rule_id(_ID, "windows-audit")
     assert [r["rule_name"] for r in hunt["rules"]] == [rid]
     assert hunt["cron"] == "*/5 * * * *"
     assert hunt["customers"] == ["acme"]
-    assert hunt["global_source_table_name"] == "windows_audit_sigma"
+    assert hunt["global_source_table_name"] == "windows-audit_sigma"
 
 
 def test_propagate_preserves_existing_hunt_rules_and_overrides(env):
@@ -340,7 +340,7 @@ def test_propagate_preserves_existing_hunt_rules_and_overrides(env):
     _import_and_select(env, _rule_yaml(), _ID)
     # a pre-existing per-source hunt with an operator rule + a per-rule override
     env.hunts.save(
-        sigma_hunt_name("windows_audit"),
+        sigma_hunt_name("windows-audit"),
         {
             "display_name": "Windows",
             "cron": "*/10 * * * *",
@@ -351,11 +351,11 @@ def test_propagate_preserves_existing_hunt_rules_and_overrides(env):
     )
 
     _propagator(env).propagate()
-    hunt = env.hunts.get(sigma_hunt_name("windows_audit"))
+    hunt = env.hunts.get(sigma_hunt_name("windows-audit"))
     by_name = {r["rule_name"]: r for r in hunt["rules"]}
     # the operator rule + its override survive; the binding is appended
     assert by_name["operator_rule"]["target_table_name"] == "custom"
-    assert binding_rule_id(_ID, "windows_audit") in by_name
+    assert binding_rule_id(_ID, "windows-audit") in by_name
     assert hunt["cron"] == "*/10 * * * *"  # existing hunt fields untouched
 
 
@@ -364,7 +364,7 @@ def test_propagate_without_hunts_flag_creates_no_hunt(env):
     _import_and_select(env, _rule_yaml(), _ID)
 
     report = _propagator(env).propagate(create_hunts=False)
-    assert report.created == [binding_rule_id(_ID, "windows_audit")]
+    assert report.created == [binding_rule_id(_ID, "windows-audit")]
     assert report.hunts_touched == []
     assert env.hunts.list_hunts() == []
 
@@ -400,12 +400,12 @@ def test_delete_binding_removes_rule_and_unlinks_hunt(env):
     _import_and_select(env, _rule_yaml(), _ID)
     prop = _propagator(env)
     prop.propagate()
-    rid = binding_rule_id(_ID, "windows_audit")
+    rid = binding_rule_id(_ID, "windows-audit")
 
     assert prop.delete_binding(rid) is True
     assert env.rules.exists(rid) is False
     # the per-source hunt held only this binding -> removed when emptied
-    assert sigma_hunt_name("windows_audit") not in [h["name"] for h in env.hunts.list_hunts()]
+    assert sigma_hunt_name("windows-audit") not in [h["name"] for h in env.hunts.list_hunts()]
 
 
 def test_delete_binding_false_for_non_sigma_rule(env):

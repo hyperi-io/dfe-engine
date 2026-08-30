@@ -64,4 +64,4 @@ def test_engine_follows_topology() -> None:
 
 def test_targets_the_internal_database() -> None:
     """The table is qualified against whatever database the spec was built for."""
-    assert f"CREATE TABLE IF NOT EXISTS {_DB}.repository" in _render()
+    assert f"CREATE TABLE IF NOT EXISTS `{_DB}`.`repository`" in _render()

@@ -1,4 +1,4 @@
-"""Tests for the built-in dfe_alerts Source definition."""
+"""Tests for the built-in dfe-alerts Source definition."""
 
 import importlib.resources as resources
 
@@ -7,18 +7,18 @@ from dfe_engine.source.registry import SourceRegistry
 
 
 class TestBuiltinAlertsSource:
-    """Test that dfe_alerts.yaml is a valid Source definition."""
+    """Test that dfe-alerts.yaml is a valid Source definition."""
 
     def test_yaml_exists_as_package_resource(self):
-        """The dfe_alerts.yaml file exists in builtin_sources."""
+        """The dfe-alerts.yaml file exists in builtin_sources."""
         builtins = resources.files("dfe_engine.source") / "builtin_sources"
-        alerts_file = builtins / "dfe_alerts.yaml"
+        alerts_file = builtins / "dfe-alerts.yaml"
         assert alerts_file.is_file()
 
     def test_parses_as_valid_source(self):
-        """dfe_alerts.yaml parses into a valid Source model."""
+        """dfe-alerts.yaml parses into a valid Source model."""
         builtins = resources.files("dfe_engine.source") / "builtin_sources"
-        alerts_file = builtins / "dfe_alerts.yaml"
+        alerts_file = builtins / "dfe-alerts.yaml"
         content = alerts_file.read_text()
 
         from dfe_engine.yaml_utils import yaml_load_string
@@ -26,7 +26,7 @@ class TestBuiltinAlertsSource:
         data = yaml_load_string(content)
         source = Source.model_validate(data)
 
-        assert source.source == "dfe_alerts"
+        assert source.source == "dfe-alerts"
         assert source.display_name == "DFE Alerts"
         assert source.enabled is True
         assert source.header.type == "time_series"
@@ -35,7 +35,7 @@ class TestBuiltinAlertsSource:
         assert "1.0.0" in source.versions
 
     def test_builtin_yaml_uses_version_tree(self):
-        data = _load_builtin("dfe_alerts")
+        data = _load_builtin("dfe-alerts")
         assert data["current"] == "1.0.0"
         assert data["deployed_version"] == "1.0.0"
         assert "1.0.0" in data["versions"]
@@ -44,14 +44,14 @@ class TestBuiltinAlertsSource:
         assert data["versions"]["1.0.0"]["views"] == [{"standard": "sigma"}]
 
     def test_has_sigma_view(self):
-        """dfe_alerts declares a sigma naming-standard view."""
-        data = _load_builtin("dfe_alerts")
+        """dfe-alerts declares a sigma naming-standard view."""
+        data = _load_builtin("dfe-alerts")
         source = Source.model_validate(data)
         assert source.view_for("sigma") is not None
 
     def test_references_detection_columns(self):
-        """dfe_alerts references the hunt-results/detection.yaml additional fields."""
-        data = _load_builtin("dfe_alerts")
+        """dfe-alerts references the hunt-results/detection.yaml additional fields."""
+        data = _load_builtin("dfe-alerts")
         source = Source.model_validate(data)
         assert source.schema_config.additional_fields == "hunt-results/detection.yaml"
 
@@ -64,7 +64,7 @@ class TestSeedBuiltinSources:
         registry = SourceRegistry(sources_directory=str(tmp_path))
         count = registry.seed_builtin_sources()
         assert count >= 1
-        assert (tmp_path / "dfe_alerts.yaml").exists()
+        assert (tmp_path / "dfe-alerts.yaml").exists()
 
     def test_seed_is_idempotent(self, tmp_path):
         """Second seed with overwrite=False skips existing files."""
@@ -85,8 +85,8 @@ class TestSeedBuiltinSources:
         """After seeding, the source can be retrieved from the registry."""
         registry = SourceRegistry(sources_directory=str(tmp_path))
         registry.seed_builtin_sources()
-        source = registry.get_source("dfe_alerts")
-        assert source.source == "dfe_alerts"
+        source = registry.get_source("dfe-alerts")
+        assert source.source == "dfe-alerts"
         assert source.enabled is True
 
 

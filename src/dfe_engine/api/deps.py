@@ -145,6 +145,11 @@ def get_source_registry():
     return reg
 
 
+def get_source_registry_optional():
+    """Optional SourceRegistry (for callers that must work without one configured)."""
+    return _registries.get("source")
+
+
 def get_service_config_registry():
     """FastAPI dependency: resolve ServiceConfigRegistry singleton."""
     reg = _registries.get("service_config")

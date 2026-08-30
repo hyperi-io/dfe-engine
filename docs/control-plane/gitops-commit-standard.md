@@ -112,6 +112,10 @@ We honour it via the RBAC + protected-var policy, not by blocking the engine:
   `replicas` -> "scale" sets `keda.min/maxReplicas`, NOT `replicaCount`; declare
   `ignoreDifferences` for any genuinely-dynamic field. Build the exclusion list
   BEFORE enabling self-heal, not after.
+- The exception is a document that explicitly sets `keda.enabled: false`. Nothing
+  owns the count there, and `replicaCount` is the only way to set it, so
+  `validate_change` accepts it in that document alone. An unset flag is the chart
+  default, which the engine cannot read, and stays refused.
 - auto-sync + self-heal + prune are ON (prune added gradually). Webhooks configured
   so commits reconcile in seconds, not on the 3-min poll (tightens the
   committed-vs-applied window the API reports).

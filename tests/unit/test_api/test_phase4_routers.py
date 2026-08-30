@@ -163,9 +163,9 @@ class TestSchemasRouter:
         sources_dir.mkdir()
         yaml_dump(
             {
-                "source": "dep_src",
+                "source": "dep-src",
                 "enabled": True,
-                "match": {"field": "tags.collector.type", "value": "dep_src"},
+                "match": {"field": "tags.collector.type", "value": "dep-src"},
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -180,7 +180,7 @@ class TestSchemasRouter:
                     }
                 },
             },
-            sources_dir / "dep_src.yaml",
+            sources_dir / "dep-src.yaml",
         )
         (tmp_path / "services").mkdir()
         (tmp_path / "auth").mkdir()
@@ -200,7 +200,7 @@ class TestSchemasRouter:
         headers = {"Authorization": f"Bearer {token}"}
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
-                resp = tc.post("/api/v1/sources/dep_src/deploy?dry_run=true", headers=headers)
+                resp = tc.post("/api/v1/sources/dep-src/deploy?dry_run=true", headers=headers)
                 assert resp.status_code == 200, resp.text
                 body = resp.json()
                 assert body["dry_run"] is True
@@ -254,9 +254,9 @@ class TestSchemasRouter:
         deploys_dir.mkdir()
         yaml_dump(
             {
-                "source": "dep_src",
+                "source": "dep-src",
                 "enabled": True,
-                "match": {"field": "tags.collector.type", "value": "dep_src"},
+                "match": {"field": "tags.collector.type", "value": "dep-src"},
                 "current": "1.0.0",
                 "versions": {
                     "1.0.0": {
@@ -270,7 +270,7 @@ class TestSchemasRouter:
                     }
                 },
             },
-            sources_dir / "dep_src.yaml",
+            sources_dir / "dep-src.yaml",
         )
         (tmp_path / "services").mkdir()
         (tmp_path / "auth").mkdir()
@@ -310,15 +310,15 @@ class TestSchemasRouter:
         headers = {"Authorization": f"Bearer {token}"}
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
-                resp = tc.post("/api/v1/sources/dep_src/deploy", headers=headers)
+                resp = tc.post("/api/v1/sources/dep-src/deploy", headers=headers)
                 assert resp.status_code == 200, resp.text
                 assert resp.json()["applied"] is True
 
-                detail = tc.get("/api/v1/sources/dep_src", headers=headers)
+                detail = tc.get("/api/v1/sources/dep-src", headers=headers)
                 assert detail.status_code == 200
                 assert detail.json()["deployed_version"] == "1.0.0"
 
-                deploy_doc = yaml_load(deploys_dir / "dep_src.yaml")
+                deploy_doc = yaml_load(deploys_dir / "dep-src.yaml")
                 assert deploy_doc["deployed_version"] == "1.0.0"
         finally:
             reset_settings()
@@ -397,9 +397,9 @@ class TestSchemasRouter:
         sources_dir.mkdir()
         yaml_dump(
             {
-                "source": "cols_src",
+                "source": "cols-src",
                 "enabled": True,
-                "match": {"field": "tags.collector.type", "value": "cols_src"},
+                "match": {"field": "tags.collector.type", "value": "cols-src"},
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -414,7 +414,7 @@ class TestSchemasRouter:
                     }
                 },
             },
-            sources_dir / "cols_src.yaml",
+            sources_dir / "cols-src.yaml",
         )
 
         services_dir = tmp_path / "services"
@@ -437,7 +437,7 @@ class TestSchemasRouter:
             settings=settings,
         )
         headers = {"Authorization": f"Bearer {token}"}
-        base_url = "/api/v1/sources/cols_src/columns"
+        base_url = "/api/v1/sources/cols-src/columns"
 
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
@@ -534,9 +534,9 @@ class TestSchemasRouter:
 
         yaml_dump(
             {
-                "source": "plan_src",
+                "source": "plan-src",
                 "enabled": True,
-                "match": {"field": "tags.collector.type", "value": "plan_src"},
+                "match": {"field": "tags.collector.type", "value": "plan-src"},
                 "current": "1.0.0",
                 "versions": {
                     "1.0.0": {
@@ -550,7 +550,7 @@ class TestSchemasRouter:
                     }
                 },
             },
-            sources_dir / "plan_src.yaml",
+            sources_dir / "plan-src.yaml",
         )
 
         settings = DFESettings(
@@ -574,16 +574,16 @@ class TestSchemasRouter:
 
         try:
             with TestClient(app, raise_server_exceptions=False) as tc:
-                plan_resp = tc.post("/api/v1/sources/plan_src/plan", headers=headers)
+                plan_resp = tc.post("/api/v1/sources/plan-src/plan", headers=headers)
                 assert plan_resp.status_code == 200
                 body = plan_resp.json()
-                assert body["source_name"] == "plan_src"
+                assert body["source_name"] == "plan-src"
                 assert body["version"] == "1.0.0"
                 assert body["ready"] is True
                 assert body["statements"]
 
-                assert (tmp_path / "source-builds" / "plan_src.yaml").is_file()
-                assert not (tmp_path / "source-plans" / "plan_src.yaml").exists()
+                assert (tmp_path / "source-builds" / "plan-src.yaml").is_file()
+                assert not (tmp_path / "source-plans" / "plan-src.yaml").exists()
         finally:
             app.dependency_overrides.clear()
             _registries.clear()

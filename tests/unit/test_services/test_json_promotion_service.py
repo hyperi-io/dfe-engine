@@ -483,7 +483,7 @@ class TestPromotionPreviewDdl:
         columns = [o.column for o in outcomes if o.status == "ok"]
         statements = promotion_preview_ddl("filebeat", columns, db="dfe")
         joined = "\n".join(statements)
-        assert "ALTER TABLE dfe.filebeat ADD COLUMN IF NOT EXISTS `user_email`" in joined
+        assert "ALTER TABLE `dfe`.`filebeat` ADD COLUMN IF NOT EXISTS `user_email`" in joined
         assert "@copy: _json.user.email" in joined
         assert "ADD INDEX idx_user_email `user_email` TYPE bloom_filter" in joined
 

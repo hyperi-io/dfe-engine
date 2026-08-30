@@ -1,0 +1,20 @@
+name: storage-model
+description: >-
+  Decided at deploy and refused afterwards. Where the data lives (mode), how it
+  is laid out on disk (storageModel), which object store holds it, and how big
+  the disk is are all one decision made once: changing any of them on a live
+  deployment strands the rows and segments already written, and a size or class
+  change additionally needs every PVC patched and the StatefulSet recreated,
+  because volumeClaimTemplates are immutable. Holders of helmvars:override can
+  still make a deliberate exception.
+protected:
+  - "infravars:*:clickhouse.mode"
+  - "infravars:*:clickhouse.storageModel"
+  - "infravars:*:clickhouse.s3.*"
+  - "infravars:*:clickhouse.storage.size"
+  - "infravars:*:clickhouse.storage.storageClass"
+  - "infravars:*:kafka.mode"
+  - "infravars:*:kafka.storageModel"
+  - "infravars:*:kafka.tiered.*"
+  - "infravars:*:kafka.storage.size"
+  - "infravars:*:kafka.storage.storageClass"

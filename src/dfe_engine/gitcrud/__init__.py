@@ -16,11 +16,12 @@ from .engine import (
     ConcurrencyConflictError,
     GitCrud,
     ResourceNotFoundError,
+    UnsafePathError,
     flatten,
     get_path,
     set_path,
 )
-from .models import ResourceClass
+from .models import Layout, ResourceClass
 from .registry import (
     ResourceClassRegistry,
     UnknownResourceClassError,
@@ -31,10 +32,12 @@ from .versioned import VersionConflictError, VersionedDoc
 __all__ = [
     "ConcurrencyConflictError",
     "GitCrud",
+    "Layout",
     "ResourceClass",
     "ResourceClassRegistry",
     "ResourceNotFoundError",
     "UnknownResourceClassError",
+    "UnsafePathError",
     "VersionConflictError",
     "VersionedDoc",
     "default_registry",

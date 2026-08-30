@@ -37,7 +37,7 @@ def crud(tmp_path) -> GitCrud:
 
 def _definition(**overrides) -> SigmaViewDefinition:
     data = {
-        "source_name": "windows_audit",
+        "source_name": "windows-audit",
         "description": "Windows process creation",
         "columns": [
             {"sigma_field": "EventID", "json_path": "EventID", "type": "UInt32"},
@@ -77,9 +77,9 @@ def test_build_ddl_source_column_aliases():
         include_source_columns=False,
     )
     ddl = build_sigma_view_ddl(definition, db="default")
-    assert "CREATE OR REPLACE VIEW default.win_sigma AS" in ddl
+    assert "CREATE OR REPLACE VIEW `default`.`win_sigma` AS" in ddl
     assert "`process_name` AS `Image`" in ddl
-    assert "FROM default.win;" in ddl
+    assert "FROM `default`.`win`;" in ddl
     # include_source_columns=False -> no trailing SELECT *
     assert "\n    *" not in ddl
 
@@ -119,12 +119,12 @@ def test_build_ddl_nested_json_path_is_single_quoted_identifier():
 
 def test_build_ddl_mixed_columns_and_star():
     definition = _definition()
-    ddl = build_sigma_view_ddl(definition, db="dfe", table_name="windows_audit")
-    assert "CREATE OR REPLACE VIEW dfe.windows_audit_sigma AS" in ddl
+    ddl = build_sigma_view_ddl(definition, db="dfe", table_name="windows-audit")
+    assert "CREATE OR REPLACE VIEW `dfe`.`windows-audit_sigma` AS" in ddl
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
     assert "`process_name` AS `Image`" in ddl
-    assert ddl.rstrip().endswith("FROM dfe.windows_audit;")
+    assert ddl.rstrip().endswith("FROM `dfe`.`windows-audit`;")
     # include_source_columns default True -> SELECT * retained
     assert "    *," in ddl or "    *\n" in ddl
 
@@ -132,7 +132,7 @@ def test_build_ddl_mixed_columns_and_star():
 def test_build_ddl_empty_definition_selects_star():
     definition = SigmaViewDefinition(source_name="win", include_source_columns=False)
     ddl = build_sigma_view_ddl(definition, db="default")
-    assert "SELECT\n    *\nFROM default.win;" in ddl
+    assert "SELECT\n    *\nFROM `default`.`win`;" in ddl
 
 
 def test_build_ddl_default_db_placeholder():
@@ -141,8 +141,8 @@ def test_build_ddl_default_db_placeholder():
         columns=[SigmaViewColumn(sigma_field="X", source_column="x")],
     )
     ddl = build_sigma_view_ddl(definition)
-    assert "{db}.win_sigma" in ddl
-    assert "FROM {db}.win;" in ddl
+    assert "`{db}`.`win_sigma`" in ddl
+    assert "FROM `{db}`.`win`;" in ddl
 
 
 # -- DDL: injection safety -----------------------------------
@@ -181,10 +181,10 @@ def test_build_ddl_rejects_illegal_ch_type():
 def test_store_save_get_roundtrip(crud):
     store = SigmaViewStore(crud)
     saved = store.save(_definition(), actor="alice")
-    assert saved.source_name == "windows_audit"
+    assert saved.source_name == "windows-audit"
 
-    loaded = store.get("windows_audit")
-    assert loaded.source_name == "windows_audit"
+    loaded = store.get("windows-audit")
+    assert loaded.source_name == "windows-audit"
     assert len(loaded.columns) == 3
     assert loaded.columns[0].json_path == "EventID"
     assert loaded.columns[0].type == "UInt32"
@@ -211,35 +211,35 @@ def test_store_list_and_summaries(crud):
     store.save(_definition(), actor="a")
     store.save(
         SigmaViewDefinition(
-            source_name="linux_syslog",
+            source_name="linux-syslog",
             columns=[SigmaViewColumn(sigma_field="exe", source_column="process_name")],
         ),
         actor="a",
     )
-    assert set(store.list_sources()) == {"windows_audit", "linux_syslog"}
+    assert set(store.list_sources()) == {"windows-audit", "linux-syslog"}
 
     summaries = {s["source_name"]: s for s in store.summaries()}
-    assert summaries["windows_audit"]["column_count"] == 3
-    assert summaries["windows_audit"]["json_derived_count"] == 2
-    assert summaries["linux_syslog"]["json_derived_count"] == 0
+    assert summaries["windows-audit"]["column_count"] == 3
+    assert summaries["windows-audit"]["json_derived_count"] == 2
+    assert summaries["linux-syslog"]["json_derived_count"] == 0
 
 
 def test_store_delete(crud):
     store = SigmaViewStore(crud)
     store.save(_definition(), actor="a")
-    assert store.exists("windows_audit")
-    store.delete("windows_audit", actor="op")
-    assert not store.exists("windows_audit")
+    assert store.exists("windows-audit")
+    store.delete("windows-audit", actor="op")
+    assert not store.exists("windows-audit")
     with pytest.raises(ResourceNotFoundError):
-        store.delete("windows_audit", actor="op")
+        store.delete("windows-audit", actor="op")
 
 
 def test_store_generate_ddl_from_stored_definition(crud):
     """generate_ddl reads the stored definition and emits JSON-derived extraction."""
     store = SigmaViewStore(crud)
     store.save(_definition(), actor="a")
-    ddl = store.generate_ddl("windows_audit", db="default")
-    assert "CREATE OR REPLACE VIEW default.windows_audit_sigma AS" in ddl
+    ddl = store.generate_ddl("windows-audit", db="default")
+    assert "CREATE OR REPLACE VIEW `default`.`windows-audit_sigma` AS" in ddl
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "`process_name` AS `Image`" in ddl
 
@@ -276,12 +276,12 @@ def test_source_mapper_prefers_stored_view_definition(crud):
     from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
     store = SigmaViewStore(crud)
-    store.save(_definition(source_name="windows_audit"), actor="a")
+    store.save(_definition(source_name="windows-audit"), actor="a")
 
-    registry = _FakeSourceRegistry([_source("windows_audit", {"EventID": "legacy_col"})])
+    registry = _FakeSourceRegistry([_source("windows-audit", {"EventID": "legacy_col"})])
     mapper = SigmaSourceMapper(registry, view_store=store)
 
-    ddl = mapper.generate_sigma_view("windows_audit", db="default")
+    ddl = mapper.generate_sigma_view("windows-audit", db="default")
     # stored def wins: JSON-derived extraction present, legacy field-map alias absent
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "legacy_col" not in ddl
@@ -291,10 +291,10 @@ def test_source_mapper_falls_back_to_field_maps_without_definition(crud):
     from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
     store = SigmaViewStore(crud)  # empty store, no definition for the source
-    registry = _FakeSourceRegistry([_source("windows_audit", {"EventID": "event_id"})])
+    registry = _FakeSourceRegistry([_source("windows-audit", {"EventID": "event_id"})])
     mapper = SigmaSourceMapper(registry, view_store=store)
 
-    ddl = mapper.generate_sigma_view("windows_audit", db="default")
+    ddl = mapper.generate_sigma_view("windows-audit", db="default")
     # legacy field-map path: real-column -> Sigma-field alias
     assert "`event_id` AS `EventID`" in ddl
     assert "assumeNotNull(_json)" not in ddl

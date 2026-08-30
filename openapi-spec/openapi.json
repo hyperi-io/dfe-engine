@@ -6724,7 +6724,7 @@
           "queries"
         ],
         "summary": "Query Cost Leaderboard",
-        "description": "Top query-cost consumers from ``dfe_audit.query_log_archive``, heaviest first.\n\nGroups by the attribution id (the hunt id for feature='hunts') and returns the\nquery count + summed read rows/bytes + duration + peak memory. Reads the MV the\nCH wrapper's log_comment attribution feeds - returns [] until it has data.",
+        "description": "Top query-cost consumers from ``dfe.query_log_archive``, heaviest first.\n\nGroups by the attribution id (the hunt id for feature='hunts') and returns the\nquery count + summed read rows/bytes + duration + peak memory. Reads the MV the\nCH wrapper's log_comment attribution feeds - returns [] until it has data.",
         "operationId": "query_cost_leaderboard_api_v1_queries_cost_leaderboard_get",
         "parameters": [
           {
@@ -11140,7 +11140,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WriteResult"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
                 }
               }
             }
@@ -11167,7 +11167,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Delete Var",
-        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team).",
+        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team);\n403 if protected, since reverting a locked var changes it as surely as setting it.",
         "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
         "parameters": [
           {
@@ -11195,7 +11195,2623 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/WriteResult"
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Backing Services",
+        "description": "Every backing service's DECLARED deploy configuration.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet.",
+        "operationId": "list_backing_services_api_v1_backing_services_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackingServiceConfig"
+                  },
+                  "type": "array",
+                  "title": "Response List Backing Services Api V1 Backing Services Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Overlays",
+        "description": "List substrate/platform overlay resources in the deploy repo's infra/ dir.",
+        "operationId": "list_overlays_api_v1_backing_services_overlays_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Overlays Api V1 Backing Services Overlays Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays/{name}/vars": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Overlay Vars",
+        "description": "Flattened dot-path vars for one overlay, each marked protected or not.",
+        "operationId": "list_overlay_vars_api_v1_backing_services_overlays__name__vars_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Overlay Vars Api V1 Backing Services Overlays  Name  Vars Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/{service}": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Get Backing Service",
+        "description": "One backing service's DECLARED deploy configuration (see the list route).",
+        "operationId": "get_backing_service_api_v1_backing_services__service__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingServiceConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays/{name}/vars/{path}": {
+      "put": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Set Overlay Var",
+        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, which loses data rather than capacity.",
+        "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVarRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingWriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Delete Overlay Var",
+        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\nNot guarded up-only: reverting a count hands it back to the chart or profile\ndefault, which the engine cannot read, so there is no after-value to compare.",
+        "operationId": "delete_overlay_var_api_v1_backing_services_overlays__name__vars__path__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingWriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List Apps",
+        "description": "Every manageable app, with the instances currently deployed.",
+        "operationId": "list_apps_api_v1_apps_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/CatalogueEntry"
+                  },
+                  "type": "array",
+                  "title": "Response List Apps Api V1 Apps Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/instances": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Create Instance",
+        "description": "Deploy an instance by creating its values overlay.\n\nThe overlay's presence is what the layer2-apps ApplicationSet turns into an Argo\nApplication, so this is the whole deployment step.",
+        "operationId": "create_instance_api_v1_apps__service__instances_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateInstanceRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App",
+        "description": "One instance's identity and shape.",
+        "operationId": "get_app_api_v1_apps__service___instance__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AppSummary"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Delete Instance",
+        "description": "Undeploy an instance by removing its values overlay.",
+        "operationId": "delete_instance_api_v1_apps__service___instance__delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/history": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get History",
+        "description": "Every change to this instance, newest first.\n\nSupply the revision Argo has synced as ``applied_revision`` to see which\ncommits have reached the cluster and which are still pending.",
+        "operationId": "get_history_api_v1_apps__service___instance__history_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "applied_revision",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Applied Revision"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 20,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/HistoryEntry"
+                  },
+                  "title": "Response Get History Api V1 Apps  Service   Instance  History Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/values": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Values",
+        "description": "The instance's overlay document as stored.",
+        "operationId": "get_values_api_v1_apps__service___instance__values_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Get Values Api V1 Apps  Service   Instance  Values Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/scaling": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Scaling",
+        "description": "The scaling dials, or why they do not apply here.",
+        "operationId": "get_scaling_api_v1_apps__service___instance__scaling_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScalingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Set Scaling",
+        "description": "Set the scaling dials. Refused when the deploy target has no such dials.",
+        "operationId": "set_scaling_api_v1_apps__service___instance__scaling_put",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ScalingRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List App Files",
+        "description": "Every file in the set, without their contents.",
+        "operationId": "list_app_files_api_v1_apps__service___instance__files__set_name__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileSummary"
+                  },
+                  "title": "Response List App Files Api V1 Apps  Service   Instance  Files  Set Name  Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/links": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "List App Links",
+        "description": "Where each linked file came from, and whether it still matches.\n\n``drift`` means the content beside the link is no longer what the linked\nversion holds - a local edit over a linked file. ``outdated`` means the link\nresolved cleanly but its target has moved since.",
+        "operationId": "list_app_links_api_v1_apps__service___instance__files__set_name__links_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/LinkStatusModel"
+                  },
+                  "title": "Response List App Links Api V1 Apps  Service   Instance  Files  Set Name  Links Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/link": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Link App File",
+        "description": "Link a file in the set to a library artefact.\n\nThe artefact's content is resolved into the file set, because a chart can only\nrender what is already in the values, and the provenance is recorded beside it\nso the link is recoverable.",
+        "operationId": "link_app_file_api_v1_apps__service___instance__files__set_name__link_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/LinkRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LinkResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/relink": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Relink App Files",
+        "description": "Re-resolve every link in the set to what its target now names.\n\nA tag link follows its tag; a version-pinned link advances to the artefact's\ncurrent version. This is the fix-once-roll-everywhere half of the library.",
+        "operationId": "relink_app_files_api_v1_apps__service___instance__files__set_name__relink_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelinkResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/copy": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Copy App Files",
+        "description": "Copy this instance's authored files onto another instance of the same app.\n\nA transform is written against one source; reusing it on another should not mean\nretyping it. Only the files move - the target keeps its own source binding,\nscaling and identity.",
+        "operationId": "copy_app_files_api_v1_apps__service___instance__files__set_name__copy_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CopyFilesRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CopyFilesResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/{filename}": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Read App File",
+        "description": "One file's content.",
+        "operationId": "read_app_file_api_v1_apps__service___instance__files__set_name___filename__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FileDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "put": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Write App File",
+        "description": "Add or replace a file the app consumes.",
+        "operationId": "write_app_file_api_v1_apps__service___instance__files__set_name___filename__put",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FileWriteRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Delete App File",
+        "description": "Remove a file the app consumes, and any link that produced it.",
+        "operationId": "delete_app_file_api_v1_apps__service___instance__files__set_name___filename__delete",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/routing": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get App Routing",
+        "description": "What the sources compile to, against what the overlay actually carries.\n\nAn absent block is called out separately from drift: it means the app is\nrunning on its built-in defaults, which is how a receiver silently ignores\nevery source rule ever defined.",
+        "operationId": "get_app_routing_api_v1_apps__service___instance__routing_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RoutingResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/routing/sync": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Sync App Routing",
+        "description": "Rewrite the overlay's routing to what the sources currently compile to.",
+        "operationId": "sync_app_routing_api_v1_apps__service___instance__routing_sync_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__apps__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/files/{set_name}/dry-run": {
+      "post": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Dry Run App File",
+        "description": "Run an authored file over real events from the source, and report each one.\n\nNothing is written: no topic, no table, no commit. ``content`` runs unsaved\ncontent, which is what makes this useful in an editor; omitted, the file\nalready in the overlay runs instead.",
+        "operationId": "dry_run_app_file_api_v1_apps__service___instance__files__set_name__dry_run_post",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "set_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Set Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DryRunRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DryRunResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/status": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Status",
+        "description": "Whether the instance is reporting telemetry, and since when.",
+        "operationId": "get_status_api_v1_apps__service___instance__status_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/metrics": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Metrics",
+        "description": "Throughput, CPU, memory and saturation for the instance.",
+        "operationId": "get_metrics_api_v1_apps__service___instance__metrics_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MetricsResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/apps/{service}/{instance}/metrics/series": {
+      "get": {
+        "tags": [
+          "App Management"
+        ],
+        "summary": "Get Resource Series",
+        "description": "CPU and memory over time as min, max, average and p95 per bucket.\n\nEach bucket aggregates across every pod reporting for this instance. A\nper-config app deploys each config under its own service name, so one instance\nis already one config.",
+        "operationId": "get_resource_series_api_v1_apps__service___instance__metrics_series_get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          },
+          {
+            "name": "instance",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Instance"
+            }
+          },
+          {
+            "name": "window_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 3600,
+              "title": "Window Seconds"
+            }
+          },
+          {
+            "name": "bucket_seconds",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "default": 60,
+              "title": "Bucket Seconds"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResourceSeriesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/kinds": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Kinds",
+        "description": "Every artefact kind the manifest declares.",
+        "operationId": "list_kinds_api_v1_library_kinds_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KindModel"
+                  },
+                  "type": "array",
+                  "title": "Response List Kinds Api V1 Library Kinds Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Artifacts",
+        "description": "Every artefact, filtered. Different filters AND together.",
+        "operationId": "list_artifacts_api_v1_library_get",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Kind"
+            }
+          },
+          {
+            "name": "group",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "Group"
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "default": "",
+              "title": "State"
+            }
+          },
+          {
+            "name": "label",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Repeatable 'key' or 'key=value' selector; all must match.",
+              "title": "Label"
+            },
+            "description": "Repeatable 'key' or 'key=value' selector; all must match."
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Substring of the name or the description.",
+              "default": "",
+              "title": "Q"
+            },
+            "description": "Substring of the name or the description."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ArtifactModel"
+                  },
+                  "title": "Response List Artifacts Api V1 Library Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Create Artifact",
+        "description": "Create an artefact, with or without its first version.\n\nCreating one empty is what lets its kind, group and labels be settled before\nany content can enter.",
+        "operationId": "create_artifact_api_v1_library_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Artifact",
+        "description": "One artefact's metadata and pointers.",
+        "operationId": "get_artifact_api_v1_library__artifact__get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactModel"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Patch Artifact",
+        "description": "Edit the classification metadata. Never produces a version.",
+        "operationId": "patch_artifact_api_v1_library__artifact__patch",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PatchArtifactRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Delete Artifact",
+        "description": "Remove an artefact. Refused while any instance links to it.\n\nRetiring an artefact that is still in use is a state change, not a delete, so\nthe history behind a deployed file is never destroyed.",
+        "operationId": "delete_artifact_api_v1_library__artifact__delete",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/state": {
+      "put": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Set State",
+        "description": "Set the lifecycle state.",
+        "operationId": "set_state_api_v1_library__artifact__state_put",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/versions": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "List Versions",
+        "description": "Every version, oldest first, without their content.",
+        "operationId": "list_versions_api_v1_library__artifact__versions_get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/VersionSummary"
+                  },
+                  "title": "Response List Versions Api V1 Library  Artifact  Versions Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Publish Version",
+        "description": "Publish content as a version.\n\nRe-sending identical content is a no-op naming the version that already holds\nit; sending different content at an existing version number is refused.",
+        "operationId": "publish_version_api_v1_library__artifact__versions_post",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishVersionRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/versions/{version}": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Version",
+        "description": "One immutable version, with its digest as a strong ETag.",
+        "operationId": "get_version_api_v1_library__artifact__versions__version__get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VersionDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/rollback": {
+      "post": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Rollback",
+        "description": "Point ``current`` back at an earlier version, keeping the newer ones.",
+        "operationId": "rollback_api_v1_library__artifact__rollback_post",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/tags/{tag}": {
+      "put": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Set Tag",
+        "description": "Point a tag at a version. Repointing is explicit, never a side effect.",
+        "operationId": "set_tag_api_v1_library__artifact__tags__tag__put",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TagRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Delete Tag",
+        "description": "Remove a tag. The versions it named are untouched.",
+        "operationId": "delete_tag_api_v1_library__artifact__tags__tag__delete",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/dfe_engine__api__v1__library__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/library/{artifact}/usage": {
+      "get": {
+        "tags": [
+          "Artefact Library"
+        ],
+        "summary": "Get Usage",
+        "description": "Every instance file that links to this artefact.",
+        "operationId": "get_usage_api_v1_library__artifact__usage_get",
+        "parameters": [
+          {
+            "name": "artifact",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Artifact"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/UsageModel"
+                  },
+                  "title": "Response Get Usage Api V1 Library  Artifact  Usage Get"
                 }
               }
             }
@@ -13280,6 +15896,125 @@
         ],
         "title": "AlertDestinationSummary"
       },
+      "AppSummary": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "scale_deployed": {
+            "type": "boolean",
+            "title": "Scale Deployed"
+          },
+          "multiplicity": {
+            "type": "string",
+            "title": "Multiplicity"
+          },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
+          "file_sets": {
+            "items": {
+              "$ref": "#/components/schemas/FileSetSummary"
+            },
+            "type": "array",
+            "title": "File Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "telemetry_name",
+          "scale_deployed",
+          "multiplicity",
+          "has_compiled_routing",
+          "file_sets"
+        ],
+        "title": "AppSummary"
+      },
+      "ArtifactModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "state": {
+            "type": "string",
+            "title": "State"
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "current": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current"
+          },
+          "versions": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "tags": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "type": "object",
+            "title": "Tags",
+            "description": "Mutable names pointing at a version."
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest",
+            "description": "Digest of the current version.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind",
+          "state"
+        ],
+        "title": "ArtifactModel"
+      },
       "AuthKind": {
         "type": "string",
         "enum": [
@@ -13330,6 +16065,115 @@
           "reason"
         ],
         "title": "AutoMergeStatus"
+      },
+      "BackingServiceConfig": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "chart": {
+            "type": "string",
+            "title": "Chart"
+          },
+          "overlay": {
+            "type": "string",
+            "title": "Overlay"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "description": "Values-key prefix every path below sits under. Read it rather than deriving one from `service` or `chart` - neither is guaranteed to match."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_model": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "replicas": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_size": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_class": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "resources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DeclaredValue"
+            },
+            "type": "object",
+            "title": "Resources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "chart",
+          "overlay",
+          "prefix",
+          "mode",
+          "storage_model",
+          "replicas",
+          "storage_size",
+          "storage_class"
+        ],
+        "title": "BackingServiceConfig",
+        "description": "A backing service's deploy configuration AS DECLARED, not as observed."
+      },
+      "BackingWriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "reload": {
+            "type": "string",
+            "title": "Reload",
+            "description": "'apply' reconciles in place, 'roll' restarts pods, 'recreate' needs the StatefulSet recreated by hand, 'redeploy' changes which objects exist."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed",
+          "reload"
+        ],
+        "title": "BackingWriteResult",
+        "description": "A governed write plus what syncing it does to the running store."
       },
       "BindingSummary": {
         "properties": {
@@ -13652,6 +16496,51 @@
         ],
         "title": "CatalogRuleSummary",
         "description": "A catalogue row (no detection payload) for the paginated list."
+      },
+      "CatalogueEntry": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "scale_deployed": {
+            "type": "boolean",
+            "title": "Scale Deployed"
+          },
+          "multiplicity": {
+            "type": "string",
+            "title": "Multiplicity"
+          },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
+          "file_sets": {
+            "items": {
+              "$ref": "#/components/schemas/FileSetSummary"
+            },
+            "type": "array",
+            "title": "File Sets"
+          },
+          "instances": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Instances"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "scale_deployed",
+          "multiplicity",
+          "has_compiled_routing",
+          "file_sets",
+          "instances"
+        ],
+        "title": "CatalogueEntry"
       },
       "CelCheckBatchRequest": {
         "properties": {
@@ -14065,6 +16954,107 @@
         "title": "ConfigSurfaceEntry",
         "description": "A single configurable setting for a Rust service."
       },
+      "CopyFilesRequest": {
+        "properties": {
+          "target_instance": {
+            "type": "string",
+            "title": "Target Instance",
+            "description": "Instance to copy into. For a source-bound app this is the source."
+          },
+          "overwrite": {
+            "type": "boolean",
+            "title": "Overwrite",
+            "description": "Replace files of the same name in the target instead of refusing.",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "target_instance"
+        ],
+        "title": "CopyFilesRequest"
+      },
+      "CopyFilesResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "copied": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Copied"
+          },
+          "skipped": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Skipped"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "CopyFilesResult"
+      },
       "CostEstimate": {
         "properties": {
           "estimated_rows": {
@@ -14223,6 +17213,60 @@
         ],
         "title": "CreateAccountRequest"
       },
+      "CreateArtifactRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "description": "A kind declared in the app manifest."
+          },
+          "group": {
+            "type": "string",
+            "title": "Group",
+            "description": "Optional namespace, e.g. 'network'.",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Labels"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Publish this as version 1. Omit to create the artefact empty."
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "kind"
+        ],
+        "title": "CreateArtifactRequest"
+      },
       "CreateGroupRequest": {
         "properties": {
           "name": {
@@ -14265,6 +17309,25 @@
           "roles"
         ],
         "title": "CreateGroupRequest"
+      },
+      "CreateInstanceRequest": {
+        "properties": {
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Values",
+            "description": "Initial helm values as dot-path keys, merged over the defaults."
+          }
+        },
+        "type": "object",
+        "required": [
+          "instance"
+        ],
+        "title": "CreateInstanceRequest"
       },
       "CreateOrgRequest": {
         "properties": {
@@ -14461,6 +17524,38 @@
         ],
         "title": "DatabaseInfo",
         "description": "Summary of a ClickHouse database."
+      },
+      "DeclaredValue": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DeclaredValue",
+        "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
       },
       "DeploymentConfigDetail": {
         "properties": {
@@ -14665,6 +17760,149 @@
         ],
         "title": "DraftColumn",
         "description": "A ready-to-send meta-schema column derived from a discovered JSON path.\n\nShaped to drop straight into ``MetaSchemaAddVersionRequest.columns`` (the\ncreate-version endpoint) or a new meta-schema's version -- the UI sends these\nverbatim, no field mapping. ``type`` is derived from the first observed\nClickHouse type; for a multi-type path (``is_consistent=false``) confirm it\nbefore saving."
+      },
+      "DryRunEventModel": {
+        "properties": {
+          "index": {
+            "type": "integer",
+            "title": "Index"
+          },
+          "before": {
+            "type": "string",
+            "title": "Before"
+          },
+          "after": {
+            "type": "string",
+            "title": "After",
+            "default": ""
+          },
+          "error": {
+            "type": "string",
+            "title": "Error",
+            "default": ""
+          },
+          "dropped": {
+            "type": "boolean",
+            "title": "Dropped",
+            "default": false
+          },
+          "changed": {
+            "type": "boolean",
+            "title": "Changed",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "index",
+          "before"
+        ],
+        "title": "DryRunEventModel",
+        "description": "What the program did to one event."
+      },
+      "DryRunRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "File in the set to run"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content",
+            "description": "Unsaved content to run instead of what is committed. Nothing is written."
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "description": "Source to sample from. Defaults to the instance, which for a source-bound app IS the source.",
+            "default": ""
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "description": "Events to sample and run over",
+            "default": 10
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DryRunRequest",
+        "description": "Run a file over sampled events without saving or deploying anything."
+      },
+      "DryRunResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "completed | unavailable | disabled | unsupported | failed"
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "source": {
+            "type": "string",
+            "title": "Source",
+            "default": ""
+          },
+          "sampled": {
+            "type": "integer",
+            "title": "Sampled",
+            "default": 0
+          },
+          "succeeded": {
+            "type": "integer",
+            "title": "Succeeded",
+            "default": 0
+          },
+          "failed": {
+            "type": "integer",
+            "title": "Failed",
+            "default": 0
+          },
+          "dropped": {
+            "type": "integer",
+            "title": "Dropped",
+            "default": 0
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated",
+            "description": "Events were cut by the count or output-size ceiling",
+            "default": false
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DryRunEventModel"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "DryRunResponse",
+        "description": "A dry run's per-event outcomes and totals."
       },
       "EmittedRecord": {
         "properties": {
@@ -14967,6 +18205,106 @@
         ],
         "title": "FieldMapping",
         "description": "A single Sigma field -> column mapping."
+      },
+      "FileDetail": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "size_bytes",
+          "content"
+        ],
+        "title": "FileDetail"
+      },
+      "FileSetSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "suffixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suffixes"
+          },
+          "reload": {
+            "type": "string",
+            "title": "Reload"
+          },
+          "directory_setting": {
+            "type": "string",
+            "title": "Directory Setting"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "suffixes",
+          "reload",
+          "directory_setting"
+        ],
+        "title": "FileSetSummary"
+      },
+      "FileSummary": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "size_bytes"
+        ],
+        "title": "FileSummary"
+      },
+      "FileWriteRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "FileWriteRequest"
       },
       "FilterTier": {
         "type": "string",
@@ -15420,6 +18758,40 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HistoryEntry": {
+        "properties": {
+          "sha": {
+            "type": "string",
+            "title": "Sha"
+          },
+          "timestamp": {
+            "type": "integer",
+            "title": "Timestamp"
+          },
+          "actor": {
+            "type": "string",
+            "title": "Actor",
+            "default": ""
+          },
+          "summary": {
+            "type": "string",
+            "title": "Summary",
+            "default": ""
+          },
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "'committed' when no Argo revision was supplied, otherwise 'applied' if the cluster has synced this commit or 'pending' if it has not yet."
+          }
+        },
+        "type": "object",
+        "required": [
+          "sha",
+          "timestamp",
+          "state"
+        ],
+        "title": "HistoryEntry"
       },
       "HuntCreateRequest": {
         "properties": {
@@ -16266,6 +19638,37 @@
         "title": "JsonPathsResponse",
         "description": "Discovered JSON paths for a source."
       },
+      "KindModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "language": {
+            "type": "string",
+            "title": "Language"
+          },
+          "suffixes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Suffixes"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "language",
+          "suffixes",
+          "encoding"
+        ],
+        "title": "KindModel"
+      },
       "LifecycleRequest": {
         "properties": {
           "state": {
@@ -16326,6 +19729,222 @@
         ],
         "title": "LifecycleState",
         "description": "The gitops state dial value."
+      },
+      "LinkModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact",
+          "version",
+          "digest"
+        ],
+        "title": "LinkModel"
+      },
+      "LinkRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name",
+            "description": "Filename the artefact's content resolves into."
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Pin this version. Omit for the artefact's current one."
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "description": "Follow this tag instead of a version; the resolved version is recorded.",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact"
+        ],
+        "title": "LinkRequest"
+      },
+      "LinkResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "link": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LinkModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "LinkResult"
+      },
+      "LinkStatusModel": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "artifact": {
+            "type": "string",
+            "title": "Artifact"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          },
+          "resolved_digest": {
+            "type": "string",
+            "title": "Resolved Digest",
+            "description": "Digest of the content sitting in the file set."
+          },
+          "available_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Available Version",
+            "description": "The version re-resolving would move this link to."
+          },
+          "missing": {
+            "type": "boolean",
+            "title": "Missing",
+            "description": "The artefact or its linked version is gone."
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "description": "The content here is not what the linked version holds."
+          },
+          "outdated": {
+            "type": "boolean",
+            "title": "Outdated",
+            "description": "The link's target has moved on since it resolved."
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "artifact",
+          "version",
+          "digest",
+          "resolved_digest",
+          "missing",
+          "drift",
+          "outdated"
+        ],
+        "title": "LinkStatusModel"
       },
       "LogEntryModel": {
         "properties": {
@@ -16990,6 +20609,40 @@
         ],
         "title": "MetricEntry",
         "description": "A single metric from the service's manifest."
+      },
+      "MetricsResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "gauges": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Gauges"
+          },
+          "rates": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "type": "object",
+            "title": "Rates"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "gauges",
+          "rates"
+        ],
+        "title": "MetricsResponse"
       },
       "NonEmptyDict_str_SchemaVersionCreate_": {
         "additionalProperties": {
@@ -18660,6 +22313,48 @@
         "title": "ParamSpec",
         "description": "A constrained invoke-time parameter.\n\nEvery param carries a CLOSED constraint - an enum carries its full value\nlist, a numeric carries both bounds. There is deliberately NO free-string\ntype: an unconstrained param would reopen the hole curation closed."
       },
+      "PatchArtifactRequest": {
+        "properties": {
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Group"
+          }
+        },
+        "type": "object",
+        "title": "PatchArtifactRequest"
+      },
       "PathTree_SchemaSummaryObject_": {
         "properties": {
           "items": {
@@ -19378,6 +23073,42 @@
         "title": "ProviderResponse",
         "description": "Provider config \u2014 env var names are shown, never actual secret values."
       },
+      "PublishVersionRequest": {
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "description": "Fixed to this version at publish.",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "Publish at this exact version. Omit for the next in the series."
+          }
+        },
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "PublishVersionRequest"
+      },
       "QueryOptions": {
         "properties": {
           "limit": {
@@ -19637,6 +23368,80 @@
         "title": "RawQueryRequest",
         "description": "Request for raw query execution against a datasource adapter."
       },
+      "RelinkResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          },
+          "relinked": {
+            "items": {
+              "$ref": "#/components/schemas/LinkModel"
+            },
+            "type": "array",
+            "title": "Relinked"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "RelinkResult"
+      },
       "ResetPasswordRequest": {
         "properties": {
           "new_password": {
@@ -19669,6 +23474,81 @@
         ],
         "title": "ResetPasswordResponse",
         "description": "Reset outcome plus where the change stands in the durable deploy repo."
+      },
+      "ResourceBucketModel": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "title": "Metric"
+          },
+          "bucket_epoch": {
+            "type": "number",
+            "title": "Bucket Epoch"
+          },
+          "minimum": {
+            "type": "number",
+            "title": "Minimum"
+          },
+          "maximum": {
+            "type": "number",
+            "title": "Maximum"
+          },
+          "average": {
+            "type": "number",
+            "title": "Average"
+          },
+          "p95": {
+            "type": "number",
+            "title": "P95"
+          },
+          "samples": {
+            "type": "integer",
+            "title": "Samples"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "bucket_epoch",
+          "minimum",
+          "maximum",
+          "average",
+          "p95",
+          "samples"
+        ],
+        "title": "ResourceBucketModel"
+      },
+      "ResourceSeriesResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "window_seconds": {
+            "type": "integer",
+            "title": "Window Seconds"
+          },
+          "bucket_seconds": {
+            "type": "integer",
+            "title": "Bucket Seconds"
+          },
+          "buckets": {
+            "items": {
+              "$ref": "#/components/schemas/ResourceBucketModel"
+            },
+            "type": "array",
+            "title": "Buckets",
+            "description": "One entry per metric per time bucket, aggregated across every pod reporting for this instance."
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "window_seconds",
+          "bucket_seconds",
+          "buckets"
+        ],
+        "title": "ResourceSeriesResponse"
       },
       "ReviewRequest": {
         "properties": {
@@ -19724,6 +23604,62 @@
           "resource_type"
         ],
         "title": "RoleResponse"
+      },
+      "RollbackRequest": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "RollbackRequest"
+      },
+      "RoutingResponse": {
+        "properties": {
+          "compiler": {
+            "type": "string",
+            "title": "Compiler",
+            "description": "Manifest-declared compiler that derives this block"
+          },
+          "values_path": {
+            "type": "string",
+            "title": "Values Path",
+            "description": "Overlay dot-path the block is written to"
+          },
+          "drift": {
+            "type": "boolean",
+            "title": "Drift",
+            "description": "The overlay disagrees with the current sources"
+          },
+          "absent": {
+            "type": "boolean",
+            "title": "Absent",
+            "description": "The overlay carries no routing, so the app runs on built-in defaults"
+          },
+          "compiled": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Compiled"
+          },
+          "deployed": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Deployed"
+          }
+        },
+        "type": "object",
+        "required": [
+          "compiler",
+          "values_path",
+          "drift",
+          "absent"
+        ],
+        "title": "RoutingResponse",
+        "description": "Source-derived routing: what it should be, and what the overlay carries."
       },
       "RuleCreateRequest": {
         "properties": {
@@ -19884,10 +23820,29 @@
       },
       "RuleFromHyperdxRequest": {
         "properties": {
+          "saved_search_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Saved Search Id",
+            "description": "HyperDX saved-search id; the engine resolves the SQL that view runs"
+          },
           "raw_sql": {
-            "type": "string",
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "title": "Raw Sql",
-            "description": "Expanded HyperDX ClickHouse SELECT to turn into a rule"
+            "description": "Pre-rendered ClickHouse SELECT, trusted as given"
           },
           "saved_search_name": {
             "anyOf": [
@@ -19933,11 +23888,8 @@
           }
         },
         "type": "object",
-        "required": [
-          "raw_sql"
-        ],
         "title": "RuleFromHyperdxRequest",
-        "description": "Create a hunt rule from a live HyperDX view.\n\nHyperDX posts the expanded ClickHouse SELECT; the create pipeline strips the UI\nmeta (time bounds, LIMIT, ``__hdx_time_bucket``, SETTINGS) via the HyperDX\nsanitizer, and the engine derives a unique rule id from the saved-search name.\nThe caller gets that id back and opens ``/rules/{id}`` -- no id to invent, no\nIndexedDB round-trip."
+        "description": "Create a hunt rule from a live HyperDX view.\n\nSupply ``saved_search_id`` and the engine asks HyperDX what SQL that view\nactually runs. Supply ``raw_sql`` and the caller's string is taken on trust,\nwhich on a SQL-mode search is whatever sits in the editor rather than the\nquery the view executes.\n\nEither way the create pipeline strips the UI meta (time bounds, LIMIT,\n``__hdx_time_bucket``, SETTINGS) via the HyperDX sanitizer, and the engine\nderives a unique rule id from the saved-search name. The caller gets that id\nback and opens ``/rules/{id}`` -- no id to invent, no IndexedDB round-trip."
       },
       "RuleFromHyperdxResponse": {
         "properties": {
@@ -19949,6 +23901,16 @@
           "display_name": {
             "type": "string",
             "title": "Display Name"
+          },
+          "resolved_from": {
+            "type": "string",
+            "enum": [
+              "saved_search",
+              "raw_sql"
+            ],
+            "title": "Resolved From",
+            "description": "Which SQL source the rule was built from",
+            "default": "raw_sql"
           },
           "sanitize_summary": {
             "additionalProperties": true,
@@ -20683,6 +24645,212 @@
           "table"
         ],
         "title": "ScaffoldRequest"
+      },
+      "ScalingRequest": {
+        "properties": {
+          "replica_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Count",
+            "description": "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is explicitly enabled, because the chart omits `replicas` and the ScaledObject owns the count."
+          },
+          "min_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Replicas"
+          },
+          "max_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Replicas"
+          },
+          "keda_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keda Enabled"
+          },
+          "cpu_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request"
+          },
+          "memory_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request"
+          },
+          "cpu_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          }
+        },
+        "type": "object",
+        "title": "ScalingRequest"
+      },
+      "ScalingResponse": {
+        "properties": {
+          "supported": {
+            "type": "boolean",
+            "title": "Supported"
+          },
+          "reason": {
+            "type": "string",
+            "title": "Reason",
+            "default": ""
+          },
+          "deploy_target": {
+            "type": "string",
+            "title": "Deploy Target"
+          },
+          "replica_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Count"
+          },
+          "min_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Replicas"
+          },
+          "max_replicas": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Replicas"
+          },
+          "keda_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Keda Enabled"
+          },
+          "cpu_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Request"
+          },
+          "memory_request": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Request"
+          },
+          "cpu_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cpu Limit"
+          },
+          "memory_limit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Memory Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "supported",
+          "deploy_target"
+        ],
+        "title": "ScalingResponse"
       },
       "SchemaColumnWrite": {
         "properties": {
@@ -22774,6 +26942,71 @@
         ],
         "title": "SqlValidationResponse"
       },
+      "StateRequest": {
+        "properties": {
+          "state": {
+            "type": "string",
+            "title": "State",
+            "description": "enabled | disabled | deprecated"
+          }
+        },
+        "type": "object",
+        "required": [
+          "state"
+        ],
+        "title": "StateRequest"
+      },
+      "StatusResponse": {
+        "properties": {
+          "telemetry_name": {
+            "type": "string",
+            "title": "Telemetry Name"
+          },
+          "reporting": {
+            "type": "boolean",
+            "title": "Reporting"
+          },
+          "last_seen_epoch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Seen Epoch"
+          },
+          "started_epoch": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started Epoch"
+          },
+          "uptime_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Uptime Seconds"
+          }
+        },
+        "type": "object",
+        "required": [
+          "telemetry_name",
+          "reporting"
+        ],
+        "title": "StatusResponse"
+      },
       "StreamRequest": {
         "properties": {
           "schema": {
@@ -23109,6 +27342,19 @@
         ],
         "title": "TableInfo",
         "description": "Summary of a ClickHouse table."
+      },
+      "TagRequest": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "TagRequest"
       },
       "TaskInfo": {
         "properties": {
@@ -23553,6 +27799,44 @@
         "type": "object",
         "title": "UpdateRoleRequest"
       },
+      "UsageModel": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "instance": {
+            "type": "string",
+            "title": "Instance"
+          },
+          "file_set": {
+            "type": "string",
+            "title": "File Set"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "tag": {
+            "type": "string",
+            "title": "Tag",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "instance",
+          "file_set",
+          "name",
+          "version"
+        ],
+        "title": "UsageModel"
+      },
       "UserResponse": {
         "properties": {
           "org_id": {
@@ -23672,6 +27956,37 @@
         ],
         "title": "ValidationError"
       },
+      "ValidationModel": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status",
+            "description": "'valid' or 'invalid' when a backend answered, 'unavailable' when none could, 'disabled' when validation is off for this deployment."
+          },
+          "backend": {
+            "type": "string",
+            "title": "Backend",
+            "default": ""
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "errors": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Errors"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status"
+        ],
+        "title": "ValidationModel"
+      },
       "VarChange": {
         "properties": {
           "cls": {
@@ -23740,6 +28055,64 @@
         "title": "VarEntry",
         "description": "One flattened dot-path var in a resource doc."
       },
+      "VersionDetail": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "published_by": {
+            "type": "string",
+            "title": "Published By",
+            "default": ""
+          },
+          "published_at": {
+            "type": "integer",
+            "title": "Published At",
+            "default": 0
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "encoding": {
+            "type": "string",
+            "title": "Encoding"
+          },
+          "content": {
+            "type": "string",
+            "title": "Content"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "digest",
+          "size_bytes",
+          "kind",
+          "encoding",
+          "content"
+        ],
+        "title": "VersionDetail"
+      },
       "VersionResponse": {
         "properties": {
           "version": {
@@ -23759,6 +28132,49 @@
           "python_version"
         ],
         "title": "VersionResponse"
+      },
+      "VersionSummary": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "digest": {
+            "type": "string",
+            "title": "Digest"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "published_by": {
+            "type": "string",
+            "title": "Published By",
+            "default": ""
+          },
+          "published_at": {
+            "type": "integer",
+            "title": "Published At",
+            "default": 0
+          },
+          "message": {
+            "type": "string",
+            "title": "Message",
+            "default": ""
+          }
+        },
+        "type": "object",
+        "required": [
+          "version",
+          "digest",
+          "size_bytes"
+        ],
+        "title": "VersionSummary"
       },
       "ViewDefinition": {
         "properties": {
@@ -23988,51 +28404,6 @@
         ],
         "title": "VrlRequest"
       },
-      "WriteResult": {
-        "properties": {
-          "changed": {
-            "type": "boolean",
-            "title": "Changed"
-          },
-          "commit_sha": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Commit Sha"
-          },
-          "auto_merged": {
-            "type": "boolean",
-            "title": "Auto Merged",
-            "default": false
-          },
-          "review_required": {
-            "type": "boolean",
-            "title": "Review Required",
-            "default": false
-          },
-          "pr_url": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Pr Url"
-          }
-        },
-        "type": "object",
-        "required": [
-          "changed"
-        ],
-        "title": "WriteResult"
-      },
       "dfe_engine__api__pagination__PaginatedResponse_SchemaColumn___1": {
         "properties": {
           "items": {
@@ -24189,6 +28560,73 @@
         "title": "AttributesRequest",
         "description": "Full-replace body for an account's attribute blob (non-sensitive or sensitive)."
       },
+      "dfe_engine__api__v1__apps__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reload": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reload",
+            "description": "How the change reaches the running process: 'hot' applies without a restart, 'roll' needs the pod to roll, 'restart' needs a manual one."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
+      },
       "dfe_engine__api__v1__deployments__SeedResponse": {
         "properties": {
           "seeded": {
@@ -24241,6 +28679,118 @@
           "seeded"
         ],
         "title": "SeedResponse"
+      },
+      "dfe_engine__api__v1__helm__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
+      },
+      "dfe_engine__api__v1__library__WriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version",
+            "description": "The version this write published or repointed to."
+          },
+          "validation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ValidationModel"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed"
+        ],
+        "title": "WriteResult"
       },
       "dfe_engine__api__v1__oidc_providers__SyncResponse": {
         "properties": {

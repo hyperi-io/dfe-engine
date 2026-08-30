@@ -142,9 +142,9 @@ class TestCrudSeedBuiltins:
         assert count >= 1
         after = crud.head_revision()
         assert after != before
-        assert registry.source_exists("dfe_alerts")
+        assert registry.source_exists("dfe-alerts")
         # ALL seeds in the one commit: exactly one new commit on the branch
-        registry.get_source("dfe_alerts")
+        registry.get_source("dfe-alerts")
 
     def test_seed_idempotent(self, registry, crud):
         registry.seed_builtin_sources()

@@ -692,9 +692,55 @@ class DeploymentSettings(BaseModel):
 
     Environment variables:
     - DFE_DEPLOYMENT_CONFIG_DIR -> deployment.config_dir
+    - DFE_DEPLOYMENT_TARGET -> deployment.target
     """
 
     config_dir: str = Field(default="", description="YAML directory for deployment configurations")
+    target: Literal["kubernetes", "docker", "unknown"] = Field(
+        default="unknown",
+        description=(
+            "Where this deployment runs. Gates the scaling dials: a Compose "
+            "deployment has no KEDA and sets CPU and memory stack-wide, so the "
+            "dials are reported unsupported rather than silently accepted. "
+            "Defaults to unknown so an unset deployment refuses rather than "
+            "guesses. Injected by the deployer, not detected."
+        ),
+    )
+
+
+class TransformValidationSettings(BaseModel):
+    """Syntax validation for authored transform files.
+
+    Environment variables:
+    - DFE_TRANSFORM_VALIDATION_ENABLED -> transform_validation.enabled
+    - DFE_TRANSFORM_VALIDATION_BLOCKING -> transform_validation.blocking
+    - DFE_TRANSFORM_DRY_RUN_ENABLED -> transform_validation.dry_run
+    """
+
+    enabled: bool = Field(
+        default=False,
+        description=(
+            "Check authored VRL and Vector transforms before committing them. Off by "
+            "default: the VRL backend links against compiled Vector artifacts a "
+            "deployment need not have, and an absent backend must not look like a "
+            "passing check."
+        ),
+    )
+    blocking: bool = Field(
+        default=True,
+        description=(
+            "Refuse a write whose content fails validation. Only an explicit failure "
+            "blocks; an unavailable backend never does."
+        ),
+    )
+    dry_run: bool = Field(
+        default=False,
+        description=(
+            "Allow running an authored transform over sampled events. Off by default: "
+            "it executes caller-supplied code, so a deployment opts in rather than "
+            "inherits it from the validation switch."
+        ),
+    )
 
 
 class SchemasSettings(BaseModel):
@@ -1140,6 +1186,9 @@ class DFESettings(BaseModel):
     services: ServicesSettings = Field(default_factory=ServicesSettings)
     repository: RepositorySettings = Field(default_factory=RepositorySettings)
     deployment: DeploymentSettings = Field(default_factory=DeploymentSettings)
+    transform_validation: TransformValidationSettings = Field(
+        default_factory=TransformValidationSettings
+    )
     helm: HelmSettings = Field(default_factory=HelmSettings)
     auth: AuthSettings = Field(default_factory=AuthSettings)
     hyperdx: HyperDXSettings = Field(default_factory=HyperDXSettings)
@@ -1526,6 +1575,16 @@ def _get_env_overrides() -> dict:
     # Deployment settings
     if val := _get_env("DFE_DEPLOYMENT_CONFIG_DIR"):
         overrides["deployment"]["config_dir"] = val
+    if val := _get_env("DFE_DEPLOYMENT_TARGET"):
+        overrides["deployment"]["target"] = val.strip().lower()
+
+    # Transform validation
+    if val := _get_env("DFE_TRANSFORM_VALIDATION_ENABLED"):
+        overrides["transform_validation"]["enabled"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_TRANSFORM_VALIDATION_BLOCKING"):
+        overrides["transform_validation"]["blocking"] = val.lower() in ("true", "1", "yes")
+    if val := _get_env("DFE_TRANSFORM_DRY_RUN_ENABLED"):
+        overrides["transform_validation"]["dry_run"] = val.lower() in ("true", "1", "yes")
 
     # Helm settings
     if val := _get_env("DFE_HELM_OUTPUT_DIR"):

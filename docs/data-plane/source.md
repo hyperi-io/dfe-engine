@@ -235,8 +235,8 @@ source version.
 ## The `_source` Label
 
 The `_source` label is the **single identifier** that ties everything together.
-It is a fixed, lowercase, underscore-separated string (e.g. `filebeat`,
-`crowdstrike_edr`).
+It is a fixed, lowercase, hyphen-separated string (e.g. `filebeat`,
+`crowdstrike-edr`).
 
 The receiver **sets `_source` in the JSON payload** at ingestion time. From
 that point, everything is derived automatically:
@@ -255,10 +255,17 @@ ClickHouse:
 
 ### Naming Rules
 
-- Lowercase alphanumeric + underscores only: `[a-z][a-z0-9_]*`
-- No hyphens (ClickHouse table names)
-- Max 64 characters
+- A Kubernetes DNS-1123 label starting with a letter: `[a-z]([a-z0-9-]*[a-z0-9])?`
+- Hyphens, never underscores. A source-bound app (a transform, a fetcher) deploys
+  one instance per source named for the source, and that name becomes an Argo
+  Application and a set of Kubernetes object names, so the source charset has to
+  be a subset of what a label allows.
+- Max 40 characters, the same cap the instance name carries
 - Must be unique across all sources
+
+A hyphenated name has to be quoted in a ClickHouse identifier position. The DDL
+generator does not quote it yet, so a hyphenated source cannot have its table
+DDL generated -- see `schema/schema_ddl.py`.
 
 ---
 
@@ -489,7 +496,7 @@ Sources are managed as YAML files - one file per source - by
 ### Validation Rules
 
 - `_source` label must be unique
-- `_source` label must match naming rules (`[a-z][a-z0-9_]*`, max 64 chars)
+- `_source` label must match naming rules (`[a-z]([a-z0-9-]*[a-z0-9])?`, max 40 chars)
 - Match rules must not conflict across non-disabled sources (same
   field+operator+value); a dormant source HOLDS its match, only disabling
   releases it

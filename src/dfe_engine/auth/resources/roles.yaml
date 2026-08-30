@@ -53,6 +53,11 @@ roles:
       - "service:*:metrics:read"
       - "helm:*"
       - "helmvars:*"
+      - "library:*"
+      # A dry run is two grants: executing authored code, and reading the sampled
+      # events it runs over. This role authors transforms, so it holds both.
+      - "dryrun:execute"
+      - "sampler:read"
       - "governance:*"
       - "action:invoke:*"
       - "deployment:*"
@@ -66,6 +71,9 @@ roles:
     permissions:
       - "governance:read"
       - "action:invoke:*"
+      - "deployment:read"
+      - "library:read"
+      - "service:*:metrics:read"
   infra_viewer:
     description: "Infrastructure read-only"
     resource_type: core

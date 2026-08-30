@@ -7,7 +7,7 @@
 # Table: dfe.detection
 # Profile: timeseries (minus _raw, _tags) + detection columns
 
-source: dfe_alerts
+source: dfe-alerts
 display_name: DFE Alerts
 description: >-
   Hunt detection results — matched records from scheduled detection rules.
@@ -25,7 +25,7 @@ versions:
       version: "1.0.0"
     match:
       field: _source
-      value: dfe_alerts
+      value: dfe-alerts
     schema:
       ttl_days: 365
       engine: MergeTree

@@ -61,13 +61,13 @@ class TestCRUD:
     def test_save_writes_versioned_yaml(self, registry: SourceRegistry, sources_dir):
         registry.save_source(
             {
-                "source": "versioned_src",
+                "source": "versioned-src",
                 "display_name": "Versioned",
                 "match": {"field": "tags.type", "value": "versioned"},
                 "schema": {"ttl_days": 30},
             }
         )
-        data = yaml_load(sources_dir / "versioned_src.yaml")
+        data = yaml_load(sources_dir / "versioned-src.yaml")
         assert "deployed_version" not in data
         assert data["current"] == "1.0.0"
         assert "1.0.0" in data["versions"]
@@ -141,7 +141,7 @@ class TestList:
 
     def test_list_enabled_only(self, registry: SourceRegistry):
         registry.save_source(_make_source("filebeat", match_value="filebeat"))
-        registry.save_source(_make_source("disabled_src", match_value="disabled", enabled=False))
+        registry.save_source(_make_source("disabled-src", match_value="disabled", enabled=False))
 
         all_sources = registry.list_sources()
         assert len(all_sources) == 2
@@ -183,7 +183,7 @@ class TestList:
         """Receiver-routed sources must use equals/exists (documented receiver gap)."""
         bad = Source.model_validate(
             {
-                "source": "bad_op",
+                "source": "bad-op",
                 "match": {"field": "f", "operator": "includes", "value": "v"},
             }
         )
@@ -195,13 +195,13 @@ class TestList:
         operator gate must not block that exit path (active/dormant still reject)."""
         legacy = Source.model_validate(
             {
-                "source": "legacy_op",
+                "source": "legacy-op",
                 "state": "disabled",
                 "match": {"field": "f", "operator": "includes", "value": "v"},
             }
         )
         registry.save_source(legacy)
-        assert registry.get_source("legacy_op").state == "disabled"
+        assert registry.get_source("legacy-op").state == "disabled"
 
     def test_disabled_releases_match(self, registry: SourceRegistry):
         registry.save_source(_make_source("dis", match_value="shared", state="disabled"))
@@ -231,9 +231,9 @@ class TestValidation:
         registry.save_source(_make_source("filebeat", match_value="fb"))
 
         with pytest.raises(SourceMatchConflictError) as exc_info:
-            registry.save_source(_make_source("another_source", match_value="fb"))
+            registry.save_source(_make_source("another-source", match_value="fb"))
         assert exc_info.value.conflicting_source == "filebeat"
-        assert exc_info.value.source == "another_source"
+        assert exc_info.value.source == "another-source"
 
     def test_match_conflict_same_source_ok(self, registry: SourceRegistry):
         """Updating the same source should not conflict with itself."""
@@ -285,7 +285,7 @@ class TestRoundTrip:
     def test_save_load_full_source(self, registry: SourceRegistry):
         source = Source.model_validate(
             {
-                "source": "crowdstrike_edr",
+                "source": "crowdstrike-edr",
                 "display_name": "CrowdStrike EDR",
                 "description": "CrowdStrike Falcon EDR telemetry",
                 "enabled": True,
@@ -326,7 +326,7 @@ class TestRoundTrip:
         )
 
         registry.save_source(source)
-        loaded = registry.get_source("crowdstrike_edr")
+        loaded = registry.get_source("crowdstrike-edr")
 
         assert loaded.source == source.source
         assert loaded.display_name == source.display_name
@@ -353,7 +353,7 @@ class TestRoundTrip:
         )
         registry.save_source(
             {
-                "source": "draft_src",
+                "source": "draft-src",
                 "match": {"field": "f", "value": "v"},
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
@@ -371,11 +371,11 @@ class TestRoundTrip:
                 },
             }
         )
-        source = registry.get_source("draft_src")
+        source = registry.get_source("draft-src")
         store.save_build(
             artifact_from_build(
                 SchemaBuildResult(
-                    source_name="draft_src",
+                    source_name="draft-src",
                     columns=[],
                     create_table_ddl="CREATE TABLE t",
                 ),
@@ -384,7 +384,7 @@ class TestRoundTrip:
             source,
         )
         registry.update_source_from_write(
-            "draft_src",
+            "draft-src",
             SourceWriteRequest.model_validate(
                 {
                     "match": {"field": "f", "value": "v"},
@@ -396,8 +396,8 @@ class TestRoundTrip:
             ),
             deployment_store=store,
         )
-        assert store.load_build("draft_src", "2.0.0") is None
-        assert store.load_build("draft_src", "1.0.0") is None
+        assert store.load_build("draft-src", "2.0.0") is None
+        assert store.load_build("draft-src", "1.0.0") is None
 
     def test_update_pre_deploy_drops_stale_source_build(self, registry: SourceRegistry, tmp_path):
         store = SourceDeploymentStore(
@@ -407,7 +407,7 @@ class TestRoundTrip:
         )
         registry.save_source(
             {
-                "source": "pre_deploy",
+                "source": "pre-deploy",
                 "match": {"field": "f", "value": "v"},
                 "deployed_version": None,
                 "current": "1.0.0",
@@ -420,11 +420,11 @@ class TestRoundTrip:
                 },
             }
         )
-        source = registry.get_source("pre_deploy")
+        source = registry.get_source("pre-deploy")
         store.save_build(
             artifact_from_build(
                 SchemaBuildResult(
-                    source_name="pre_deploy",
+                    source_name="pre-deploy",
                     columns=[],
                     create_table_ddl="CREATE TABLE t",
                 ),
@@ -433,7 +433,7 @@ class TestRoundTrip:
             source,
         )
         registry.update_source_from_write(
-            "pre_deploy",
+            "pre-deploy",
             SourceWriteRequest.model_validate(
                 {
                     "match": {"field": "f", "value": "v"},
@@ -445,7 +445,7 @@ class TestRoundTrip:
             ),
             deployment_store=store,
         )
-        assert store.load_build("pre_deploy", "1.0.0") is None
+        assert store.load_build("pre-deploy", "1.0.0") is None
 
 
 # ---------------------------------------------------------------------------
