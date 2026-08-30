@@ -189,7 +189,7 @@ def operator_headers(operator_token: str) -> dict[str, str]:
 def sample_source() -> dict:
     """A minimal valid source definition for testing."""
     return {
-        "source": "test_source",
+        "source": "test-source",
         "display_name": "Test Source",
         "description": "A test data source",
         "enabled": True,

@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from pydantic import ValidationError
 from scalo.config import DirectoryConfigStore
 from scalo.logger import logger
 
@@ -57,6 +58,21 @@ class SourceNotFoundError(SourceRegistryError):
 
 class SourceValidationError(SourceRegistryError):
     """Source definition failed validation."""
+
+
+def _first_error_message(exc: ValidationError) -> str:
+    """The readable half of a pydantic error, so the API can hand it to a caller.
+
+    Keeps the explanation a field validator wrote and drops the report scaffolding
+    around it; a caller told only "1 validation error for Source" learns nothing.
+    """
+    errors = exc.errors()
+    if not errors:
+        return str(exc)
+    first = errors[0]
+    location = ".".join(str(part) for part in first.get("loc", ()))
+    message = str(first.get("msg", "")).removeprefix("Value error, ")
+    return f"{location}: {message}" if location else message
 
 
 class SourceMatchConflictError(SourceValidationError):
@@ -410,7 +426,13 @@ class SourceRegistry:
         if not write.source:
             raise SourceValidationError("'source' field is required")
 
-        source = source_from_write(write, source_name=write.source)
+        # Building the Source is where the name rules are enforced, so a bad name
+        # has to surface as a validation error the API can map to a 422 rather
+        # than as a raw pydantic error nothing catches.
+        try:
+            source = source_from_write(write, source_name=write.source)
+        except ValidationError as e:
+            raise SourceValidationError(_first_error_message(e)) from e
         return self.save_source(source, created_by=created_by, description=description)
 
     def update_source_from_write(

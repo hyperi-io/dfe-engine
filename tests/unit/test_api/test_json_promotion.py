@@ -34,13 +34,13 @@ from dfe_engine.settings import (
 )
 from dfe_engine.yaml_utils import yaml_dump
 
-PROMO_SOURCE = "promo_source"
-NOMETA_SOURCE = "nometa_source"
-VERSIONED_SOURCE = "versioned_src"
-CORE_SOURCE = "core_source"
+PROMO_SOURCE = "promo-source"
+NOMETA_SOURCE = "nometa-source"
+VERSIONED_SOURCE = "versioned-src"
+CORE_SOURCE = "core-source"
 SCHEMA_PATH = "meta/promo"
 CORE_SCHEMA_PATH = "meta/core_tpl"
-CORE_FORK_PATH = "meta/core_source_core_tpl"
+CORE_FORK_PATH = "meta/core-source_core_tpl"
 
 
 class _NoCallClient:
@@ -640,7 +640,7 @@ class TestPromoteField:
     def test_core_meta_schema_dry_run_does_not_fork(
         self, settings: DFESettings, client: TestClient, admin_headers
     ):
-        fork_file = Path(settings.schemas.schemas_dir) / "meta" / "core_source_core_tpl.yaml"
+        fork_file = Path(settings.schemas.schemas_dir) / "meta" / "core-source_core_tpl.yaml"
         assert not fork_file.is_file()
         resp = client.post(
             f"/api/v1/schemas/{CORE_SOURCE}/promote-field",
