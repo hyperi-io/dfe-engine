@@ -47,6 +47,29 @@ def unsafe_ident_reason(name: str) -> str | None:
     return None
 
 
+def quote_ident(name: str, *, what: str = "identifier") -> str:
+    """Backtick-quote *name* for a DDL identifier position, after checking it is safe.
+
+    Every identifier is quoted, not only the ones that would otherwise break: one
+    shape to read, and no branch that can be got wrong for the name nobody tried.
+    A source name may carry a hyphen, and unquoted ``db.my-source`` parses as a
+    subtraction rather than as a table -- so the quoting is load-bearing, not
+    cosmetic.
+
+    Quoting is never the only defence. :func:`unsafe_ident_reason` runs first and
+    refuses a backtick, so a name can never close the quoting it is wrapped in.
+    """
+    reason = unsafe_ident_reason(name)
+    if reason is not None:
+        raise DDLGenerationError(f"unsafe {what}: {name!r} ({reason})")
+    return f"`{name}`"
+
+
+def _qualified(db: str, name: str, *, what: str) -> str:
+    """A ``db.object`` reference with both halves quoted."""
+    return f"{quote_ident(db, what='database')}.{quote_ident(name, what=what)}"
+
+
 def _safe_view_ident(name: str, *, what: str) -> str:
     """Validate a mapping identifier for the backtick-quoted view positions.
 
@@ -274,7 +297,7 @@ class DDLGenerator:
         # named topology from config carries no ON CLUSTER intent). Without it a
         # Replicated table is created on the ONE node the connection landed on,
         # and the siblings behind a headless service silently diverge.
-        create = f"CREATE TABLE IF NOT EXISTS {cfg.db}.{table_name}"
+        create = f"CREATE TABLE IF NOT EXISTS {_qualified(cfg.db, table_name, what='table name')}"
         if cfg.cluster:
             create += f" ON CLUSTER {cfg.cluster}"
         else:
@@ -377,8 +400,8 @@ class DDLGenerator:
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
         sql = (
-            f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} "
-            f"ADD COLUMN IF NOT EXISTS {col_def}"
+            f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
+            f"{self._on_cluster(cfg)} ADD COLUMN IF NOT EXISTS {col_def}"
         )
         if after:
             sql += f" AFTER `{after}`"
@@ -403,7 +426,8 @@ class DDLGenerator:
         cfg = config or DDLConfig()
         col_def = self._column_def(column)
         return (
-            f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
+            f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
+            f"{self._on_cluster(cfg)} MODIFY COLUMN {col_def};\n"
         )
 
     def generate_alter_add_index(
@@ -420,7 +444,10 @@ class DDLGenerator:
         idx = self._index_def(column)
         if not idx:
             return None
-        return f"ALTER TABLE {cfg.db}.{table_name}{self._on_cluster(cfg)} ADD {idx};\n"
+        return (
+            f"ALTER TABLE {_qualified(cfg.db, table_name, what='table name')}"
+            f"{self._on_cluster(cfg)} ADD {idx};\n"
+        )
 
     # ── Standard Views ─────────────────────────────────────────────
 
@@ -460,10 +487,11 @@ class DDLGenerator:
             select_parts = "    *"
 
         return (
-            f"CREATE OR REPLACE VIEW {cfg.db}.{view_name}{self._on_cluster(cfg)} AS\n"
+            f"CREATE OR REPLACE VIEW {_qualified(cfg.db, view_name, what='view name')}"
+            f"{self._on_cluster(cfg)} AS\n"
             f"SELECT\n"
             f"{select_parts}\n"
-            f"FROM {cfg.db}.{table_name};\n"
+            f"FROM {_qualified(cfg.db, table_name, what='table name')};\n"
         )
 
     def generate_sigma_view(

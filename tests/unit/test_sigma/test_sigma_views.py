@@ -77,9 +77,9 @@ def test_build_ddl_source_column_aliases():
         include_source_columns=False,
     )
     ddl = build_sigma_view_ddl(definition, db="default")
-    assert "CREATE OR REPLACE VIEW default.win_sigma AS" in ddl
+    assert "CREATE OR REPLACE VIEW `default`.`win_sigma` AS" in ddl
     assert "`process_name` AS `Image`" in ddl
-    assert "FROM default.win;" in ddl
+    assert "FROM `default`.`win`;" in ddl
     # include_source_columns=False -> no trailing SELECT *
     assert "\n    *" not in ddl
 
@@ -120,11 +120,11 @@ def test_build_ddl_nested_json_path_is_single_quoted_identifier():
 def test_build_ddl_mixed_columns_and_star():
     definition = _definition()
     ddl = build_sigma_view_ddl(definition, db="dfe", table_name="windows-audit")
-    assert "CREATE OR REPLACE VIEW dfe.windows-audit_sigma AS" in ddl
+    assert "CREATE OR REPLACE VIEW `dfe`.`windows-audit_sigma` AS" in ddl
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl
     assert "`process_name` AS `Image`" in ddl
-    assert ddl.rstrip().endswith("FROM dfe.windows-audit;")
+    assert ddl.rstrip().endswith("FROM `dfe`.`windows-audit`;")
     # include_source_columns default True -> SELECT * retained
     assert "    *," in ddl or "    *\n" in ddl
 
@@ -132,7 +132,7 @@ def test_build_ddl_mixed_columns_and_star():
 def test_build_ddl_empty_definition_selects_star():
     definition = SigmaViewDefinition(source_name="win", include_source_columns=False)
     ddl = build_sigma_view_ddl(definition, db="default")
-    assert "SELECT\n    *\nFROM default.win;" in ddl
+    assert "SELECT\n    *\nFROM `default`.`win`;" in ddl
 
 
 def test_build_ddl_default_db_placeholder():
@@ -141,8 +141,8 @@ def test_build_ddl_default_db_placeholder():
         columns=[SigmaViewColumn(sigma_field="X", source_column="x")],
     )
     ddl = build_sigma_view_ddl(definition)
-    assert "{db}.win_sigma" in ddl
-    assert "FROM {db}.win;" in ddl
+    assert "`{db}`.`win_sigma`" in ddl
+    assert "FROM `{db}`.`win`;" in ddl
 
 
 # -- DDL: injection safety -----------------------------------
@@ -239,7 +239,7 @@ def test_store_generate_ddl_from_stored_definition(crud):
     store = SigmaViewStore(crud)
     store.save(_definition(), actor="a")
     ddl = store.generate_ddl("windows-audit", db="default")
-    assert "CREATE OR REPLACE VIEW default.windows-audit_sigma AS" in ddl
+    assert "CREATE OR REPLACE VIEW `default`.`windows-audit_sigma` AS" in ddl
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "`process_name` AS `Image`" in ddl
 

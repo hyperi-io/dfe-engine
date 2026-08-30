@@ -117,7 +117,7 @@ def test_generate_ddl_from_stored_definition(client, app, admin_headers, tmp_pat
     gen = client.post("/api/v1/sigma/views/windows-audit", headers=admin_headers)
     assert gen.status_code == 200, gen.text
     ddl = gen.json()["ddl"]
-    assert "CREATE OR REPLACE VIEW default.windows-audit_sigma AS" in ddl
+    assert "CREATE OR REPLACE VIEW `default`.`windows-audit_sigma` AS" in ddl
     # JSON-derived columns extracted from _json with the dynamic-subcolumn idiom
     assert "CAST(assumeNotNull(_json).`EventID` AS UInt32) AS `EventID`" in ddl
     assert "assumeNotNull(_json).`process.command_line` AS `CommandLine`" in ddl

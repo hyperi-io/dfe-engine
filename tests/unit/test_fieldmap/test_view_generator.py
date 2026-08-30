@@ -77,7 +77,7 @@ class TestGenerateView:
         assert "windows-audit_sigma" in ddl
         assert "`event_id` AS `EventID`" in ddl
         assert "`user_name` AS `User`" in ddl
-        assert "FROM {db}.windows-audit" in ddl
+        assert "FROM `{db}`.`windows-audit`" in ddl
 
     def test_generates_view_from_source_map(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(
@@ -118,8 +118,8 @@ class TestGenerateView:
         cfg = DDLConfig(db="analytics")
         ddl = gen.generate_view("sigma", "test-src", "test_table", cfg)
         assert ddl is not None
-        assert "analytics.test_table_sigma" in ddl
-        assert "FROM analytics.test_table" in ddl
+        assert "`analytics`.`test_table_sigma`" in ddl
+        assert "FROM `analytics`.`test_table`" in ddl
 
     def test_view_includes_star(self, gen: ViewGenerator, registry: FieldMapRegistry):
         registry.save_map(_make_field_map(standard="sigma", mappings={"A": "a"}))
@@ -190,7 +190,7 @@ class TestGenerateViewsForSource:
         registry.save_map(_make_field_map(standard="sigma", mappings={"X": "x"}))
         cfg = DDLConfig(db="mydb")
         views = gen.generate_views_for_source("src", "tbl", config=cfg)
-        assert "mydb.tbl_sigma" in views["sigma"]
+        assert "`mydb`.`tbl_sigma`" in views["sigma"]
 
 
 # ---------------------------------------------------------------

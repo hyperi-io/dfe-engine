@@ -56,7 +56,7 @@ versions:
         attribute: [lowcardinality]
         use_case: dimension
         expr: "@source: first(_source) | topic_name"
-        comment: "Data source label (e.g. beats, syslog, crowdstrike_edr)"
+        comment: "Data source label (e.g. beats, syslog, crowdstrike-edr)"
         _field_type: base
 
       - name: _raw
@@ -130,7 +130,7 @@ versions:
         attribute: [lowcardinality]
         use_case: dimension
         expr: "@source: first(_source) | topic_name"
-        comment: "Data source label (e.g. beats, syslog, crowdstrike_edr)"
+        comment: "Data source label (e.g. beats, syslog, crowdstrike-edr)"
         _field_type: base
 
       - name: _raw

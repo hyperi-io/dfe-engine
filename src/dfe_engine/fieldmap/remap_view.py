@@ -129,12 +129,10 @@ class RemapViewDefinition(BaseModel):
 
 
 def _safe_ident(name: str, *, what: str) -> str:
-    """Validate a bare identifier for a backtick-quoted OR an unquoted DDL position.
+    """Validate a bare identifier for a backtick-quoted DDL position.
 
     Rejects a backtick (which would break out of ``\\`...\\``` quoting), whitespace,
-    and the DDL control chars ``; ( ) ' " \\`` - so the value is safe even in the
-    UNQUOTED ``{db}.{table}`` positions the view DDL emits, not only the
-    backtick-wrapped column aliases. The charset rule is
+    and the DDL control chars ``; ( ) ' " \\``. The charset rule is
     ``schema_ddl.unsafe_ident_reason`` (ONE rule, two exception seams). Governed,
     RBAC'd, git-stored values, checked as defence in depth (the discipline
     json_promotion_service applies to its JSON subcolumn accessor).
@@ -144,6 +142,16 @@ def _safe_ident(name: str, *, what: str) -> str:
     if unsafe_ident_reason(name) is not None:
         raise RemapViewError(f"illegal {what}: {name!r}")
     return name
+
+
+def _quoted_ident(name: str, *, what: str) -> str:
+    """A checked identifier, backtick-quoted for the ``db.object`` positions.
+
+    A source name may carry a hyphen, and unquoted ``db.my-source`` parses as a
+    subtraction, so every one of these is quoted rather than only the ones that
+    would otherwise break.
+    """
+    return f"`{_safe_ident(name, what=what)}`"
 
 
 def _parens_balanced(s: str) -> bool:
@@ -223,13 +231,13 @@ def build_remap_view_ddl(
             the injection-safety validation.
     """
     # `db` is normally the "{db}" placeholder the deployer substitutes, but a caller
-    # may pass a real database name (a user-supplied param) - validate it as an
-    # identifier so it cannot inject into the DDL. The placeholder itself passes
-    # through.
-    if db != "{db}":
-        db = _safe_ident(db, what="db")
+    # may pass a real database name (a user-supplied param). Either way it is
+    # checked and quoted: the substitution is a plain string replace, so the
+    # placeholder lands inside the backticks the deployed name needs.
+    quoted_db = _quoted_ident(db, what="db")
     table = _safe_ident(table_name or definition.source_name, what="table_name")
-    view_name = f"{table}_{definition.standard}"
+    quoted_table = f"`{table}`"
+    quoted_view = _quoted_ident(f"{table}_{definition.standard}", what="view_name")
 
     select_terms = [_column_select_expr(col) for col in definition.columns]
     if definition.include_source_columns:
@@ -238,4 +246,8 @@ def build_remap_view_ddl(
         select_terms = ["*"]
 
     body = ",\n    ".join(select_terms)
-    return f"CREATE OR REPLACE VIEW {db}.{view_name} AS\nSELECT\n    {body}\nFROM {db}.{table};\n"
+    return (
+        f"CREATE OR REPLACE VIEW {quoted_db}.{quoted_view} AS\n"
+        f"SELECT\n    {body}\n"
+        f"FROM {quoted_db}.{quoted_table};\n"
+    )
