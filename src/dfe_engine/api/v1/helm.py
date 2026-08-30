@@ -36,6 +36,7 @@ from dfe_engine.gitcrud.commit_policy import (
     validate_change,
     validate_name,
 )
+from dfe_engine.gitcrud.engine import ResourceNotFoundError
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 
@@ -121,8 +122,14 @@ def set_var_governed(
     gc = gitcrud_of(request)
     settings = request.app.state.settings
 
+    # The stored document is the context the controller-ownership rule needs: a
+    # resource that has already disabled KEDA owns its own replica count.
     try:
-        validate_change(path, value)
+        stored = gc.get(cls, name)
+    except ResourceNotFoundError:
+        stored = {}
+    try:
+        validate_change(path, value, stored)
     except CommitPolicyError as exc:
         raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
 

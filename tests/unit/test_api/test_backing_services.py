@@ -7,18 +7,23 @@ writable. Everything runs against a real dulwich repo, no mocks.
 
 from __future__ import annotations
 
+from importlib import resources
+
+import pytest
+
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
+from dfe_engine.yaml_utils import yaml_load_string
 
-STORAGE_LOCK = [
-    "infravars:*:clickhouse.mode",
-    "infravars:*:clickhouse.storageModel",
-    "infravars:*:clickhouse.s3.*",
-    "infravars:*:kafka.mode",
-    "infravars:*:kafka.storageModel",
-    "infravars:*:kafka.tiered.*",
-]
+# The SHIPPED policy, not a copy of it: a pattern added to the seeded file has to
+# take effect here without anyone remembering to retype it.
+SHIPPED_POLICY = yaml_load_string(
+    resources.files("dfe_engine.governance.resources.policies")
+    .joinpath("storage-model.yaml")
+    .read_text(encoding="utf-8")
+)
+STORAGE_LOCK: list[str] = SHIPPED_POLICY["protected"]
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -117,6 +122,32 @@ class TestDeclaredReads:
         assert resp.status_code == 404
         assert resp.json()["code"] == "not_found"
 
+    def test_every_service_carries_its_values_prefix(self, client, app, admin_headers, tmp_path):
+        # ClickHouse's chart name is not its prefix, so a caller deriving one from
+        # service or chart gets it wrong for one of the two.
+        _wire_gitcrud(app, tmp_path)
+        body = client.get("/api/v1/backing-services", headers=admin_headers).json()
+        assert {s["service"]: s["prefix"] for s in body} == {
+            "clickhouse": "clickhouse",
+            "kafka": "kafka",
+        }
+        assert all(s["prefix"] for s in body)
+        assert [s for s in body if s["chart"] != s["service"]]
+
+    def test_the_prefix_is_the_one_writes_actually_use(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        ch = client.get("/api/v1/backing-services/clickhouse", headers=admin_headers).json()
+        path = f"{ch['prefix']}.replicas"
+        resp = client.put(
+            f"/api/v1/backing-services/overlays/{ch['chart']}/vars/{path}",
+            json={"value": 7},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert gc.get("infravars", ch["chart"])["clickhouse"]["replicas"] == 7
+        reread = client.get("/api/v1/backing-services/clickhouse", headers=admin_headers).json()
+        assert reread["replicas"]["value"] == 7
+
     def test_viewer_cannot_read(self, client, app, viewer_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
         assert client.get("/api/v1/backing-services", headers=viewer_headers).status_code == 403
@@ -162,6 +193,180 @@ class TestOverlayVars:
         assert resp.status_code == 403
 
 
+class TestReloadHint:
+    """Every write says what syncing it does, so the UI stops implying a restart."""
+
+    def _put(self, client, headers, path, value):
+        return client.put(
+            f"/api/v1/backing-services/overlays/kafka/vars/{path}",
+            json={"value": value},
+            headers=headers,
+        )
+
+    def test_resources_roll_the_pods(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        resp = self._put(client, admin_headers, "kafka.resources.requests.cpu", "2")
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reload"] == "roll"
+
+    def test_a_member_count_applies_without_a_restart(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        assert self._put(client, admin_headers, "kafka.replicas", 5).json()["reload"] == "apply"
+
+    def test_storage_needs_the_statefulset_recreated(self, client, app, admin_headers, tmp_path):
+        # volumeClaimTemplates are immutable, so no sync can apply this on its own.
+        _wire_gitcrud(app, tmp_path)
+        resp = self._put(client, admin_headers, "kafka.storage.size", "200Gi")
+        assert resp.json()["reload"] == "recreate"
+
+    def test_a_mode_change_redeploys(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        assert self._put(client, admin_headers, "kafka.mode", "external").json()["reload"] == (
+            "redeploy"
+        )
+
+    def test_storage_model_rolls_rather_than_recreating(self, client, app, admin_headers, tmp_path):
+        # `storage` and `storageModel` are different keys with different answers.
+        _wire_gitcrud(app, tmp_path)
+        assert self._put(client, admin_headers, "kafka.storageModel", "tiered").json()[
+            "reload"
+        ] == ("roll")
+
+    def test_an_unmapped_key_reports_apply(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        assert self._put(client, admin_headers, "kafka.name", "dfe-kafka").json()["reload"] == (
+            "apply"
+        )
+
+    def test_a_revert_carries_the_hint_too(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"resources": {"requests": {"cpu": "2"}}}}, "t")
+        resp = client.delete(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.resources.requests.cpu",
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reload"] == "roll"
+
+
+class TestMemberCountsGoUpOnly:
+    """Scale-down loses data rather than capacity, so it is refused server-side."""
+
+    def _set(self, client, headers, name, path, value):
+        return client.put(
+            f"/api/v1/backing-services/overlays/{name}/vars/{path}",
+            json={"value": value},
+            headers=headers,
+        )
+
+    def test_lowering_kafka_brokers_is_refused_with_the_reason(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        resp = self._set(client, admin_headers, "kafka", "kafka.replicas", 3)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "scale_down_refused"
+        assert "reassigned off it" in resp.json()["message"]
+        assert gc.get("infravars", "kafka")["kafka"]["replicas"] == 5
+
+    def test_lowering_clickhouse_nodes_names_the_clickhouse_reason(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "clickhouse-cluster", {"clickhouse": {"replicas": 3}}, "tester")
+        resp = self._set(client, admin_headers, "clickhouse-cluster", "clickhouse.replicas", 1)
+        assert resp.status_code == 400
+        assert "drops a copy of the data" in resp.json()["message"]
+
+    def test_the_keeper_ensemble_is_up_only_as_well(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars", "clickhouse-cluster", {"clickhouse": {"keeper": {"replicas": 3}}}, "tester"
+        )
+        resp = self._set(
+            client, admin_headers, "clickhouse-cluster", "clickhouse.keeper.replicas", 1
+        )
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "scale_down_refused"
+
+    def test_raising_a_count_is_accepted(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 3}}, "tester")
+        assert self._set(client, admin_headers, "kafka", "kafka.replicas", 6).status_code == 200
+        assert gc.get("infravars", "kafka")["kafka"]["replicas"] == 6
+
+    def test_the_same_count_is_accepted(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 3}}, "tester")
+        assert self._set(client, admin_headers, "kafka", "kafka.replicas", 3).status_code == 200
+
+    def test_an_undeclared_count_accepts_anything(self, client, app, admin_headers, tmp_path):
+        # Nothing declared means nothing to compare against; the chart or profile
+        # default is not readable from here.
+        _wire_gitcrud(app, tmp_path)
+        assert self._set(client, admin_headers, "kafka", "kafka.replicas", 1).status_code == 200
+
+    def test_cpu_and_memory_move_down_freely(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put(
+            "infravars",
+            "kafka",
+            {"kafka": {"resources": {"requests": {"cpu": "4", "memory": "8Gi"}}}},
+            "tester",
+        )
+        assert (
+            self._set(
+                client, admin_headers, "kafka", "kafka.resources.requests.cpu", "1"
+            ).status_code
+            == 200
+        )
+        assert (
+            self._set(
+                client, admin_headers, "kafka", "kafka.resources.requests.memory", "1Gi"
+            ).status_code
+            == 200
+        )
+
+    def test_the_comparison_is_against_the_resolved_stack_not_one_file(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # The per-chart file wins, so lowering the shared file below it changes
+        # nothing and must not be refused.
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"kafka": {"replicas": 5}}, "tester")
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 9}}, "tester")
+        assert self._set(client, admin_headers, "common", "kafka.replicas", 2).status_code == 200
+        assert gc.get("infravars", "common")["kafka"]["replicas"] == 2
+
+    def test_lowering_the_winning_file_is_still_refused(self, client, app, admin_headers, tmp_path):
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "common", {"kafka": {"replicas": 5}}, "tester")
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 9}}, "tester")
+        resp = self._set(client, admin_headers, "kafka", "kafka.replicas", 6)
+        assert resp.status_code == 400
+        assert "9 -> 6" in resp.json()["message"]
+
+    def test_an_unrelated_overlay_is_not_guarded(self, client, app, admin_headers, tmp_path):
+        # network-policies is not in either service's stack, so a count written
+        # there cannot lower anything.
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 9}}, "tester")
+        assert (
+            self._set(client, admin_headers, "network-policies", "kafka.replicas", 1).status_code
+            == 200
+        )
+
+    def test_the_override_grant_does_not_bypass_the_data_loss_guard(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # This is not a policy lock: admin holds helmvars:override and is still
+        # refused, because the hazard is data loss rather than governance.
+        gc = _wire_gitcrud(app, tmp_path)
+        gc.put("infravars", "kafka", {"kafka": {"replicas": 5}}, "tester")
+        assert self._set(client, admin_headers, "kafka", "kafka.replicas", 2).status_code == 400
+
+
 class TestStorageModelIsDecidedAtDeploy:
     def test_storage_model_write_is_refused_with_the_policy(
         self, client, app, api_settings, admin_headers, tmp_path
@@ -187,9 +392,13 @@ class TestStorageModelIsDecidedAtDeploy:
             ("clickhouse-cluster", "clickhouse.mode", "external"),
             ("clickhouse-cluster", "clickhouse.storageModel", "s3backed"),
             ("clickhouse-cluster", "clickhouse.s3.endpoint", "https://b.example.com/ch/"),
+            ("clickhouse-cluster", "clickhouse.storage.size", "500Gi"),
+            ("clickhouse-cluster", "clickhouse.storage.storageClass", "gp3"),
             ("kafka", "kafka.mode", "external"),
             ("kafka", "kafka.storageModel", "tiered"),
             ("kafka", "kafka.tiered.className", "com.example.Rsm"),
+            ("kafka", "kafka.storage.size", "200Gi"),
+            ("kafka", "kafka.storage.storageClass", "gp3"),
         ]
         for name, path, value in locked:
             resp = client.put(
@@ -199,6 +408,41 @@ class TestStorageModelIsDecidedAtDeploy:
             )
             assert resp.status_code == 403, f"{path} was writable: {resp.text}"
             assert resp.json()["code"] == "protected_var"
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "clickhouse.storage.size",
+            "clickhouse.storage.storageClass",
+            "kafka.storage.size",
+            "kafka.storage.storageClass",
+        ],
+    )
+    def test_the_shipped_policy_locks_the_disk(self, path):
+        # Derek's call, mandated up front: volumeClaimTemplates are immutable, so a
+        # size or class change is a StatefulSet recreate rather than a values edit.
+        assert f"infravars:*:{path}" in STORAGE_LOCK
+
+    def test_storage_size_is_refused_for_a_writer_and_written_with_override(
+        self, client, app, api_settings, admin_headers, tmp_path
+    ):
+        gc = _wire_gitcrud(app, tmp_path)
+        _lock(client, admin_headers)
+        refused = client.put(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.storage.size",
+            json={"value": "200Gi"},
+            headers=_writer(app, api_settings),
+        )
+        assert refused.status_code == 403
+        assert refused.json()["code"] == "protected_var"
+        # admin holds '*' -> helmvars:override, which is the deliberate exception.
+        allowed = client.put(
+            "/api/v1/backing-services/overlays/kafka/vars/kafka.storage.size",
+            json={"value": "200Gi"},
+            headers=admin_headers,
+        )
+        assert allowed.status_code == 200, allowed.text
+        assert gc.get("infravars", "kafka")["kafka"]["storage"]["size"] == "200Gi"
 
     def test_the_lock_covers_common_yaml_too(
         self, client, app, api_settings, admin_headers, tmp_path

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from dfe_engine.appmgmt import catalogue
 from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 from dfe_engine.governance import PolicyStore
@@ -55,6 +56,35 @@ class TestCatalogue:
         assert by_service[VRL]["instances"] == []
         assert by_service[VRL]["file_sets"][0]["language"] == "vrl"
         assert by_service["dfe-transform-elastic"]["file_sets"] == []
+
+    def test_the_routing_flag_matches_the_manifest(self, client, app, admin_headers, tmp_path):
+        # Without it the UI can only find out by probing /routing for a 400.
+        _wire(app, tmp_path)
+        listed = client.get("/api/v1/apps", headers=admin_headers).json()
+        assert {e["service"]: e["has_compiled_routing"] for e in listed} == {
+            service: catalogue.descriptor(service).has_compiled_routing
+            for service in catalogue.services()
+        }
+
+    def test_the_flag_predicts_what_the_routing_route_answers(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        flagged = {
+            e["service"]: e["has_compiled_routing"]
+            for e in client.get("/api/v1/apps", headers=admin_headers).json()
+        }
+        assert flagged[VRL] is False
+        probe = client.get(f"{BASE}/routing", headers=admin_headers)
+        assert probe.status_code == 400
+        assert probe.json()["code"] == "routing_not_compiled"
+
+    def test_the_instance_summary_carries_the_flag(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        got = client.get(BASE, headers=admin_headers).json()
+        assert got["has_compiled_routing"] is catalogue.descriptor(VRL).has_compiled_routing
 
 
 class TestLifecycle:
@@ -188,6 +218,36 @@ class TestScaling:
         _deploy(client, admin_headers)
         got = client.get(f"{BASE}/scaling", headers=admin_headers).json()
         assert got["supported"] is False
+
+    def test_replica_count_round_trips_with_keda_off(self, client, app, admin_headers, tmp_path):
+        # Without this dial a deployment with KEDA disabled has no settable count.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.put(
+            f"{BASE}/scaling",
+            json={"keda_enabled": False, "replica_count": 3},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+        got = client.get(f"{BASE}/scaling", headers=admin_headers).json()
+        assert got["keda_enabled"] is False
+        assert got["replica_count"] == 3
+
+    def test_replica_count_while_keda_is_on_is_400(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        client.put(f"{BASE}/scaling", json={"keda_enabled": True}, headers=admin_headers)
+        resp = client.put(f"{BASE}/scaling", json={"replica_count": 3}, headers=admin_headers)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_dial"
+        assert "KEDA is enabled" in resp.json()["message"]
+
+    def test_a_negative_replica_count_is_400(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.put(f"{BASE}/scaling", json={"replica_count": -1}, headers=admin_headers)
+        assert resp.status_code == 400
+        assert resp.json()["code"] == "invalid_dial"
 
 
 class TestFiles:
