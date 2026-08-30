@@ -58,12 +58,19 @@ surface small and the policy readable.
 `src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
 because every resource is git-backed config. A `ResourceClass` says where a class
 lives (a directory), how one resource is laid out, and which RBAC prefix governs
-it. The default registry covers the deploy repo: `helmvars` (the overlays under
-`values/`), `sources` (the all-in-one source-definition docs under
+it. The default registry covers the deploy repo: `helmvars` (the app-instance
+overlays under `values/`), `infravars` (the substrate and platform overlays under
+`infra/`), `sources` (the all-in-one source-definition docs under
 `config/sources/` - the first datamodel class in the deploy repo), `library` (the
 versioned artefact library under `config/library/`) and the `governance` class
 (`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`, plus
 the CH RBAC types).
+
+`infravars` shares the `helmvars` RBAC prefix but needs its own directory: Argo
+hands the app generator's `values/*-values.yaml` glob to git as a pathspec, where
+`*` matches `/`, so anything under `values/` becomes an Argo application. Its
+surface is `api/v1/backing-services`, and its reads are DECLARED, never observed
+-- the engine runs no Kubernetes client, by design.
 
 ### Layouts -- one document, or a directory
 

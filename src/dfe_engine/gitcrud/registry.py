@@ -68,6 +68,12 @@ def default_registry() -> ResourceClassRegistry:
         [
             # helmvars class - deployment overlays
             ResourceClass("helmvars", "values", rbac_prefix="helmvars"),
+            # The same class for the charts that are NOT app instances - the
+            # substrate and platform overlays. A separate DIRECTORY because
+            # anything under values/ becomes an Argo application: the appset's
+            # `values/*-values.yaml` glob reaches git as a pathspec, where `*`
+            # matches `/`, so a subdirectory does not hide a file from it.
+            ResourceClass("infravars", "infra", rbac_prefix="helmvars"),
             # datamodel class - source definitions. The stored doc IS the
             # exchange format (API payload = file = gitcrud doc); the Source
             # model owns its own semver version envelope (current/versions/
