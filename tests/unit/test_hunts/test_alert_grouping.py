@@ -291,7 +291,7 @@ class TestAlertStateManager:
     def test_ddl_contains_expected_structure(self):
         mgr = AlertStateManager()
         ddl = mgr.get_ddl()
-        assert "CREATE TABLE IF NOT EXISTS dfe.alert_state" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`alert_state`" in ddl
         assert "hunt_name" in ddl
         assert "rule_name" in ddl
         assert "_org_id" in ddl
@@ -303,7 +303,7 @@ class TestAlertStateManager:
     def test_ddl_custom_database(self):
         mgr = AlertStateManager(database="custom_db")
         ddl = mgr.get_ddl()
-        assert "custom_db.alert_state" in ddl
+        assert "`custom_db`.`alert_state`" in ddl
 
     def test_ensure_table_exists_idempotent(self):
         mgr = AlertStateManager()

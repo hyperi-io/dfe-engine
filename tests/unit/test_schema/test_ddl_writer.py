@@ -19,7 +19,7 @@ class TestDefaultTable:
 
     def test_creates_valid_ddl(self, writer):
         ddl = writer.generate_default_table()
-        assert "CREATE TABLE IF NOT EXISTS {db}.default" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`default`" in ddl
 
     def test_uses_db_placeholder(self, writer):
         ddl = writer.generate_default_table()
@@ -160,7 +160,7 @@ class TestDetectionTable:
 
     def test_uses_db_placeholder(self, writer):
         ddl = writer.generate_detection_table()
-        assert "{db}.detection" in ddl
+        assert "`{db}`.`detection`" in ddl
 
     def test_has_metadata_header(self, writer):
         ddl = writer.generate_detection_table()
@@ -182,22 +182,22 @@ class TestTargetDatabase:
     def test_defaults_to_placeholder(self):
         # The static/reference path must keep emitting the placeholder.
         ddl = DDLFileWriter().generate_default_table()
-        assert "CREATE TABLE IF NOT EXISTS {db}.default" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`default`" in ddl
 
     def test_real_database_reaches_default_table_ddl(self):
         ddl = DDLFileWriter(database="dfe").generate_default_table()
-        assert "CREATE TABLE IF NOT EXISTS dfe.default" in ddl
-        assert "{db}.default" not in ddl
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`default`" in ddl
+        assert "`{db}`.`default`" not in ddl
 
     def test_real_database_reaches_detection_ddl(self):
         ddl = DDLFileWriter(database="dfe_hunts").generate_detection_table()
-        assert "CREATE TABLE IF NOT EXISTS dfe_hunts.detection" in ddl
-        assert "{db}.detection" not in ddl
+        assert "CREATE TABLE IF NOT EXISTS `dfe_hunts`.`detection`" in ddl
+        assert "`{db}`.`detection`" not in ddl
 
     def test_real_database_reaches_checkpoint_ddl(self):
         ddl = DDLFileWriter(database="dfe").generate_detection_checkpoint_table()
-        assert "CREATE TABLE IF NOT EXISTS dfe.detection_checkpoint" in ddl
-        assert "{db}.detection_checkpoint" not in ddl
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`detection_checkpoint`" in ddl
+        assert "`{db}`.`detection_checkpoint`" not in ddl
 
 
 # ── generate_all ─────────────────────────────────────────────────

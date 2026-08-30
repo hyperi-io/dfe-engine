@@ -154,11 +154,11 @@ class TestSourceCRUDWorkflow:
 
         # Create
         source = {
-            "source": "e2e_test_source",
+            "source": "e2e-test-source",
             "display_name": "E2E Test Source",
             "description": "Created by E2E test",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": "e2e_test_source"},
+            "match": {"field": "tags.collector.type", "value": "e2e-test-source"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
@@ -166,19 +166,19 @@ class TestSourceCRUDWorkflow:
         assert resp.status_code == 201
 
         # Get
-        resp = e2e_client.get("/api/v1/sources/e2e_test_source", headers=headers)
+        resp = e2e_client.get("/api/v1/sources/e2e-test-source", headers=headers)
         assert resp.status_code == 200
 
         # Update
         resp = e2e_client.put(
-            "/api/v1/sources/e2e_test_source",
+            "/api/v1/sources/e2e-test-source",
             json={**source, "display_name": "Updated E2E Source"},
             headers=headers,
         )
         assert resp.status_code == 200
 
         # Verify update persisted
-        resp = e2e_client.get("/api/v1/sources/e2e_test_source", headers=headers)
+        resp = e2e_client.get("/api/v1/sources/e2e-test-source", headers=headers)
         assert resp.status_code == 200
         assert resp.json()["display_name"] == "Updated E2E Source"
 
@@ -189,11 +189,11 @@ class TestSourceCRUDWorkflow:
         assert data["total"] >= 1
 
         # Delete
-        resp = e2e_client.delete("/api/v1/sources/e2e_test_source", headers=headers)
+        resp = e2e_client.delete("/api/v1/sources/e2e-test-source", headers=headers)
         assert resp.status_code in (200, 204)
 
         # Verify gone
-        resp = e2e_client.get("/api/v1/sources/e2e_test_source", headers=headers)
+        resp = e2e_client.get("/api/v1/sources/e2e-test-source", headers=headers)
         assert resp.status_code == 404
 
     def test_duplicate_source_returns_409(self, e2e_client):

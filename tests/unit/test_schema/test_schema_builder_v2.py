@@ -352,7 +352,7 @@ class TestBuildDDLOnly:
             SchemaColumn(name="x", type="string"),
         ]
         ddl = builder.build_ddl_only(columns, "my_table")
-        assert "CREATE TABLE IF NOT EXISTS {db}.my_table" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`my_table`" in ddl
         assert "`_ts`" in ddl
         assert "`x`" in ddl
 

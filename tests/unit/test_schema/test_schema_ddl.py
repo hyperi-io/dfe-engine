@@ -47,13 +47,63 @@ def _basic_columns() -> list[SchemaColumn]:
     ]
 
 
+# ── Identifier quoting ──────────────────────────────────────────────
+
+
+class TestQuotedIdentifiers:
+    """Every identifier is quoted, and quoting is never the only defence."""
+
+    def test_a_hyphenated_table_renders_quoted_ddl(self, gen: DDLGenerator):
+        """A source name may carry a hyphen; unquoted it would parse as a subtraction."""
+        ddl = gen.generate_create_table("dfe-alerts", _basic_columns())
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`dfe-alerts`" in ddl
+        assert "{db}.dfe-alerts" not in ddl.replace("`{db}`.`dfe-alerts`", "")
+
+    def test_a_hyphenated_table_quotes_every_alter_form(self, gen: DDLGenerator):
+        column = _col(name="new_field", type="string")
+        add = gen.generate_alter_add_column("dfe-alerts", column)
+        modify = gen.generate_alter_modify_column("dfe-alerts", column)
+        assert add.startswith("ALTER TABLE `{db}`.`dfe-alerts` ")
+        assert modify.startswith("ALTER TABLE `{db}`.`dfe-alerts` ")
+
+    def test_a_hyphenated_table_quotes_the_view_and_its_from(self, gen: DDLGenerator):
+        ddl = gen.generate_view("dfe-alerts", {"EventID": "event_id"}, "sigma")
+        assert "CREATE OR REPLACE VIEW `{db}`.`dfe-alerts_sigma`" in ddl
+        assert "FROM `{db}`.`dfe-alerts`;" in ddl
+
+    def test_a_plain_name_is_quoted_too(self, gen: DDLGenerator):
+        """One shape, no branch: the name that does not need quoting gets it anyway."""
+        ddl = gen.generate_create_table("filebeat", _basic_columns())
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`filebeat`" in ddl
+
+    def test_the_db_placeholder_survives_substitution(self, gen: DDLGenerator):
+        """The deployer replaces the literal `{db}` token, so it lands inside the quotes."""
+        ddl = gen.generate_create_table("dfe-alerts", _basic_columns())
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`dfe-alerts`" in ddl.replace("{db}", "dfe")
+
+    def test_a_backtick_in_a_table_name_is_refused(self, gen: DDLGenerator):
+        """Quoting must never be the only defence: the charset check runs first."""
+        with pytest.raises(DDLGenerationError, match="unsafe table name"):
+            gen.generate_create_table("evil`; DROP TABLE x; --", _basic_columns())
+
+    def test_a_backtick_in_the_database_is_refused(self, gen: DDLGenerator):
+        with pytest.raises(DDLGenerationError, match="unsafe database"):
+            gen.generate_create_table("t", _basic_columns(), DDLConfig(db="a`b"))
+
+    def test_unsafe_ident_reason_refuses_a_backtick(self):
+        from dfe_engine.schema.schema_ddl import unsafe_ident_reason
+
+        assert unsafe_ident_reason("a`b") is not None
+        assert unsafe_ident_reason("dfe-alerts") is None
+
+
 # ── CREATE TABLE ────────────────────────────────────────────────────
 
 
 class TestGenerateCreateTable:
     def test_basic_create_table(self, gen: DDLGenerator):
         ddl = gen.generate_create_table("filebeat", _basic_columns())
-        assert "CREATE TABLE IF NOT EXISTS {db}.filebeat" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`filebeat`" in ddl
         assert "ENGINE = MergeTree()" in ddl
         assert "PARTITION BY toYYYYMMDD(_timestamp_load)" in ddl
 
@@ -432,7 +482,7 @@ class TestAlterTable:
     def test_add_column(self, gen: DDLGenerator):
         col = _col(name="new_field", type="string", use_case="dimension")
         ddl = gen.generate_alter_add_column("filebeat", col)
-        assert "ALTER TABLE {db}.filebeat ADD COLUMN IF NOT EXISTS" in ddl
+        assert "ALTER TABLE `{db}`.`filebeat` ADD COLUMN IF NOT EXISTS" in ddl
         assert "`new_field` Nullable(String)" in ddl
 
     def test_add_column_after(self, gen: DDLGenerator):
@@ -443,7 +493,7 @@ class TestAlterTable:
     def test_modify_column(self, gen: DDLGenerator):
         col = _col(name="user_name", type="string", attribute=["lowcardinality"])
         ddl = gen.generate_alter_modify_column("filebeat", col)
-        assert "ALTER TABLE {db}.filebeat MODIFY COLUMN" in ddl
+        assert "ALTER TABLE `{db}`.`filebeat` MODIFY COLUMN" in ddl
         assert "LowCardinality(Nullable(String))" in ddl
 
 
@@ -454,10 +504,10 @@ class TestGenerateView:
     def test_generic_view_with_suffix(self, gen: DDLGenerator):
         mappings = {"source.ip": "source_ip", "user.name": "user_name"}
         ddl = gen.generate_view("syslog", mappings, "ecs")
-        assert "CREATE OR REPLACE VIEW {db}.syslog_ecs AS" in ddl
+        assert "CREATE OR REPLACE VIEW `{db}`.`syslog_ecs` AS" in ddl
         assert "`source_ip` AS `source.ip`" in ddl
         assert "`user_name` AS `user.name`" in ddl
-        assert "FROM {db}.syslog" in ddl
+        assert "FROM `{db}`.`syslog`" in ddl
 
     def test_cim_suffix(self, gen: DDLGenerator):
         ddl = gen.generate_view("t", {"src_ip": "source_ip"}, "cim")
@@ -500,11 +550,11 @@ class TestSigmaView:
             "EventID": "event_id",
         }
         ddl = gen.generate_sigma_view("windows-audit", mappings)
-        assert "CREATE OR REPLACE VIEW {db}.windows-audit_sigma AS" in ddl
+        assert "CREATE OR REPLACE VIEW `{db}`.`windows-audit_sigma` AS" in ddl
         assert "`event_id` AS `EventID`" in ddl
         assert "`source_ip` AS `SourceIP`" in ddl
         assert "`user_name` AS `User`" in ddl
-        assert "FROM {db}.windows-audit" in ddl
+        assert "FROM `{db}`.`windows-audit`" in ddl
 
     def test_sigma_view_includes_star(self, gen: DDLGenerator):
         ddl = gen.generate_sigma_view("t", {"X": "x"})
@@ -517,8 +567,8 @@ class TestSigmaView:
     def test_sigma_view_custom_db(self, gen: DDLGenerator):
         cfg = DDLConfig(db="mydb")
         ddl = gen.generate_sigma_view("t", {"X": "x"}, cfg)
-        assert "mydb.t_sigma" in ddl
-        assert "FROM mydb.t" in ddl
+        assert "`mydb`.`t_sigma`" in ddl
+        assert "FROM `mydb`.`t`" in ddl
 
 
 # ── DDLConfig ───────────────────────────────────────────────────────
