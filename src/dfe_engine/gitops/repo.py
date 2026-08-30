@@ -14,6 +14,7 @@ uses internally) so there is no shell-out to ``git``.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import cast
@@ -154,12 +155,15 @@ class GitopsRepo:
 
     def publish(
         self,
-        artifacts: dict[str, str],
+        artifacts: Mapping[str, str | bytes],
         message: str,
         deletions: list[str] | None = None,
         branch: str | None = None,
     ) -> PublishResult:
         """Write artifacts, optionally remove files, commit-if-changed, push-if-set.
+
+        Text is written UTF-8 with LF endings; ``bytes`` is written verbatim, so a
+        binary artefact is stored as itself rather than as an encoding of itself.
 
         ``branch`` selects the target:
         - ``None`` (default): commit straight onto the tracked branch and push it
@@ -179,7 +183,10 @@ class GitopsRepo:
         for rel, content in sorted(artifacts.items()):
             target = self._path / rel
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(content, encoding="utf-8", newline="\n")
+            if isinstance(content, bytes):
+                target.write_bytes(content)
+            else:
+                target.write_text(content, encoding="utf-8", newline="\n")
             written.append(rel)
             porcelain.add(str(self._path), paths=[str(target)])
 

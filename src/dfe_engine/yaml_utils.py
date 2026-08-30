@@ -30,6 +30,7 @@ from ruamel.yaml import (
     YAML,
     YAMLError,  # noqa: F401 - re-exported
 )
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 # ruamel YAML instances carry mutable parser/emitter state and are NOT
 # thread-safe: a single shared instance dumped/loaded from two threads at once
@@ -139,6 +140,43 @@ def yaml_dump_string(data: Any) -> str:
     stream = StringIO()
     _rt().dump(data, stream)
     return stream.getvalue()
+
+
+def block_scalar_safe(text: str) -> bool:
+    """Whether ``text`` round-trips through a ``|`` block scalar unchanged.
+
+    A block scalar cannot represent a carriage return, cannot end a line in
+    whitespace, and takes its indentation from the first non-empty line - so
+    content whose first line is indented further than a later one silently
+    terminates the block early and the remainder parses as sibling YAML.
+    """
+    if "\r" in text:
+        return False
+    lines = text.split("\n")
+    if any(line != line.rstrip() for line in lines):
+        return False
+    first = next((line for line in lines if line.strip()), "")
+    return not (first[:1].isspace())
+
+
+def literal_block(text: str) -> LiteralScalarString | str:
+    """Emit ``text`` as a ``|`` block scalar where that is safe, else unchanged.
+
+    A block scalar keeps a file body readable in a diff instead of collapsing it
+    into one quoted line of ``\\n`` escapes. Content the block form would corrupt
+    is returned as a plain string so the emitter quotes it instead: correctness
+    outranks the nicer diff, and forcing the block form on unsafe content lets a
+    file body break out of its own scalar and forge sibling keys.
+
+    Args:
+        text: The content to emit.
+
+    Returns:
+        The content, tagged for block style only when that is lossless.
+    """
+    if not text or not block_scalar_safe(text):
+        return text
+    return LiteralScalarString(text if text.endswith("\n") else text + "\n")
 
 
 def deep_merge(base: dict, override: dict, *, replace_lists: bool = False) -> dict:

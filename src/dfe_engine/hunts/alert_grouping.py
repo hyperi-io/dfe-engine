@@ -43,7 +43,7 @@ from scalo.logger import logger
 from dfe_engine.schema.applier import SchemaApplier
 from dfe_engine.schema.engine_resolver import EngineResolver
 from dfe_engine.schema.internal_tables import alert_state_spec
-from dfe_engine.schema.schema_ddl import DDLGenerator
+from dfe_engine.schema.schema_ddl import DDLGenerator, quote_ident
 from dfe_engine.settings import default_data_database
 from dfe_engine.source.type_registry import TypeRegistry
 
@@ -198,7 +198,7 @@ def build_grouping_query(
     return (
         f"SELECT\n"
         f"    {select_clause}\n"
-        f"FROM {target_db}.{target_table}\n"
+        f"FROM {quote_ident(target_db, what='database')}.{quote_ident(target_table, what='table name')}\n"
         f"WHERE hunt_name = '{hunt_name_esc}'\n"
         f"  AND rule_name = '{rule_name_esc}'\n"
         f"  AND _org_id = '{customer_esc}'\n"

@@ -27,6 +27,7 @@ from pydantic import BaseModel
 from scalo.logger import logger
 
 from dfe_engine.api.cli_exposure import CLI_HIDDEN
+from dfe_engine.api.deps import get_source_registry_optional
 from dfe_engine.api.e2e.seed import Seed
 
 E2E_TAG = "E2E"
@@ -57,6 +58,9 @@ class SeedRequest(BaseModel):
         "seed_dfe_analyst_user",
         "seed_dfe_infra_user",
         "seed_dfe_viewers_user",
+        "seed_source_with_transform",
+        "seed_library_artefact",
+        "seed_app_scaling_state",
         "reset_all",
     ]
 
@@ -80,6 +84,10 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         group_store=request.app.state.group_store,
         org_registry=request.app.state.org_registry,
         env=request.app.state.settings.env,
+        gitcrud=getattr(request.app.state, "gitcrud", None),
+        source_registry=get_source_registry_optional(),
+        settings=request.app.state.settings,
+        forge=getattr(request.app.state, "forge", None),
     )
     success = seeder.seed_static(body.script)
     logger.warning("e2e seed", script=body.script, success=success)

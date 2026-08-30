@@ -281,7 +281,21 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
-        assert "FROM acme.logs_alerts" in sql
+        assert "FROM `acme`.`logs_alerts`" in sql
+
+    def test_from_reference_quotes_a_hyphenated_table(self):
+        sql = build_grouping_query(
+            target_db="acme",
+            target_table="filebeat-alerts",
+            hunt_name="test",
+            rule_name="rule",
+            customer="acme",
+            group_by=["severity"],
+            time_start="2026-01-01 00:00:00",
+            time_end="2026-01-01 01:00:00",
+            results_table_columns=self.RESULTS_COLS,
+        )
+        assert "FROM `acme`.`filebeat-alerts`" in sql
 
 
 # ── AlertStateManager ────────────────────────────────────────────
@@ -291,7 +305,7 @@ class TestAlertStateManager:
     def test_ddl_contains_expected_structure(self):
         mgr = AlertStateManager()
         ddl = mgr.get_ddl()
-        assert "CREATE TABLE IF NOT EXISTS dfe.alert_state" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `dfe`.`alert_state`" in ddl
         assert "hunt_name" in ddl
         assert "rule_name" in ddl
         assert "_org_id" in ddl
@@ -303,7 +317,7 @@ class TestAlertStateManager:
     def test_ddl_custom_database(self):
         mgr = AlertStateManager(database="custom_db")
         ddl = mgr.get_ddl()
-        assert "custom_db.alert_state" in ddl
+        assert "`custom_db`.`alert_state`" in ddl
 
     def test_ensure_table_exists_idempotent(self):
         mgr = AlertStateManager()

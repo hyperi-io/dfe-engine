@@ -345,12 +345,12 @@ class TestSource:
         assert s.topic_load is None
 
     def test_display_name_auto(self):
-        s = Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))
+        s = Source(source="crowdstrike-edr", match=SourceMatch(field="f", value="v"))
         assert s.display_name == "Crowdstrike Edr"
 
     def test_display_name_explicit(self):
         s = Source(
-            source="crowdstrike_edr",
+            source="crowdstrike-edr",
             display_name="CrowdStrike EDR",
             match=SourceMatch(field="f", value="v"),
         )
@@ -430,42 +430,63 @@ class TestSource:
 
 
 class TestSourceNaming:
+    """A source name has to survive as the DNS-1123 label an instance is named for."""
+
     def test_valid_names(self):
-        for name in ["filebeat", "syslog", "crowdstrike_edr", "a", "x123_456"]:
+        for name in ["filebeat", "syslog", "crowdstrike-edr", "a", "x123-456"]:
             s = Source(source=name, match=SourceMatch(field="f", value="v"))
             assert s.source == name
 
     def test_starts_with_digit(self):
-        with pytest.raises(ValueError, match="must match"):
+        with pytest.raises(ValueError, match="DNS-1123 label"):
             Source(source="123abc")
 
     def test_uppercase(self):
-        with pytest.raises(ValueError, match="must match"):
+        with pytest.raises(ValueError, match="DNS-1123 label"):
             Source(source="FileBeat")
 
-    def test_hyphens(self):
-        with pytest.raises(ValueError, match="must match"):
-            Source(source="file-beat")
+    def test_underscores_are_refused_and_the_error_says_why(self):
+        """The message has to name the constraint, not just quote the regex."""
+        with pytest.raises(ValueError) as caught:
+            Source(source="crowdstrike_edr", match=SourceMatch(field="f", value="v"))
+        message = str(caught.value)
+        assert "DNS-1123 label" in message
+        assert "use '-' instead of '_'" in message
+        # It says what breaks, so the reader knows why the rule exists.
+        assert "instance" in message
+
+    def test_trailing_hyphen(self):
+        """A DNS-1123 label ends alphanumeric, so the instance would be rejected."""
+        with pytest.raises(ValueError, match="DNS-1123 label"):
+            Source(source="filebeat-")
 
     def test_spaces(self):
-        with pytest.raises(ValueError, match="must match"):
+        with pytest.raises(ValueError, match="DNS-1123 label"):
             Source(source="file beat")
 
     def test_too_long(self):
         with pytest.raises(ValueError, match="exceeds max length"):
-            Source(source="a" * 65)
+            Source(source="a" * 41)
 
     def test_max_length_ok(self):
-        s = Source(source="a" * 64, match=SourceMatch(field="f", value="v"))
-        assert len(s.source) == 64
+        s = Source(source="a" * 40, match=SourceMatch(field="f", value="v"))
+        assert len(s.source) == 40
 
     def test_empty(self):
         with pytest.raises(ValueError):
             Source(source="")
 
-    def test_underscore_only(self):
-        with pytest.raises(ValueError, match="must match"):
+    def test_leading_underscore(self):
+        with pytest.raises(ValueError, match="DNS-1123 label"):
             Source(source="_test")
+
+    def test_every_legal_name_is_a_legal_instance_name(self):
+        """The alignment this rule exists for, asserted against the instance rule."""
+        from dfe_engine.appmgmt.instances import validate_instance
+
+        for name in ["filebeat", "crowdstrike-edr", "x123-456", "a", "a" * 40]:
+            Source(source=name, match=SourceMatch(field="f", value="v"))
+            validate_instance(name)
 
 
 # ---------------------------------------------------------------------------
@@ -503,7 +524,7 @@ class TestSourceYaml:
 
     def test_round_trip_preserves_data(self):
         data = {
-            "source": "test_source",
+            "source": "test-source",
             "display_name": "Test Source",
             "description": "A test",
             "enabled": False,
@@ -611,7 +632,7 @@ class TestSourceWriteRequest:
         dormant source (effective_state keeps the current tri-state)."""
         existing = Source.model_validate(
             {
-                "source": "dormant_src",
+                "source": "dormant-src",
                 "state": "dormant",
                 "match": {"field": "f", "value": "v"},
             }
@@ -626,13 +647,13 @@ class TestSourceWriteRequest:
     def test_create_uses_1_0_0_not_header_profile_version(self):
         write = SourceWriteRequest.model_validate(
             {
-                "source": "profile_pin",
+                "source": "profile-pin",
                 "header": {"type": "common-header/minimal", "version": "1.1.0"},
                 "match": {"field": "f", "value": "v"},
                 "schema": {"engine": "MergeTree"},
             }
         )
-        src = source_from_write(write, source_name="profile_pin")
+        src = source_from_write(write, source_name="profile-pin")
         assert "1.0.0" in src.versions
         assert src.versions["1.0.0"].header.version == "1.1.0"
         assert src.current == "1.0.0"
@@ -641,12 +662,12 @@ class TestSourceWriteRequest:
     def test_create_without_header_leaves_header_unset(self):
         write = SourceWriteRequest.model_validate(
             {
-                "source": "no_header",
+                "source": "no-header",
                 "match": {"field": "f", "value": "v"},
                 "schema": {"engine": "MergeTree"},
             }
         )
-        src = source_from_write(write, source_name="no_header")
+        src = source_from_write(write, source_name="no-header")
         ver = src.versions["1.0.0"]
         assert ver.header is None
         assert "header" not in ver.to_yaml_dict()
@@ -669,7 +690,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_refuses_overwrite(self, monkeypatch):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -707,7 +728,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_appends_on_bump_worthy_change_after_deploy(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -745,7 +766,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_in_place_before_deploy(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": None,
                 "current": "1.0.0",
                 "versions": {
@@ -771,7 +792,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_omitted_header_not_persisted(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": None,
                 "current": "1.0.0",
                 "versions": {
@@ -799,7 +820,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_in_place_after_deploy_non_bump_fields(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -825,7 +846,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_bumps_on_meta_schema_path_after_deploy(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "2.0.0",
                 "current": "2.0.0",
                 "versions": {
@@ -864,7 +885,7 @@ class TestSourceWriteRequest:
         """Bump-worthy edits on a non-deployed ``current`` stay in place."""
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
                 "versions": {
@@ -918,7 +939,7 @@ class TestSourceWriteRequest:
     def test_apply_write_update_bumps_transform_when_current_deployed(self):
         existing = Source.model_validate(
             {
-                "source": "src_a",
+                "source": "src-a",
                 "deployed_version": "1.0.0",
                 "current": "1.0.0",
                 "versions": {
@@ -1047,7 +1068,7 @@ class TestSourceWriteRequest:
 class TestSourceVersionGetResponse:
     def test_round_trip_fields(self):
         resp = SourceVersionGetResponse(
-            source="my_source",
+            source="my-source",
             display_name="My Source",
             description="desc",
             enabled=False,
@@ -1063,7 +1084,7 @@ class TestSourceVersionGetResponse:
                 transform=SourceTransform(engine="vector"),
             ),
         )
-        assert resp.source == "my_source"
+        assert resp.source == "my-source"
         assert resp.version.schema_config.engine == "MergeTree"
         assert resp.version.match is not None
         assert resp.version.match.value == "x"
@@ -1073,7 +1094,7 @@ class TestPaginatedSourceSummaryResponse:
     def test_from_summaries_pagination_and_tree(self):
         objs = [
             SourceSummaryObject(
-                name="aws_cloudtrail",
+                name="aws-cloudtrail",
                 current="1.0.0",
                 deployed_version="1.0.0",
                 versions=["1.0.0"],
@@ -1089,7 +1110,7 @@ class TestPaginatedSourceSummaryResponse:
         assert resp.total == 2
         assert len(resp.items) == 1
         root_names = {obj.name for obj in resp.objects.items}
-        assert root_names == {"aws_cloudtrail", "syslog"}
+        assert root_names == {"aws-cloudtrail", "syslog"}
         assert resp.objects.children == {}
 
 
@@ -1103,7 +1124,7 @@ class TestSourceVersioning:
         }
         s = Source.model_validate(
             {
-                "source": "legacy_top",
+                "source": "legacy-top",
                 "current": "1.0.0",
                 "deployed_version": "1.0.0",
                 "match": {"field": "f", "value": "v"},
@@ -1120,7 +1141,7 @@ class TestSourceVersioning:
 
     def test_versioned_yaml_shape(self):
         data = {
-            "source": "no_transform",
+            "source": "no-transform",
             "display_name": "No Transform",
             "enabled": True,
             "deployed_version": "1.0.0",
@@ -1178,7 +1199,7 @@ class TestSourceVersioning:
         """Guards _VERSIONED_KEYS: flat bodies normalize into the version tree."""
         s = Source.model_validate(
             {
-                "source": "pull_src",
+                "source": "pull-src",
                 "match": {"field": "f", "value": "v"},
                 "fetcher": {"source_type": "m365"},
                 "views": [{"standard": "sigma", "taxonomy": "windows"}],
@@ -1229,7 +1250,7 @@ class TestSourceVersioning:
 
     def test_empty_versions_rejected(self):
         src = Source.model_construct(
-            source="empty_ver",
+            source="empty-ver",
             display_name="Empty",
             enabled=True,
             current="1.0.0",
@@ -1281,7 +1302,7 @@ class TestSourceVersioning:
     def test_to_yaml_dict_includes_transform(self):
         s = Source.model_validate(
             {
-                "source": "with_xform",
+                "source": "with-xform",
                 "match": {"field": "f", "value": "v"},
                 "transform": {"engine": "vector", "config_file": "/etc/vector/x.yaml"},
             }

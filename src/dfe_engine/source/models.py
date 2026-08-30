@@ -32,9 +32,42 @@ from pydantic import (
 from dfe_engine.api.pagination import PaginatedResponseWithObjects, PathTree
 from dfe_engine.source.engine_registry import EngineRegistry, InvalidEngineError
 
-# _source naming: lowercase alphanumeric + underscores, starts with letter
-_SOURCE_PATTERN = re.compile(r"^[a-z][a-z0-9_]*$")
-_SOURCE_MAX_LENGTH = 64
+# _source naming: a Kubernetes DNS-1123 label that starts with a letter. A
+# source-bound app's instance name IS the source name, so this charset must stay
+# a subset of ``appmgmt.instances._INSTANCE_RE`` -- hyphens, never underscores.
+_SOURCE_PATTERN = re.compile(r"^[a-z]([a-z0-9-]*[a-z0-9])?$")
+
+# The instance label caps at 40 characters, and the source name has to fit one.
+_SOURCE_MAX_LENGTH = 40
+
+
+def validate_source_name(name: str) -> str:
+    """Return *name* if it is a legal ``_source`` label, else raise.
+
+    The single definition of the rule. Anything else holding a source label --
+    a field map's ``source``, a rule's ``source`` -- validates through here, so
+    the two ends can never drift into accepting different names for one thing.
+    """
+    if len(name) > _SOURCE_MAX_LENGTH:
+        raise ValueError(
+            f"Source name {name!r} exceeds max length of {_SOURCE_MAX_LENGTH}: a "
+            "source-bound app deploys an instance named for its source, and a "
+            "Kubernetes label cannot be longer than that"
+        )
+    if not _SOURCE_PATTERN.match(name):
+        hint = (
+            " (use '-' instead of '_')"
+            if "_" in name
+            else " (lowercase alphanumeric and '-', starting with a letter, ending alphanumeric)"
+        )
+        raise ValueError(
+            f"Source name {name!r} must be a Kubernetes DNS-1123 label starting with a "
+            f"letter{hint}: a source-bound app such as a transform or a fetcher is "
+            "deployed as one instance per source, named for the source, so the name "
+            "becomes an Argo Application and a set of Kubernetes object names"
+        )
+    return name
+
 
 SourceMatchOperator = Literal[
     "equals",
@@ -797,20 +830,15 @@ class Source(BaseModel):
     @classmethod
     def _validate_source_name(cls, v: str) -> str:
         """Enforce _source naming rules."""
-        if len(v) > _SOURCE_MAX_LENGTH:
-            raise ValueError(f"Source name {v!r} exceeds max length of {_SOURCE_MAX_LENGTH}")
-        if not _SOURCE_PATTERN.match(v):
-            raise ValueError(
-                f"Source name {v!r} must match [a-z][a-z0-9_]* "
-                f"(lowercase alphanumeric + underscores, starts with letter)"
-            )
-        return v
+        return validate_source_name(v)
 
     @model_validator(mode="after")
     def _validate_versions_and_display_name(self) -> Source:
         """Default display_name and ensure version pointers are valid."""
         if self.display_name is None:
-            self.display_name = self.source.replace("_", " ").title()
+            # The word separator in a source name is the hyphen, so that is what
+            # becomes a space when a display name is derived rather than given.
+            self.display_name = self.source.replace("-", " ").title()
 
         if not self.versions:
             raise ValueError("versions must contain at least one version entry")

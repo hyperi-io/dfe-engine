@@ -224,7 +224,9 @@ def test_ui_deploys_schema_change_via_git(e2e: E2EConfig) -> None:
     # The create contract is `source` (not `name`) and `match` is REQUIRED - it is
     # the routing predicate that binds incoming events to this source, so a source
     # without one could never match anything.
-    source_name = f"e2e_src_{uuid.uuid4().hex[:8]}"
+    # Hyphen-separated: a source name is a DNS-1123 label, because a source-bound
+    # app deploys an instance named for it.
+    source_name = f"e2e-src-{uuid.uuid4().hex[:8]}"
     body = {
         "source": source_name,
         "match": {"field": "_source", "operator": "equals", "value": source_name},

@@ -70,11 +70,16 @@ class FieldMap(BaseModel):
     @field_validator("source")
     @classmethod
     def _validate_source(cls, v: str | None) -> str | None:
-        if v is not None:
-            v = v.lower()
-            if not _NAME_PATTERN.match(v):
-                raise ValueError(f"Source '{v}' must match [a-z][a-z0-9_]*")
-        return v
+        """Hold ``source`` to the one source-name rule, not a second copy of it.
+
+        Imported lazily because ``source.models`` reads ``KNOWN_STANDARDS`` from
+        here, so a module-level import would close the cycle.
+        """
+        if v is None:
+            return None
+        from dfe_engine.source.models import validate_source_name
+
+        return validate_source_name(v.lower())
 
     @property
     def registry_key(self) -> str:

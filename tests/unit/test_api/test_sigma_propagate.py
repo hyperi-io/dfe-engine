@@ -19,7 +19,7 @@ from dfe_engine.gitcrud import GitCrud, default_registry
 from dfe_engine.gitops.repo import GitopsRepo
 
 _ID = "dddddddd-dddd-dddd-dddd-dddddddddddd"
-_BINDING = f"sigma_windows_audit_{_ID.replace('-', '')}"
+_BINDING = f"sigma_windows-audit_{_ID.replace('-', '')}"
 
 
 def _wire_gitcrud(app, tmp_path):
@@ -29,7 +29,7 @@ def _wire_gitcrud(app, tmp_path):
     return gc
 
 
-def _add_windows_source(name: str = "windows_audit") -> None:
+def _add_windows_source(name: str = "windows-audit") -> None:
     _registries["source"].save_source(
         {
             "source": name,
@@ -113,15 +113,15 @@ def test_propagate_generates_binding_and_hunt(client, app, admin_headers, tmp_pa
     assert body["status"] == "completed"
     report = body["report"]
     assert report["created"] == [_BINDING]
-    assert report["hunts_touched"] == ["sigma_hunt_windows_audit"]
+    assert report["hunts_touched"] == ["sigma_hunt_windows-audit"]
 
     # the generated DFE rule targets the sigma view + carries the back-ref
     rule = client.get(f"/api/v1/rules/{_BINDING}", headers=admin_headers).json()
-    assert rule["source_table"] == "windows_audit_sigma"
+    assert rule["source_table"] == "windows-audit_sigma"
     assert "Image ILIKE" in rule["where_clause"]
 
     # the per-source hunt includes the binding
-    hunt = client.get("/api/v1/hunts/sigma_hunt_windows_audit", headers=admin_headers).json()
+    hunt = client.get("/api/v1/hunts/sigma_hunt_windows-audit", headers=admin_headers).json()
     assert [r["rule_name"] for r in hunt["rules"]] == [_BINDING]
     assert hunt["customers"] == ["acme"]
 
@@ -134,7 +134,7 @@ def test_propagate_generates_binding_and_hunt(client, app, admin_headers, tmp_pa
     got = client.get(f"/api/v1/sigma/bindings/{_BINDING}", headers=admin_headers)
     assert got.status_code == 200
     assert got.json()["sigma_rule_id"] == _ID
-    assert got.json()["hunts"] == ["sigma_hunt_windows_audit"]
+    assert got.json()["hunts"] == ["sigma_hunt_windows-audit"]
 
 
 def test_propagate_poll_endpoint(client, app, admin_headers, tmp_path):
@@ -181,7 +181,7 @@ def test_delete_binding_unlinks_hunt(client, app, admin_headers, tmp_path):
     assert client.get(f"/api/v1/rules/{_BINDING}", headers=admin_headers).status_code == 404
     # the emptied per-source hunt is gone
     assert (
-        client.get("/api/v1/hunts/sigma_hunt_windows_audit", headers=admin_headers).status_code
+        client.get("/api/v1/hunts/sigma_hunt_windows-audit", headers=admin_headers).status_code
         == 404
     )
 

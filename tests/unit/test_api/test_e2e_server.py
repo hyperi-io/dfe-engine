@@ -19,7 +19,9 @@ from dfe_engine.settings import (
     APISettings,
     AuthSettings,
     ClickHouseSettings,
+    DeploymentSettings,
     DFESettings,
+    GitopsSettings,
     HuntsSettings,
     LocalAuthSettings,
     SchemasSettings,
@@ -31,6 +33,14 @@ from dfe_engine.settings import (
 _SEED = "/api/e2e/seed-static"
 _STATUS = "/api/e2e/status"
 
+_APPS = "/api/v1/apps"
+_LIB = "/api/v1/library"
+_SOURCES = "/api/v1/sources"
+
+_VRL = "dfe-transform-vrl"
+_SOURCE = "seedsource"
+_ARTIFACT = "seed-artefact"
+
 
 @pytest.fixture(autouse=True)
 def _hermetic_break_glass(monkeypatch):
@@ -39,7 +49,20 @@ def _hermetic_break_glass(monkeypatch):
     monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
 
 
-def _settings(tmp_path: Path, *, e2e_server: bool, env: str = "test") -> DFESettings:
+def _settings(
+    tmp_path: Path,
+    *,
+    e2e_server: bool,
+    env: str = "test",
+    gitops: bool = False,
+    deployment_target: str = "unknown",
+) -> DFESettings:
+    """Settings for an e2e-server process.
+
+    ``gitops`` stands a real local deploy repo up the way ``make e2e-server`` does
+    when it is configured for one: the app-management seeds write into it, and the
+    source registry backs onto its ``config/sources``.
+    """
     for sub in ("sources", "services", "rules", "hunts", "auth", "schemas", "secrets"):
         (tmp_path / sub).mkdir()
     return DFESettings(
@@ -47,6 +70,12 @@ def _settings(tmp_path: Path, *, e2e_server: bool, env: str = "test") -> DFESett
         e2e_server=e2e_server,
         config_dir=str(tmp_path),
         clickhouse=ClickHouseSettings(bootstrap_tables=False),
+        deployment=DeploymentSettings(target=deployment_target),
+        gitops=GitopsSettings(
+            enabled=gitops,
+            local_path=str(tmp_path / "deploy") if gitops else "",
+            push=False,
+        ),
         source=SourceSettings(sources_dir=str(tmp_path / "sources")),
         services=ServicesSettings(config_yaml_dir=str(tmp_path / "services")),
         schemas=SchemasSettings(schemas_dir=str(tmp_path / "schemas")),
@@ -187,6 +216,515 @@ def test_e2e_seed_dfe_admin_resets_existing_password(tmp_path):
                 ).status_code
                 == 200
             )
+    finally:
+        _registries.clear()
+
+
+@pytest.fixture
+def appmgmt_client(tmp_path):
+    """An e2e-server process with a real deploy repo and a Kubernetes deploy target.
+
+    Everything the app-management seeds produce is read back over the product API in
+    the same process, so the assertions exercise the routers a Playwright spec drives
+    rather than the files underneath them.
+    """
+    app = create_app(
+        settings=_settings(tmp_path, e2e_server=True, gitops=True, deployment_target="kubernetes")
+    )
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            yield client
+    finally:
+        _registries.clear()
+
+
+def _seed(client: TestClient, script: str) -> None:
+    resp = client.post(_SEED, json={"script": script})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["success"] is True
+
+
+def _admin(client: TestClient) -> dict[str, str]:
+    login = client.post("/api/v1/auth/login", json={"username": "admin", "password": "changeme"})
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _get(client: TestClient, path: str, headers: dict[str, str]) -> dict | list:
+    resp = client.get(path, headers=headers)
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+def _instances(client: TestClient, headers: dict[str, str], service: str) -> list[str]:
+    listed = _get(client, _APPS, headers)
+    by_service = {entry["service"]: entry for entry in listed}
+    return by_service[service]["instances"]
+
+
+class TestSeedSourceWithTransform:
+    """The Sources/<source> page: a source, its bound apps, and compiled routing."""
+
+    def test_the_seeded_source_and_its_apps_are_readable_over_the_api(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        headers = _admin(appmgmt_client)
+
+        source = _get(appmgmt_client, f"{_SOURCES}/{_SOURCE}", headers)
+        assert source["source"] == _SOURCE
+        version = source["versions"][source["current"]]
+        assert version["match"]["value"] == _SOURCE
+        # The fetcher half of the page, which the source model carries itself.
+        assert version["fetcher"]["source_type"] == "http_json"
+
+        assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
+        assert _instances(appmgmt_client, headers, "dfe-fetcher") == [_SOURCE]
+
+        summary = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}", headers)
+        assert summary["telemetry_name"] == f"{_VRL}-{_SOURCE}"
+        assert summary["multiplicity"] == "per_config"
+
+    def test_the_transform_carries_a_program_the_editor_can_open(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        headers = _admin(appmgmt_client)
+
+        listed = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        assert [f["name"] for f in listed] == [f"{_SOURCE}.vrl"]
+
+        found = _get(
+            appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms/{_SOURCE}.vrl", headers
+        )
+        assert found["language"] == "vrl"
+        assert f'.dfe_source = "{_SOURCE}"' in found["content"]
+
+    def test_the_receiver_routing_is_compiled_from_the_seeded_source(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        headers = _admin(appmgmt_client)
+
+        found = _get(appmgmt_client, f"{_APPS}/dfe-receiver/default/routing", headers)
+        assert (found["drift"], found["absent"]) == (False, False)
+        assert [rule["source"] for rule in found["deployed"]["source_rules"]] == [_SOURCE]
+
+    def test_the_loader_routing_is_synced_too(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        headers = _admin(appmgmt_client)
+
+        found = _get(appmgmt_client, f"{_APPS}/dfe-loader/default/routing", headers)
+        assert (found["drift"], found["absent"]) == (False, False)
+
+    def test_seeding_twice_duplicates_nothing(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        _seed(appmgmt_client, "seed_source_with_transform")
+        headers = _admin(appmgmt_client)
+
+        listed = _get(appmgmt_client, _SOURCES, headers)
+        assert [s["name"] for s in listed["items"]] == [_SOURCE]
+        assert _instances(appmgmt_client, headers, _VRL) == [_SOURCE]
+        files = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        assert [f["name"] for f in files] == [f"{_SOURCE}.vrl"]
+
+    def test_reset_all_removes_the_source_and_its_instances(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_source_with_transform")
+        _seed(appmgmt_client, "reset_all")
+        headers = _admin(appmgmt_client)
+
+        assert _get(appmgmt_client, _SOURCES, headers)["items"] == []
+        assert _instances(appmgmt_client, headers, _VRL) == []
+        assert _instances(appmgmt_client, headers, "dfe-receiver") == []
+        assert appmgmt_client.get(f"{_SOURCES}/{_SOURCE}", headers=headers).status_code == 404
+
+
+class TestSeedLibraryArtefact:
+    """The Library page, plus the per-file link and drift surfaces it feeds."""
+
+    def test_the_artefact_carries_two_versions_a_tag_and_labels(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        headers = _admin(appmgmt_client)
+
+        assert [a["name"] for a in _get(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
+
+        found = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}", headers)
+        assert found["kind"] == "vrl"
+        assert found["versions"] == [1, 2]
+        assert found["current"] == 2
+        assert found["tags"] == {"stable": 1}
+        assert found["group"] == "seed"
+        assert found["labels"] == {"team": "platform", "tier": "gold"}
+
+        versions = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/versions", headers)
+        assert [v["version"] for v in versions] == [1, 2]
+        assert versions[0]["digest"] != versions[1]["digest"]
+
+    def test_the_version_content_reads_back_verbatim(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        headers = _admin(appmgmt_client)
+
+        found = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/versions/2", headers)
+        assert ".dfe_enriched = true" in found["content"]
+
+    def test_the_link_and_its_usage_are_both_visible(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        headers = _admin(appmgmt_client)
+
+        usage = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)
+        assert len(usage) == 1
+        assert (usage[0]["service"], usage[0]["instance"]) == (_VRL, _SOURCE)
+        assert usage[0]["name"] == "seed_library.vrl"
+
+        links = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms/links", headers)
+        assert len(links) == 1
+        # Pinned behind the current version, so the page has a real outdated signal
+        # without the resolved content having drifted from what it was linked to.
+        assert (links[0]["version"], links[0]["available_version"]) == (1, 2)
+        assert (links[0]["outdated"], links[0]["drift"], links[0]["missing"]) == (
+            True,
+            False,
+            False,
+        )
+
+    def test_the_linked_content_lands_in_the_file_set(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        headers = _admin(appmgmt_client)
+
+        listed = _get(appmgmt_client, f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms", headers)
+        assert sorted(f["name"] for f in listed) == ["seed_library.vrl", f"{_SOURCE}.vrl"]
+
+        found = _get(
+            appmgmt_client,
+            f"{_APPS}/{_VRL}/{_SOURCE}/files/transforms/seed_library.vrl",
+            headers,
+        )
+        assert ".dfe_artefact = 1" in found["content"]
+
+    def test_seeding_twice_adds_no_version_and_no_second_link(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        _seed(appmgmt_client, "seed_library_artefact")
+        headers = _admin(appmgmt_client)
+
+        found = _get(appmgmt_client, f"{_LIB}/{_ARTIFACT}", headers)
+        assert found["versions"] == [1, 2]
+        assert found["current"] == 2
+        assert found["tags"] == {"stable": 1}
+        assert len(_get(appmgmt_client, f"{_LIB}/{_ARTIFACT}/usage", headers)) == 1
+        assert [a["name"] for a in _get(appmgmt_client, _LIB, headers)] == [_ARTIFACT]
+
+    def test_reset_all_removes_the_artefact(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_library_artefact")
+        _seed(appmgmt_client, "reset_all")
+        headers = _admin(appmgmt_client)
+
+        assert _get(appmgmt_client, _LIB, headers) == []
+        assert appmgmt_client.get(f"{_LIB}/{_ARTIFACT}", headers=headers).status_code == 404
+
+
+class TestSeedAppScalingState:
+    """The Components page: pools whose dials are set rather than chart defaults."""
+
+    def test_the_pools_report_the_seeded_dials(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        headers = _admin(appmgmt_client)
+
+        for service in ("dfe-receiver", "dfe-loader"):
+            found = _get(appmgmt_client, f"{_APPS}/{service}/default/scaling", headers)
+            assert found["supported"] is True
+            assert found["deploy_target"] == "kubernetes"
+            assert (found["min_replicas"], found["max_replicas"]) == (2, 12)
+            assert found["keda_enabled"] is True
+            assert (found["cpu_request"], found["memory_request"]) == ("250m", "512Mi")
+            assert (found["cpu_limit"], found["memory_limit"]) == ("1", "1Gi")
+
+    def test_seeding_twice_leaves_the_same_dials(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        headers = _admin(appmgmt_client)
+
+        found = _get(appmgmt_client, f"{_APPS}/dfe-receiver/default/scaling", headers)
+        assert (found["min_replicas"], found["max_replicas"]) == (2, 12)
+        assert _instances(appmgmt_client, headers, "dfe-receiver") == ["default"]
+
+    def test_reset_all_removes_the_pools(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        _seed(appmgmt_client, "reset_all")
+        headers = _admin(appmgmt_client)
+
+        assert _instances(appmgmt_client, headers, "dfe-receiver") == []
+        assert (
+            appmgmt_client.get(f"{_APPS}/dfe-receiver/default/scaling", headers=headers).status_code
+            == 404
+        )
+
+    def test_reset_all_still_leaves_the_break_glass_admin(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        _seed(appmgmt_client, "reset_all")
+        assert _admin(appmgmt_client)
+
+
+_BACKING = "/api/v1/backing-services"
+_CH_OVERLAY = "clickhouse-cluster"
+
+
+class TestResetClearsRunState:
+    """A reset has to take the substrate overlay with it, or specs inherit it.
+
+    The live failure this pins: one spec raised a backing-service node count, the
+    next reset left it raised, and that spec then failed against its predecessor's
+    leftovers on a workspace it believed was clean.
+    """
+
+    @staticmethod
+    def _raise_node_count(client: TestClient, headers: dict[str, str]) -> None:
+        resp = client.put(
+            f"{_BACKING}/overlays/{_CH_OVERLAY}/vars/clickhouse.replicas",
+            json={"value": 5},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_raised_node_count_does_not_survive_reset_all(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        headers = _admin(appmgmt_client)
+        self._raise_node_count(appmgmt_client, headers)
+
+        # It really is declared before the reset, or the test proves nothing.
+        declared = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        assert declared["clickhouse"]["replicas"]["value"] == 5
+        assert declared["clickhouse"]["replicas"]["source"] is not None
+
+        _seed(appmgmt_client, "reset_all")
+
+        headers = _admin(appmgmt_client)
+        after = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        for service in after.values():
+            for field in ("mode", "storage_model", "replicas", "storage_size", "storage_class"):
+                assert service[field]["value"] is None, f"{service['service']}.{field}"
+                assert service[field]["source"] is None
+        assert _get(appmgmt_client, f"{_BACKING}/overlays", headers) == []
+
+    def test_the_auto_merge_flag_does_not_survive_reset_all(self, appmgmt_client):
+        """Absent reads as off, which is the posture a fresh deployment starts in."""
+        headers = _admin(appmgmt_client)
+        enabled = appmgmt_client.put(
+            "/api/v1/gitops/auto-merge", json={"enabled": True}, headers=headers
+        )
+        assert enabled.status_code == 200, enabled.text
+        assert _get(appmgmt_client, "/api/v1/gitops/auto-merge", headers)["stored"] is True
+
+        _seed(appmgmt_client, "reset_all")
+
+        headers = _admin(appmgmt_client)
+        assert _get(appmgmt_client, "/api/v1/gitops/auto-merge", headers)["stored"] is False
+
+    def test_the_shipped_governance_library_survives_reset_all(self, appmgmt_client):
+        """Actions and policies are product configuration, not run state."""
+        gc = appmgmt_client.app.state.gitcrud
+        actions = set(gc.list("actions"))
+        policies = set(gc.list("policies"))
+        assert actions, "the startup seed should have populated the action library"
+        assert policies, "the startup seed should have populated the policy library"
+
+        _seed(appmgmt_client, "reset_all")
+
+        assert set(gc.list("actions")) == actions
+        assert set(gc.list("policies")) == policies
+
+    def test_reset_all_still_leaves_the_break_glass_durable(self, appmgmt_client):
+        """Clearing run state must not disturb the account copy the reset re-mirrors."""
+        _seed(appmgmt_client, "seed_setup_complete")
+        _seed(appmgmt_client, "reset_all")
+
+        app = appmgmt_client.app
+        live = app.state.account_store.get("admin")
+        stored = app.state.gitcrud.get("accounts", "admin")
+        assert stored["password_hash"] == live.password_hash
+
+    def test_clearing_run_state_is_a_no_op_without_a_deploy_repo(self, tmp_path):
+        app = create_app(settings=_settings(tmp_path, e2e_server=True))
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                assert app.state.gitcrud is None
+                _seed(client, "reset_all")
+                assert not (tmp_path / "deploy").exists()
+        finally:
+            _registries.clear()
+
+
+def _setup_status(client: TestClient) -> dict:
+    resp = client.get("/api/v1/auth/setup-status")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestBreakGlassDurability:
+    """Seeding has to leave the break-glass admin durable, or setup never finishes.
+
+    The wizard only calls the rotate-the-break-glass step done once the deploy
+    repo's copy of the account matches the live one. A seeder that wrote only the
+    live store left every gitops-enabled Playwright run bounced to
+    ``/setup/resetBreakGlassAccount``, forever.
+    """
+
+    @staticmethod
+    def _client(tmp_path):
+        return create_app(settings=_settings(tmp_path, e2e_server=True, gitops=True))
+
+    def test_seeding_leaves_the_break_glass_merged_and_setup_complete(self, tmp_path):
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+
+                status = _setup_status(client)
+                assert status["break_glass"]["committed"] is True
+                assert status["break_glass"]["merged"] is True
+                assert status["break_glass"]["pending"] is None
+                assert status["initial_setup"]["complete"] is True
+                assert status["initial_setup"]["current_step"] is None
+        finally:
+            _registries.clear()
+
+    def test_the_committed_hash_is_the_live_one_not_a_second_derivation(self, tmp_path):
+        """bcrypt re-salts, so the hash has to be mirrored rather than re-derived."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                live = app.state.account_store.get("admin")
+                stored = app.state.gitcrud.get("accounts", "admin")
+                assert stored["password_hash"] == live.password_hash
+        finally:
+            _registries.clear()
+
+    def test_the_seeded_break_glass_password_still_logs_in(self, tmp_path):
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                login = client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "already_reset"},
+                )
+                assert login.status_code == 200, login.text
+        finally:
+            _registries.clear()
+
+    def test_reseeding_after_reset_all_is_merged_again(self, tmp_path):
+        """The Playwright arrangement: reset_all then seed, over and over."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                for _ in range(2):
+                    _seed(client, "reset_all")
+                    _seed(client, "seed_setup_complete")
+                    status = _setup_status(client)
+                    assert status["break_glass"]["merged"] is True
+                    assert status["initial_setup"]["complete"] is True
+
+                live = app.state.account_store.get("admin")
+                stored = app.state.gitcrud.get("accounts", "admin")
+                assert stored["password_hash"] == live.password_hash
+        finally:
+            _registries.clear()
+
+    def test_only_the_break_glass_account_reaches_the_deploy_repo(self, tmp_path):
+        """A regular seeded account is durable in its own store; git is the exception."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                _seed(client, "seed_dfe_analyst_user")
+                committed = set(app.state.gitcrud.list("accounts"))
+                assert committed == {"admin"}
+        finally:
+            _registries.clear()
+
+    def test_gitops_off_seeds_with_no_deploy_repo_at_all(self, tmp_path):
+        """The mirror only happens on the gitops path; without one nothing changes."""
+        app = create_app(settings=_settings(tmp_path, e2e_server=True))
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                assert app.state.gitcrud is None
+                _seed(client, "seed_setup_complete")
+                assert not (tmp_path / "deploy").exists()
+
+                status = _setup_status(client)
+                # No deploy repo means the live store IS the durable store, so the
+                # durability question does not arise.
+                assert status["break_glass"]["enabled"] is False
+                assert status["break_glass"]["merged"] is True
+                assert status["initial_setup"]["complete"] is True
+
+                login = client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "already_reset"},
+                )
+                assert login.status_code == 200, login.text
+        finally:
+            _registries.clear()
+
+
+class TestBreakGlassReviewPosture:
+    """A posture that refuses direct-to-main reports pending rather than pretending.
+
+    Not reachable from `make e2e-server`, whose DFE_ENV=test is a dev posture and
+    so always commits straight to main -- the seed gate requires that env. Built
+    directly here so the honest-pending branch is still pinned.
+    """
+
+    @staticmethod
+    def _seeder(tmp_path):
+        from dfe_engine.api.e2e.seed import Seed
+        from dfe_engine.auth.bootstrap import bootstrap_auth
+        from dfe_engine.gitcrud import GitCrud, default_registry
+        from dfe_engine.gitops.repo import GitopsRepo
+        from dfe_engine.orgs.registry import OrgRegistry
+
+        gc = GitCrud(
+            GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
+        )
+        accounts, groups, *_ = bootstrap_auth(tmp_path / "config" / "auth", gitcrud=gc)
+        # e2e_server=False because settings REFUSE to mount the seed routes in a
+        # production posture at all -- which is the same reason this branch cannot
+        # be reached through the endpoint. Only the routing posture is wanted here.
+        settings = _settings(tmp_path, e2e_server=False, env="production", gitops=True)
+        settings.gitops.mode = "team"
+        # The gate is the seeder's own env; the ROUTING posture is the settings'.
+        seeder = Seed(
+            account_store=accounts,
+            group_store=groups,
+            org_registry=OrgRegistry(tmp_path / "orgs"),
+            env="test",
+            gitcrud=gc,
+            settings=settings,
+            forge=None,
+        )
+        return seeder, gc, accounts, settings
+
+    def test_a_review_posture_commits_to_a_branch_and_reports_unmerged(self, tmp_path, monkeypatch):
+        from dfe_engine.auth.account_durability import steady_state
+
+        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+        seeder, gc, accounts, settings = self._seeder(tmp_path)
+
+        assert seeder.seed_static("seed_setup_complete") is True
+
+        state = steady_state(
+            gc, accounts, "admin", environment=settings.env, mode=settings.gitops.mode
+        )
+        # Committed (on a review branch, so the change is not lost), but the
+        # tracked branch still carries the old hash, so it is honestly unmerged.
+        assert state.committed is True
+        assert state.merged is False
+        assert gc.get("accounts", "admin")["password_hash"] != accounts.get("admin").password_hash
+
+
+def test_an_app_seed_without_a_deploy_repo_fails_loudly(tmp_path):
+    """A misconfigured e2e-server must not report a seed that wrote nothing."""
+    app = create_app(settings=_settings(tmp_path, e2e_server=True))
+    try:
+        with TestClient(app, raise_server_exceptions=False) as client:
+            resp = client.post(_SEED, json={"script": "seed_source_with_transform"})
+            assert resp.status_code == 500
     finally:
         _registries.clear()
 

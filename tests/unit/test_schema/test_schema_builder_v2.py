@@ -90,8 +90,8 @@ def _make_source(
     schema_config["engine"] = engine
 
     data = {
-        "source": "test_source",
-        "match": {"field": "tags.collector.type", "value": "test_source"},
+        "source": "test-source",
+        "match": {"field": "tags.collector.type", "value": "test-source"},
         "header": {"type": header_type, "version": "1.0.0"},
         "schema": schema_config,
     }
@@ -111,7 +111,7 @@ class TestBuild:
         result = builder.build(source)
 
         assert isinstance(result, SchemaBuildResult)
-        assert result.source_name == "test_source"
+        assert result.source_name == "test-source"
         assert result.validation_errors == []
 
         # Profile columns + source columns
@@ -123,7 +123,7 @@ class TestBuild:
 
         # DDL generated
         assert "CREATE TABLE IF NOT EXISTS" in result.create_table_ddl
-        assert "test_source" in result.create_table_ddl
+        assert "test-source" in result.create_table_ddl
 
     def test_build_meta_schema_registry_path_without_suffix(self, registry, tmp_path):
         meta_dir = tmp_path / "meta" / "aws"
@@ -266,7 +266,7 @@ class TestSigmaView:
         result = builder.build(source)
 
         assert "sigma" in result.view_ddls
-        assert "test_source_sigma" in result.view_ddls["sigma"]
+        assert "test-source_sigma" in result.view_ddls["sigma"]
         assert "`user_name` AS `User`" in result.view_ddls["sigma"]
         assert "`event_id` AS `EventID`" in result.view_ddls["sigma"]
 
@@ -304,8 +304,8 @@ class TestErrors:
     def test_invalid_profile(self, registry):
         builder = SchemaBuilderV2(registry=registry)
         data = {
-            "source": "bad_source",
-            "match": {"field": "tags.collector.type", "value": "bad_source"},
+            "source": "bad-source",
+            "match": {"field": "tags.collector.type", "value": "bad-source"},
             "header": {"type": "nonexistent_profile"},
             "schema": {},
         }
@@ -352,7 +352,7 @@ class TestBuildDDLOnly:
             SchemaColumn(name="x", type="string"),
         ]
         ddl = builder.build_ddl_only(columns, "my_table")
-        assert "CREATE TABLE IF NOT EXISTS {db}.my_table" in ddl
+        assert "CREATE TABLE IF NOT EXISTS `{db}`.`my_table`" in ddl
         assert "`_ts`" in ddl
         assert "`x`" in ddl
 
@@ -429,8 +429,8 @@ class TestViewDDLIntegration:
 
         assert "sigma" in result.view_ddls
         assert "ecs" in result.view_ddls
-        assert "test_source_sigma" in result.view_ddls["sigma"]
-        assert "test_source_ecs" in result.view_ddls["ecs"]
+        assert "test-source_sigma" in result.view_ddls["sigma"]
+        assert "test-source_ecs" in result.view_ddls["ecs"]
         assert "`user_name` AS `User`" in result.view_ddls["sigma"]
 
     def test_skips_standard_with_no_maps(self, registry, schemas_dir, fm_registry):
@@ -495,10 +495,10 @@ class TestViewDDLIntegration:
         )
         # The source-name convention map: bypassed when the view pins another.
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="test_source", mappings={"User": "convention_user"})
+            FieldMap(standard="sigma", source="test-source", mappings={"User": "convention_user"})
         )
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+            FieldMap(standard="sigma", source="corp-pin", mappings={"User": "pinned_user"})
         )
         builder = SchemaBuilderV2(
             registry=registry,
@@ -507,7 +507,7 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            views=[{"standard": "sigma", "field_map": "corp_pin"}],
+            views=[{"standard": "sigma", "field_map": "corp-pin"}],
         )
         result = builder.build(source)
 
@@ -519,7 +519,7 @@ class TestViewDDLIntegration:
     def test_field_map_pin_standard_slash_form(self, registry, schemas_dir, fm_registry):
         """The 'standard/name' pin form resolves the same map as the bare name."""
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+            FieldMap(standard="sigma", source="corp-pin", mappings={"User": "pinned_user"})
         )
         builder = SchemaBuilderV2(
             registry=registry,
@@ -528,7 +528,7 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            views=[{"standard": "sigma", "field_map": "sigma/corp_pin"}],
+            views=[{"standard": "sigma", "field_map": "sigma/corp-pin"}],
         )
         result = builder.build(source)
         assert "`pinned_user` AS `User`" in result.view_ddls["sigma"]
@@ -545,7 +545,7 @@ class TestViewDDLIntegration:
         )
         source = _make_source(
             meta_schema="meta.yaml",
-            views=[{"standard": "sigma", "field_map": "ecs/corp_pin"}],
+            views=[{"standard": "sigma", "field_map": "ecs/corp-pin"}],
         )
         with pytest.raises(FieldMapError, match="ecs"):
             builder.build(source)
@@ -555,7 +555,7 @@ class TestViewDDLIntegration:
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
-                source="corp_pin",
+                source="corp-pin",
                 mappings={"User": "pinned_user", "EventID": "pinned_event_id"},
             )
         )
@@ -569,7 +569,7 @@ class TestViewDDLIntegration:
             views=[
                 {
                     "standard": "sigma",
-                    "field_map": "corp_pin",
+                    "field_map": "corp-pin",
                     "custom_mappings": {"User": "inline_user"},
                 }
             ],
@@ -591,7 +591,7 @@ class TestViewDDLIntegration:
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
-                source="test_source",
+                source="test-source",
                 mappings={"EventID": "cs_event_id"},
             )
         )
@@ -628,8 +628,8 @@ class TestLoadColumnsForSourceVersion:
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = Source.model_validate(
             {
-                "source": "versioned_src",
-                "match": {"field": "tags.collector.type", "value": "versioned_src"},
+                "source": "versioned-src",
+                "match": {"field": "tags.collector.type", "value": "versioned-src"},
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
                 "versions": {
@@ -669,8 +669,8 @@ class TestLoadColumnsForSourceVersion:
         builder = SchemaBuilderV2(registry=registry, schemas_base_dir=schemas_dir)
         source = Source.model_validate(
             {
-                "source": "versioned_src",
-                "match": {"field": "tags.collector.type", "value": "versioned_src"},
+                "source": "versioned-src",
+                "match": {"field": "tags.collector.type", "value": "versioned-src"},
                 "deployed_version": "1.0.0",
                 "current": "2.0.0",
                 "versions": {

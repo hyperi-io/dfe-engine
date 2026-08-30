@@ -71,26 +71,26 @@ class TestCRUD:
 
     def test_save_and_get_source_specific(self, registry):
         fm = _make_field_map(
-            source="windows_audit",
+            source="windows-audit",
             mappings={"User": "account_name"},
         )
         registry.save_map(fm)
 
-        loaded = registry.get_map("sigma", "windows_audit")
-        assert loaded.source == "windows_audit"
+        loaded = registry.get_map("sigma", "windows-audit")
+        assert loaded.source == "windows-audit"
         assert loaded.mappings == {"User": "account_name"}
 
     def test_save_from_dict(self, registry):
         data = {
             "standard": "ecs",
-            "source": "linux_syslog",
+            "source": "linux-syslog",
             "mappings": {"source.ip": "source_ip"},
         }
         result = registry.save_map(data)
         assert isinstance(result, FieldMap)
         assert result.standard == "ecs"
 
-        loaded = registry.get_map("ecs", "linux_syslog")
+        loaded = registry.get_map("ecs", "linux-syslog")
         assert loaded.mappings == {"source.ip": "source_ip"}
 
     def test_save_invalid_dict_raises(self, registry):
@@ -117,14 +117,14 @@ class TestCRUD:
 
     def test_delete_existing(self, registry):
         fm = _make_field_map(
-            source="windows_audit",
+            source="windows-audit",
             mappings={"User": "user_name"},
         )
         registry.save_map(fm)
-        assert registry.map_exists("sigma", "windows_audit")
+        assert registry.map_exists("sigma", "windows-audit")
 
-        registry.delete_map("sigma", "windows_audit")
-        assert not registry.map_exists("sigma", "windows_audit")
+        registry.delete_map("sigma", "windows-audit")
+        assert not registry.map_exists("sigma", "windows-audit")
 
     def test_delete_nonexistent_is_noop(self, registry):
         registry.delete_map("sigma", "nonexistent")
@@ -169,7 +169,7 @@ class TestList:
         registry.save_map(
             _make_field_map(
                 standard="ecs",
-                source="windows_audit",
+                source="windows-audit",
                 mappings={"source.ip": "source_ip", "user.name": "user_name"},
                 version="8.11",
             )
@@ -179,7 +179,7 @@ class TestList:
         assert len(results) == 1
         entry = results[0]
         assert entry["standard"] == "ecs"
-        assert entry["source"] == "windows_audit"
+        assert entry["source"] == "windows-audit"
         assert entry["is_default"] is False
         assert entry["version"] == "8.11"
         assert entry["mapping_count"] == 2
@@ -227,9 +227,9 @@ class TestMapExists:
         assert registry.map_exists("sigma") is False
 
     def test_exists_source_specific(self, registry):
-        registry.save_map(_make_field_map(source="windows_audit", mappings={"A": "a"}))
-        assert registry.map_exists("sigma", "windows_audit") is True
-        assert registry.map_exists("sigma", "linux_syslog") is False
+        registry.save_map(_make_field_map(source="windows-audit", mappings={"A": "a"}))
+        assert registry.map_exists("sigma", "windows-audit") is True
+        assert registry.map_exists("sigma", "linux-syslog") is False
 
 
 # ---------------------------------------------------------------
@@ -350,20 +350,20 @@ class TestMultiStandard:
         registry.save_map(
             _make_field_map(
                 standard="sigma",
-                source="windows_audit",
+                source="windows-audit",
                 mappings={"User": "user_name"},
             )
         )
         registry.save_map(
             _make_field_map(
                 standard="ecs",
-                source="windows_audit",
+                source="windows-audit",
                 mappings={"user.name": "user_name"},
             )
         )
 
-        sigma = registry.get_map("sigma", "windows_audit")
-        ecs = registry.get_map("ecs", "windows_audit")
+        sigma = registry.get_map("sigma", "windows-audit")
+        ecs = registry.get_map("ecs", "windows-audit")
         assert sigma.mappings == {"User": "user_name"}
         assert ecs.mappings == {"user.name": "user_name"}
 
@@ -377,12 +377,12 @@ class TestMultiStandard:
         registry.save_map(
             _make_field_map(
                 standard="sigma",
-                source="windows_audit",
+                source="windows-audit",
                 mappings={"User": "account_name"},
             )
         )
 
         default = registry.get_map("sigma")
-        specific = registry.get_map("sigma", "windows_audit")
+        specific = registry.get_map("sigma", "windows-audit")
         assert default.mappings["User"] == "user_name"
         assert specific.mappings["User"] == "account_name"
