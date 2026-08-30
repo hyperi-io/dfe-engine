@@ -33,6 +33,7 @@ data off first. CPU and memory move freely both ways.
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, TypeGuard
@@ -99,6 +100,15 @@ class BackingService:
     extra_member_counts: tuple[str, ...] = field(default_factory=tuple)
     """Further member counts under `prefix` that are up-only for the same reason."""
 
+    reload_by_segment: Mapping[str, BackingReload] = field(default_factory=dict)
+    """Per-service reload verdicts, checked before `_RELOAD_SHARED`.
+
+    The same segment means different things to different operators -- a storage
+    model Strimzi reconciles onto a running CR is a disk the ClickHouse operator
+    will not add to a live cluster -- so the verdict cannot be keyed on the
+    segment alone.
+    """
+
 
 CATALOGUE: tuple[BackingService, ...] = (
     BackingService(
@@ -116,6 +126,12 @@ CATALOGUE: tuple[BackingService, ...] = (
         # A Keeper ensemble is a Raft quorum: shrinking it can lose the quorum
         # outright, which takes every ReplicatedMergeTree table read-only with it.
         extra_member_counts=("keeper.replicas",),
+        reload_by_segment={
+            # The ClickHouse operator takes no new disk on an existing cluster,
+            # and every model but `local` adds or re-shapes a volume claim.
+            "storageModel": BackingReload.RECREATE,
+            "tieredBlock": BackingReload.RECREATE,
+        },
     ),
     BackingService(
         service="kafka",
@@ -129,6 +145,12 @@ CATALOGUE: tuple[BackingService, ...] = (
             "broker goes, or the replicas it held go with it. Reassign first, then "
             "lower the count in the deploy repo"
         ),
+        reload_by_segment={
+            # Strimzi reconciles tieredStorage onto the running Kafka CR and
+            # rolls the brokers onto it -- no claim changes shape.
+            "storageModel": BackingReload.ROLL,
+            "tieredObject": BackingReload.ROLL,
+        },
     ),
 )
 
@@ -143,14 +165,13 @@ _RESOURCE_PATHS = (
 
 # What a written key does once Argo has it, keyed by the first segment below the
 # service prefix. Matched by segment equality, not string prefix, so `storage` and
-# `storageModel` stay distinct. Anything unlisted falls to APPLY.
-_RELOAD_BY_SEGMENT: dict[str, BackingReload] = {
+# `storageModel` stay distinct. A service's own `reload_by_segment` wins where the
+# two disagree; anything in neither falls to APPLY.
+_RELOAD_SHARED: dict[str, BackingReload] = {
     # mode=external removes the store's objects; mode=cluster creates them.
     "mode": BackingReload.REDEPLOY,
     # Server or broker config -- the operator restarts pods onto the new settings.
-    "storageModel": BackingReload.ROLL,
-    "s3": BackingReload.ROLL,
-    "tiered": BackingReload.ROLL,
+    "objectStore": BackingReload.ROLL,
     "resources": BackingReload.ROLL,
     # volumeClaimTemplates are immutable, so no sync can apply a size or class change.
     "storage": BackingReload.RECREATE,
@@ -266,7 +287,10 @@ def _reload_for(path: str) -> BackingReload:
     segments = path.split(".")
     if len(segments) < 2:
         return BackingReload.APPLY
-    return _RELOAD_BY_SEGMENT.get(segments[1], BackingReload.APPLY)
+    segment = segments[1]
+    if segment in spec.reload_by_segment:
+        return spec.reload_by_segment[segment]
+    return _RELOAD_SHARED.get(segment, BackingReload.APPLY)
 
 
 def _resolved(docs: list[tuple[str, dict]], path: str) -> Any | None:
