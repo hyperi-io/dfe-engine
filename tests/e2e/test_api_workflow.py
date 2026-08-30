@@ -199,10 +199,10 @@ class TestSourceCRUDWorkflow:
     def test_duplicate_source_returns_409(self, e2e_client):
         headers = self._login(e2e_client)
         source = {
-            "source": "dup_test",
+            "source": "dup-test",
             "display_name": "Dup",
             "enabled": True,
-            "match": {"field": "tags.collector.type", "value": "dup_test"},
+            "match": {"field": "tags.collector.type", "value": "dup-test"},
             "header": {"type": "time_series", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
