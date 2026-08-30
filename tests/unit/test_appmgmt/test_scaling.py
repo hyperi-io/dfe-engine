@@ -129,6 +129,48 @@ def test_keda_toggle_is_carried_through():
     assert scaling.changes({}, keda_enabled=False) == {"keda.enabled": False}
 
 
+class TestReplicaCount:
+    """The KEDA-off dial: without it a deployment with KEDA disabled has no count."""
+
+    def test_a_fixed_count_is_written_when_keda_is_off(self):
+        doc = {"keda": {"enabled": False}}
+        assert scaling.changes(doc, replica_count=3) == {"replicaCount": 3}
+
+    def test_an_unset_keda_flag_accepts_a_count(self):
+        # The chart default is not readable from here, so an unset key cannot refuse.
+        assert scaling.changes({}, replica_count=2) == {"replicaCount": 2}
+
+    def test_turning_keda_off_in_the_same_request_accepts_a_count(self):
+        doc = {"keda": {"enabled": True}}
+        assert scaling.changes(doc, replica_count=4, keda_enabled=False) == {
+            "keda.enabled": False,
+            "replicaCount": 4,
+        }
+
+    def test_a_count_is_refused_while_keda_is_explicitly_on(self):
+        doc = {"keda": {"enabled": True}}
+        with pytest.raises(InvalidDialError, match="KEDA is enabled"):
+            scaling.changes(doc, replica_count=3)
+
+    def test_zero_is_allowed_as_a_deliberate_stop(self):
+        assert scaling.changes({"keda": {"enabled": False}}, replica_count=0) == {"replicaCount": 0}
+
+    def test_a_negative_count_is_refused(self):
+        with pytest.raises(InvalidDialError, match="negative"):
+            scaling.changes({}, replica_count=-1)
+
+    def test_an_absurd_count_is_refused(self):
+        with pytest.raises(InvalidDialError, match="ceiling"):
+            scaling.changes({}, replica_count=scaling.MAX_REPLICAS_CEILING + 1)
+
+    def test_the_written_path_is_the_one_read_reports(self):
+        changed = scaling.changes({}, replica_count=6)
+        doc: dict = {}
+        for path, value in changed.items():
+            doc.setdefault(path, value)
+        assert scaling.read(doc, VRL, DeployTarget.KUBERNETES).replica_count == 6
+
+
 def test_no_supplied_dials_produces_no_changes():
     assert scaling.changes({}) == {}
 

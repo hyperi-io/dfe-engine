@@ -120,22 +120,37 @@ def validate_subject(subject: str) -> None:
         raise CommitPolicyError(f"type {ctype!r} not in {sorted(ALLOWED_TYPES)}")
 
 
-def validate_change(path: str, value: object) -> None:
+def validate_change(path: str, value: object, doc: dict | None = None) -> None:
     """Reject immutability/self-heal hazards in a var write (the standard).
 
     - image/chart refs must be pinned: no ``latest``, no untagged ref.
     - controller-owned fields must not be tracked under self-heal (KEDA owns
       replicas -> set keda.min/maxReplicas, not replicaCount).
+
+    ``doc`` is the document the write lands in. A document that explicitly sets
+    ``keda.enabled: false`` has no controller owning the replica count, and
+    ``replicaCount`` is then the only way to set it, so it is allowed there. With
+    no document the field stays refused: an unset flag means the chart default,
+    which is not readable from here.
     """
     leaf = path.rsplit(".", 1)[-1]
     if leaf in {"tag", "image"} and isinstance(value, str):
         v = value.strip()
         if v == "" or v.endswith(":latest") or v == "latest":
             raise CommitPolicyError(f"unpinned/floating image ref at {path}: {value!r}")
-    if path == "replicaCount" or path.endswith(".replicaCount"):
+    if (path == "replicaCount" or path.endswith(".replicaCount")) and not _keda_disabled(doc):
         raise CommitPolicyError(
-            f"{path} is controller-owned (KEDA); set keda.min/maxReplicas instead"
+            f"{path} is controller-owned (KEDA); set keda.min/maxReplicas instead, "
+            "or disable KEDA in the same write"
         )
+
+
+def _keda_disabled(doc: dict | None) -> bool:
+    """Whether the document hands the replica count back to the deployment."""
+    if not isinstance(doc, dict):
+        return False
+    keda = doc.get("keda")
+    return isinstance(keda, dict) and keda.get("enabled") is False
 
 
 def resolve_mode(

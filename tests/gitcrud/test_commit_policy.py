@@ -125,6 +125,22 @@ def test_validate_change_allows_pinned_and_keda():
     validate_change("keda.maxReplicas", 10)  # no raise
 
 
+def test_replicacount_is_allowed_where_the_document_disables_keda():
+    # With KEDA off nothing else owns the count, and refusing it leaves a
+    # deployment with no settable replica number at all.
+    validate_change("replicaCount", 3, {"keda": {"enabled": False}})  # no raise
+
+
+@pytest.mark.parametrize(
+    "doc",
+    [None, {}, {"keda": {}}, {"keda": {"enabled": True}}, {"keda": "off"}, {"replicaCount": 1}],
+)
+def test_replicacount_stays_refused_without_an_explicit_keda_off(doc):
+    # An unset flag is the chart default, which is not readable from here.
+    with pytest.raises(CommitPolicyError):
+        validate_change("replicaCount", 3, doc)
+
+
 def test_resolve_mode():
     assert resolve_mode(environment="dev", rbac_class="helmvars") == "direct"
     assert resolve_mode(environment="prod", rbac_class="helmvars") == "pr"

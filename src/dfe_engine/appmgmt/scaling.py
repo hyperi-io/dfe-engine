@@ -5,7 +5,7 @@
 #
 #  License:      BUSL-1.1
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
-"""CPU, memory and the KEDA replica range, as one validated surface.
+"""CPU, memory, the replica count and the KEDA range, as one validated surface.
 
 These dials are not a second store: they ARE helm values, written through the same
 gitcrud path as any other overlay change. This module only decides which paths make
@@ -113,6 +113,7 @@ def read(doc: dict, app: AppDescriptor, target: DeployTarget) -> ScalingDials:
 def changes(
     doc: dict,
     *,
+    replica_count: int | None = None,
     min_replicas: int | None = None,
     max_replicas: int | None = None,
     keda_enabled: bool | None = None,
@@ -135,6 +136,25 @@ def changes(
 
     effective_min = min_replicas if min_replicas is not None else get_path(doc, KEDA_MIN_PATH)
     effective_max = max_replicas if max_replicas is not None else get_path(doc, KEDA_MAX_PATH)
+    effective_keda = keda_enabled if keda_enabled is not None else get_path(doc, KEDA_ENABLED_PATH)
+
+    if replica_count is not None:
+        if replica_count < 0:
+            raise InvalidDialError(f"replica_count cannot be negative, got {replica_count}")
+        if replica_count > MAX_REPLICAS_CEILING:
+            raise InvalidDialError(
+                f"replica_count {replica_count} exceeds the {MAX_REPLICAS_CEILING} ceiling"
+            )
+        # The charts omit `replicas:` while KEDA owns the count. Only an explicit
+        # `true` refuses -- an unset key is the chart default, which is not readable
+        # from here.
+        if effective_keda is True:
+            raise InvalidDialError(
+                "replica_count does not apply while KEDA is enabled: the chart omits "
+                "replicas and the ScaledObject owns the count. Set keda_enabled false "
+                "in the same request, or move min_replicas instead"
+            )
+        out[REPLICA_COUNT_PATH] = replica_count
 
     if min_replicas is not None:
         if min_replicas < 1:
