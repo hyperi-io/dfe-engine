@@ -9,6 +9,7 @@ from dfe_engine.api.v1.api_keys import router as api_keys_router
 from dfe_engine.api.v1.apps import router as apps_router
 from dfe_engine.api.v1.auth import router as auth_router
 from dfe_engine.api.v1.authoring import router as authoring_router
+from dfe_engine.api.v1.backing_services import router as backing_services_router
 from dfe_engine.api.v1.cel import router as cel_router
 from dfe_engine.api.v1.config import router as config_router
 from dfe_engine.api.v1.deployments import router as deployments_router
@@ -94,6 +95,9 @@ v1_router.include_router(sigma_router)
 v1_router.include_router(cel_router)
 # Governed Ops (Tier-1 helm-var CRUD + Tier-2 actions/admin) - 503 until gitops on
 v1_router.include_router(helm_router)
+# The substrate/platform half of the same overlay layer -- declared config out,
+# governed writes in, storage model and modes locked by policy
+v1_router.include_router(backing_services_router)
 v1_router.include_router(apps_router)
 # The versioned artefact library an app instance links its consumed files to
 v1_router.include_router(library_router)

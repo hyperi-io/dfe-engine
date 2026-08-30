@@ -57,7 +57,7 @@ class WriteResult(BaseModel):
     pr_url: str | None = None
 
 
-def _gitcrud(request: Request) -> GitCrud:
+def gitcrud_of(request: Request) -> GitCrud:
     gc = getattr(request.app.state, "gitcrud", None)
     if gc is None:
         raise HTTPException(
@@ -67,20 +67,20 @@ def _gitcrud(request: Request) -> GitCrud:
     return gc
 
 
-def _policy(request: Request) -> PolicyStore | None:
+def policy_of(request: Request) -> PolicyStore | None:
     return getattr(request.app.state, "policy_store", None)
 
 
-def _has_override(request: Request, user: Any) -> bool:
+def has_override(request: Request, user: Any) -> bool:
     return authorize(user, "helmvars:override", role_config=request.app.state.role_config).allowed
 
 
-def _forge(request: Request):
+def forge_of(request: Request):
     """The deploy-repo forge client for opening review PRs (None -> refuse)."""
     return getattr(request.app.state, "forge", None)
 
 
-def _check_name(name: str) -> None:
+def check_name(name: str) -> None:
     """400 on a resource name that could traverse the tree or forge a trailer."""
     try:
         validate_name(name)
@@ -90,10 +90,151 @@ def _check_name(name: str) -> None:
         ) from exc
 
 
+def enforce_protected(request: Request, user: Any, cls: str, name: str, path: str) -> bool:
+    """403 unless the caller may write this var. Returns whether it is protected."""
+    policy = policy_of(request)
+    if policy is None:
+        return False
+    protected = policy.is_protected(cls, name, path)
+    try:
+        policy.enforce(cls, name, path, override=has_override(request, user))
+    except ProtectedVarError as exc:
+        raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
+    return protected
+
+
+def set_var_governed(
+    cls: str,
+    name: str,
+    path: str,
+    value: Any,
+    user: Any,
+    request: Request,
+    if_match: str | None,
+) -> WriteResult:
+    """Set one var in one resource class: policy, routing, commit, audit.
+
+    Shared by every governed-var surface, so a new class binds to the same
+    guarantees rather than reimplementing them one check short.
+    """
+    check_name(name)
+    gc = gitcrud_of(request)
+    settings = request.app.state.settings
+
+    try:
+        validate_change(path, value)
+    except CommitPolicyError as exc:
+        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
+
+    protected = enforce_protected(request, user, cls, name, path)
+
+    msg = build_message(
+        CommitContext(
+            ctype="cfg",
+            scope=name,
+            summary=f"set {path.split('.')[-1]}"[:40],
+            actor=user.user_id,
+            role="helmvars:write",
+            base_revision=if_match or "",
+        )
+    )
+
+    def _write(branch: str):
+        return gc.set_key(
+            cls, name, path, value, user.user_id, message=msg, base_revision=if_match, branch=branch
+        )
+
+    try:
+        outcome = route_write(
+            gc=gc,
+            forge=forge_of(request),
+            environment=settings.env,
+            mode=settings.gitops.mode,
+            rbac_class=cls,
+            resource=f"{cls}/{name}:{path}",
+            actor=user.user_id,
+            protected=protected,
+            title=f"cfg({name}): set {path}",
+            body=f"Governed helm-var change to {name} ({path}={value!r}) "
+            f"by {user.user_id}. Opened for review because production+team may "
+            "not commit straight to main.",
+            write=_write,
+        )
+    except ConcurrencyConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "conflict",
+                "message": str(exc),
+                # non-reserved keys become the ErrorResponse.context (current vs theirs)
+                "current": exc.current,
+                "head": exc.head,
+            },
+        ) from exc
+    except ReviewRequiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "review_required", "message": str(exc)}
+        ) from exc
+    audit_resource_change(
+        user.user_id,
+        cls,
+        name,
+        "updated",
+        {"path": path, "commit": outcome.commit_sha, "pr": outcome.pr_url},
+    )
+    return WriteResult(
+        changed=outcome.changed,
+        commit_sha=outcome.commit_sha,
+        auto_merged=outcome.auto_merged,
+        review_required=outcome.review_required,
+        pr_url=outcome.pr_url,
+    )
+
+
+def delete_var_governed(cls: str, name: str, path: str, user: Any, request: Request) -> WriteResult:
+    """Revert one var to its chart default. Reverting a protected var IS changing
+    it, so the same override grant applies as on a set."""
+    check_name(name)
+    gc = gitcrud_of(request)
+    settings = request.app.state.settings
+    protected = enforce_protected(request, user, cls, name, path)
+
+    def _write(branch: str):
+        return gc.delete_key(cls, name, path, user.user_id, branch=branch)
+
+    try:
+        outcome = route_write(
+            gc=gc,
+            forge=forge_of(request),
+            environment=settings.env,
+            mode=settings.gitops.mode,
+            rbac_class=cls,
+            resource=f"{cls}/{name}:{path}",
+            actor=user.user_id,
+            protected=protected,
+            title=f"cfg({name}): revert {path}",
+            body=f"Revert helm-var {name} ({path}) by {user.user_id}. Opened for "
+            "review because production+team may not commit straight to main.",
+            write=_write,
+        )
+    except ReviewRequiredError as exc:
+        raise HTTPException(
+            status_code=409, detail={"code": "review_required", "message": str(exc)}
+        ) from exc
+    audit_resource_change(user.user_id, cls, name, "updated", {"path": path, "revert": True})
+    return WriteResult(
+        changed=outcome.changed,
+        commit_sha=outcome.commit_sha,
+        auto_merged=outcome.auto_merged,
+        review_required=outcome.review_required,
+        pr_url=outcome.pr_url,
+    )
+
+
 @router.get("/files", dependencies=[Depends(require_action(scopes_dict["helmvars_read"]))])
 async def list_files(user: CurrentUser, request: Request) -> list[str]:
     """List helm-var overlay resources."""
-    return _gitcrud(request).list(_CLASS)
+    return gitcrud_of(request).list(_CLASS)
 
 
 @router.get(
@@ -101,9 +242,9 @@ async def list_files(user: CurrentUser, request: Request) -> list[str]:
 )
 async def list_vars(name: str, user: CurrentUser, request: Request) -> list[dict[str, Any]]:
     """Flattened dot-path vars for a resource, each marked protected or not."""
-    _check_name(name)
-    gc = _gitcrud(request)
-    policy = _policy(request)
+    check_name(name)
+    gc = gitcrud_of(request)
+    policy = policy_of(request)
     out: list[dict[str, Any]] = []
     for path, value in gc.vars(_CLASS, name).items():
         protected = bool(policy and policy.is_protected(_CLASS, name, path))
@@ -127,91 +268,7 @@ async def set_var(
     """Set a helm var. Direct commit in dev/solo; routed to a review PR (or 409
     'review_required') in production+team. 409 on stale If-Match; 403 if protected.
     """
-    _check_name(name)
-    gc = _gitcrud(request)
-    policy = _policy(request)
-    settings = request.app.state.settings
-
-    try:
-        validate_change(path, body.value)
-    except CommitPolicyError as exc:
-        raise HTTPException(403, detail={"code": "policy_violation", "message": str(exc)}) from exc
-
-    protected = bool(policy and policy.is_protected(_CLASS, name, path))
-    if policy is not None:
-        try:
-            policy.enforce(_CLASS, name, path, override=_has_override(request, user))
-        except ProtectedVarError as exc:
-            raise HTTPException(403, detail={"code": "protected_var", "message": str(exc)}) from exc
-
-    msg = build_message(
-        CommitContext(
-            ctype="cfg",
-            scope=name,
-            summary=f"set {path.split('.')[-1]}"[:40],
-            actor=user.user_id,
-            role="helmvars:write",
-            base_revision=if_match or "",
-        )
-    )
-
-    def _write(branch: str):
-        return gc.set_key(
-            _CLASS,
-            name,
-            path,
-            body.value,
-            user.user_id,
-            message=msg,
-            base_revision=if_match,
-            branch=branch,
-        )
-
-    try:
-        outcome = route_write(
-            gc=gc,
-            forge=_forge(request),
-            environment=settings.env,
-            mode=settings.gitops.mode,
-            rbac_class=_CLASS,
-            resource=f"{_CLASS}/{name}:{path}",
-            actor=user.user_id,
-            protected=protected,
-            title=f"cfg({name}): set {path}",
-            body=f"Governed helm-var change to {name} ({path}={body.value!r}) "
-            f"by {user.user_id}. Opened for review because production+team may "
-            "not commit straight to main.",
-            write=_write,
-        )
-    except ConcurrencyConflictError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                # non-reserved keys become the ErrorResponse.context (current vs theirs)
-                "current": exc.current,
-                "head": exc.head,
-            },
-        ) from exc
-    except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
-    audit_resource_change(
-        user.user_id,
-        "helmvars",
-        name,
-        "updated",
-        {"path": path, "commit": outcome.commit_sha, "pr": outcome.pr_url},
-    )
-    return WriteResult(
-        changed=outcome.changed,
-        commit_sha=outcome.commit_sha,
-        auto_merged=outcome.auto_merged,
-        review_required=outcome.review_required,
-        pr_url=outcome.pr_url,
-    )
+    return set_var_governed(_CLASS, name, path, body.value, user, request, if_match)
 
 
 @router.delete(
@@ -220,37 +277,7 @@ async def set_var(
     dependencies=[Depends(require_action(scopes_dict["helmvars_write"]))],
 )
 async def delete_var(name: str, path: str, user: CurrentUser, request: Request) -> WriteResult:
-    """Revert a helm var to its chart default. Routed like set_var (PR in prod+team)."""
-    _check_name(name)
-    gc = _gitcrud(request)
-    settings = request.app.state.settings
-
-    def _write(branch: str):
-        return gc.delete_key(_CLASS, name, path, user.user_id, branch=branch)
-
-    try:
-        outcome = route_write(
-            gc=gc,
-            forge=_forge(request),
-            environment=settings.env,
-            mode=settings.gitops.mode,
-            rbac_class=_CLASS,
-            resource=f"{_CLASS}/{name}:{path}",
-            actor=user.user_id,
-            title=f"cfg({name}): revert {path}",
-            body=f"Revert helm-var {name} ({path}) by {user.user_id}. Opened for "
-            "review because production+team may not commit straight to main.",
-            write=_write,
-        )
-    except ReviewRequiredError as exc:
-        raise HTTPException(
-            status_code=409, detail={"code": "review_required", "message": str(exc)}
-        ) from exc
-    audit_resource_change(user.user_id, "helmvars", name, "updated", {"path": path, "revert": True})
-    return WriteResult(
-        changed=outcome.changed,
-        commit_sha=outcome.commit_sha,
-        auto_merged=outcome.auto_merged,
-        review_required=outcome.review_required,
-        pr_url=outcome.pr_url,
-    )
+    """Revert a helm var to its chart default. Routed like set_var (PR in prod+team);
+    403 if protected, since reverting a locked var changes it as surely as setting it.
+    """
+    return delete_var_governed(_CLASS, name, path, user, request)
