@@ -1,4 +1,4 @@
-name: storage-model
+name: storage-layout
 description: >-
   Decided at deploy and refused afterwards. Where the data lives (mode), how it
   is laid out on disk (storageModel), which object store or cold volume holds
@@ -10,12 +10,19 @@ description: >-
 protected:
   - "infravars:*:clickhouse.mode"
   - "infravars:*:clickhouse.storageModel"
-  - "infravars:*:clickhouse.s3.*"
-  - "infravars:*:clickhouse.tiered.*"
+  - "infravars:*:clickhouse.objectStore.*"
+  - "infravars:*:clickhouse.tieredBlock.*"
   - "infravars:*:clickhouse.storage.size"
   - "infravars:*:clickhouse.storage.storageClass"
   - "infravars:*:kafka.mode"
   - "infravars:*:kafka.storageModel"
-  - "infravars:*:kafka.tiered.*"
+  - "infravars:*:kafka.objectStore.*"
+  - "infravars:*:kafka.tieredObject.*"
   - "infravars:*:kafka.storage.size"
   - "infravars:*:kafka.storage.storageClass"
+  # The pre-vocabulary spellings of the same three blocks, kept because a lock
+  # that matches nothing costs nothing while a missing one silently permits.
+  # Drop them once no supported chart renders these keys.
+  - "infravars:*:clickhouse.s3.*"
+  - "infravars:*:clickhouse.tiered.*"
+  - "infravars:*:kafka.tiered.*"

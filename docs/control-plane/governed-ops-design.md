@@ -171,8 +171,11 @@ A `ProtectedPolicy` is the one thing that reaches below a class -- a list of loc
 `cls:name:path` globs that even Tier-1 must respect unless the caller holds the
 override grant. It is a policy object, not a per-var ACL. Two policies ship and
 seed into every deploy repo: `baseline` locks image references, and
-`storage-model` locks the data-layer modes, both storage models, the object-store
-blocks and the disk size and class.
+`storage-layout` locks the data-layer modes, the storage model, the
+`objectStore` / `tieredBlock` / `tieredObject` dial blocks, and the disk size and
+class. Seeding never rewrites an existing file, so a repo carrying the earlier
+`storage-model` policy keeps it and gains `storage-layout` beside it -- hence the
+pre-vocabulary key spellings in the shipped lock.
 
 Not everything unsafe is a protected var. A lower node or broker count is refused
 by the backing-services router itself, with a 400 that names the reason, and the
