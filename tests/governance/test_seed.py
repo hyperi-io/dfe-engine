@@ -50,6 +50,11 @@ class TestEmptyRepo:
         doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-model.yaml"])
         assert "infravars:*:kafka.storage.size" in doc["protected"]
         assert "infravars:*:clickhouse.storage.storageClass" in doc["protected"]
+        # Both storage models a deployer can pick are locked, not just the
+        # object-store one: tiering moves parts onto the cold volume, so its
+        # name, class and size are as unrecoverable a change as the bucket.
+        assert "infravars:*:clickhouse.s3.*" in doc["protected"]
+        assert "infravars:*:clickhouse.tiered.*" in doc["protected"]
 
     def test_ships_the_documented_dials(self, tmp_path: Path):
         artifacts = pending_seed(repo_root=tmp_path)
