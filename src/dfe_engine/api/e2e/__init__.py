@@ -87,6 +87,7 @@ async def seed_static(body: SeedRequest, request: Request) -> SeedResponse:
         gitcrud=getattr(request.app.state, "gitcrud", None),
         source_registry=get_source_registry_optional(),
         settings=request.app.state.settings,
+        forge=getattr(request.app.state, "forge", None),
     )
     success = seeder.seed_static(body.script)
     logger.warning("e2e seed", script=body.script, success=success)

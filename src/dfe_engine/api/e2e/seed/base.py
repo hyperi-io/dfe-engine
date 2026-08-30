@@ -21,6 +21,7 @@ from dfe_engine.orgs.registry import OrgRegistry
 
 if TYPE_CHECKING:
     from dfe_engine.gitcrud import GitCrud
+    from dfe_engine.gitcrud.forge import ForgeProvider
     from dfe_engine.settings import DFESettings
     from dfe_engine.source.registry import SourceRegistry
 
@@ -50,6 +51,7 @@ class Seed:
         gitcrud: GitCrud | None = None,
         source_registry: SourceRegistry | None = None,
         settings: DFESettings | None = None,
+        forge: ForgeProvider | None = None,
     ) -> None:
         resolved = (env if env is not None else os.environ.get("DFE_ENV", "")).strip().lower()
         if resolved != _TEST_ENV:
@@ -60,6 +62,7 @@ class Seed:
         self._gitcrud = gitcrud
         self._source_registry = source_registry
         self._settings = settings
+        self._forge = forge
         self._attach_seeders(resolved)
 
     def _child(self, seeder: type[_S], env: str) -> _S:
@@ -72,6 +75,7 @@ class Seed:
             gitcrud=self._gitcrud,
             source_registry=self._source_registry,
             settings=self._settings,
+            forge=self._forge,
         )
 
     def _attach_seeders(self, env: str) -> None:

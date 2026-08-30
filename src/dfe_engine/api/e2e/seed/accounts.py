@@ -13,12 +13,14 @@ from __future__ import annotations
 import os
 
 from dfe_engine.api.e2e.seed.base import Seed
+from dfe_engine.auth import account_durability
 
 _ADMIN_GROUP = "dfe-admins"
 _DFE_ANALYST_GROUP = "dfe-analysts"
 _DFE_INFRA_GROUP = "dfe-infra"
 _DFE_VIEWERS_GROUP = "dfe-viewers"
 _WELL_KNOWN_E2E_PASSWORD = "changeme"
+_SEED_ACTOR = "e2e-seed"
 
 
 def _break_glass_admin_name() -> str:
@@ -144,7 +146,42 @@ class Accounts(Seed):
         created = self._upsert_local_account(name, password, groups=groups)
         for group_name in groups:
             self._ensure_membership(group_name, name)
+        self._mirror_to_deploy_repo(name)
         return created
+
+    def _mirror_to_deploy_repo(self, name: str) -> None:
+        """Persist the break-glass account into the deploy repo, as a real write does.
+
+        The setup wizard will not call itself finished until the durable copy of
+        the break-glass admin MATCHES the live one, and it compares the stored
+        password hash. Writing only the live store therefore leaves every seeded
+        e2e run parked on the rotate-the-break-glass step forever.
+
+        The hash is read back from the store rather than re-derived, because
+        bcrypt salts afresh every time: deriving it twice would produce two hashes
+        of the same password that never compare equal.
+
+        Only the break-glass admin is git-backed, and only when gitops is on --
+        the same two conditions ``api/v1/accounts.py`` applies, through the same
+        routing, so a seeded deployment and an operator's password reset leave the
+        repo in the same shape.
+        """
+        if self._gitcrud is None or not account_durability.is_break_glass(name):
+            return
+        account = self._account_store.get(name)
+        if account is None:
+            return
+        settings = self._require_settings()
+        account_durability.publish_account(
+            self._gitcrud,
+            self._forge,
+            environment=settings.env,
+            mode=settings.gitops.mode,
+            username=name,
+            doc=account.model_dump(exclude={"username"}),
+            summary="seed account",
+            actor=_SEED_ACTOR,
+        )
 
     def _ensure_group(self, name: str) -> None:
         """Error on a group the startup bootstrap did not create.
