@@ -20,7 +20,7 @@ from dfe_engine.yaml_utils import yaml_load_string
 # take effect here without anyone remembering to retype it.
 SHIPPED_POLICY = yaml_load_string(
     resources.files("dfe_engine.governance.resources.policies")
-    .joinpath("storage-model.yaml")
+    .joinpath("storage-layout.yaml")
     .read_text(encoding="utf-8")
 )
 STORAGE_LOCK: list[str] = SHIPPED_POLICY["protected"]
@@ -39,7 +39,7 @@ def _wire_gitcrud(app, tmp_path):
 def _lock(client, admin_headers):
     client.post(
         "/api/v1/governance/admin/policies",
-        json={"name": "storage-model", "protected": STORAGE_LOCK},
+        json={"name": "storage-layout", "protected": STORAGE_LOCK},
         headers=admin_headers,
     )
 
@@ -196,9 +196,9 @@ class TestOverlayVars:
 class TestReloadHint:
     """Every write says what syncing it does, so the UI stops implying a restart."""
 
-    def _put(self, client, headers, path, value):
+    def _put(self, client, headers, path, value, overlay="kafka"):
         return client.put(
-            f"/api/v1/backing-services/overlays/kafka/vars/{path}",
+            f"/api/v1/backing-services/overlays/{overlay}/vars/{path}",
             json={"value": value},
             headers=headers,
         )
@@ -225,12 +225,64 @@ class TestReloadHint:
             "redeploy"
         )
 
-    def test_storage_model_rolls_rather_than_recreating(self, client, app, admin_headers, tmp_path):
-        # `storage` and `storageModel` are different keys with different answers.
+    def test_the_kafka_storage_model_rolls_rather_than_recreating(
+        self, client, app, admin_headers, tmp_path
+    ):
+        # `storage` and `storageModel` are different keys with different answers,
+        # and Strimzi reconciles tieredStorage onto the running CR.
         _wire_gitcrud(app, tmp_path)
-        assert self._put(client, admin_headers, "kafka.storageModel", "tiered").json()[
+        assert self._put(client, admin_headers, "kafka.storageModel", "tiered-object").json()[
             "reload"
         ] == ("roll")
+
+    def test_the_clickhouse_storage_model_needs_a_recreate(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """The same segment, the opposite verdict: the ClickHouse operator takes no
+        new disk on an existing cluster, so the write Strimzi rolls rebuilds here."""
+        _wire_gitcrud(app, tmp_path)
+        resp = self._put(
+            client,
+            admin_headers,
+            "clickhouse.storageModel",
+            "tiered-block",
+            overlay="clickhouse-cluster",
+        )
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["reload"] == "recreate"
+
+    def test_the_clickhouse_cold_tier_needs_a_recreate(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        resp = self._put(
+            client,
+            admin_headers,
+            "clickhouse.tieredBlock.coldSize",
+            "4Ti",
+            overlay="clickhouse-cluster",
+        )
+        assert resp.json()["reload"] == "recreate"
+
+    def test_the_object_store_block_rolls_on_both_services(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """Credential binding and request bounds are server or broker config, so
+        both services restart pods and nothing more."""
+        _wire_gitcrud(app, tmp_path)
+        ch = self._put(
+            client,
+            admin_headers,
+            "clickhouse.objectStore.endpoint",
+            "https://b.example.com/ch/",
+            overlay="clickhouse-cluster",
+        )
+        assert ch.json()["reload"] == "roll", ch.text
+        kafka = self._put(client, admin_headers, "kafka.objectStore.remoteKey", "services/minio")
+        assert kafka.json()["reload"] == "roll", kafka.text
+
+    def test_the_kafka_plugin_block_rolls(self, client, app, admin_headers, tmp_path):
+        _wire_gitcrud(app, tmp_path)
+        resp = self._put(client, admin_headers, "kafka.tieredObject.className", "com.example.Rsm")
+        assert resp.json()["reload"] == "roll"
 
     def test_an_unmapped_key_reports_apply(self, client, app, admin_headers, tmp_path):
         _wire_gitcrud(app, tmp_path)
@@ -375,7 +427,7 @@ class TestStorageModelIsDecidedAtDeploy:
         _lock(client, admin_headers)
         resp = client.put(
             "/api/v1/backing-services/overlays/clickhouse-cluster/vars/clickhouse.storageModel",
-            json={"value": "s3backed"},
+            json={"value": "cached-object"},
             headers=_writer(app, api_settings),
         )
         assert resp.status_code == 403
@@ -390,16 +442,18 @@ class TestStorageModelIsDecidedAtDeploy:
         writer = _writer(app, api_settings)
         locked = [
             ("clickhouse-cluster", "clickhouse.mode", "external"),
-            ("clickhouse-cluster", "clickhouse.storageModel", "s3backed"),
-            ("clickhouse-cluster", "clickhouse.s3.endpoint", "https://b.example.com/ch/"),
-            ("clickhouse-cluster", "clickhouse.tiered.coldName", "slower"),
-            ("clickhouse-cluster", "clickhouse.tiered.coldStorageClass", "gp3"),
-            ("clickhouse-cluster", "clickhouse.tiered.coldSize", "8Ti"),
+            ("clickhouse-cluster", "clickhouse.storageModel", "cached-object"),
+            ("clickhouse-cluster", "clickhouse.objectStore.endpoint", "https://b.example.com/ch/"),
+            ("clickhouse-cluster", "clickhouse.objectStore.supportBatchDelete", False),
+            ("clickhouse-cluster", "clickhouse.tieredBlock.coldName", "slower"),
+            ("clickhouse-cluster", "clickhouse.tieredBlock.coldStorageClass", "gp3"),
+            ("clickhouse-cluster", "clickhouse.tieredBlock.coldSize", "8Ti"),
             ("clickhouse-cluster", "clickhouse.storage.size", "500Gi"),
             ("clickhouse-cluster", "clickhouse.storage.storageClass", "gp3"),
             ("kafka", "kafka.mode", "external"),
-            ("kafka", "kafka.storageModel", "tiered"),
-            ("kafka", "kafka.tiered.className", "com.example.Rsm"),
+            ("kafka", "kafka.storageModel", "tiered-object"),
+            ("kafka", "kafka.tieredObject.className", "com.example.Rsm"),
+            ("kafka", "kafka.objectStore.remoteKey", "services/minio"),
             ("kafka", "kafka.storage.size", "200Gi"),
             ("kafka", "kafka.storage.storageClass", "gp3"),
         ]
@@ -424,6 +478,25 @@ class TestStorageModelIsDecidedAtDeploy:
     def test_the_shipped_policy_locks_the_disk(self, path):
         # Derek's call, mandated up front: volumeClaimTemplates are immutable, so a
         # size or class change is a StatefulSet recreate rather than a values edit.
+        assert f"infravars:*:{path}" in STORAGE_LOCK
+
+    @pytest.mark.parametrize(
+        "path",
+        [
+            "clickhouse.objectStore.*",
+            "clickhouse.tieredBlock.*",
+            "kafka.objectStore.*",
+            "kafka.tieredObject.*",
+        ],
+    )
+    def test_the_shipped_policy_locks_every_dial_block(self, path):
+        """One block per storage family, both services, so a new dial inside a block
+        is locked the day it ships rather than the day someone remembers it."""
+        assert f"infravars:*:{path}" in STORAGE_LOCK
+
+    @pytest.mark.parametrize("path", ["clickhouse.s3.*", "clickhouse.tiered.*", "kafka.tiered.*"])
+    def test_the_pre_vocabulary_spellings_stay_locked(self, path):
+        """A deploy repo pinned to an older chart still writes these paths."""
         assert f"infravars:*:{path}" in STORAGE_LOCK
 
     def test_storage_size_is_refused_for_a_writer_and_written_with_override(
@@ -470,7 +543,7 @@ class TestStorageModelIsDecidedAtDeploy:
         writer = _writer(app, api_settings)
         blocked = client.put(
             "/api/v1/backing-services/overlays/clickhouse-cluster/vars/clickhouse.storageModel",
-            json={"value": "s3backed"},
+            json={"value": "cached-object"},
             headers=writer,
         )
         assert blocked.status_code == 403
@@ -490,7 +563,7 @@ class TestStorageModelIsDecidedAtDeploy:
         # admin holds '*' -> helmvars:override
         resp = client.put(
             "/api/v1/backing-services/overlays/kafka/vars/kafka.storageModel",
-            json={"value": "tiered"},
+            json={"value": "tiered-object"},
             headers=admin_headers,
         )
         assert resp.status_code == 200, resp.text
@@ -501,7 +574,7 @@ class TestStorageModelIsDecidedAtDeploy:
         """Deleting a protected var reverts it to the chart default, which changes
         it as surely as setting it does."""
         gc = _wire_gitcrud(app, tmp_path)
-        gc.put("infravars", "kafka", {"kafka": {"storageModel": "tiered"}}, "tester")
+        gc.put("infravars", "kafka", {"kafka": {"storageModel": "tiered-object"}}, "tester")
         _lock(client, admin_headers)
         resp = client.delete(
             "/api/v1/backing-services/overlays/kafka/vars/kafka.storageModel",
@@ -509,4 +582,4 @@ class TestStorageModelIsDecidedAtDeploy:
         )
         assert resp.status_code == 403
         assert resp.json()["code"] == "protected_var"
-        assert gc.get("infravars", "kafka")["kafka"]["storageModel"] == "tiered"
+        assert gc.get("infravars", "kafka")["kafka"]["storageModel"] == "tiered-object"

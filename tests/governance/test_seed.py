@@ -41,20 +41,47 @@ class TestEmptyRepo:
         assert actions, "an empty deploy repo must be given the shipped actions"
         assert policies, "an empty deploy repo must be given the baseline policy"
 
-    def test_ships_the_storage_model_lock(self, tmp_path: Path):
+    def test_ships_the_storage_layout_lock(self, tmp_path: Path):
         """Every deployment gets the storage lock, not just a hand-seeded one."""
         artifacts = pending_seed(repo_root=tmp_path)
         names = {Path(k).stem for k in artifacts if k.startswith(POLICIES_SUBDIR)}
-        assert names == {"baseline", "storage-model"}
+        assert names == {"baseline", "storage-layout"}
 
-        doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-model.yaml"])
+        doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-layout.yaml"])
         assert "infravars:*:kafka.storage.size" in doc["protected"]
         assert "infravars:*:clickhouse.storage.storageClass" in doc["protected"]
-        # Both storage models a deployer can pick are locked, not just the
-        # object-store one: tiering moves parts onto the cold volume, so its
-        # name, class and size are as unrecoverable a change as the bucket.
-        assert "infravars:*:clickhouse.s3.*" in doc["protected"]
-        assert "infravars:*:clickhouse.tiered.*" in doc["protected"]
+        # One dial block per storage family, both services: tiering MOVES parts onto
+        # the cold volume, so its name, class and size lock like the bucket does.
+        for block in (
+            "clickhouse.objectStore.*",
+            "clickhouse.tieredBlock.*",
+            "kafka.objectStore.*",
+            "kafka.tieredObject.*",
+        ):
+            assert f"infravars:*:{block}" in doc["protected"]
+
+    def test_the_lock_lands_beside_a_repo_that_already_has_the_old_one(self, tmp_path: Path):
+        """A seeded policy file is never rewritten, so a renamed vocabulary reaches
+        an existing deploy repo only under a new filename."""
+        stale = tmp_path / POLICIES_SUBDIR / "storage-model.yaml"
+        stale.parent.mkdir(parents=True, exist_ok=True)
+        stale.write_text(
+            'name: storage-model\nprotected:\n  - "infravars:*:clickhouse.s3.*"\n',
+            encoding="utf-8",
+            newline="\n",
+        )
+        artifacts = pending_seed(repo_root=tmp_path)
+        names = {Path(k).stem for k in artifacts if k.startswith(POLICIES_SUBDIR)}
+        assert "storage-layout" in names
+        assert "storage-model" not in names
+        assert stale.read_text(encoding="utf-8").startswith("name: storage-model")
+
+    def test_the_lock_carries_the_pre_vocabulary_spellings(self, tmp_path: Path):
+        """A deploy repo pinned to an older chart still writes these paths."""
+        artifacts = pending_seed(repo_root=tmp_path)
+        doc = yaml_load_string(artifacts[f"{POLICIES_SUBDIR}/storage-layout.yaml"])
+        for old in ("clickhouse.s3.*", "clickhouse.tiered.*", "kafka.tiered.*"):
+            assert f"infravars:*:{old}" in doc["protected"]
 
     def test_ships_the_documented_dials(self, tmp_path: Path):
         artifacts = pending_seed(repo_root=tmp_path)
