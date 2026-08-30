@@ -28,7 +28,7 @@ class TestListSources:
         data = resp.json()
         assert data["total"] >= 1
         names = [item["name"] for item in data["items"]]
-        assert "test_source" in names
+        assert "test-source" in names
         assert "objects" in data
         assert data["items"][0]["versions"] == ["1.0.0"]
         assert data["items"][0]["current"] == "1.0.0"
@@ -40,9 +40,9 @@ class TestListSources:
             client.post(
                 "/api/v1/sources",
                 json={
-                    "source": f"src_{i}",
+                    "source": f"src-{i}",
                     "enabled": True,
-                    "match": {"field": "tags.collector.type", "value": f"src_{i}"},
+                    "match": {"field": "tags.collector.type", "value": f"src-{i}"},
                 },
                 headers=admin_headers,
             )
@@ -71,18 +71,18 @@ class TestListSources:
         client.post(
             "/api/v1/sources",
             json={
-                "source": "windows_audit",
+                "source": "windows-audit",
                 "display_name": "Windows Audit Logs",
-                "match": {"field": "tags.collector.type", "value": "windows_audit"},
+                "match": {"field": "tags.collector.type", "value": "windows-audit"},
             },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
             json={
-                "source": "linux_syslog",
+                "source": "linux-syslog",
                 "display_name": "Linux Syslog",
-                "match": {"field": "tags.collector.type", "value": "linux_syslog"},
+                "match": {"field": "tags.collector.type", "value": "linux-syslog"},
             },
             headers=admin_headers,
         )
@@ -90,7 +90,7 @@ class TestListSources:
         resp = client.get("/api/v1/sources?search=windows", headers=admin_headers)
         data = resp.json()
         assert data["total"] == 1
-        assert data["items"][0]["name"] == "windows_audit"
+        assert data["items"][0]["name"] == "windows-audit"
 
     def test_list_sort(self, client: TestClient, admin_headers: dict):
         for name in ["charlie", "alpha", "bravo"]:
@@ -112,26 +112,26 @@ class TestListSources:
         client.post(
             "/api/v1/sources",
             json={
-                "source": "aws_cloudtrail",
+                "source": "aws-cloudtrail",
                 "display_name": "AWS CloudTrail",
-                "match": {"field": "tags.collector.type", "value": "aws_cloudtrail"},
+                "match": {"field": "tags.collector.type", "value": "aws-cloudtrail"},
             },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
             json={
-                "source": "dfe_alerts",
+                "source": "dfe-alerts",
                 "display_name": "DFE Alerts",
-                "match": {"field": "tags.collector.type", "value": "dfe_alerts"},
+                "match": {"field": "tags.collector.type", "value": "dfe-alerts"},
             },
             headers=admin_headers,
         )
         resp = client.get("/api/v1/sources", headers=admin_headers)
         data = resp.json()
         root_names = {item["name"] for item in data["objects"]["items"]}
-        assert "aws_cloudtrail" in root_names
-        assert "dfe_alerts" in root_names
+        assert "aws-cloudtrail" in root_names
+        assert "dfe-alerts" in root_names
         assert data["objects"]["children"] == {}
 
         resp = client.get("/api/v1/sources")
@@ -147,26 +147,26 @@ class TestListSources:
         client.post(
             "/api/v1/sources",
             json={
-                "source": "enabled_only_src",
+                "source": "enabled-only-src",
                 "enabled": True,
-                "match": {"field": "tags.collector.type", "value": "enabled_only_src"},
+                "match": {"field": "tags.collector.type", "value": "enabled-only-src"},
             },
             headers=admin_headers,
         )
         client.post(
             "/api/v1/sources",
             json={
-                "source": "disabled_only_src",
+                "source": "disabled-only-src",
                 "enabled": False,
-                "match": {"field": "tags.collector.type", "value": "disabled_only_src"},
+                "match": {"field": "tags.collector.type", "value": "disabled-only-src"},
             },
             headers=admin_headers,
         )
         resp = client.get("/api/v1/sources?enabled=false", headers=admin_headers)
         assert resp.status_code == 200
         names = [item["name"] for item in resp.json()["items"]]
-        assert "disabled_only_src" in names
-        assert "enabled_only_src" not in names
+        assert "disabled-only-src" in names
+        assert "enabled-only-src" not in names
 
 
 class TestSaveValidationHttpMapping:
@@ -184,17 +184,61 @@ class TestCreateSource:
         resp = client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         assert resp.status_code == 201
         data = resp.json()
-        assert data["source"] == "test_source"
+        assert data["source"] == "test-source"
         assert data["message"] == "created"
         assert data["current"] == "1.0.0"
         assert data["deployed_version"] is None
         assert data["versions"] == ["1.0.0"]
 
-        get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
+        get_resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
         body = get_resp.json()
         assert body["current"] == "1.0.0"
         assert body["deployed_version"] is None
         assert "1.0.0" in body["versions"]
+
+    def test_create_hyphenated_source_round_trips(self, client: TestClient, admin_headers: dict):
+        """A hyphenated name has to survive creation, not merely pass the pattern.
+
+        The live regression this pins: the name validated, then the create path
+        raised a raw pydantic error nothing caught and the caller got a 500.
+        """
+        resp = client.post(
+            "/api/v1/sources",
+            json={
+                "source": "verify-syslog",
+                "match": {"field": "tags.collector.type", "value": "verify-syslog"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 201, resp.text
+        assert resp.json()["source"] == "verify-syslog"
+
+        body = client.get("/api/v1/sources/verify-syslog", headers=admin_headers)
+        assert body.status_code == 200, body.text
+        assert body.json()["source"] == "verify-syslog"
+        # Derived from the name, so the hyphen is the word separator.
+        assert body.json()["display_name"] == "Verify Syslog"
+
+        listed = client.get("/api/v1/sources", headers=admin_headers).json()
+        assert "verify-syslog" in [item["name"] for item in listed["items"]]
+
+    def test_create_underscore_source_is_422_naming_the_constraint(
+        self, client: TestClient, admin_headers: dict
+    ):
+        """An illegal name is a validation error, never an unhandled 500."""
+        resp = client.post(
+            "/api/v1/sources",
+            json={
+                "source": "verify_syslog",
+                "match": {"field": "tags.collector.type", "value": "verify_syslog"},
+            },
+            headers=admin_headers,
+        )
+        assert resp.status_code == 422, resp.text
+        body = resp.json()
+        assert body["code"] == "validation_error"
+        assert "DNS-1123 label" in body["message"]
+        assert "use '-' instead of '_'" in body["message"]
 
     def test_create_rejects_version_tree_in_body(
         self, client: TestClient, admin_headers: dict, sample_source: dict
@@ -246,10 +290,10 @@ class TestGetSource:
 
     def test_get_existing(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
-        resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
+        resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
         assert resp.status_code == 200
         data = resp.json()
-        assert data["source"] == "test_source"
+        assert data["source"] == "test-source"
         assert data["display_name"] == "Test Source"
         ver = data["versions"]["1.0.0"]
         assert ver["source_build"] is None
@@ -268,12 +312,12 @@ class TestGetSourceVersion:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions/1.0.0",
+            "/api/v1/sources/test-source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
         body = resp.json()
-        assert body["source"] == "test_source"
+        assert body["source"] == "test-source"
         assert body["selected"] == "1.0.0"
         assert body["current"] == "1.0.0"
         assert body["versions"] == ["1.0.0"]
@@ -287,12 +331,12 @@ class TestGetSourceVersion:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         client.put(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={**sample_source, "description": "v2"},
             headers=admin_headers,
         )
         v1 = client.get(
-            "/api/v1/sources/test_source/versions/1.0.0",
+            "/api/v1/sources/test-source/versions/1.0.0",
             headers=admin_headers,
         )
         assert v1.status_code == 200
@@ -305,10 +349,10 @@ class TestGetSourceVersion:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         registry = _registries["source"]
-        registry.set_deployed_version("test_source", "1.0.0")
+        registry.set_deployed_version("test-source", "1.0.0")
 
         client.put(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={
                 **sample_source,
                 "schema": {
@@ -319,7 +363,7 @@ class TestGetSourceVersion:
             headers=admin_headers,
         )
         v2 = client.get(
-            "/api/v1/sources/test_source/versions/2.0.0",
+            "/api/v1/sources/test-source/versions/2.0.0",
             headers=admin_headers,
         )
         assert v2.status_code == 200
@@ -331,7 +375,7 @@ class TestGetSourceVersion:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions/9.9.9",
+            "/api/v1/sources/test-source/versions/9.9.9",
             headers=admin_headers,
         )
         assert resp.status_code == 404
@@ -347,7 +391,7 @@ class TestGetSourceVersion:
         self, client: TestClient, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
-        resp = client.get("/api/v1/sources/test_source/versions", headers=admin_headers)
+        resp = client.get("/api/v1/sources/test-source/versions", headers=admin_headers)
         assert resp.status_code == 404
 
     def test_get_version_includes_top_level_metadata(
@@ -360,7 +404,7 @@ class TestGetSourceVersion:
         }
         client.post("/api/v1/sources", json=body, headers=admin_headers)
         resp = client.get(
-            "/api/v1/sources/test_source/versions/1.0.0",
+            "/api/v1/sources/test-source/versions/1.0.0",
             headers=admin_headers,
         )
         assert resp.status_code == 200
@@ -377,7 +421,7 @@ class TestUpdateSource:
     def test_update_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.put(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={**sample_source, "description": "Updated description"},
             headers=admin_headers,
         )
@@ -389,7 +433,7 @@ class TestUpdateSource:
         assert updated["versions"] == ["1.0.0"]
 
         # Verify the update persisted
-        get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
+        get_resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
         assert get_resp.json()["description"] == "Updated description"
         body = get_resp.json()
         assert "1.0.0" in body["versions"]
@@ -402,7 +446,7 @@ class TestUpdateSource:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.put(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={
                 **sample_source,
                 "versions": {"1.0.0": {"date_time": "2026-01-01", "schema": {}}},
@@ -434,11 +478,11 @@ class TestUpdateSource:
         from dfe_engine.source.registry import SourceNotFoundError
 
         def missing(*args, **kwargs):
-            raise SourceNotFoundError("test_source")
+            raise SourceNotFoundError("test-source")
 
         monkeypatch.setattr(registry, "update_source_from_write", missing)
         resp = client.put(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={**sample_source, "description": "gone"},
             headers=admin_headers,
         )
@@ -450,13 +494,13 @@ class TestUpdateSource:
         shared = {"field": "ingest_type", "value": "shared_value"}
         first = {
             **sample_source,
-            "source": "source_alpha",
+            "source": "source-alpha",
             "match": shared,
             "views": [],
         }
         second = {
             **sample_source,
-            "source": "source_beta",
+            "source": "source-beta",
             "match": {"field": "ingest_type", "value": "other_value"},
             "views": [],
         }
@@ -465,20 +509,20 @@ class TestUpdateSource:
 
         create_dup = client.post(
             "/api/v1/sources",
-            json={**second, "source": "source_gamma", "match": shared},
+            json={**second, "source": "source-gamma", "match": shared},
             headers=admin_headers,
         )
         assert create_dup.status_code == 409
         dup_body = create_dup.json()
         assert dup_body["code"] == "match_conflict"
-        assert dup_body["context"]["conflicting_source"] == "source_alpha"
-        assert dup_body["context"]["source"] == "source_gamma"
+        assert dup_body["context"]["conflicting_source"] == "source-alpha"
+        assert dup_body["context"]["source"] == "source-gamma"
         assert dup_body["context"]["field"] == "ingest_type"
         assert dup_body["context"]["value"] == "shared_value"
-        assert "source_alpha" in dup_body["message"]
+        assert "source-alpha" in dup_body["message"]
 
         conflict_put = client.put(
-            "/api/v1/sources/source_beta",
+            "/api/v1/sources/source-beta",
             json={**second, "match": shared},
             headers=admin_headers,
         )
@@ -491,11 +535,11 @@ class TestDeleteSource:
 
     def test_delete_success(self, client: TestClient, admin_headers: dict, sample_source: dict):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
-        resp = client.delete("/api/v1/sources/test_source", headers=admin_headers)
+        resp = client.delete("/api/v1/sources/test-source", headers=admin_headers)
         assert resp.status_code == 204
 
         # Verify it's gone
-        get_resp = client.get("/api/v1/sources/test_source", headers=admin_headers)
+        get_resp = client.get("/api/v1/sources/test-source", headers=admin_headers)
         assert get_resp.status_code == 404
 
     def test_delete_not_found(self, client: TestClient, admin_headers: dict):
@@ -506,7 +550,7 @@ class TestDeleteSource:
         self, client: TestClient, viewer_headers: dict, admin_headers: dict, sample_source: dict
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
-        resp = client.delete("/api/v1/sources/test_source", headers=viewer_headers)
+        resp = client.delete("/api/v1/sources/test-source", headers=viewer_headers)
         assert resp.status_code == 403
 
 
@@ -517,26 +561,26 @@ class TestPatchSourceEnabled:
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
 
         disable = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={"enabled": False},
             headers=admin_headers,
         )
         assert disable.status_code == 200
         assert disable.json()["message"] == "disabled"
         assert (
-            client.get("/api/v1/sources/test_source", headers=admin_headers).json()["enabled"]
+            client.get("/api/v1/sources/test-source", headers=admin_headers).json()["enabled"]
             is False
         )
 
         enable = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={"enabled": True},
             headers=admin_headers,
         )
         assert enable.status_code == 200
         assert enable.json()["message"] == "active"
         assert (
-            client.get("/api/v1/sources/test_source", headers=admin_headers).json()["enabled"]
+            client.get("/api/v1/sources/test-source", headers=admin_headers).json()["enabled"]
             is True
         )
 
@@ -545,13 +589,13 @@ class TestPatchSourceEnabled:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={"state": "dormant"},
             headers=admin_headers,
         )
         assert resp.status_code == 200
         assert resp.json()["message"] == "dormant"
-        detail = client.get("/api/v1/sources/test_source", headers=admin_headers).json()
+        detail = client.get("/api/v1/sources/test-source", headers=admin_headers).json()
         assert detail["state"] == "dormant"
         assert detail["enabled"] is False  # compat accessor
 
@@ -560,7 +604,7 @@ class TestPatchSourceEnabled:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={},
             headers=admin_headers,
         )
@@ -571,7 +615,7 @@ class TestPatchSourceEnabled:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={"enabled": True},
             headers=admin_headers,
         )
@@ -580,7 +624,7 @@ class TestPatchSourceEnabled:
 
     def test_not_found(self, client: TestClient, admin_headers: dict):
         resp = client.patch(
-            "/api/v1/sources/missing_src",
+            "/api/v1/sources/missing-src",
             json={"enabled": False},
             headers=admin_headers,
         )
@@ -592,7 +636,7 @@ class TestPatchSourceEnabled:
     ):
         client.post("/api/v1/sources", json=sample_source, headers=admin_headers)
         resp = client.patch(
-            "/api/v1/sources/test_source",
+            "/api/v1/sources/test-source",
             json={"enabled": False, "description": "nope"},
             headers=admin_headers,
         )
@@ -627,32 +671,32 @@ class TestBulkAction:
         client.post(
             "/api/v1/sources",
             json={
-                "source": "bulk_toggle",
-                "match": {"field": "tags.collector.type", "value": "bulk_toggle"},
+                "source": "bulk-toggle",
+                "match": {"field": "tags.collector.type", "value": "bulk-toggle"},
             },
             headers=admin_headers,
         )
         disable = client.post(
             "/api/v1/sources/bulk",
-            json={"action": "disable", "sources": ["bulk_toggle"]},
+            json={"action": "disable", "sources": ["bulk-toggle"]},
             headers=admin_headers,
         )
         assert disable.status_code == 200
-        assert disable.json()["succeeded"] == ["bulk_toggle"]
+        assert disable.json()["succeeded"] == ["bulk-toggle"]
         assert (
-            client.get("/api/v1/sources/bulk_toggle", headers=admin_headers).json()["enabled"]
+            client.get("/api/v1/sources/bulk-toggle", headers=admin_headers).json()["enabled"]
             is False
         )
 
         enable = client.post(
             "/api/v1/sources/bulk",
-            json={"action": "enable", "sources": ["bulk_toggle"]},
+            json={"action": "enable", "sources": ["bulk-toggle"]},
             headers=admin_headers,
         )
         assert enable.status_code == 200
-        assert enable.json()["succeeded"] == ["bulk_toggle"]
+        assert enable.json()["succeeded"] == ["bulk-toggle"]
         assert (
-            client.get("/api/v1/sources/bulk_toggle", headers=admin_headers).json()["enabled"]
+            client.get("/api/v1/sources/bulk-toggle", headers=admin_headers).json()["enabled"]
             is True
         )
 

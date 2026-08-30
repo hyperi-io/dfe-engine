@@ -499,12 +499,12 @@ class TestSigmaView:
             "User": "user_name",
             "EventID": "event_id",
         }
-        ddl = gen.generate_sigma_view("windows_audit", mappings)
-        assert "CREATE OR REPLACE VIEW {db}.windows_audit_sigma AS" in ddl
+        ddl = gen.generate_sigma_view("windows-audit", mappings)
+        assert "CREATE OR REPLACE VIEW {db}.windows-audit_sigma AS" in ddl
         assert "`event_id` AS `EventID`" in ddl
         assert "`source_ip` AS `SourceIP`" in ddl
         assert "`user_name` AS `User`" in ddl
-        assert "FROM {db}.windows_audit" in ddl
+        assert "FROM {db}.windows-audit" in ddl
 
     def test_sigma_view_includes_star(self, gen: DDLGenerator):
         ddl = gen.generate_sigma_view("t", {"X": "x"})

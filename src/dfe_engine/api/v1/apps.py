@@ -46,7 +46,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
 
-from dfe_engine.api.deps import ClickHouseClient, CurrentUser, SourceReg, require_action
+from dfe_engine.api.deps import (
+    ClickHouseClient,
+    CurrentUser,
+    SourceReg,
+    get_source_registry,
+    require_action,
+)
 from dfe_engine.appmgmt import (
     AppInstance,
     DeployTarget,
@@ -84,6 +90,7 @@ from dfe_engine.gitcrud.engine import ResourceNotFoundError, flatten, set_path
 from dfe_engine.gitcrud.routing import ReviewRequiredError, route_write
 from dfe_engine.governance import PolicyStore, ProtectedVarError
 from dfe_engine.sampling import SampleRequest, SamplerError
+from dfe_engine.source.registry import SourceNotFoundError
 
 router = APIRouter(prefix="/apps", tags=["App Management"])
 
@@ -401,15 +408,16 @@ def _require_source(request: Request, app: AppInstance) -> None:
 
     The instance IS the source, and its topics are derived from that name, so a
     typo would otherwise deploy a transform consuming a topic nothing writes.
+
+    The registry is resolved through the dependency that owns it rather than off
+    ``app.state``, which never carries one -- reading it there made this guard
+    unconditionally pass.
     """
     if not catalogue.descriptor(app.service).source_bound:
         return
-    registry = getattr(request.app.state, "source_registry", None)
-    if registry is None:
-        return
     try:
-        registry.get_source(app.instance)
-    except Exception as exc:
+        get_source_registry().get_source(app.instance)
+    except SourceNotFoundError as exc:
         raise HTTPException(
             404,
             detail={

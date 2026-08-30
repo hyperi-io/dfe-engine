@@ -42,14 +42,14 @@ class TestFieldMapBasic:
     def test_full_creation(self):
         fm = _make_field_map(
             standard="ecs",
-            source="windows_audit",
+            source="windows-audit",
             mappings={"source.ip": "source_ip"},
             version="8.11",
             description="ECS for windows",
             inherits="_default",
         )
         assert fm.standard == "ecs"
-        assert fm.source == "windows_audit"
+        assert fm.source == "windows-audit"
         assert fm.mappings == {"source.ip": "source_ip"}
         assert fm.version == "8.11"
         assert fm.description == "ECS for windows"
@@ -73,7 +73,7 @@ class TestFieldMapBasic:
     def test_to_yaml_dict_round_trip(self):
         fm = _make_field_map(
             standard="ecs",
-            source="windows_audit",
+            source="windows-audit",
             mappings={"source.ip": "source_ip", "user.name": "user_name"},
             version="8.11",
         )
@@ -87,12 +87,12 @@ class TestFieldMapBasic:
     def test_from_dict(self):
         data = {
             "standard": "cim",
-            "source": "linux_syslog",
+            "source": "linux-syslog",
             "mappings": {"src_ip": "source_ip"},
         }
         fm = FieldMap.model_validate(data)
         assert fm.standard == "cim"
-        assert fm.source == "linux_syslog"
+        assert fm.source == "linux-syslog"
 
 
 # ---------------------------------------------------------------
@@ -106,8 +106,8 @@ class TestFieldMapValidation:
         assert fm.standard == "sigma"
 
     def test_source_forced_lowercase(self):
-        fm = _make_field_map(source="Windows_Audit")
-        assert fm.source == "windows_audit"
+        fm = _make_field_map(source="Windows-Audit")
+        assert fm.source == "windows-audit"
 
     def test_invalid_standard_raises(self):
         with pytest.raises(ValueError, match="must match"):
@@ -118,12 +118,18 @@ class TestFieldMapValidation:
             _make_field_map(standard="sigma-ecs")
 
     def test_invalid_source_raises(self):
-        with pytest.raises(ValueError, match="must match"):
+        """``source`` holds a _source label, so it answers to the source-name rule."""
+        with pytest.raises(ValueError, match="DNS-1123 label"):
             _make_field_map(source="123bad")
 
     def test_invalid_source_special_chars(self):
-        with pytest.raises(ValueError, match="must match"):
-            _make_field_map(source="windows-audit")
+        with pytest.raises(ValueError, match="DNS-1123 label"):
+            _make_field_map(source="windows.audit")
+
+    def test_source_underscore_refused_like_a_source_name(self):
+        """The two ends cannot drift: an underscore is refused in both places."""
+        with pytest.raises(ValueError, match="use '-' instead of '_'"):
+            _make_field_map(source="windows_audit")
 
     def test_standard_required(self):
         with pytest.raises(Exception):
@@ -141,13 +147,13 @@ class TestFieldMapProperties:
         assert fm.registry_key == f"sigma/{DEFAULT_MAP_NAME}"
 
     def test_registry_key_source(self):
-        fm = _make_field_map(standard="ecs", source="windows_audit")
-        assert fm.registry_key == "ecs/windows_audit"
+        fm = _make_field_map(standard="ecs", source="windows-audit")
+        assert fm.registry_key == "ecs/windows-audit"
 
     def test_is_default_true(self):
         fm = _make_field_map()
         assert fm.is_default is True
 
     def test_is_default_false(self):
-        fm = _make_field_map(source="windows_audit")
+        fm = _make_field_map(source="windows-audit")
         assert fm.is_default is False

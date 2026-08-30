@@ -23,9 +23,9 @@ from dfe_engine.source.registry import SourceNotFoundError
 SEED_SOURCE_NAME = "seedsource"
 """The source every app-management seed binds to; siblings key their instances off it.
 
-No underscore: a source name may carry one, but a source-bound app's instance IS the
-source name and an instance must be a DNS-1123 label, so only the intersection of the
-two character sets can be seeded end to end.
+Deliberately hyphen-free as well as underscore-free: a hyphen is legal in a source
+name but not yet quoted in a ClickHouse identifier position, so a hyphenated fixture
+would break the moment a spec asked the API to render this source's DDL.
 """
 
 SEED_ACTOR = "e2e-seed"

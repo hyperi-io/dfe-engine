@@ -9,7 +9,7 @@ def _sample_create_payload(**overrides):
         "display_name": "Test Rule",
         "severity": "high",
         "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
-        "source": "windows_audit",
+        "source": "windows-audit",
     }
     payload.update(overrides)
     return payload
@@ -165,13 +165,13 @@ class TestRulesUpdateAndDelete:
             json={
                 "severity": "high",
                 "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
-                "source": "windows_audit",
+                "source": "windows-audit",
                 "source_type": "",
             },
             headers=admin_headers,
         )
         assert resp.status_code == 200
-        assert resp.json()["rule"]["source"] == "windows_audit"
+        assert resp.json()["rule"]["source"] == "windows-audit"
 
     def test_delete_rule(self, client, admin_headers):
         create = client.post(
@@ -256,7 +256,7 @@ class TestRulesCreate:
                 "name": "my_rule",
                 "severity": "high",
                 "user_sql": "SELECT * FROM default.events WHERE severity = 'high'",
-                "source": "windows_audit",
+                "source": "windows-audit",
             },
             headers=admin_headers,
         )

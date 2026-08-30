@@ -16,7 +16,7 @@ from dfe_engine.source.type_registry import TypeRegistry
 
 
 def _make_source(
-    name: str = "windows_audit",
+    name: str = "windows-audit",
     *,
     sigma: SourceView | None = None,
     enabled: bool = True,
@@ -111,11 +111,11 @@ def empty_sigma():
 @pytest.fixture
 def source_registry(windows_sigma, linux_sigma, empty_sigma):
     sources = [
-        _make_source("windows_audit", sigma=windows_sigma),
-        _make_source("linux_syslog", sigma=linux_sigma),
-        _make_source("network_flow", sigma=empty_sigma),
-        _make_source("raw_passthrough"),  # no sigma at all
-        _make_source("disabled_source", sigma=windows_sigma, enabled=False),
+        _make_source("windows-audit", sigma=windows_sigma),
+        _make_source("linux-syslog", sigma=linux_sigma),
+        _make_source("network-flow", sigma=empty_sigma),
+        _make_source("raw-passthrough"),  # no sigma at all
+        _make_source("disabled-source", sigma=windows_sigma, enabled=False),
     ]
     return FakeSourceRegistry(sources)
 
@@ -134,8 +134,8 @@ def mapper(source_registry, type_registry):
 
 class TestGetSource:
     def test_get_existing_source(self, mapper):
-        source = mapper.get_source("windows_audit")
-        assert source.source == "windows_audit"
+        source = mapper.get_source("windows-audit")
+        assert source.source == "windows-audit"
 
     def test_get_missing_source_raises(self, mapper):
         with pytest.raises(SourceNotFoundError):
@@ -149,7 +149,7 @@ class TestGetSource:
 
 class TestGetFieldMappings:
     def test_returns_sigma_mappings(self, mapper):
-        mappings = mapper.get_field_mappings("windows_audit")
+        mappings = mapper.get_field_mappings("windows-audit")
         assert mappings == {
             "EventID": "event_id",
             "CommandLine": "command_line",
@@ -158,15 +158,15 @@ class TestGetFieldMappings:
         }
 
     def test_returns_empty_for_no_sigma_config(self, mapper):
-        mappings = mapper.get_field_mappings("raw_passthrough")
+        mappings = mapper.get_field_mappings("raw-passthrough")
         assert mappings == {}
 
     def test_returns_empty_for_empty_mappings(self, mapper):
-        mappings = mapper.get_field_mappings("network_flow")
+        mappings = mapper.get_field_mappings("network-flow")
         assert mappings == {}
 
     def test_returns_linux_mappings(self, mapper):
-        mappings = mapper.get_field_mappings("linux_syslog")
+        mappings = mapper.get_field_mappings("linux-syslog")
         assert mappings == {
             "exe": "process_name",
             "cmdline": "command_line",
@@ -185,8 +185,8 @@ class TestGetFieldMappings:
 class TestGetSchemaMetadata:
     def test_returns_empty_when_build_fails(self, mapper):
         """When SchemaBuilderV2.build raises, returns empty dict."""
-        # raw_passthrough has no meta_schema, so build will fail
-        metadata = mapper.get_schema_metadata("raw_passthrough")
+        # raw-passthrough has no meta_schema, so build will fail
+        metadata = mapper.get_schema_metadata("raw-passthrough")
         assert metadata == {}
 
     def test_missing_source_raises(self, mapper):
@@ -201,10 +201,10 @@ class TestGetSchemaMetadata:
 
 class TestGenerateSigmaView:
     def test_generates_view_ddl(self, mapper):
-        ddl = mapper.generate_sigma_view("windows_audit")
+        ddl = mapper.generate_sigma_view("windows-audit")
         assert ddl is not None
         assert "CREATE OR REPLACE VIEW" in ddl
-        assert "windows_audit_sigma" in ddl
+        assert "windows-audit_sigma" in ddl
         # Mappings should appear as aliases
         assert "event_id" in ddl
         assert "EventID" in ddl
@@ -212,16 +212,16 @@ class TestGenerateSigmaView:
         assert "CommandLine" in ddl
 
     def test_uses_custom_db(self, mapper):
-        ddl = mapper.generate_sigma_view("windows_audit", db="my_db")
+        ddl = mapper.generate_sigma_view("windows-audit", db="my_db")
         assert ddl is not None
         assert "my_db" in ddl
 
     def test_returns_none_for_no_sigma(self, mapper):
-        ddl = mapper.generate_sigma_view("raw_passthrough")
+        ddl = mapper.generate_sigma_view("raw-passthrough")
         assert ddl is None
 
     def test_returns_none_for_empty_mappings(self, mapper):
-        ddl = mapper.generate_sigma_view("network_flow")
+        ddl = mapper.generate_sigma_view("network-flow")
         assert ddl is None
 
     def test_missing_source_raises(self, mapper):
@@ -237,21 +237,21 @@ class TestGenerateSigmaView:
 class TestGenerateAllSigmaViews:
     def test_generates_views_for_sources_with_mappings(self, mapper):
         views = mapper.generate_all_sigma_views()
-        # Should include windows_audit and linux_syslog (have non-empty mappings)
-        assert "windows_audit" in views
-        assert "linux_syslog" in views
-        # Should NOT include network_flow (empty mappings) or raw_passthrough (no sigma)
-        assert "network_flow" not in views
-        assert "raw_passthrough" not in views
+        # Should include windows-audit and linux-syslog (have non-empty mappings)
+        assert "windows-audit" in views
+        assert "linux-syslog" in views
+        # Should NOT include network-flow (empty mappings) or raw-passthrough (no sigma)
+        assert "network-flow" not in views
+        assert "raw-passthrough" not in views
 
     def test_enabled_only_excludes_disabled(self, mapper):
         views = mapper.generate_all_sigma_views(enabled_only=True)
-        assert "disabled_source" not in views
-        assert "windows_audit" in views
+        assert "disabled-source" not in views
+        assert "windows-audit" in views
 
     def test_enabled_only_false_includes_disabled(self, mapper):
         views = mapper.generate_all_sigma_views(enabled_only=False)
-        assert "disabled_source" in views
+        assert "disabled-source" in views
 
     def test_views_contain_valid_ddl(self, mapper):
         views = mapper.generate_all_sigma_views()
@@ -269,19 +269,19 @@ class TestGetSourcesForLogsource:
     def test_match_by_product_windows(self, mapper):
         matches = mapper.get_sources_for_logsource(product="windows")
         names = [s.source for s in matches]
-        assert "windows_audit" in names
-        assert "linux_syslog" not in names
+        assert "windows-audit" in names
+        assert "linux-syslog" not in names
 
     def test_match_by_product_linux(self, mapper):
         matches = mapper.get_sources_for_logsource(product="linux")
         names = [s.source for s in matches]
-        assert "linux_syslog" in names
-        assert "windows_audit" not in names
+        assert "linux-syslog" in names
+        assert "windows-audit" not in names
 
     def test_case_insensitive_product(self, mapper):
         matches = mapper.get_sources_for_logsource(product="Windows")
         names = [s.source for s in matches]
-        assert "windows_audit" in names
+        assert "windows-audit" in names
 
     def test_no_match_returns_empty(self, mapper):
         matches = mapper.get_sources_for_logsource(product="macos")
@@ -295,29 +295,29 @@ class TestGetSourcesForLogsource:
         """get_sources_for_logsource only queries enabled sources."""
         matches = mapper.get_sources_for_logsource(product="windows")
         names = [s.source for s in matches]
-        # disabled_source has windows taxonomy but is disabled
-        assert "disabled_source" not in names
+        # disabled-source has windows taxonomy but is disabled
+        assert "disabled-source" not in names
 
     def test_service_narrowing_excludes_wrong_source(self, type_registry):
         # Two same-product sources - a sysmon-service rule must bind ONLY
         # the sysmon source, not the audit source that declares a different service.
         audit = _make_source(
-            "windows_audit",
+            "windows-audit",
             sigma=SourceView(standard="sigma", taxonomy="windows", service="audit"),
         )
         sysmon = _make_source(
-            "windows_sysmon",
+            "windows-sysmon",
             sigma=SourceView(standard="sigma", taxonomy="windows", service="sysmon"),
         )
-        bare = _make_source("windows_any", sigma=SourceView(standard="sigma", taxonomy="windows"))
+        bare = _make_source("windows-any", sigma=SourceView(standard="sigma", taxonomy="windows"))
         from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
         m = SigmaSourceMapper(FakeSourceRegistry([audit, sysmon, bare]), registry=type_registry)
 
         names = {s.source for s in m.get_sources_for_logsource(product="windows", service="sysmon")}
-        assert "windows_sysmon" in names
-        assert "windows_audit" not in names  # wrong service, excluded
-        assert "windows_any" in names  # no declared service -> matches any
+        assert "windows-sysmon" in names
+        assert "windows-audit" not in names  # wrong service, excluded
+        assert "windows-any" in names  # no declared service -> matches any
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +363,7 @@ class TestFieldMapRegistryIntegration:
                 mappings={"EventID": "registry_event_id", "RegistryOnly": "registry_col"},
             )
         )
-        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        mappings = mapper_with_registry.get_field_mappings("windows-audit")
         # The source's inline custom_mappings override the registry per-key...
         assert mappings["EventID"] == "event_id"
         # ...while registry-only keys survive in the merge.
@@ -371,7 +371,7 @@ class TestFieldMapRegistryIntegration:
 
     def test_inline_only_when_no_registry_maps(self, mapper_with_registry):
         """When the registry has no sigma maps, the inline custom_mappings stand alone."""
-        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        mappings = mapper_with_registry.get_field_mappings("windows-audit")
         assert mappings["EventID"] == "event_id"
 
     def test_source_specific_override_from_registry(self, mapper_with_registry, fm_registry):
@@ -389,11 +389,11 @@ class TestFieldMapRegistryIntegration:
         fm_registry.save_map(
             FieldMap(
                 standard="sigma",
-                source="windows_audit",
+                source="windows-audit",
                 mappings={"User": "win_user"},
             )
         )
-        mappings = mapper_with_registry.get_field_mappings("windows_audit")
+        mappings = mapper_with_registry.get_field_mappings("windows-audit")
         assert mappings["User"] == "win_user"
         assert mappings["Extra"] == "extra_col"
 
@@ -405,7 +405,7 @@ class TestFieldMapRegistryIntegration:
                 mappings={"RegistryField": "registry_col"},
             )
         )
-        ddl = mapper_with_registry.generate_sigma_view("windows_audit")
+        ddl = mapper_with_registry.generate_sigma_view("windows-audit")
         assert ddl is not None
         assert "`registry_col` AS `RegistryField`" in ddl
         assert "`event_id` AS `EventID`" in ddl  # inline mapping in the same view
@@ -432,17 +432,17 @@ class TestFieldMapRegistryIntegration:
         )
         # The source-name convention map: bypassed when the view pins another.
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="windows_audit", mappings={"User": "convention_user"})
+            FieldMap(standard="sigma", source="windows-audit", mappings={"User": "convention_user"})
         )
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+            FieldMap(standard="sigma", source="corp-pin", mappings={"User": "pinned_user"})
         )
         source = _make_source(
-            "windows_audit",
+            "windows-audit",
             sigma=SourceView(
                 standard="sigma",
                 taxonomy="windows",
-                field_map="corp_pin",
+                field_map="corp-pin",
                 custom_mappings={"EventID": "inline_event_id"},
             ),
         )
@@ -452,11 +452,11 @@ class TestFieldMapRegistryIntegration:
             field_map_registry=fm_registry,
         )
 
-        mappings = m.get_field_mappings("windows_audit")
+        mappings = m.get_field_mappings("windows-audit")
         assert mappings["User"] == "pinned_user"  # pin, not the convention map
         assert mappings["EventID"] == "inline_event_id"  # inline still wins per-key
 
-        ddl = m.generate_sigma_view("windows_audit")
+        ddl = m.generate_sigma_view("windows-audit")
         assert ddl is not None
         assert "`pinned_user` AS `User`" in ddl
         assert "convention_user" not in ddl
@@ -467,15 +467,15 @@ class TestFieldMapRegistryIntegration:
         from dfe_engine.sigma.source_mapper import SigmaSourceMapper
 
         fm_registry.save_map(
-            FieldMap(standard="sigma", source="corp_pin", mappings={"User": "pinned_user"})
+            FieldMap(standard="sigma", source="corp-pin", mappings={"User": "pinned_user"})
         )
         good = _make_source(
-            "windows_audit",
-            sigma=SourceView(standard="sigma", taxonomy="windows", field_map="sigma/corp_pin"),
+            "windows-audit",
+            sigma=SourceView(standard="sigma", taxonomy="windows", field_map="sigma/corp-pin"),
         )
         bad = _make_source(
-            "linux_syslog",
-            sigma=SourceView(standard="sigma", taxonomy="linux", field_map="ecs/corp_pin"),
+            "linux-syslog",
+            sigma=SourceView(standard="sigma", taxonomy="linux", field_map="ecs/corp-pin"),
         )
         m = SigmaSourceMapper(
             FakeSourceRegistry([good, bad]),
@@ -483,13 +483,13 @@ class TestFieldMapRegistryIntegration:
             field_map_registry=fm_registry,
         )
 
-        assert m.get_field_mappings("windows_audit")["User"] == "pinned_user"
+        assert m.get_field_mappings("windows-audit")["User"] == "pinned_user"
         with pytest.raises(FieldMapError, match="ecs"):
-            m.get_field_mappings("linux_syslog")
+            m.get_field_mappings("linux-syslog")
 
     def test_no_registry_behaves_like_legacy(self, mapper):
         """Without field_map_registry, mapper behaves identically to legacy."""
-        mappings = mapper.get_field_mappings("windows_audit")
+        mappings = mapper.get_field_mappings("windows-audit")
         assert mappings == {
             "EventID": "event_id",
             "CommandLine": "command_line",

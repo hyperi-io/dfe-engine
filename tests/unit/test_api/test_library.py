@@ -47,6 +47,15 @@ def _publish(client, headers, name="parse-syslog", content=V1, **body):
 
 
 def _deploy(client, headers, instance="syslog"):
+    # A vrl instance IS a source's processing step, so the source comes first.
+    client.post(
+        "/api/v1/sources",
+        json={
+            "source": instance,
+            "match": {"field": "tags.collector.type", "value": instance},
+        },
+        headers=headers,
+    )
     return client.post(
         f"/api/v1/apps/{VRL}/instances", json={"instance": instance}, headers=headers
     )

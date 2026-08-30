@@ -32,7 +32,21 @@ def _wire(app, tmp_path, target: str = "kubernetes"):
     return gc
 
 
+def _define_source(client, headers, name: str):
+    """Define the source a source-bound instance is named for.
+
+    An instance of a source-bound app IS a source's processing step, so the
+    source has to exist first. Idempotent: a repeat is a 409 the caller ignores.
+    """
+    return client.post(
+        "/api/v1/sources",
+        json={"source": name, "match": {"field": "tags.collector.type", "value": name}},
+        headers=headers,
+    )
+
+
 def _deploy(client, headers, instance: str = "edge", values: dict | None = None):
+    _define_source(client, headers, instance)
     return client.post(
         f"/api/v1/apps/{VRL}/instances",
         json={"instance": instance, "values": values or {}},
@@ -100,6 +114,44 @@ class TestLifecycle:
         resp = _deploy(client, admin_headers, instance="Not A Label")
         assert resp.status_code == 400
         assert resp.json()["code"] == "invalid_instance"
+
+    def test_a_source_bound_instance_needs_its_source(self, client, app, admin_headers, tmp_path):
+        """The instance IS the source, so a name no source answers to is refused.
+
+        Without this the deploy succeeds and the transform consumes a landing
+        topic nothing ever writes to.
+        """
+        _wire(app, tmp_path)
+        resp = client.post(
+            f"/api/v1/apps/{VRL}/instances",
+            json={"instance": "nosuchsource"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 404, resp.text
+        assert resp.json()["code"] == "unknown_source"
+        assert "nosuchsource" in resp.json()["message"]
+
+    def test_a_defined_source_deploys(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        assert _define_source(client, admin_headers, "realsource").status_code == 201
+        resp = client.post(
+            f"/api/v1/apps/{VRL}/instances",
+            json={"instance": "realsource"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_an_app_that_is_not_source_bound_needs_no_source(
+        self, client, app, admin_headers, tmp_path
+    ):
+        """The guard is per-app: a pool has no source binding to check."""
+        _wire(app, tmp_path)
+        resp = client.post(
+            "/api/v1/apps/dfe-receiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        assert resp.status_code == 200, resp.text
 
     def test_undeploy_removes_the_overlay(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
@@ -255,6 +307,7 @@ class TestFiles:
         # The supervisor's reload compares config structs, and its transform config
         # holds only paths, so a content edit needs a pod roll to take effect.
         _wire(app, tmp_path)
+        _define_source(client, admin_headers, "edge")
         client.post(
             "/api/v1/apps/dfe-transform-vector/instances",
             json={"instance": "edge"},
@@ -321,6 +374,7 @@ class TestAdversarialRegressions:
         _wire(app, tmp_path)
         service = "dfe-transform-vector"
         instance = "customer-alpha-primary"
+        _define_source(client, admin_headers, instance)
         created = client.post(
             f"/api/v1/apps/{service}/instances",
             json={"instance": instance, "values": {}},
@@ -343,7 +397,10 @@ class TestAdversarialRegressions:
     def test_the_longest_legal_instance_name_deploys(self, client, app, admin_headers, tmp_path):
         _wire(app, tmp_path)
         service = "dfe-transform-vector"
+        # The source-name cap is this same 40, so the longest legal instance is
+        # still a nameable source.
         instance = "c" * 40
+        _define_source(client, admin_headers, instance)
         created = client.post(
             f"/api/v1/apps/{service}/instances",
             json={"instance": instance, "values": {}},
