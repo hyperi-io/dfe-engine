@@ -58,12 +58,19 @@ surface small and the policy readable.
 `src/dfe_engine/gitcrud/`. One engine handles every resource class the same way,
 because every resource is git-backed config. A `ResourceClass` says where a class
 lives (a directory), how one resource is laid out, and which RBAC prefix governs
-it. The default registry covers the deploy repo: `helmvars` (the overlays under
-`values/`), `sources` (the all-in-one source-definition docs under
+it. The default registry covers the deploy repo: `helmvars` (the app-instance
+overlays under `values/`), `infravars` (the substrate and platform overlays under
+`infra/`), `sources` (the all-in-one source-definition docs under
 `config/sources/` - the first datamodel class in the deploy repo), `library` (the
 versioned artefact library under `config/library/`) and the `governance` class
 (`accounts`, `groups`, `roles`, `actions`, `policies` under `governance/`, plus
 the CH RBAC types).
+
+`infravars` shares the `helmvars` RBAC prefix but needs its own directory: Argo
+hands the app generator's `values/*-values.yaml` glob to git as a pathspec, where
+`*` matches `/`, so anything under `values/` becomes an Argo application. Its
+surface is `api/v1/backing-services`, and its reads are DECLARED, never observed
+-- the engine runs no Kubernetes client, by design.
 
 ### Layouts -- one document, or a directory
 
@@ -162,7 +169,18 @@ sequenceDiagram
 
 A `ProtectedPolicy` is the one thing that reaches below a class -- a list of locked
 `cls:name:path` globs that even Tier-1 must respect unless the caller holds the
-override grant. It is a policy object, not a per-var ACL.
+override grant. It is a policy object, not a per-var ACL. Two policies ship and
+seed into every deploy repo: `baseline` locks image references, and
+`storage-model` locks the data-layer modes, both storage models, the object-store
+blocks and the disk size and class.
+
+Not everything unsafe is a protected var. A lower node or broker count is refused
+by the backing-services router itself, with a 400 that names the reason, and the
+override grant does NOT get past it: the hazard is data loss rather than
+governance, and there is no correct way to grant your way through it. The same
+distinction applies to `replicaCount`, which the commit standard refuses unless
+the document being written explicitly disables KEDA -- with a controller owning
+the count, writing one renders nothing.
 
 ### Constrained params -- a dial with detents, or a bounded knob
 

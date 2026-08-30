@@ -11167,7 +11167,7 @@
           "Governed Ops: Helm Vars"
         ],
         "summary": "Delete Var",
-        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team).",
+        "description": "Revert a helm var to its chart default. Routed like set_var (PR in prod+team);\n403 if protected, since reverting a locked var changes it as surely as setting it.",
         "operationId": "delete_var_api_v1_helm_files__name__vars__path__delete",
         "parameters": [
           {
@@ -11196,6 +11196,307 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/dfe_engine__api__v1__helm__WriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Backing Services",
+        "description": "Every backing service's DECLARED deploy configuration.\n\nDeclared, not observed: these are the values the deploy repo asks for, read\nfrom git. The engine runs no Kubernetes client, so a figure here can differ\nfrom the cluster whenever Argo has not synced the declaration yet.",
+        "operationId": "list_backing_services_api_v1_backing_services_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/BackingServiceConfig"
+                  },
+                  "type": "array",
+                  "title": "Response List Backing Services Api V1 Backing Services Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Overlays",
+        "description": "List substrate/platform overlay resources in the deploy repo's infra/ dir.",
+        "operationId": "list_overlays_api_v1_backing_services_overlays_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array",
+                  "title": "Response List Overlays Api V1 Backing Services Overlays Get"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays/{name}/vars": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "List Overlay Vars",
+        "description": "Flattened dot-path vars for one overlay, each marked protected or not.",
+        "operationId": "list_overlay_vars_api_v1_backing_services_overlays__name__vars_get",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true
+                  },
+                  "title": "Response List Overlay Vars Api V1 Backing Services Overlays  Name  Vars Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/{service}": {
+      "get": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Get Backing Service",
+        "description": "One backing service's DECLARED deploy configuration (see the list route).",
+        "operationId": "get_backing_service_api_v1_backing_services__service__get",
+        "parameters": [
+          {
+            "name": "service",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Service"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingServiceConfig"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      }
+    },
+    "/api/v1/backing-services/overlays/{name}/vars/{path}": {
+      "put": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Set Overlay Var",
+        "description": "Set a substrate/platform value.\n\n403 with the policy that blocked it when the var is protected - the storage\nmodel, the data-layer modes and the disk size are decided at deploy, and moving\none on a live deployment is a data migration. 400 when the value would lower a\ndeclared node or broker count, which loses data rather than capacity.",
+        "operationId": "set_overlay_var_api_v1_backing_services_overlays__name__vars__path__put",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetVarRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingWriteResult"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ]
+      },
+      "delete": {
+        "tags": [
+          "Governed Ops: Backing Services"
+        ],
+        "summary": "Delete Overlay Var",
+        "description": "Revert a substrate/platform value to its chart default. Protected vars refuse.\n\nNot guarded up-only: reverting a count hands it back to the chart or profile\ndefault, which the engine cannot read, so there is no after-value to compare.",
+        "operationId": "delete_overlay_var_api_v1_backing_services_overlays__name__vars__path__delete",
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "path",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Path"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BackingWriteResult"
                 }
               }
             }
@@ -15617,6 +15918,11 @@
             "type": "string",
             "title": "Multiplicity"
           },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -15632,6 +15938,7 @@
           "telemetry_name",
           "scale_deployed",
           "multiplicity",
+          "has_compiled_routing",
           "file_sets"
         ],
         "title": "AppSummary"
@@ -15758,6 +16065,115 @@
           "reason"
         ],
         "title": "AutoMergeStatus"
+      },
+      "BackingServiceConfig": {
+        "properties": {
+          "service": {
+            "type": "string",
+            "title": "Service"
+          },
+          "chart": {
+            "type": "string",
+            "title": "Chart"
+          },
+          "overlay": {
+            "type": "string",
+            "title": "Overlay"
+          },
+          "prefix": {
+            "type": "string",
+            "title": "Prefix",
+            "description": "Values-key prefix every path below sits under. Read it rather than deriving one from `service` or `chart` - neither is guaranteed to match."
+          },
+          "mode": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_model": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "replicas": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_size": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "storage_class": {
+            "$ref": "#/components/schemas/DeclaredValue"
+          },
+          "resources": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/DeclaredValue"
+            },
+            "type": "object",
+            "title": "Resources"
+          }
+        },
+        "type": "object",
+        "required": [
+          "service",
+          "chart",
+          "overlay",
+          "prefix",
+          "mode",
+          "storage_model",
+          "replicas",
+          "storage_size",
+          "storage_class"
+        ],
+        "title": "BackingServiceConfig",
+        "description": "A backing service's deploy configuration AS DECLARED, not as observed."
+      },
+      "BackingWriteResult": {
+        "properties": {
+          "changed": {
+            "type": "boolean",
+            "title": "Changed"
+          },
+          "commit_sha": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Commit Sha"
+          },
+          "auto_merged": {
+            "type": "boolean",
+            "title": "Auto Merged",
+            "default": false
+          },
+          "review_required": {
+            "type": "boolean",
+            "title": "Review Required",
+            "default": false
+          },
+          "pr_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pr Url"
+          },
+          "reload": {
+            "type": "string",
+            "title": "Reload",
+            "description": "'apply' reconciles in place, 'roll' restarts pods, 'recreate' needs the StatefulSet recreated by hand, 'redeploy' changes which objects exist."
+          }
+        },
+        "type": "object",
+        "required": [
+          "changed",
+          "reload"
+        ],
+        "title": "BackingWriteResult",
+        "description": "A governed write plus what syncing it does to the running store."
       },
       "BindingSummary": {
         "properties": {
@@ -16095,6 +16511,11 @@
             "type": "string",
             "title": "Multiplicity"
           },
+          "has_compiled_routing": {
+            "type": "boolean",
+            "title": "Has Compiled Routing",
+            "description": "Whether this app's routing is compiled from the source definitions. False means the /routing routes answer 400 for every instance of it."
+          },
           "file_sets": {
             "items": {
               "$ref": "#/components/schemas/FileSetSummary"
@@ -16115,6 +16536,7 @@
           "service",
           "scale_deployed",
           "multiplicity",
+          "has_compiled_routing",
           "file_sets",
           "instances"
         ],
@@ -17102,6 +17524,38 @@
         ],
         "title": "DatabaseInfo",
         "description": "Summary of a ClickHouse database."
+      },
+      "DeclaredValue": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {},
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          },
+          "protected": {
+            "type": "boolean",
+            "title": "Protected",
+            "default": false
+          }
+        },
+        "type": "object",
+        "title": "DeclaredValue",
+        "description": "One value as the deploy repo declares it.\n\n``source`` names the overlay file it came from; a null source means the\ndeployment declared nothing and the chart or profile default applies. Those\ndefaults live in dfe-infra, which the engine does not read, so the API says\n\"not declared\" rather than guessing a number."
       },
       "DeploymentConfigDetail": {
         "properties": {
@@ -24194,6 +24648,18 @@
       },
       "ScalingRequest": {
         "properties": {
+          "replica_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Replica Count",
+            "description": "Fixed pod count, for a deployment with KEDA off. Refused while KEDA is explicitly enabled, because the chart omits `replicas` and the ScaledObject owns the count."
+          },
           "min_replicas": {
             "anyOf": [
               {
