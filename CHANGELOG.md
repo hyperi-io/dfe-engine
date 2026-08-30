@@ -3,6 +3,29 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.12](https://github.com/hyperi-io/dfe-engine/compare/v1.17.11...v1.17.12) (2026-08-30)
+
+### Bug Fixes
+
+* a versioned artefact library, stored as real files in git ([26f8fa9](https://github.com/hyperi-io/dfe-engine/commit/26f8fa98066bd092483b65877992182a6c6436bd))
+* e2e seeds for the source, library and components UI areas ([5227598](https://github.com/hyperi-io/dfe-engine/commit/52275983be9e6751737c0ec047a57e1c8c826267))
+* enrichment tables are a file set like any other ([c1d85dd](https://github.com/hyperi-io/dfe-engine/commit/c1d85dd1baf7637c47828ea4e13fbf054abb6faa))
+* generic app-management layer over the deploy overlay ([8162910](https://github.com/hyperi-io/dfe-engine/commit/816291056f3d7d9555815f17b3f5360443300b1a))
+* **governance:** lock the clickhouse tiered dials like every other storage choice ([22ee44f](https://github.com/hyperi-io/dfe-engine/commit/22ee44ff4322841434a6ed557dfcd47627b24a98))
+* guard the backing-service dials, and let a KEDA-off app set its count ([46927a4](https://github.com/hyperi-io/dfe-engine/commit/46927a4386dfb535b4e4a0f7336d32b296c74af0))
+* infra_admin can run the dry run it is meant to author ([feff12b](https://github.com/hyperi-io/dfe-engine/commit/feff12bf6bddbf4d04edf928d5961c78f944b8fb))
+* quote the grouping query's table reference like every other sink ([7df4d0f](https://github.com/hyperi-io/dfe-engine/commit/7df4d0fbef3b0707b1d0536808fac580816f70d2))
+* quote the identifiers the DDL generator emits ([6ee723d](https://github.com/hyperi-io/dfe-engine/commit/6ee723d22321b4e71e40d2803794d71509710c11))
+* reflect the app catalogue, and remediate the review findings ([01cbf4d](https://github.com/hyperi-io/dfe-engine/commit/01cbf4df9d212fa7fd8b5df1e11b3e489295fd31))
+* refuse a post-deploy storage-model change, and show what was declared ([13d4d6e](https://github.com/hyperi-io/dfe-engine/commit/13d4d6ecff081e2d788bf2dfcf1e566fe37b07bb))
+* reset_all clears the substrate overlay it was leaving behind ([af0a71e](https://github.com/hyperi-io/dfe-engine/commit/af0a71edf2c6091f4e9c03cfd089f81fca781146))
+* run a transform over real events before committing it ([ba11431](https://github.com/hyperi-io/dfe-engine/commit/ba114316211341039148b34bb082cdf0224e3ce1))
+* seeding the break-glass admin persists it, so setup can finish ([f42b3df](https://github.com/hyperi-io/dfe-engine/commit/f42b3df12e122ed166f9b5ec0158c0ce8d3f42a4))
+* source names are DNS-1123 labels, and the source guard fires ([f461630](https://github.com/hyperi-io/dfe-engine/commit/f46163036ba506de63348e5874d1fdd008185f6b))
+* source routing now reaches the app that has to obey it ([c6668e6](https://github.com/hyperi-io/dfe-engine/commit/c6668e6c0f79559d46da943be989f34d53db9672))
+* the duplicate-source workflow test uses a legal name ([836bd74](https://github.com/hyperi-io/dfe-engine/commit/836bd740aba9d876be615f6b537aefedac857475))
+* validate the Vector shape the app actually loads ([e864b09](https://github.com/hyperi-io/dfe-engine/commit/e864b09afafe6dd1f1ffed1d1650a60abc3a682b))
+
 ## [1.17.11](https://github.com/hyperi-io/dfe-engine/compare/v1.17.10...v1.17.11) (2026-08-27)
 
 ### Bug Fixes
