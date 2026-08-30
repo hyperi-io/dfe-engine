@@ -223,6 +223,11 @@ class Seed:
             self.artefacts.delete_all()
             self.sources.delete_all()
 
+            # The deploy-repo state no seeder creates but a spec can change --
+            # the substrate overlay and the auto-merge flag. Left behind, a
+            # backing-service count raised by one spec is still raised for the next.
+            self.apps.delete_run_state()
+
             # Re-add the break-glass admin account
             self.accounts.reset_break_glass_admin()
             logger.info("e2e seed", script=script)

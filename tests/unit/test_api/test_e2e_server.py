@@ -458,6 +458,95 @@ class TestSeedAppScalingState:
         assert _admin(appmgmt_client)
 
 
+_BACKING = "/api/v1/backing-services"
+_CH_OVERLAY = "clickhouse-cluster"
+
+
+class TestResetClearsRunState:
+    """A reset has to take the substrate overlay with it, or specs inherit it.
+
+    The live failure this pins: one spec raised a backing-service node count, the
+    next reset left it raised, and that spec then failed against its predecessor's
+    leftovers on a workspace it believed was clean.
+    """
+
+    @staticmethod
+    def _raise_node_count(client: TestClient, headers: dict[str, str]) -> None:
+        resp = client.put(
+            f"{_BACKING}/overlays/{_CH_OVERLAY}/vars/clickhouse.replicas",
+            json={"value": 5},
+            headers=headers,
+        )
+        assert resp.status_code == 200, resp.text
+
+    def test_a_raised_node_count_does_not_survive_reset_all(self, appmgmt_client):
+        _seed(appmgmt_client, "seed_app_scaling_state")
+        headers = _admin(appmgmt_client)
+        self._raise_node_count(appmgmt_client, headers)
+
+        # It really is declared before the reset, or the test proves nothing.
+        declared = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        assert declared["clickhouse"]["replicas"]["value"] == 5
+        assert declared["clickhouse"]["replicas"]["source"] is not None
+
+        _seed(appmgmt_client, "reset_all")
+
+        headers = _admin(appmgmt_client)
+        after = {s["service"]: s for s in _get(appmgmt_client, _BACKING, headers)}
+        for service in after.values():
+            for field in ("mode", "storage_model", "replicas", "storage_size", "storage_class"):
+                assert service[field]["value"] is None, f"{service['service']}.{field}"
+                assert service[field]["source"] is None
+        assert _get(appmgmt_client, f"{_BACKING}/overlays", headers) == []
+
+    def test_the_auto_merge_flag_does_not_survive_reset_all(self, appmgmt_client):
+        """Absent reads as off, which is the posture a fresh deployment starts in."""
+        headers = _admin(appmgmt_client)
+        enabled = appmgmt_client.put(
+            "/api/v1/gitops/auto-merge", json={"enabled": True}, headers=headers
+        )
+        assert enabled.status_code == 200, enabled.text
+        assert _get(appmgmt_client, "/api/v1/gitops/auto-merge", headers)["stored"] is True
+
+        _seed(appmgmt_client, "reset_all")
+
+        headers = _admin(appmgmt_client)
+        assert _get(appmgmt_client, "/api/v1/gitops/auto-merge", headers)["stored"] is False
+
+    def test_the_shipped_governance_library_survives_reset_all(self, appmgmt_client):
+        """Actions and policies are product configuration, not run state."""
+        gc = appmgmt_client.app.state.gitcrud
+        actions = set(gc.list("actions"))
+        policies = set(gc.list("policies"))
+        assert actions, "the startup seed should have populated the action library"
+        assert policies, "the startup seed should have populated the policy library"
+
+        _seed(appmgmt_client, "reset_all")
+
+        assert set(gc.list("actions")) == actions
+        assert set(gc.list("policies")) == policies
+
+    def test_reset_all_still_leaves_the_break_glass_durable(self, appmgmt_client):
+        """Clearing run state must not disturb the account copy the reset re-mirrors."""
+        _seed(appmgmt_client, "seed_setup_complete")
+        _seed(appmgmt_client, "reset_all")
+
+        app = appmgmt_client.app
+        live = app.state.account_store.get("admin")
+        stored = app.state.gitcrud.get("accounts", "admin")
+        assert stored["password_hash"] == live.password_hash
+
+    def test_clearing_run_state_is_a_no_op_without_a_deploy_repo(self, tmp_path):
+        app = create_app(settings=_settings(tmp_path, e2e_server=True))
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                assert app.state.gitcrud is None
+                _seed(client, "reset_all")
+                assert not (tmp_path / "deploy").exists()
+        finally:
+            _registries.clear()
+
+
 def _setup_status(client: TestClient) -> dict:
     resp = client.get("/api/v1/auth/setup-status")
     assert resp.status_code == 200, resp.text

@@ -33,6 +33,19 @@ POOL_SERVICES = ("dfe-receiver", "dfe-loader")
 POOL_INSTANCE = "default"
 """Instance name for a single-multiplicity app: one deployment for the whole stack."""
 
+RUN_STATE_CLASSES = ("infravars", "gov_settings")
+"""Deploy-repo classes a reset clears, beyond the ones the child seeders own.
+
+Both are per-run state on the same three tests: nothing seeds them at startup,
+each is only written through an API a spec drives, and its absence IS the shipped
+default. ``infravars`` is the substrate overlay (backing-service node counts,
+storage, CPU); ``gov_settings`` is the auto-merge posture flag.
+
+Deliberately NOT here: ``actions`` and ``policies`` are the shipped governance
+library, re-seeded from packaged resources on every start; ``accounts`` is the
+durable break-glass copy the reset re-mirrors rather than removes.
+"""
+
 _TRANSFORM_FILENAME = f"{SEED_SOURCE_NAME}.vrl"
 _TRANSFORM_PROGRAM = (
     f'# Seeded transform program.\n.dfe_seeded = true\n.dfe_source = "{SEED_SOURCE_NAME}"\n'
@@ -95,6 +108,31 @@ class Apps(Seed):
                 SEED_ACTOR,
                 message=f"e2e: undeploy {app.service}/{app.instance}",
             )
+
+    def delete_run_state(self) -> None:
+        """Clear the deploy-repo classes no seeder creates but a spec can change.
+
+        Nothing seeds either of these at startup and both are only ever written
+        through an API a spec drives, so whatever is there came from the run that
+        just finished. Deleting the resource restores the shipped default rather
+        than removing configuration: an absent overlay declares nothing, and an
+        absent auto-merge flag reads as off.
+
+        Without this, a backing-service node count raised by one spec is still
+        raised for the next -- the state that survived a reset and failed a spec
+        against its own leftovers.
+        """
+        gc = self._gitcrud
+        if gc is None:
+            return
+        for cls_name in RUN_STATE_CLASSES:
+            for name in gc.list(cls_name):
+                gc.delete(
+                    cls_name,
+                    name,
+                    SEED_ACTOR,
+                    message=f"e2e: clear {cls_name}/{name}",
+                )
 
     def _ensure_instance(self, service: str, instance: str) -> bool:
         """Create the instance's overlay when absent. Returns whether it was written."""
