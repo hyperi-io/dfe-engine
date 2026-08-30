@@ -458,6 +458,177 @@ class TestSeedAppScalingState:
         assert _admin(appmgmt_client)
 
 
+def _setup_status(client: TestClient) -> dict:
+    resp = client.get("/api/v1/auth/setup-status")
+    assert resp.status_code == 200, resp.text
+    return resp.json()
+
+
+class TestBreakGlassDurability:
+    """Seeding has to leave the break-glass admin durable, or setup never finishes.
+
+    The wizard only calls the rotate-the-break-glass step done once the deploy
+    repo's copy of the account matches the live one. A seeder that wrote only the
+    live store left every gitops-enabled Playwright run bounced to
+    ``/setup/resetBreakGlassAccount``, forever.
+    """
+
+    @staticmethod
+    def _client(tmp_path):
+        return create_app(settings=_settings(tmp_path, e2e_server=True, gitops=True))
+
+    def test_seeding_leaves_the_break_glass_merged_and_setup_complete(self, tmp_path):
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+
+                status = _setup_status(client)
+                assert status["break_glass"]["committed"] is True
+                assert status["break_glass"]["merged"] is True
+                assert status["break_glass"]["pending"] is None
+                assert status["initial_setup"]["complete"] is True
+                assert status["initial_setup"]["current_step"] is None
+        finally:
+            _registries.clear()
+
+    def test_the_committed_hash_is_the_live_one_not_a_second_derivation(self, tmp_path):
+        """bcrypt re-salts, so the hash has to be mirrored rather than re-derived."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                live = app.state.account_store.get("admin")
+                stored = app.state.gitcrud.get("accounts", "admin")
+                assert stored["password_hash"] == live.password_hash
+        finally:
+            _registries.clear()
+
+    def test_the_seeded_break_glass_password_still_logs_in(self, tmp_path):
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                login = client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "already_reset"},
+                )
+                assert login.status_code == 200, login.text
+        finally:
+            _registries.clear()
+
+    def test_reseeding_after_reset_all_is_merged_again(self, tmp_path):
+        """The Playwright arrangement: reset_all then seed, over and over."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                for _ in range(2):
+                    _seed(client, "reset_all")
+                    _seed(client, "seed_setup_complete")
+                    status = _setup_status(client)
+                    assert status["break_glass"]["merged"] is True
+                    assert status["initial_setup"]["complete"] is True
+
+                live = app.state.account_store.get("admin")
+                stored = app.state.gitcrud.get("accounts", "admin")
+                assert stored["password_hash"] == live.password_hash
+        finally:
+            _registries.clear()
+
+    def test_only_the_break_glass_account_reaches_the_deploy_repo(self, tmp_path):
+        """A regular seeded account is durable in its own store; git is the exception."""
+        app = self._client(tmp_path)
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                _seed(client, "seed_setup_complete")
+                _seed(client, "seed_dfe_analyst_user")
+                committed = set(app.state.gitcrud.list("accounts"))
+                assert committed == {"admin"}
+        finally:
+            _registries.clear()
+
+    def test_gitops_off_seeds_with_no_deploy_repo_at_all(self, tmp_path):
+        """The mirror only happens on the gitops path; without one nothing changes."""
+        app = create_app(settings=_settings(tmp_path, e2e_server=True))
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                assert app.state.gitcrud is None
+                _seed(client, "seed_setup_complete")
+                assert not (tmp_path / "deploy").exists()
+
+                status = _setup_status(client)
+                # No deploy repo means the live store IS the durable store, so the
+                # durability question does not arise.
+                assert status["break_glass"]["enabled"] is False
+                assert status["break_glass"]["merged"] is True
+                assert status["initial_setup"]["complete"] is True
+
+                login = client.post(
+                    "/api/v1/auth/login",
+                    json={"username": "admin", "password": "already_reset"},
+                )
+                assert login.status_code == 200, login.text
+        finally:
+            _registries.clear()
+
+
+class TestBreakGlassReviewPosture:
+    """A posture that refuses direct-to-main reports pending rather than pretending.
+
+    Not reachable from `make e2e-server`, whose DFE_ENV=test is a dev posture and
+    so always commits straight to main -- the seed gate requires that env. Built
+    directly here so the honest-pending branch is still pinned.
+    """
+
+    @staticmethod
+    def _seeder(tmp_path):
+        from dfe_engine.api.e2e.seed import Seed
+        from dfe_engine.auth.bootstrap import bootstrap_auth
+        from dfe_engine.gitcrud import GitCrud, default_registry
+        from dfe_engine.gitops.repo import GitopsRepo
+        from dfe_engine.orgs.registry import OrgRegistry
+
+        gc = GitCrud(
+            GitopsRepo(local_path=str(tmp_path / "deploy"), push=False), default_registry()
+        )
+        accounts, groups, *_ = bootstrap_auth(tmp_path / "config" / "auth", gitcrud=gc)
+        # e2e_server=False because settings REFUSE to mount the seed routes in a
+        # production posture at all -- which is the same reason this branch cannot
+        # be reached through the endpoint. Only the routing posture is wanted here.
+        settings = _settings(tmp_path, e2e_server=False, env="production", gitops=True)
+        settings.gitops.mode = "team"
+        # The gate is the seeder's own env; the ROUTING posture is the settings'.
+        seeder = Seed(
+            account_store=accounts,
+            group_store=groups,
+            org_registry=OrgRegistry(tmp_path / "orgs"),
+            env="test",
+            gitcrud=gc,
+            settings=settings,
+            forge=None,
+        )
+        return seeder, gc, accounts, settings
+
+    def test_a_review_posture_commits_to_a_branch_and_reports_unmerged(self, tmp_path, monkeypatch):
+        from dfe_engine.auth.account_durability import steady_state
+
+        monkeypatch.setenv("DFE_ENV", "test")
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_NAME", raising=False)
+        monkeypatch.delenv("DFE_AUTH_LOCAL_ADMIN_PASSWORD", raising=False)
+        seeder, gc, accounts, settings = self._seeder(tmp_path)
+
+        assert seeder.seed_static("seed_setup_complete") is True
+
+        state = steady_state(
+            gc, accounts, "admin", environment=settings.env, mode=settings.gitops.mode
+        )
+        # Committed (on a review branch, so the change is not lost), but the
+        # tracked branch still carries the old hash, so it is honestly unmerged.
+        assert state.committed is True
+        assert state.merged is False
+        assert gc.get("accounts", "admin")["password_hash"] != accounts.get("admin").password_hash
+
+
 def test_an_app_seed_without_a_deploy_repo_fails_loudly(tmp_path):
     """A misconfigured e2e-server must not report a seed that wrote nothing."""
     app = create_app(settings=_settings(tmp_path, e2e_server=True))
