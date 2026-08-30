@@ -281,7 +281,21 @@ class TestBuildGroupingQuery:
             time_end="2026-01-01 01:00:00",
             results_table_columns=self.RESULTS_COLS,
         )
-        assert "FROM acme.logs_alerts" in sql
+        assert "FROM `acme`.`logs_alerts`" in sql
+
+    def test_from_reference_quotes_a_hyphenated_table(self):
+        sql = build_grouping_query(
+            target_db="acme",
+            target_table="filebeat-alerts",
+            hunt_name="test",
+            rule_name="rule",
+            customer="acme",
+            group_by=["severity"],
+            time_start="2026-01-01 00:00:00",
+            time_end="2026-01-01 01:00:00",
+            results_table_columns=self.RESULTS_COLS,
+        )
+        assert "FROM `acme`.`filebeat-alerts`" in sql
 
 
 # ── AlertStateManager ────────────────────────────────────────────

@@ -50,11 +50,10 @@ def unsafe_ident_reason(name: str) -> str | None:
 def quote_ident(name: str, *, what: str = "identifier") -> str:
     """Backtick-quote *name* for a DDL identifier position, after checking it is safe.
 
-    Every identifier is quoted, not only the ones that would otherwise break: one
-    shape to read, and no branch that can be got wrong for the name nobody tried.
-    A source name may carry a hyphen, and unquoted ``db.my-source`` parses as a
-    subtraction rather than as a table -- so the quoting is load-bearing, not
-    cosmetic.
+    Every identifier is quoted, not only the ones that would otherwise break --
+    one shape to read, with no branch to get wrong. A source name may carry a
+    hyphen, and unquoted ``db.my-source`` parses as a subtraction rather than a
+    table, so without the quoting the statement does not parse.
 
     Quoting is never the only defence. :func:`unsafe_ident_reason` runs first and
     refuses a backtick, so a name can never close the quoting it is wrapped in.
