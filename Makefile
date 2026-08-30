@@ -46,7 +46,9 @@ dev:
 # the API from dfe-ui.
 # Hunt log and checkpoint paths are pinned in too: they are not among the
 # DFE_CONFIG_DIR-derived subdirs, so their defaults land in the CWD and would
-# outlive the wipe.
+# outlive the wipe. The gitops deploy repo is pinned for the same reason, and
+# only takes effect when .env.e2e sets DFE_GITOPS_ENABLED=true -- the
+# app-management seeds write their instances, artefacts and sources into it.
 # NOT swept: ClickHouse users/roles, which are server-global rather than
 # per-database. Only the governance reconcile creates those, and it is off
 # unless DFE_ORG_PROVISIONING_ENABLED is set.
@@ -139,6 +141,7 @@ e2e-server:
 	export DFE_STORAGE_PATH="$(E2E_WORKSPACE)/artifacts"; \
 	export DFE_HUNT_LOG_PATH="$(E2E_WORKSPACE)/hunt-log"; \
 	export DFE_HUNTS_CHECKPOINT_PATH="$(E2E_WORKSPACE)/hunt-checkpoints"; \
+	export DFE_GITOPS_LOCAL_PATH="$(E2E_WORKSPACE)/deploy-repo"; \
 	export DFE_CLICKHOUSE_DATA_DATABASE="$(E2E_CH_DATA_DB)"; \
 	export DFE_E2E_SERVER=true; \
 	export DFE_ENV_FILE=.env.e2e; \
