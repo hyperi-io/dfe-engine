@@ -139,7 +139,7 @@ def set_var_governed(
         CommitContext(
             ctype="cfg",
             scope=name,
-            summary=f"set {path.split('.')[-1]}"[:40],
+            summary=f"set {path.split('.')[-1]}",
             actor=user.user_id,
             role="helmvars:write",
             base_revision=if_match or "",
