@@ -42,11 +42,19 @@ from ruamel.yaml.scalarstring import LiteralScalarString
 _local = threading.local()
 
 
+# Never wrap a scalar. ruamel folds a scalar past 80 columns, and re-reading
+# turns each fold back into a space, so the content changes. Block scalars avoid
+# folding, but the safe loader discards scalar style: content written as a block
+# returns plain, and the next write of that document emits it folded.
+_NO_WRAP = 1 << 30
+
+
 def _safe() -> YAML:
     inst = getattr(_local, "safe", None)
     if inst is None:
         inst = YAML(typ="safe")
         inst.default_flow_style = False
+        inst.width = _NO_WRAP
         _local.safe = inst
     return inst
 
@@ -57,6 +65,7 @@ def _rt() -> YAML:
         inst = YAML()
         inst.default_flow_style = False
         inst.preserve_quotes = True
+        inst.width = _NO_WRAP
         inst.indent(mapping=2, sequence=4, offset=2)
         _local.rt = inst
     return inst
