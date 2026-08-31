@@ -46,7 +46,7 @@ def _table_yaml_path(ref: str) -> Path:
     if root is None:
         raise SchemaLoadError(
             f"Cannot resolve the dfe-schemas tree, so {ref!r} is unreadable. "
-            "Set DFE_SCHEMAS_DIR, check out the schemas submodule, or run from "
+            "Set DFE_SCHEMAS_DIR, install the dfe-schemas package, or run from "
             "an image that seeds them."
         )
     path = root / f"{ref}.yaml"

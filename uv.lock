@@ -704,6 +704,7 @@ dependencies = [
     { name = "clickhouse-connect" },
     { name = "croniter" },
     { name = "cryptography" },
+    { name = "dfe-schemas" },
     { name = "diskcache" },
     { name = "dulwich" },
     { name = "faker" },
@@ -766,6 +767,7 @@ requires-dist = [
     { name = "clickhouse-connect", specifier = ">=1.4.1" },
     { name = "croniter", specifier = ">=6.2.2" },
     { name = "cryptography", specifier = ">=50.0.0" },
+    { name = "dfe-schemas", specifier = ">=0.2.0" },
     { name = "diskcache", specifier = ">=5.6.3" },
     { name = "dulwich", specifier = ">=1.2.7" },
     { name = "faker", specifier = ">=40.36.0" },
@@ -816,6 +818,15 @@ dev = [
     { name = "ruff", specifier = ">=0.16.2" },
     { name = "types-requests", specifier = ">=2.33.0" },
     { name = "werkzeug", specifier = ">=3.1.8" },
+]
+
+[[package]]
+name = "dfe-schemas"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/42/cd/65efe0061977737a3c8cba7d311b79385e1536884fadd9178d69730ea9f5/dfe_schemas-0.2.0.tar.gz", hash = "sha256:67ca75ac8a068f3d41e704608aed8e5675b3d11b82e4ace8b1fa8aa43c90bfd9", size = 30461, upload-time = "2026-08-31T06:08:54.739Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2e/d6/7bd897d6f438f769e505f22f030db929843a54c0815ff88fb2a8e0d36551/dfe_schemas-0.2.0-py3-none-any.whl", hash = "sha256:ba8578a7fdbf05a884e8acc78edf6afb37c72f952253d5371803d4424eb21b89", size = 55092, upload-time = "2026-08-31T06:08:53.693Z" },
 ]
 
 [[package]]

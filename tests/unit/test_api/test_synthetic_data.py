@@ -7,22 +7,23 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Synthetic data API tests - pack listing, bounded inline generation, stream tasks, RBAC.
 
-Generation runs against the real dfe-schemas submodule (skipped when absent).
+Generation runs against the real dfe-schemas package (skipped when absent).
 The stream tests post to a closed local port - a real connection failure, no
 service and no mocks - and assert degrade-not-die accounting.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SYSLOG = REPO_ROOT / "schemas" / "meta" / "syslog.yaml"
+from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
+
+_SCHEMAS_ROOT = _resolve_package_schemas_root()
+SYSLOG = (_SCHEMAS_ROOT / "meta" / "syslog.yaml") if _SCHEMAS_ROOT else None
 
 needs_packs = pytest.mark.skipif(
-    not SYSLOG.exists(), reason="dfe-schemas submodule without reference packs"
+    SYSLOG is None or not SYSLOG.exists(),
+    reason="dfe-schemas package without reference packs",
 )
 
 

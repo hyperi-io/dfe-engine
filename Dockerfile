@@ -39,13 +39,19 @@ RUN UV_NO_BUILD=1 uv sync --frozen --no-dev --no-install-project
 COPY src/ src/
 RUN uv sync --frozen --no-dev
 
-COPY schemas/ /app/schemas-seed/
-# Writable dirs owned by the runtime UID. /app/secrets is the scalo.secrets root
-# (#106): the engine mints an ES384 JWT signing key on first boot and, with
-# no writable secrets dir and no runtime WORKDIR, it defaulted to ./.secrets under
-# / and crash-looped as non-root. COPY --from preserves this ownership into the
-# runtime stage.
-RUN mkdir -p /app/schemas /app/config /app/secrets \
+# /app/schemas-seed is copied out of the installed dfe-schemas wheel, so the
+# image ships exactly the version uv.lock pins; bootstrap.py copies it into
+# DFE_SCHEMAS_DIR on the first run of each engine version. It stays root-owned
+# and read-only, as the COPY it replaced was.
+#
+# The rest are writable dirs owned by the runtime UID. /app/secrets is the
+# scalo.secrets root (#106): the engine mints an ES384 JWT signing key on first
+# boot and, with no writable secrets dir and no runtime WORKDIR, it defaulted to
+# ./.secrets under / and crash-looped as non-root. COPY --from preserves this
+# ownership into the runtime stage.
+RUN /app/.venv/bin/python -c \
+    "import dfe_schemas, shutil; shutil.copytree(dfe_schemas.schemas_root(), '/app/schemas-seed')" \
+    && mkdir -p /app/schemas /app/config /app/secrets \
     && chown -R 1000:1000 /app/schemas /app/config /app/secrets
 
 # --- Runtime stage (aligned with hyperi-pylib deployment contract) ---

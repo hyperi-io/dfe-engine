@@ -18,7 +18,11 @@ from __future__ import annotations
 import pytest
 
 from dfe_engine.schema.ddl_writer import DDLFileWriter
-from dfe_engine.schema.schema_loader import SEED_DIR_ENV_VAR, _resolve_schemas_root
+from dfe_engine.schema.schema_loader import (
+    SEED_DIR_ENV_VAR,
+    _resolve_package_schemas_root,
+    _resolve_schemas_root,
+)
 
 
 def _make_schemas_tree(root, *, hunts: bool = True):
@@ -32,10 +36,50 @@ def _make_schemas_tree(root, *, hunts: bool = True):
 
 @pytest.fixture(autouse=True)
 def _isolate(monkeypatch, tmp_path):
-    """Neutralise the checkout this test suite runs inside."""
+    """Neutralise the dfe-schemas package this test suite runs against."""
     monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
     monkeypatch.setenv(SEED_DIR_ENV_VAR, str(tmp_path / "no-seed-here"))
-    monkeypatch.setattr("dfe_engine.schema.schema_loader._find_project_root", lambda: None)
+    monkeypatch.setattr(
+        "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: None
+    )
+
+
+def test_the_real_package_maps_to_its_data_directory():
+    """The wheel's ``dfe_schemas/data`` is what the loader treats as a schemas root.
+
+    Called through the module-level import so the autouse fixture's patch of the
+    module attribute does not shadow it.
+    """
+    root = _resolve_package_schemas_root()
+    assert root is not None, "dfe-schemas is a declared dependency and must be installed"
+    assert root.name == "data"
+    assert root.parent.name == "dfe_schemas"
+    for tree in ("common-header", "hunts", "meta", "tables", "additional"):
+        assert (root / tree).is_dir(), f"{tree} missing under {root}"
+
+
+def test_the_installed_package_beats_the_image_seed(monkeypatch, tmp_path):
+    """The wheel is the schema source; the seed only covers a process that has none."""
+    packaged = _make_schemas_tree(tmp_path / "site-packages" / "dfe_schemas" / "data")
+    seed = _make_schemas_tree(tmp_path / "schemas-seed")
+    monkeypatch.setenv(SEED_DIR_ENV_VAR, str(seed))
+    monkeypatch.setattr(
+        "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: packaged
+    )
+
+    assert _resolve_schemas_root() == packaged
+
+
+def test_an_explicit_dir_wins_over_the_package(monkeypatch, tmp_path):
+    """DFE_SCHEMAS_DIR is how a deployment overrides the shipped trees."""
+    explicit = _make_schemas_tree(tmp_path / "explicit")
+    packaged = _make_schemas_tree(tmp_path / "site-packages" / "dfe_schemas" / "data")
+    monkeypatch.setenv("DFE_SCHEMAS_DIR", str(explicit))
+    monkeypatch.setattr(
+        "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: packaged
+    )
+
+    assert _resolve_schemas_root() == explicit
 
 
 def test_the_image_seed_resolves_when_nothing_else_does(monkeypatch, tmp_path):
