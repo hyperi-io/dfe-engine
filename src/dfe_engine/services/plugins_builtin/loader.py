@@ -92,8 +92,15 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
     if config.buffer.flush_rows == 0:
         errors.append("buffer.flush_rows must be greater than 0")
 
-    if config.routing.route_all_by_org and config.routing.routed_orgs:
-        warnings.append("route_all_by_org is true, routed_orgs list will be ignored")
+    # The loader resolves the database by looking the FIRST db_fields hit up in
+    # org_routes (dfe-loader/src/routing/router.rs:240-252) -- with db_fields
+    # empty it short-circuits to default_db and never consults the map at all.
+    if config.routing.org_routes and not config.routing.db_fields:
+        warnings.append(
+            "routing.org_routes is set but routing.db_fields is empty -- the loader "
+            "reads the org from the first db_fields hit, so every route is dead and "
+            "all data lands in default_db"
+        )
 
 
 _sizing_overrides: dict[str, dict[str, Any]] = {

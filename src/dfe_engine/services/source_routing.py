@@ -118,35 +118,29 @@ def compile_receiver_routing(
 def compile_loader_routing(
     registry: SourceRegistry,
     *,
-    db: str = "common",
-    source_field: str = "_source",
+    db: str = "dfe",
 ) -> LoaderRoutingConfig:
     """Compile Source definitions into a LoaderRoutingConfig.
 
-    In source_routing mode, the loader reads the ``_source`` field from
-    each message and uses it directly as the ClickHouse table name.
-    No category_to_table mapping is needed.
+    The loader takes the table from the first ``table_fields`` hit, and the
+    default ``["_source"]`` is exactly the field the receiver stamps - so a
+    source lands in a table of its own name with no map at all. What the map
+    is FOR is the source whose table_name differs from its source name, and
+    emitting it for every ACTIVE source keeps the two in step without the
+    compile having to know which ones diverge.
 
-    The ``category_to_table`` map is still populated (from Source definitions)
-    as a diagnostic aid — it shows which sources map to which tables.
+    Dormant and disabled sources are left out: their schema stays
+    pre-positioned but they have no live loader path.
 
     Args:
         registry: SourceRegistry to read Source definitions from.
         db: Default database for the loader.
-        source_field: JSON field containing the source name.
-
-    Returns:
-        LoaderRoutingConfig with source_routing=True.
     """
-    # Build a diagnostic map of source → table_name (ACTIVE only: dormant
-    # sources have no live loader path).
     source_to_table: dict[str, str] = {}
     for source in registry.get_all_sources(states=("active",)):
         source_to_table[source.source] = source.table_name
 
     return LoaderRoutingConfig(
-        source_routing=True,
-        source_field=source_field,
         default_db=db,
-        category_to_table=source_to_table,
+        source_to_table=source_to_table,
     )
