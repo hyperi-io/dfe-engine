@@ -14,6 +14,7 @@ diagnose on a shared cluster.
 
 from __future__ import annotations
 
+import importlib
 import io
 import json
 import tarfile
@@ -97,12 +98,31 @@ class TestWrapping:
         markers = [s.marker for s in corpus.samples(archive)]
         assert len(markers) == len(set(markers))
 
-    def test_a_run_tag_is_carried_when_given(self, archive):
+    def test_a_run_marker_is_carried_when_given(self, archive):
         body = corpus.wrap(corpus.samples(archive)[0], run="run-1")
-        assert body["tags"]["e2e_run"] == "run-1"
+        assert body[corpus.MARKER_FIELD]["run"] == "run-1"
 
-    def test_no_run_tag_when_not_given(self, archive):
-        assert "e2e_run" not in corpus.wrap(corpus.samples(archive)[0])["tags"]
+    def test_no_run_marker_when_not_given(self, archive):
+        assert "run" not in corpus.wrap(corpus.samples(archive)[0])[corpus.MARKER_FIELD]
+
+    def test_the_marker_is_at_the_root_not_in_tags(self, archive):
+        # Every module branch of the bundled pipeline assigns `.tags` outright
+        # (filebeat.vrl:130, 2027, 3021), so a marker inside it never reaches
+        # the sink topic and the run's own rows become unfindable.
+        body = corpus.wrap(corpus.samples(archive)[0], run="run-1")
+        assert body["tags"] == []
+        assert corpus.MARKER_FIELD in body
+
+    def test_the_corpus_path_follows_the_env_override(self, archive, monkeypatch):
+        # The corpus lives in dfe-transform-vrl, so a checkout anywhere but
+        # /projects has to be able to say where it is.
+        monkeypatch.setenv("DFE_FILEBEAT_CORPUS", str(archive))
+        reloaded = importlib.reload(corpus)
+        try:
+            assert reloaded.CORPUS == archive
+        finally:
+            monkeypatch.delenv("DFE_FILEBEAT_CORPUS")
+            importlib.reload(corpus)
 
     def test_the_body_is_json_serialisable(self, archive):
         # It is POSTed as JSON, so a shape the encoder refuses fails the run.

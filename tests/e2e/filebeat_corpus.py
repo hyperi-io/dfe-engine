@@ -19,10 +19,15 @@ the reason in one place:
 - The bundled VRL consumes the DFE 2.1 Kafka shape, ``{message, tags,
   timestamp}``, and produces ECS.
 
-So each line becomes ``{"message": <line>, "tags": {...}, "_source": ...}``.
-The discriminator is a real field the receiver's compiled rule matches, not a
-test-only convention: a Source declaring ``match: {field: _source, operator:
-equals, value: filebeat}`` compiles to exactly that.
+So each line becomes ``{"message": <line>, "tags": [], "_source": ...,
+"_e2e": {...}}``. The discriminator is a real field the receiver's compiled
+rule matches, not a test-only convention: a Source declaring ``match: {field:
+_source, operator: equals, value: filebeat}`` compiles to exactly that.
+
+The run marker sits at the ROOT, not in ``tags``: every module branch of the
+bundled pipeline assigns ``.tags`` outright (filebeat.vrl:130, 2027, 3021), so
+a marker inside it is gone by the time the row lands and nothing downstream can
+find this run's events.
 
 Read straight out of the archive, never unpacked to the working tree - it
 carries Elastic-licensed data whose terms travel with it.
@@ -31,13 +36,23 @@ carries Elastic-licensed data whose terms travel with it.
 from __future__ import annotations
 
 import json
+import os
 import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
-CORPUS = Path("/projects/dfe-transform-vrl/tests/fixtures/filebeat/filebeat-testdata.tar.gz")
+DEFAULT_CORPUS = Path(
+    "/projects/dfe-transform-vrl/tests/fixtures/filebeat/filebeat-testdata.tar.gz"
+)
+
+# The corpus lives in the transform repo, so a checkout anywhere else needs to
+# say where.
+CORPUS = Path(os.environ.get("DFE_FILEBEAT_CORPUS") or DEFAULT_CORPUS)
 
 MODULES = ("cisco_umbrella", "cisco_ios", "cisco_meraki")
+
+# Root field carrying the replay's own metadata through the transform.
+MARKER_FIELD = "_e2e"
 
 # The umbrella branch needs no timezone table, so it is the subset that runs
 # without the enrichment tables mounted.
@@ -133,13 +148,19 @@ def _module_of(name: str, modules: tuple[str, ...]) -> str | None:
 def wrap(sample: Sample, source: str = "filebeat", run: str = "") -> dict:
     """One sample as the JSON body the receiver routes and the VRL consumes.
 
-    ``run`` tags every event of one run so a shared cluster's existing rows are
-    not mistaken for this run's output.
+    ``run`` marks every event of one run so a shared cluster's existing rows are
+    not mistaken for this run's output. ``tags`` is an empty list because that is
+    the shape the pipeline expects to find and replace.
     """
-    tags: dict[str, str] = {"corpus_module": sample.module, "corpus_marker": sample.marker}
+    marker: dict[str, str] = {"module": sample.module, "marker": sample.marker}
     if run:
-        tags["e2e_run"] = run
-    return {"message": sample.line, "tags": tags, "_source": source}
+        marker["run"] = run
+    return {
+        "message": sample.line,
+        "tags": [],
+        "_source": source,
+        MARKER_FIELD: marker,
+    }
 
 
 def wrap_all(items: list[Sample], source: str = "filebeat", run: str = "") -> list[dict]:
