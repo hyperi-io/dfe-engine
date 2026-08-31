@@ -11567,6 +11567,22 @@
               "type": "string",
               "title": "Service"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
           }
         ],
         "requestBody": {
@@ -11688,6 +11704,22 @@
             "schema": {
               "type": "string",
               "title": "Instance"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
             }
           }
         ],
@@ -11813,7 +11845,7 @@
           "App Management"
         ],
         "summary": "Get Values",
-        "description": "The instance's overlay document as stored.",
+        "description": "The instance's overlay document as stored, with the revision to write against.",
         "operationId": "get_values_api_v1_apps__service___instance__values_get",
         "parameters": [
           {
@@ -11841,9 +11873,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "title": "Response Get Values Api V1 Apps  Service   Instance  Values Get"
+                  "$ref": "#/components/schemas/ValuesResponse"
                 }
               }
             }
@@ -12271,6 +12301,22 @@
               "type": "string",
               "title": "Set Name"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
           }
         ],
         "responses": {
@@ -12337,6 +12383,22 @@
               "type": "string",
               "title": "Set Name"
             }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
           }
         ],
         "requestBody": {
@@ -12384,7 +12446,7 @@
           "App Management"
         ],
         "summary": "Read App File",
-        "description": "One file's content.",
+        "description": "One file's content, with the revision to write it back against.",
         "operationId": "read_app_file_api_v1_apps__service___instance__files__set_name___filename__get",
         "parameters": [
           {
@@ -12593,6 +12655,22 @@
             "schema": {
               "type": "string",
               "title": "Filename"
+            }
+          },
+          {
+            "name": "If-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
             }
           }
         ],
@@ -18223,6 +18301,18 @@
           "content": {
             "type": "string",
             "title": "Content"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag",
+            "description": "The deploy repo's revision when this was read. Send it back as the If-Match header on a write to have the write refused with a 409 if anything has been committed since. Repo-wide, not per resource."
           }
         },
         "type": "object",
@@ -23649,6 +23739,18 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Deployed"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag",
+            "description": "The deploy repo's revision when this was read. Send it back as the If-Match header on a write to have the write refused with a 409 if anything has been committed since. Repo-wide, not per resource."
           }
         },
         "type": "object",
@@ -24755,6 +24857,18 @@
           "deploy_target": {
             "type": "string",
             "title": "Deploy Target"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag",
+            "description": "The deploy repo's revision when this was read. Send it back as the If-Match header on a write to have the write refused with a 409 if anything has been committed since. Repo-wide, not per resource."
           },
           "replica_count": {
             "anyOf": [
@@ -27986,6 +28100,33 @@
           "status"
         ],
         "title": "ValidationModel"
+      },
+      "ValuesResponse": {
+        "properties": {
+          "values": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Values"
+          },
+          "etag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Etag",
+            "description": "The deploy repo's revision when this was read. Send it back as the If-Match header on a write to have the write refused with a 409 if anything has been committed since. Repo-wide, not per resource."
+          }
+        },
+        "type": "object",
+        "required": [
+          "values"
+        ],
+        "title": "ValuesResponse",
+        "description": "The overlay document, wrapped so the revision has somewhere to live.\n\nThe document is nested rather than returned bare: its keys are the chart's,\nso a top-level ``etag`` beside them would collide with any chart that ever\nnames a value that."
       },
       "VarChange": {
         "properties": {

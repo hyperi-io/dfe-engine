@@ -31,6 +31,13 @@ Every mutation is a git commit into the deploy repo through the same gitcrud pat
 ``api/v1/helm.py`` uses, so the protected-var policy, review routing and audit apply
 unchanged, and every write reports the same state Argo later acts on.
 
+Optimistic concurrency runs on the deploy repo's revision. Every read that backs a
+write carries it as ``etag``; send it back as ``If-Match`` and the write is refused
+with a 409 if anything has been committed since. It is ONE repo-wide value rather
+than a per-resource one, because that is what the gitcrud guard compares against -
+an instance's own newest commit goes stale the moment any other resource is written,
+and would refuse a caller who had raced nobody.
+
 RBAC follows the privilege each route actually exercises rather than one blanket
 class: the overlay's contents are the ``helmvars`` resource, standing an instance up
 or tearing it down is ``deployment:write`` / ``deployment:delete``, and the
@@ -163,6 +170,18 @@ def _routing_flag() -> Any:
     )
 
 
+def _etag_field() -> Any:
+    """A fresh field descriptor, since a FieldInfo belongs to one model."""
+    return Field(
+        default=None,
+        description=(
+            "The deploy repo's revision when this was read. Send it back as the "
+            "If-Match header on a write to have the write refused with a 409 if "
+            "anything has been committed since. Repo-wide, not per resource."
+        ),
+    )
+
+
 class AppSummary(BaseModel):
     service: str
     instance: str
@@ -182,10 +201,23 @@ class CatalogueEntry(BaseModel):
     instances: list[str]
 
 
+class ValuesResponse(BaseModel):
+    """The overlay document, wrapped so the revision has somewhere to live.
+
+    The document is nested rather than returned bare: its keys are the chart's,
+    so a top-level ``etag`` beside them would collide with any chart that ever
+    names a value that.
+    """
+
+    values: dict[str, Any]
+    etag: str | None = _etag_field()
+
+
 class ScalingResponse(BaseModel):
     supported: bool
     reason: str = ""
     deploy_target: str
+    etag: str | None = _etag_field()
     replica_count: int | None = None
     min_replicas: int | None = None
     max_replicas: int | None = None
@@ -222,6 +254,7 @@ class FileSummary(BaseModel):
 
 class FileDetail(FileSummary):
     content: str
+    etag: str | None = _etag_field()
 
 
 class FileWriteRequest(BaseModel):
@@ -239,6 +272,7 @@ class RoutingResponse(BaseModel):
     )
     compiled: dict[str, Any] = Field(default_factory=dict)
     deployed: dict[str, Any] = Field(default_factory=dict)
+    etag: str | None = _etag_field()
 
 
 class DryRunRequest(BaseModel):
@@ -401,6 +435,34 @@ def _gitcrud(request: Request) -> GitCrud:
             detail={"code": "not_configured", "message": "gitops is not enabled"},
         )
     return gc
+
+
+def _etag(gc: GitCrud) -> str | None:
+    """The revision an If-Match write on this surface is checked against.
+
+    Repo HEAD, because that is exactly what ``GitCrud._guard_revision`` compares
+    a base revision to. The instance's own newest commit would be wrong: it goes
+    stale as soon as any other resource in the deploy repo is written, and would
+    then 409 a caller who had raced nobody.
+    """
+    return gc.head_revision()
+
+
+def _conflict(exc: ConcurrencyConflictError) -> HTTPException:
+    """Map a stale base revision to the 409 the UI reads.
+
+    ``head`` is the revision the caller should re-read against, so a conflict is
+    recoverable without a second round trip.
+    """
+    return HTTPException(
+        409,
+        detail={
+            "code": "conflict",
+            "message": str(exc),
+            "current": exc.current,
+            "head": exc.head,
+        },
+    )
 
 
 def _policy(request: Request) -> PolicyStore | None:
@@ -594,15 +656,7 @@ def _commit(
             write=_write,
         )
     except ConcurrencyConflictError as exc:
-        raise HTTPException(
-            409,
-            detail={
-                "code": "conflict",
-                "message": str(exc),
-                "current": exc.current,
-                "head": exc.head,
-            },
-        ) from exc
+        raise _conflict(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
 
@@ -655,7 +709,11 @@ async def list_apps(user: CurrentUser, request: Request) -> list[CatalogueEntry]
 
 @router.post("/{service}/instances", response_model=WriteResult, dependencies=[_DEPLOY_WRITE])
 async def create_instance(
-    service: str, body: CreateInstanceRequest, user: CurrentUser, request: Request
+    service: str,
+    body: CreateInstanceRequest,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> WriteResult:
     """Deploy an instance by creating its values overlay.
 
@@ -681,7 +739,15 @@ async def create_instance(
     except ValueError as exc:
         raise HTTPException(400, detail={"code": "invalid_values", "message": str(exc)}) from exc
     protected = _enforce(request, user, app.overlay_name, doc)
-    return _commit(request, user, app, doc, summary="deploy instance", protected=protected)
+    return _commit(
+        request,
+        user,
+        app,
+        doc,
+        summary="deploy instance",
+        protected=protected,
+        if_match=if_match,
+    )
 
 
 @router.get("/{service}/{instance}", dependencies=[_DEPLOY_READ])
@@ -703,7 +769,11 @@ async def get_app(service: str, instance: str, user: CurrentUser, request: Reque
 
 @router.delete("/{service}/{instance}", response_model=WriteResult, dependencies=[_DEPLOY_DELETE])
 async def delete_instance(
-    service: str, instance: str, user: CurrentUser, request: Request
+    service: str,
+    instance: str,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> WriteResult:
     """Undeploy an instance by removing its values overlay."""
     app = _resolve(service, instance)
@@ -727,7 +797,9 @@ async def delete_instance(
     )
 
     def _write(branch: str):
-        return gc.delete(_CLASS, name, user.user_id, message=message, branch=branch)
+        return gc.delete(
+            _CLASS, name, user.user_id, message=message, base_revision=if_match, branch=branch
+        )
 
     try:
         outcome = route_write(
@@ -742,6 +814,8 @@ async def delete_instance(
             body=f"Undeploy {service}/{instance} by {user.user_id}.",
             write=_write,
         )
+    except ConcurrencyConflictError as exc:
+        raise _conflict(exc) from exc
     except ReviewRequiredError as exc:
         raise HTTPException(409, detail={"code": "review_required", "message": str(exc)}) from exc
     audit_resource_change(user.user_id, "helmvars", name, "deleted", {})
@@ -789,10 +863,11 @@ async def get_history(
 @router.get("/{service}/{instance}/values", dependencies=[_READ])
 async def get_values(
     service: str, instance: str, user: CurrentUser, request: Request
-) -> dict[str, Any]:
-    """The instance's overlay document as stored."""
+) -> ValuesResponse:
+    """The instance's overlay document as stored, with the revision to write against."""
     app = _resolve(service, instance)
-    return _overlay(_gitcrud(request), app)
+    gc = _gitcrud(request)
+    return ValuesResponse(values=_overlay(gc, app), etag=_etag(gc))
 
 
 # ── scaling ───────────────────────────────────────────────────
@@ -804,10 +879,11 @@ async def get_scaling(
 ) -> ScalingResponse:
     """The scaling dials, or why they do not apply here."""
     app = _resolve(service, instance)
-    doc = _overlay(_gitcrud(request), app)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
     target = _deploy_target(request)
     dials = scaling.read(doc, catalogue.descriptor(service), target)
-    return ScalingResponse(deploy_target=str(target), **asdict(dials))
+    return ScalingResponse(deploy_target=str(target), etag=_etag(gc), **asdict(dials))
 
 
 @router.put("/{service}/{instance}/scaling", response_model=WriteResult, dependencies=[_WRITE])
@@ -1005,7 +1081,12 @@ async def link_app_file(
     dependencies=[_WRITE],
 )
 async def relink_app_files(
-    service: str, instance: str, set_name: str, user: CurrentUser, request: Request
+    service: str,
+    instance: str,
+    set_name: str,
+    user: CurrentUser,
+    request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> RelinkResult:
     """Re-resolve every link in the set to what its target now names.
 
@@ -1024,7 +1105,15 @@ async def relink_app_files(
     if not moved:
         return RelinkResult(changed=False, reload=str(fs.reload))
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(request, user, app, doc, summary=f"relink {set_name}", protected=protected)
+    result = _commit(
+        request,
+        user,
+        app,
+        doc,
+        summary=f"relink {set_name}",
+        protected=protected,
+        if_match=if_match,
+    )
     return RelinkResult(
         **result.model_dump(exclude={"reload", "validation"}),
         reload=str(fs.reload),
@@ -1044,6 +1133,7 @@ async def copy_app_files(
     body: CopyFilesRequest,
     user: CurrentUser,
     request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> CopyFilesResult:
     """Copy this instance's authored files onto another instance of the same app.
 
@@ -1083,6 +1173,7 @@ async def copy_app_files(
         target_doc,
         summary=f"copy {set_name} from {instance}",
         protected=protected,
+        if_match=if_match,
     )
     return CopyFilesResult(
         **result.model_dump(exclude={"reload", "validation"}),
@@ -1101,10 +1192,11 @@ async def read_app_file(
     user: CurrentUser,
     request: Request,
 ) -> FileDetail:
-    """One file's content."""
+    """One file's content, with the revision to write it back against."""
     app = _resolve(service, instance)
     fs = _file_set(service, set_name)
-    doc = _overlay(_gitcrud(request), app)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
     try:
         found = files.read_file(doc, fs, filename)
     except FileNotInSetError:
@@ -1116,6 +1208,7 @@ async def read_app_file(
         language=found.language,
         size_bytes=found.size_bytes,
         content=found.content,
+        etag=_etag(gc),
     )
 
 
@@ -1185,6 +1278,7 @@ async def delete_app_file(
     filename: str,
     user: CurrentUser,
     request: Request,
+    if_match: str | None = Header(default=None, alias="If-Match"),
 ) -> WriteResult:
     """Remove a file the app consumes, and any link that produced it."""
     app = _resolve(service, instance)
@@ -1203,7 +1297,15 @@ async def delete_app_file(
     except links.LinkNotFoundError:
         pass
     protected = _enforce(request, user, app.overlay_name, doc)
-    result = _commit(request, user, app, doc, summary=f"remove {filename}", protected=protected)
+    result = _commit(
+        request,
+        user,
+        app,
+        doc,
+        summary=f"remove {filename}",
+        protected=protected,
+        if_match=if_match,
+    )
     return result.model_copy(update={"reload": str(fs.reload)})
 
 
@@ -1252,7 +1354,8 @@ async def get_app_routing(
     every source rule ever defined.
     """
     app = _routing_app(service, instance)
-    doc = _overlay(_gitcrud(request), app)
+    gc = _gitcrud(request)
+    doc = _overlay(gc, app)
     found = _routing_status(request, app, doc, source_registry)
     return RoutingResponse(
         compiler=found.compiler,
@@ -1261,6 +1364,7 @@ async def get_app_routing(
         absent=found.absent,
         compiled=found.compiled,
         deployed=found.deployed,
+        etag=_etag(gc),
     )
 
 

@@ -377,14 +377,20 @@ class GitCrud:
         name: str,
         actor: str,
         message: str | None = None,
+        base_revision: str | None = None,
         branch: str = "",
     ) -> PublishResult:
-        """Delete a whole resource and commit.
+        """Delete a whole resource and commit. If base_revision is given, enforce it.
 
         A bundle takes its payload files with it, in the same commit as its
         manifest - a directory left holding orphaned content would be enumerated
         as neither present nor absent.
+
+        A delete takes the same base_revision guard as a write: removing a
+        resource somebody has edited since you read it destroys their change as
+        thoroughly as overwriting it would.
         """
+        self._guard_revision(cls_name, name, base_revision)
         cls = self._cls(cls_name)
         if not self._file(cls, name).is_file():
             raise ResourceNotFoundError(self._rel(cls, name))
