@@ -19,10 +19,16 @@ the reason in one place:
 - The bundled VRL consumes the DFE 2.1 Kafka shape, ``{message, tags,
   timestamp}``, and produces ECS.
 
-So each line becomes ``{"message": <line>, "tags": {...}, "_source": ...}``.
+So each line becomes ``{"message": <line>, "tags": [...], "_source": ...}``.
 The discriminator is a real field the receiver's compiled rule matches, not a
 test-only convention: a Source declaring ``match: {field: _source, operator:
 equals, value: filebeat}`` compiles to exactly that.
+
+``tags`` is a LIST OF STRINGS because that is what the 2.1 contract carries and
+what the pipeline can read: the bundled VRL tests ``includes(array!(.tags), ...)``
+for ``preserve_original_event``, and against a map it reaches
+``assert!(false, "contains only works on strings and array")`` and aborts the
+program for every event. Each marker is therefore a ``key:value`` string.
 
 Read straight out of the archive, never unpacked to the working tree - it
 carries Elastic-licensed data whose terms travel with it.
@@ -136,9 +142,9 @@ def wrap(sample: Sample, source: str = "filebeat", run: str = "") -> dict:
     ``run`` tags every event of one run so a shared cluster's existing rows are
     not mistaken for this run's output.
     """
-    tags: dict[str, str] = {"corpus_module": sample.module, "corpus_marker": sample.marker}
+    tags: list[str] = [f"corpus_module:{sample.module}", f"corpus_marker:{sample.marker}"]
     if run:
-        tags["e2e_run"] = run
+        tags.append(f"e2e_run:{run}")
     return {"message": sample.line, "tags": tags, "_source": source}
 
 
