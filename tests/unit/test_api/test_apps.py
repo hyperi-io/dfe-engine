@@ -595,6 +595,214 @@ class TestRouting:
         assert resp.status_code == 403
 
 
+class TestOptimisticConcurrency:
+    """The etag a read hands out, and the If-Match write it makes possible.
+
+    The etag is the deploy repo's HEAD, which is what the gitcrud guard compares
+    against. An instance's own newest commit would go stale as soon as anything
+    else in the repo was written and refuse a caller who raced nobody.
+    """
+
+    STALE = "0" * 40
+
+    def _conflicted(self, resp):
+        """Assert the shaped 409, and hand back the revision to retry against."""
+        assert resp.status_code == 409, resp.text
+        body = resp.json()
+        assert body["code"] == "conflict"
+        # head is what the caller re-reads against, so a conflict is recoverable
+        # without a second round trip.
+        return body["context"]["head"]
+
+    def test_every_read_that_backs_a_write_carries_the_head(
+        self, client, app, admin_headers, tmp_path
+    ):
+        gc = _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        client.put(
+            f"{BASE}/files/transforms/000_parse.vrl",
+            json={"content": VRL_SOURCE},
+            headers=admin_headers,
+        )
+        head = gc.head_revision()
+        assert head
+
+        for path in (
+            f"{BASE}/values",
+            f"{BASE}/scaling",
+            f"{BASE}/files/transforms/000_parse.vrl",
+        ):
+            got = client.get(path, headers=admin_headers)
+            assert got.status_code == 200, got.text
+            assert got.json()["etag"] == head, path
+
+    def test_the_routing_read_carries_the_head(self, client, app, admin_headers, tmp_path):
+        gc = _wire(app, tmp_path)
+        client.post(
+            "/api/v1/apps/dfe-receiver/instances",
+            json={"instance": "default"},
+            headers=admin_headers,
+        )
+        got = client.get("/api/v1/apps/dfe-receiver/default/routing", headers=admin_headers)
+        assert got.status_code == 200, got.text
+        assert got.json()["etag"] == gc.head_revision()
+
+    def test_the_overlay_is_nested_under_values(self, client, app, admin_headers, tmp_path):
+        # The document's keys are the chart's, so the revision cannot sit beside
+        # them without risking a collision with a chart value called etag.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        body = client.get(f"{BASE}/values", headers=admin_headers).json()
+        assert body["values"]["deploy"] == {"service": VRL, "instance": "edge"}
+
+    def test_the_etag_moves_with_every_commit(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        first = client.get(f"{BASE}/scaling", headers=admin_headers).json()["etag"]
+        client.put(f"{BASE}/scaling", json={"min_replicas": 3}, headers=admin_headers)
+        second = client.get(f"{BASE}/scaling", headers=admin_headers).json()["etag"]
+        assert first != second
+
+    def test_a_read_etag_writes_and_the_reused_one_then_conflicts(
+        self, client, app, admin_headers, tmp_path
+    ):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        etag = client.get(f"{BASE}/scaling", headers=admin_headers).json()["etag"]
+
+        fresh = client.put(
+            f"{BASE}/scaling",
+            json={"min_replicas": 2},
+            headers={**admin_headers, "If-Match": etag},
+        )
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["changed"] is True
+
+        # The same etag a second time is exactly the stale-tab case.
+        stale = client.put(
+            f"{BASE}/scaling",
+            json={"min_replicas": 4},
+            headers={**admin_headers, "If-Match": etag},
+        )
+        head = self._conflicted(stale)
+        assert head == fresh.json()["commit_sha"]
+
+    def test_copy_refuses_a_stale_write(self, client, app, admin_headers, tmp_path):
+        # A whole-file-set rewrite, so last-write-wins here costs authored content.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers, instance="edge")
+        _deploy(client, admin_headers, instance="other")
+        client.put(
+            f"{BASE}/files/transforms/000_parse.vrl",
+            json={"content": VRL_SOURCE},
+            headers=admin_headers,
+        )
+        path = f"{BASE}/files/transforms/copy"
+
+        stale = client.post(
+            path,
+            json={"target_instance": "other"},
+            headers={**admin_headers, "If-Match": self.STALE},
+        )
+        head = self._conflicted(stale)
+
+        fresh = client.post(
+            path,
+            json={"target_instance": "other"},
+            headers={**admin_headers, "If-Match": head},
+        )
+        assert fresh.status_code == 200, fresh.text
+        assert fresh.json()["copied"] == ["000_parse.vrl"]
+
+    def test_relink_refuses_a_stale_write(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        created = client.post(
+            "/api/v1/library",
+            json={"name": "parse-syslog", "kind": "vrl", "content": VRL_SOURCE},
+            headers=admin_headers,
+        )
+        assert created.status_code == 200, created.text
+        linked = client.post(
+            f"{BASE}/files/transforms/link",
+            json={"name": "000_parse.vrl", "artifact": "parse-syslog"},
+            headers=admin_headers,
+        )
+        assert linked.status_code == 200, linked.text
+        # The link has to be behind before a relink writes anything: a relink that
+        # moves nothing never reaches the commit, so it has no revision to guard.
+        published = client.post(
+            "/api/v1/library/parse-syslog/versions",
+            json={"content": VRL_SOURCE + "\n.extra = true\n"},
+            headers=admin_headers,
+        )
+        assert published.status_code == 200, published.text
+
+        path = f"{BASE}/files/transforms/relink"
+        stale = client.post(path, headers={**admin_headers, "If-Match": self.STALE})
+        head = self._conflicted(stale)
+
+        fresh = client.post(path, headers={**admin_headers, "If-Match": head})
+        assert fresh.status_code == 200, fresh.text
+        assert [link["name"] for link in fresh.json()["relinked"]] == ["000_parse.vrl"]
+
+    def test_deleting_a_file_refuses_a_stale_write(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        path = f"{BASE}/files/transforms/000_parse.vrl"
+        client.put(path, json={"content": VRL_SOURCE}, headers=admin_headers)
+
+        stale = client.delete(path, headers={**admin_headers, "If-Match": self.STALE})
+        head = self._conflicted(stale)
+
+        fresh = client.delete(path, headers={**admin_headers, "If-Match": head})
+        assert fresh.status_code == 200, fresh.text
+
+    def test_deploying_refuses_a_stale_write(self, client, app, admin_headers, tmp_path):
+        _wire(app, tmp_path)
+        # Something has to be committed first: an empty deploy repo has no
+        # revision, so there is nothing a base revision can be stale against.
+        _deploy(client, admin_headers, instance="other")
+        _define_source(client, admin_headers, "edge")
+
+        resp = client.post(
+            f"/api/v1/apps/{VRL}/instances",
+            json={"instance": "edge"},
+            headers={**admin_headers, "If-Match": self.STALE},
+        )
+        head = self._conflicted(resp)
+
+        fresh = client.post(
+            f"/api/v1/apps/{VRL}/instances",
+            json={"instance": "edge"},
+            headers={**admin_headers, "If-Match": head},
+        )
+        assert fresh.status_code == 200, fresh.text
+
+    def test_undeploying_refuses_a_stale_write(self, client, app, admin_headers, tmp_path):
+        # A delete takes the guard too: removing an overlay somebody edited since
+        # you read it destroys their change as thoroughly as overwriting it.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+
+        stale = client.delete(BASE, headers={**admin_headers, "If-Match": self.STALE})
+        head = self._conflicted(stale)
+        assert client.get(f"{BASE}/values", headers=admin_headers).status_code == 200
+
+        fresh = client.delete(BASE, headers={**admin_headers, "If-Match": head})
+        assert fresh.status_code == 200, fresh.text
+        assert client.get(f"{BASE}/values", headers=admin_headers).status_code == 404
+
+    def test_a_write_without_if_match_still_lands(self, client, app, admin_headers, tmp_path):
+        # The header is opt-in: a caller that does not send one is unguarded, not
+        # refused, so every existing client keeps working.
+        _wire(app, tmp_path)
+        _deploy(client, admin_headers)
+        resp = client.put(f"{BASE}/scaling", json={"min_replicas": 2}, headers=admin_headers)
+        assert resp.status_code == 200, resp.text
+        assert resp.json()["changed"] is True
+
+
 class TestDryRun:
     """Running an authored file over sampled events, and the gates on doing it."""
 

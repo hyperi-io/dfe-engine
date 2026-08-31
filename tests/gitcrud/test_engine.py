@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from dfe_engine.gitcrud import (
+    ConcurrencyConflictError,
     GitCrud,
     ResourceClass,
     ResourceClassRegistry,
@@ -131,6 +132,37 @@ def test_delete_removes_resource(crud):
     assert crud.list("helmvars") == []
     with pytest.raises(ResourceNotFoundError):
         crud.get("helmvars", "receiver-default")
+
+
+def test_delete_honours_a_base_revision(crud):
+    # Removing a resource somebody edited since you read it destroys their change
+    # as thoroughly as overwriting it, so delete takes the same guard a put does.
+    crud.put("helmvars", "receiver-default", {"a": 1}, actor="x")
+    stale = crud.head_revision()
+    crud.put("helmvars", "loader-default", {"a": 1}, actor="x")
+
+    with pytest.raises(ConcurrencyConflictError) as caught:
+        crud.delete("helmvars", "receiver-default", actor="x", base_revision=stale)
+    assert caught.value.head == crud.head_revision()
+    assert crud.get("helmvars", "receiver-default") == {"a": 1}
+
+    res = crud.delete("helmvars", "receiver-default", actor="x", base_revision=crud.head_revision())
+    assert res.changed
+
+
+def test_a_virgin_repo_cannot_be_guarded(crud):
+    # There is no revision to be stale against before the first commit, so the
+    # very first write lands whatever base revision the caller claims. A fresh
+    # install hits this, so it must not surface as a spurious conflict.
+    assert crud.head_revision() is None
+    res = crud.put("helmvars", "receiver-default", {"a": 1}, actor="x", base_revision="0" * 40)
+    assert res.changed
+
+
+def test_delete_without_a_base_revision_is_unguarded(crud):
+    crud.put("helmvars", "receiver-default", {"a": 1}, actor="x")
+    crud.put("helmvars", "loader-default", {"a": 1}, actor="x")
+    assert crud.delete("helmvars", "receiver-default", actor="x").changed
 
 
 def test_unchanged_put_does_not_commit(crud):
