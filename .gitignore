@@ -105,7 +105,7 @@ Thumbs.db
 !.env.example
 !.env.example.*
 
-# them alone if already present.
+# Agent working docs: local by default, never committed.
 docs/superpowers/
 # Local planning docs (planning skill): local by default, NEVER committed.
 # Only docs/plans/shared/ is committable (explicit opt-in). Use `/*` (not a bare
@@ -125,6 +125,11 @@ GEMINI.md
 .cursor/
 .gemini/
 .cursorrules
+.hyperi-ai/
+.superpowers/
+
+# Local tool caches (kubectl cache dir when KUBECONFIG points here)
+.kube/
 
 # Git worktrees (local dev convenience)
 .worktrees/
