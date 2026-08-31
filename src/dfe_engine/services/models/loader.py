@@ -6,6 +6,8 @@ All defaults match the Rust `impl Default` values exactly.
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field, SecretStr, field_validator
 
 from dfe_engine.services.models.base import BaseServiceConfig
@@ -138,33 +140,43 @@ class LoaderDlqConfig(BaseModel):
 class LoaderRoutingConfig(BaseModel):
     """Database/table routing configuration for the loader.
 
-    Two modes:
-    - Legacy: inspect table_fields, look up category_to_table map.
-    - Source routing: the ``_source`` field directly determines the table name.
-      When enabled, table_fields and category_to_table are ignored.
+    Field-for-field the loader's ``RoutingConfig``
+    (dfe-loader/src/config/pipeline.rs), DEFAULTS INCLUDED. That struct is the
+    contract, and serde drops an unknown key without a word, so a key invented
+    here does not fail the loader -- it silently never takes effect and the
+    loader falls back to its own default, sending every message somewhere the
+    author never asked for. The Rust struct is the SSoT; anything added here
+    must exist there first.
+
+    Routing resolves in order: a ``rules`` CEL match wins outright, otherwise
+    the table comes from the first ``table_fields`` hit (mapped through
+    ``source_to_table`` when it has an entry) and the database from
+    ``db_fields`` / ``org_routes``, falling back to ``default_table`` and
+    ``default_db``.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    source_routing: bool = Field(
-        default=False,
-        description="Use _source field for direct table routing",
-    )
-    source_field: str = Field(
-        default="_source",
-        description="JSON field containing the source name (when source_routing=True)",
+    rules: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="CEL rules {when, target, db?}, top to bottom, first match wins",
     )
     db_fields: list[str] = []
-    table_fields: list[str] = Field(
-        default_factory=lambda: ["event_category", "tags.event_category"]
-    )
-    default_db: str = "common"
-    default_table: str = "common"
+    table_fields: list[str] = Field(default_factory=lambda: ["_source"])
+    default_db: str = "dfe"
+    default_table: str = "default"
     org_id_field: str | None = "org_id"
-    routed_orgs: list[str] = []
-    route_all_by_org: bool = False
-    category_to_table: dict[str, str] = Field(default_factory=dict)
+    org_routes: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Per-org database routing {org_id, database?}; unlisted orgs use default_db",
+    )
+    source_to_table: dict[str, str] = Field(default_factory=dict)
     mapping_file: str | None = None
+    topic_suffixes: list[str] = Field(default_factory=lambda: ["_land", "_load"])
+    compat_v2_source: bool = Field(
+        default=False,
+        description="Prepend the pre-2.2 event_category fields to source_fields/table_fields",
+    )
     dlq: LoaderDlqConfig = Field(default_factory=LoaderDlqConfig)
 
 

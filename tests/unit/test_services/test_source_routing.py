@@ -1,11 +1,20 @@
 """Tests for source routing config generation.
 
-The receiver emit targets the REAL dfe-receiver ``routing`` serde contract
-(src/config/mod.rs SourceRule/RoutingConfig) - the round-trip test below pins
-the exact field names.
+Both emits target REAL Rust serde contracts - the receiver's
+(dfe-receiver src/config/mod.rs SourceRule/RoutingConfig) and the loader's
+(dfe-loader src/config/pipeline.rs RoutingConfig). The receiver side is pinned
+by a round-trip over its exact field names; the loader side is pinned by
+reading the Rust struct itself, because serde drops an unknown key without
+complaint and a wrong key therefore has no signal until data lands in the wrong
+table.
 """
 
 from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -66,8 +75,162 @@ class FakeSourceRegistry:
 
 
 # ---------------------------------------------------------------------------
+# The dfe-loader serde contract, read out of the Rust that defines it
+# ---------------------------------------------------------------------------
+
+_LOADER_DIR_ENV = "DFE_LOADER_DIR"
+_PIPELINE_RS = Path("src") / "config" / "pipeline.rs"
+
+_UNPARSED = object()
+
+
+@dataclass(frozen=True)
+class RustStruct:
+    """A Rust struct's field names and whatever of its defaults are literals."""
+
+    fields: set[str]
+    defaults: dict[str, object]
+
+
+def _loader_pipeline_rs() -> Path | None:
+    """dfe-loader's pipeline.rs, from the env override or a sibling checkout."""
+    roots: list[Path] = []
+    override = os.environ.get(_LOADER_DIR_ENV)
+    if override:
+        roots.append(Path(override))
+    roots.append(Path(__file__).resolve().parents[3].parent / "dfe-loader")
+    for root in roots:
+        candidate = root / _PIPELINE_RS
+        if candidate.is_file():
+            return candidate
+    return None
+
+
+def _rust_block(text: str, header: str) -> str:
+    """The brace-balanced body that follows ``header``."""
+    start = text.index(header) + len(header)
+    depth = 1
+    for i in range(start, len(text)):
+        if text[i] == "{":
+            depth += 1
+        elif text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start:i]
+    raise AssertionError(f"unbalanced braces after {header!r}")
+
+
+def _strip_comments(body: str) -> str:
+    return re.sub(r"//[^\n]*", "", body)
+
+
+def _split_top_level(body: str) -> list[str]:
+    """Comma-separated items at nesting depth zero, strings kept intact."""
+    parts: list[str] = []
+    current = ""
+    depth = 0
+    in_string = False
+    escaped = False
+    for ch in body:
+        if in_string:
+            current += ch
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == '"':
+                in_string = False
+            continue
+        if ch == '"':
+            in_string = True
+            current += ch
+            continue
+        if ch in "([{":
+            depth += 1
+        elif ch in ")]}":
+            depth -= 1
+        if ch == "," and depth == 0:
+            parts.append(current)
+            current = ""
+        else:
+            current += ch
+    parts.append(current)
+    return [stripped for stripped in (part.strip() for part in parts) if stripped]
+
+
+def _unwrap(expr: str, prefix: str, suffix: str) -> str | None:
+    if expr.startswith(prefix) and expr.endswith(suffix):
+        return expr[len(prefix) : len(expr) - len(suffix)]
+    return None
+
+
+def _rust_literal(expr: str) -> object:
+    """A Rust default expression as its Python equivalent, or ``_UNPARSED``.
+
+    Only the forms the config structs actually use are handled - anything else
+    (a nested ``::default()``, a computed value) comes back unparsed and is
+    left out of the comparison rather than guessed at.
+    """
+    expr = " ".join(expr.split())
+    if expr == "None":
+        return None
+    if expr in ("true", "false"):
+        return expr == "true"
+    if expr.endswith("HashMap::new()"):
+        return {}
+    inner = _unwrap(expr, "Some(", ")")
+    if inner is not None:
+        return _rust_literal(inner)
+    inner = _unwrap(expr, "vec![", "]")
+    if inner is not None:
+        return [_rust_literal(item) for item in _split_top_level(inner)]
+    match = re.fullmatch(r'"((?:[^"\\]|\\.)*)"(?:\.to_string\(\)|\.into\(\))?', expr)
+    if match:
+        return match.group(1)
+    return _UNPARSED
+
+
+def _parse_rust_struct(path: Path, name: str) -> RustStruct:
+    text = path.read_text(encoding="utf-8")
+
+    struct_body = _strip_comments(_rust_block(text, f"pub struct {name} {{"))
+    fields = set(re.findall(r"^\s*pub (\w+)\s*:", struct_body, re.MULTILINE))
+
+    impl_body = _rust_block(text, f"impl Default for {name} {{")
+    fn_body = _rust_block(impl_body, "fn default() -> Self {")
+    literal_body = _strip_comments(_rust_block(fn_body, "Self {"))
+
+    defaults: dict[str, object] = {}
+    for assignment in _split_top_level(literal_body):
+        field, sep, expr = assignment.partition(":")
+        if not sep:
+            continue
+        value = _rust_literal(expr)
+        if value is not _UNPARSED:
+            defaults[field.strip()] = value
+
+    return RustStruct(fields=fields, defaults=defaults)
+
+
+# ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def rust_routing() -> RustStruct:
+    """dfe-loader's RoutingConfig, as the Rust source declares it."""
+    path = _loader_pipeline_rs()
+    if path is None:
+        pytest.skip(
+            f"no dfe-loader checkout alongside this one - point {_LOADER_DIR_ENV} at "
+            "one to check the engine model against the real loader contract"
+        )
+    parsed = _parse_rust_struct(path, "RoutingConfig")
+    # A reshuffle upstream that defeats the parser must fail loudly here rather
+    # than pass every assertion against an empty field set.
+    assert "default_db" in parsed.fields, f"could not parse RoutingConfig out of {path}"
+    return parsed
 
 
 @pytest.fixture
@@ -243,39 +406,72 @@ class TestCompileReceiverRouting:
 
 
 class TestCompileLoaderRouting:
-    def test_compiles_source_routing(self, registry):
+    def test_routes_on_the_field_the_receiver_stamps(self, registry):
+        # _source is what compile_receiver_routing stamps, and the loader's own
+        # default table_fields, so the two halves meet with no map at all.
         config = compile_loader_routing(registry)
-        assert config.source_routing is True
-        assert config.source_field == "_source"
-        assert config.default_db == "common"
+        assert config.table_fields == ["_source"]
+        assert config.default_db == "dfe"
+        assert config.default_table == "default"
 
-    def test_category_to_table_populated(self, registry):
+    def test_source_to_table_populated(self, registry):
         config = compile_loader_routing(registry)
         # All ACTIVE sources should appear
-        assert "filebeat" in config.category_to_table
-        assert "syslog" in config.category_to_table
-        assert "crowdstrike-edr" in config.category_to_table
+        assert "filebeat" in config.source_to_table
+        assert "syslog" in config.source_to_table
+        assert "crowdstrike-edr" in config.source_to_table
         # Disabled + dormant excluded
-        assert "disabled-src" not in config.category_to_table
-        assert "dormant-src" not in config.category_to_table
+        assert "disabled-src" not in config.source_to_table
+        assert "dormant-src" not in config.source_to_table
 
     def test_custom_db(self, registry):
         config = compile_loader_routing(registry, db="prod")
         assert config.default_db == "prod"
 
-    def test_custom_source_field(self, registry):
-        config = compile_loader_routing(registry, source_field="source_name")
-        assert config.source_field == "source_name"
-
     def test_empty_registry(self):
         empty = FakeSourceRegistry([])
         config = compile_loader_routing(empty)
-        assert config.source_routing is True
-        assert config.category_to_table == {}
+        assert config.source_to_table == {}
+        assert config.table_fields == ["_source"]
 
 
-class TestLoaderRoutingSourceRouting:
-    def test_defaults_source_routing_false(self):
-        config = LoaderRoutingConfig()
-        assert config.source_routing is False
-        assert config.source_field == "_source"
+# ---------------------------------------------------------------------------
+# Tests: LoaderRoutingConfig against the dfe-loader serde contract
+# ---------------------------------------------------------------------------
+
+
+class TestLoaderRoutingAgainstRustContract:
+    """The engine model pinned to dfe-loader's RoutingConfig, field by field.
+
+    serde drops an unknown key in silence, so a key the engine invents does not
+    fail the loader - it never takes effect and the loader silently uses its own
+    default. That failure has no signal anywhere until data lands in the wrong
+    table, which is why the two schemas are compared here rather than trusted to
+    stay in step.
+    """
+
+    def test_every_emitted_key_exists_in_the_rust_struct(self, rust_routing):
+        emitted = set(LoaderRoutingConfig().model_dump(mode="json"))
+        unknown = emitted - rust_routing.fields
+        assert not unknown, (
+            f"the loader's RoutingConfig has no {sorted(unknown)} - serde would drop "
+            f"{'them' if len(unknown) > 1 else 'it'} without a word and fall back to "
+            "its own default"
+        )
+
+    def test_the_shared_defaults_agree(self, rust_routing):
+        ours = LoaderRoutingConfig().model_dump(mode="json")
+        shared = {k: v for k, v in rust_routing.defaults.items() if k in ours}
+        # Guards the assertion below against a parse that quietly found nothing.
+        assert len(shared) >= 6, f"only parsed {sorted(shared)} out of the Rust defaults"
+        for name, expected in shared.items():
+            assert ours[name] == expected, (
+                f"routing.{name} defaults to {ours[name]!r} here and {expected!r} in "
+                "the loader - the loader's value is the one that ships"
+            )
+
+    def test_the_compiled_block_is_serde_compatible(self, registry, rust_routing):
+        # What actually reaches a deployed loader is the compiled block, so the
+        # compile output is checked and not only the bare model.
+        compiled = compile_loader_routing(registry, db="prod").model_dump(mode="json")
+        assert set(compiled) <= rust_routing.fields

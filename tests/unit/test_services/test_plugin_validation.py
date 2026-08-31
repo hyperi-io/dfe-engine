@@ -66,10 +66,10 @@ class TestValidateLoaderHappyPath:
         assert errors == []
         assert warnings == []
 
-    def test_no_warnings_for_route_all_without_routed_orgs(self):
+    def test_no_warnings_for_org_routes_with_db_fields(self):
         config = LoaderConfig()
-        config.routing.route_all_by_org = True
-        config.routing.routed_orgs = []
+        config.routing.db_fields = ["org_id"]
+        config.routing.org_routes = [{"org_id": "acme"}]
         errors, warnings = run_loader_validation(config)
         assert errors == []
         assert warnings == []
@@ -359,19 +359,28 @@ class TestLoaderTransportModelDefaults:
 
 
 class TestValidateLoaderRouting:
-    def test_route_all_by_org_with_routed_orgs_produces_warning(self):
+    def test_org_routes_without_db_fields_produces_warning(self):
+        # The loader reads the org from the first db_fields hit, so org_routes
+        # with no db_fields is a map it never opens.
         config = LoaderConfig()
-        config.routing.route_all_by_org = True
-        config.routing.routed_orgs = ["org-a", "org-b"]
+        config.routing.db_fields = []
+        config.routing.org_routes = [{"org_id": "org-a"}, {"org_id": "org-b"}]
         _, warnings = run_loader_validation(config)
-        assert any("route_all_by_org" in w for w in warnings)
+        assert any("org_routes" in w for w in warnings)
 
-    def test_route_all_by_org_false_no_warning(self):
+    def test_db_fields_present_no_warning(self):
         config = LoaderConfig()
-        config.routing.route_all_by_org = False
-        config.routing.routed_orgs = ["org-a"]
+        config.routing.db_fields = ["org_id"]
+        config.routing.org_routes = [{"org_id": "org-a"}]
         _, warnings = run_loader_validation(config)
-        assert not any("route_all_by_org" in w for w in warnings)
+        assert not any("org_routes" in w for w in warnings)
+
+    def test_no_org_routes_no_warning(self):
+        config = LoaderConfig()
+        config.routing.db_fields = []
+        config.routing.org_routes = []
+        _, warnings = run_loader_validation(config)
+        assert not any("org_routes" in w for w in warnings)
 
 
 # ---------------------------------------------------------------------------
