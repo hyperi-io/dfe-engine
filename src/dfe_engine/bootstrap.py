@@ -8,7 +8,7 @@
 
 """Ensure the schemas and config storage directories exist, seeding schemas once.
 
-Schemas are seeded from the image-baked ``dfe-schemas`` submodule when the schemas directory's ``.seeded`` marker is absent or names a different engine version, so an upgrade refreshes the shipped defaults over a tree an older image seeded while leaving files the deployment added; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
+Schemas are seeded from the image-baked ``dfe-schemas`` tree when the schemas directory's ``.seeded`` marker is absent or names a different engine version, so an upgrade refreshes the shipped defaults over a tree an older image seeded while leaving files the deployment added; config is only ensured to exist. The config directory falls back to a baked default when unset; the schemas directory is bootstrapped only when configured (the container image sets ``DFE_SCHEMAS_DIR``), so an unconfigured schemas directory is skipped rather than forced onto an absolute default path. Both directories are expected to sit on a persistent volume.
 """
 
 from __future__ import annotations

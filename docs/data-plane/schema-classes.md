@@ -192,8 +192,9 @@ written = writer.write_all(Path("out/"))  # writes + returns paths
 - **Nullable ORDER BY**: ORDER BY columns should carry `not_null`; the
   engine warns but does not reject.
 - **Shipped schemas are read-only**: `is_shipped_schema()` detects paths
-  inside the submodule or bundled profiles - custom schemas live outside
-  those directories (`DFE_SCHEMAS_DIR`).
+  inside the resolved schemas root (the `dfe-schemas` package, or the image
+  seed) or the bundled profiles - custom schemas live outside those
+  directories (`DFE_SCHEMAS_DIR`).
 - **Profile name matches the FILENAME**: use `timeseries` / `minimal` /
   `passthrough` in `header.type`, matching the YAML filenames.
 - **type_registry.yaml loads via YAML 1.1** (PyYAML through

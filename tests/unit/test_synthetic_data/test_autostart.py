@@ -9,20 +9,21 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 
 import pytest
 
+from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
 from dfe_engine.settings import SyntheticDataSettings
 from dfe_engine.synthetic_data.autostart import run_standing_stream, start_autostart
 from dfe_engine.synthetic_data.models import StreamRequest
 from dfe_engine.synthetic_data.service import SyntheticDataService
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-SYSLOG = REPO_ROOT / "schemas" / "meta" / "syslog.yaml"
+_SCHEMAS_ROOT = _resolve_package_schemas_root()
+SYSLOG = (_SCHEMAS_ROOT / "meta" / "syslog.yaml") if _SCHEMAS_ROOT else None
 
 needs_packs = pytest.mark.skipif(
-    not SYSLOG.exists(), reason="dfe-schemas submodule without reference packs"
+    SYSLOG is None or not SYSLOG.exists(),
+    reason="dfe-schemas package without reference packs",
 )
 
 

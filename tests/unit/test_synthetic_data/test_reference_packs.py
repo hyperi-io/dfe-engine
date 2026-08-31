@@ -9,12 +9,12 @@
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
+from dfe_engine.schema.schema_loader import _resolve_schemas_root
 from dfe_engine.synthetic_data.schema_source import SchemaEventFactory
 
 FIXED_END = datetime(2026, 8, 18, 12, 0, 0, tzinfo=UTC)
@@ -24,15 +24,16 @@ OTEL_SEVERITY_BANDS = {"DEBUG": (5, 8), "INFO": (9, 12), "WARN": (13, 16), "ERRO
 SSH_MARKERS = ("password for", "publickey for", "Invalid user", "Connection closed", "sshd:session")
 
 
-def schemas_root() -> Path:
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
-    if env_dir and (Path(env_dir) / "meta").is_dir():
-        return Path(env_dir)
-    return Path(__file__).resolve().parents[3] / "schemas"
+def schemas_root() -> Path | None:
+    """The same tree the engine reads: DFE_SCHEMAS_DIR, the package, or the seed."""
+    return _resolve_schemas_root()
 
 
 def load(relpath: str, seed: int = 42) -> SchemaEventFactory:
-    path = schemas_root() / relpath
+    root = schemas_root()
+    if root is None:
+        pytest.skip("no dfe-schemas tree resolved")
+    path = root / relpath
     if not path.exists():
         pytest.skip(f"reference pack not present: {relpath}")
     return SchemaEventFactory.from_schema(path, seed=seed)

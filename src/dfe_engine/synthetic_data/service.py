@@ -7,7 +7,7 @@
 #  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Synthetic data service - the API-facing orchestration layer.
 
-Resolves schema refs against the schemas root (submodule or
+Resolves schema refs against the schemas root (the dfe-schemas package or
 ``DFE_SCHEMAS_DIR``), enforces the settings ceilings (count, rate, stream
 duration), and runs stream deliveries as TaskManager coroutines with
 progress reporting. Refs are containment-checked against the schemas root,
@@ -59,7 +59,7 @@ class SyntheticDataService:
         root = _resolve_schemas_root()
         if root is None:
             raise SyntheticDataError(
-                "No schemas root available (dfe-schemas submodule or DFE_SCHEMAS_DIR)"
+                "No schemas root available (dfe-schemas package or DFE_SCHEMAS_DIR)"
             )
         return root
 

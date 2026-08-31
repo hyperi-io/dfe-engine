@@ -2,7 +2,7 @@
 
 **Status:** Shipped (`schema_builder_v2.py` is the live path). Since this
 design landed, the schema YAML SSoT moved to the dfe-schemas repo (the
-`schemas/` submodule) - the engine keeps bundled fallback copies under
+version-pinned `dfe-schemas` wheel) - the engine keeps bundled fallback copies under
 `src/dfe_engine/schema/profiles/`. Class-level lookup:
 [schema-classes.md](schema-classes.md).
 

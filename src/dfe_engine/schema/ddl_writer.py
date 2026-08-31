@@ -87,13 +87,13 @@ class DDLFileWriter:
         if schemas_root is None:
             raise FileNotFoundError(
                 f"hunts/{filename} was not found: no dfe-schemas tree resolved. Set "
-                "DFE_SCHEMAS_DIR, or check out the schemas submodule"
+                "DFE_SCHEMAS_DIR, or install the dfe-schemas package"
             )
         candidate = schemas_root / "hunts" / filename
         if candidate.exists():
             return candidate
         raise FileNotFoundError(
-            f"{str(candidate)!r} was not found. Ensure the dfe-schemas submodule is checked out"
+            f"{str(candidate)!r} was not found. Ensure the dfe-schemas package is installed"
         )
 
     @staticmethod

@@ -76,7 +76,7 @@ Redpanda Cloud lifecycle (control plane; opt-in, WS-C dfe-engine#99):
 - DFE_REDPANDA_CLOUD_KAFKA_USER -> kafka.redpanda_cloud.kafka_user
 
 Schemas:
-- DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas submodule root)
+- DFE_SCHEMAS_DIR -> schemas.schemas_dir (dfe-schemas tree root)
 
 Auth (local):
 - DFE_AUTH_LOCAL_ENABLED -> auth.local.enabled
@@ -744,7 +744,7 @@ class TransformValidationSettings(BaseModel):
 
 
 class SchemasSettings(BaseModel):
-    """Shared schemas settings (dfe-schemas submodule).
+    """Shared schemas settings (dfe-schemas tree).
 
     Environment variables:
     - DFE_SCHEMAS_DIR -> schemas.schemas_dir
@@ -752,7 +752,7 @@ class SchemasSettings(BaseModel):
 
     schemas_dir: str = Field(
         default="",
-        description="Root of dfe-schemas directory (submodule or standalone checkout)",
+        description="Root of dfe-schemas directory (overrides the installed package)",
     )
 
 
@@ -1540,7 +1540,7 @@ def _get_env_overrides() -> dict:
     if val := _get_env("DFE_KEDA_SHIM_QUERY_CONFIG"):
         overrides["keda_shim"]["query_config"] = val
 
-    # Schemas settings (dfe-schemas submodule)
+    # Schemas settings (dfe-schemas tree)
     if val := _get_env("DFE_SCHEMAS_DIR"):
         overrides["schemas"]["schemas_dir"] = val
 
