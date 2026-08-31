@@ -166,7 +166,9 @@ class TestResolution:
         """An empty table list would let the data plane start on an empty db."""
         monkeypatch.delenv("DFE_SCHEMAS_DIR", raising=False)
         monkeypatch.setenv("DFE_SCHEMAS_SEED_DIR", str(tmp_path / "absent"))
-        monkeypatch.setattr("dfe_engine.schema.schema_loader._find_project_root", lambda: None)
+        monkeypatch.setattr(
+            "dfe_engine.schema.schema_loader._resolve_package_schemas_root", lambda: None
+        )
         with pytest.raises(SchemaLoadError, match="Cannot resolve the dfe-schemas tree"):
             load_table_spec("tables/widget", "dfe")
 

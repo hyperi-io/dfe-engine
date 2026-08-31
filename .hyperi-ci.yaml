@@ -7,8 +7,6 @@
 #
 # Override defaults with HYPERCI_* env vars.
 
-submodules: schemas
-
 build:
   type: app
 

@@ -8,21 +8,22 @@ and rule-authoring work is developed against.
 ## The 30-second boot
 
 ```sh
-git submodule update --init      # first time only -- populates schemas/
 make dev                         # -> Swagger UI at http://localhost:8003/docs
 ```
 
-`make dev` exports `DFE_CONFIG_DIR=./config` and `DFE_SCHEMAS_DIR=./schemas` and
-runs `uv run dfe-engine run`. The console script `dfe-engine` maps to
-`dfe_engine.api:run_dev_server`, which serves the API on `DFE_API_PORT` (default
-8003).
+`make dev` exports `DFE_CONFIG_DIR=./config` and runs `uv run dfe-engine run`.
+The console script `dfe-engine` maps to `dfe_engine.api:run_dev_server`, which
+serves the API on `DFE_API_PORT` (default 8003).
 
 Two things trip people up on a fresh clone:
 
-- **`config/` is not a submodule** -- only `schemas` is. `make dev` points
-  `DFE_CONFIG_DIR` at `./config`; the engine seeds its auth store, registries and
-  `.secrets` into whatever that directory is, and tolerates it being empty or a
-  throwaway. It does NOT need to pre-exist with content.
+- **The schemas come from the `dfe-schemas` package**, which `uv sync` installs
+  -- there is nothing to check out. `DFE_SCHEMAS_DIR` is deliberately left unset
+  by `make dev`; set it only to point the engine at your own tree. `config/` is
+  a plain directory: `make dev` points `DFE_CONFIG_DIR` at `./config`, the engine
+  seeds its auth store, registries and `.secrets` into whatever that directory
+  is, and tolerates it being empty or a throwaway. It does NOT need to pre-exist
+  with content.
 - **You need a `.env`** for `make dev` (`cp .env.example .env`). For pure
   auth/attributes work you do not want the example's ClickHouse pointed at a real
   cluster -- set `DFE_CLICKHOUSE_BOOTSTRAP_TABLES=false` and the engine boots with

@@ -43,5 +43,4 @@ jobs:
       tag: ${{ inputs.tag || '' }}
       from-head: ${{ inputs.from-head || '' }}
       bump: ${{ inputs.bump || 'auto' }}
-      submodules: schemas
     secrets: inherit

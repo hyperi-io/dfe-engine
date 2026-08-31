@@ -33,7 +33,7 @@ flowchart TB
 | Repo | Role in the layer |
 |---|---|
 | **dfe-engine** | The config control plane + the sole authorisation PDP. Hosts the FastAPI API and the generated `dfe` CLI. Everything else in the layer keys off its API. |
-| **dfe-schemas** | The schema SSoT (common event header, hunt-results DDL, profiles). The engine reads it (git submodule) and auto-creates from it. |
+| **dfe-schemas** | The schema SSoT (common event header, hunt-results DDL, profiles). The engine reads it (the version-pinned `dfe-schemas` wheel) and auto-creates from it. |
 | **dfe-ui** | The operator console. A window over the engine API - it holds no authority of its own; it verifies the engine-minted JWT. |
 | **dfe-infra** | The GitOps SSoT and deploy vehicle (Argo CD). Deploys the suite; never a config authority. |
 | **dfe-deploy** | The per-deployment read-write gitops repo the running engine commits to. We own only its **initial** state; after handover the deployment owns it. |
@@ -48,7 +48,7 @@ ONE write path - so a change is auditable and consumers can never diverge.
 | SSoT | Lives in | Consumed by | Only written by |
 |---|---|---|---|
 | **API surface** - `openapi.json` | dfe-engine `openapi-spec/` | dfe CLI, dfe-ui types, dfe-ai, contract mock, reference docs | the FastAPI routes via `generate.py` (never hand-edited) |
-| **Schema** - event header, hunt-results DDL, profiles | dfe-schemas (git submodule) | the engine (auto-creates the CH objects at startup), the CLI, dfe-ui | dfe-schemas commits |
+| **Schema** - event header, hunt-results DDL, profiles | dfe-schemas (the `dfe-schemas` wheel, pinned in `uv.lock`) | the engine (auto-creates the CH objects at startup), the CLI, dfe-ui | dfe-schemas commits |
 | **Deployment shape** - Helm charts + values | dfe-infra `helm/` (base charts) + the deploy-repo overlays | Argo CD, the cluster | base charts by dfe-infra; the values/overlays by the engine (HelmValuesCompiler merges runtime `config:` + deployment `keda:/resources:/replicas:`) as a gitops commit |
 | **Deployed state** - the gitops YAML | dfe-deploy (per deployment) | Argo CD (syncs to the cluster), the engine (reads current state) | the engine API - every mutation is a git commit (governed ops); `dfe local` break-glass when the daemon is down |
 | **AuthZ** - RBAC roles + scopes | dfe-engine `auth/` (YAML) | the API (`require_action`), the CLI | the engine (governed writes) |

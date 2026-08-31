@@ -12,8 +12,9 @@ version; the engine returns the exact column snapshot for that version.
 Profile resolution order (first match wins):
 1. Explicit ``profiles_dir`` argument
 2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
-3. ``schemas/common-header/`` submodule (relative to project root)
-4. Bundled ``schema/profiles/`` inside the package
+3. ``common-header/`` under the installed ``dfe-schemas`` package
+4. ``common-header/`` under the image's schema seed directory
+5. Bundled ``schema/profiles/`` inside the package
 
 Usage:
     from dfe_engine.schema.schema_loader import SchemaLoader
@@ -29,6 +30,7 @@ Usage:
 from __future__ import annotations
 
 import os
+from importlib import resources
 from pathlib import Path
 from typing import Any
 
@@ -37,10 +39,14 @@ from scalo.logger import logger
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.yaml_utils import yaml_load
 
-# Submodule location relative to project root.
-_SUBMODULE_COMMON_HEADER = "schemas/common-header"
-_SUBMODULE_HUNTS = "schemas/hunts"
-_SUBMODULE_ROOT = "schemas"
+# Subdirectories of a dfe-schemas tree, wherever that tree is resolved from.
+_COMMON_HEADER_SUBDIR = "common-header"
+_HUNTS_SUBDIR = "hunts"
+
+# The dfe-schemas distribution and the package-data directory its wheel
+# force-includes the schema trees under.
+_SCHEMAS_PACKAGE = "dfe_schemas"
+_SCHEMAS_PACKAGE_DATA = "data"
 
 # Bundled profiles inside the package (fallback).
 _BUNDLED_PROFILES_DIR = Path(__file__).parent / "profiles"
@@ -51,82 +57,48 @@ DEFAULT_SCHEMAS_SEED_DIR = "/app/schemas-seed"
 SEED_DIR_ENV_VAR = "DFE_SCHEMAS_SEED_DIR"
 
 
-def _find_project_root() -> Path | None:
-    """Walk up from this file to find the project root (contains pyproject.toml)."""
-    current = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (current / "pyproject.toml").exists():
-            return current
-        parent = current.parent
-        if parent == current:
-            break
-        current = parent
-    return None
-
-
-def _resolve_hunts_schemas_dir() -> Path:
-    """Resolve the hunts schemas directory.
-
-    Order: DFE_SCHEMAS_DIR env var → submodule → bundled.
-    """
-    # 1. Env var override
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
-    if env_dir:
-        candidate = Path(env_dir) / "hunts"
-        if candidate.is_dir():
-            return candidate
-
-    # 2. Submodule (relative to project root)
-    root = _find_project_root()
-    if root:
-        candidate = root / _SUBMODULE_HUNTS
-        if candidate.is_dir():
-            return candidate
-
-    # 3. Bundled fallback
-    return _BUNDLED_PROFILES_DIR
-
-
-def _resolve_profiles_dir() -> Path:
-    """Resolve the common-header profiles directory.
-
-    Order: DFE_SCHEMAS_DIR env var → submodule → bundled.
-    """
-    # 1. Env var override
-    env_dir = os.getenv("DFE_SCHEMAS_DIR")
-    if env_dir:
-        candidate = Path(env_dir) / "common-header"
-        if candidate.is_dir():
-            return candidate
-
-    # 2. Submodule (relative to project root)
-    root = _find_project_root()
-    if root:
-        candidate = root / _SUBMODULE_COMMON_HEADER
-        if candidate.is_dir():
-            return candidate
-
-    # 3. Bundled fallback
-    return _BUNDLED_PROFILES_DIR
-
-
 def _looks_like_schemas_root(candidate: Path) -> bool:
     """Whether *candidate* is a full dfe-schemas tree rather than a partial one.
 
     Requiring ``common-header/`` stops a partial tree such as ``config/schemas``
     -- or the empty directory the image seeds INTO -- shadowing a real checkout.
     """
-    return candidate.is_dir() and (candidate / "common-header").is_dir()
+    return candidate.is_dir() and (candidate / _COMMON_HEADER_SUBDIR).is_dir()
+
+
+def _resolve_package_schemas_root() -> Path | None:
+    """Locate the schema trees inside the installed ``dfe-schemas`` package.
+
+    ``importlib.resources`` finds the package wherever it is installed rather
+    than guessing a path relative to this file. The wheel force-includes the
+    trees under ``dfe_schemas/data/``, the same layout every resolver here
+    expects at a schemas root; a source checkout on ``sys.path`` keeps them one
+    level up instead, so both shapes are tried.
+
+    Returns None when the package is absent or carries no trees.
+    """
+    try:
+        package_dir = resources.files(_SCHEMAS_PACKAGE)
+    except (ImportError, TypeError):
+        return None
+
+    packaged = Path(str(package_dir / _SCHEMAS_PACKAGE_DATA))
+    checkout = Path(str(package_dir)).parent
+    for candidate in (packaged, checkout):
+        if _looks_like_schemas_root(candidate):
+            return candidate
+    return None
 
 
 def _resolve_schemas_root() -> Path | None:
     """Resolve the dfe-schemas root directory.
 
-    Order: ``DFE_SCHEMAS_DIR``, the ``schemas/`` submodule, then the image's
-    seed directory. The seed is last because a real checkout should win, and
-    present at all because the container ships the schemas there: every process
-    in the image needs to read them, while only the daemon runs the bootstrap
-    that copies them out. Without it, `dfe-schema` in a Job had no schemas.
+    Order: ``DFE_SCHEMAS_DIR``, the installed ``dfe-schemas`` package, then the
+    image's seed directory. The env var is first so a deployment's own tree
+    wins. The seed is last and present at all because the container ships the
+    schemas there: every process in the image needs to read them, while only the
+    daemon runs the bootstrap that copies them out. Without it, `dfe-schema` in
+    a Job had no schemas.
 
     Returns None if only bundled profiles are available.
     """
@@ -134,15 +106,53 @@ def _resolve_schemas_root() -> Path | None:
     if env_dir and _looks_like_schemas_root(Path(env_dir)):
         return Path(env_dir)
 
-    root = _find_project_root()
-    if root and _looks_like_schemas_root(root / _SUBMODULE_ROOT):
-        return root / _SUBMODULE_ROOT
+    packaged = _resolve_package_schemas_root()
+    if packaged:
+        return packaged
 
     seed_dir = Path(os.getenv(SEED_DIR_ENV_VAR, DEFAULT_SCHEMAS_SEED_DIR))
     if _looks_like_schemas_root(seed_dir):
         return seed_dir
 
     return None
+
+
+def _resolve_subdir(name: str) -> Path:
+    """Resolve one subdirectory of a dfe-schemas tree, falling back to bundled.
+
+    The env var is consulted directly rather than through
+    :func:`_resolve_schemas_root` so a directory carrying only the subdirectory
+    asked for still answers, as it always has.
+    """
+    env_dir = os.getenv("DFE_SCHEMAS_DIR")
+    if env_dir:
+        candidate = Path(env_dir) / name
+        if candidate.is_dir():
+            return candidate
+
+    root = _resolve_schemas_root()
+    if root:
+        candidate = root / name
+        if candidate.is_dir():
+            return candidate
+
+    return _BUNDLED_PROFILES_DIR
+
+
+def _resolve_hunts_schemas_dir() -> Path:
+    """Resolve the hunts schemas directory.
+
+    Order: DFE_SCHEMAS_DIR env var → resolved schemas root → bundled.
+    """
+    return _resolve_subdir(_HUNTS_SUBDIR)
+
+
+def _resolve_profiles_dir() -> Path:
+    """Resolve the common-header profiles directory.
+
+    Order: DFE_SCHEMAS_DIR env var → resolved schemas root → bundled.
+    """
+    return _resolve_subdir(_COMMON_HEADER_SUBDIR)
 
 
 _COMMON_HEADER_PREFIX = "common-header/"
@@ -214,7 +224,7 @@ def resolve_schema_yaml_path(schemas_base: Path, path_str: str) -> Path:
 def is_shipped_schema(path: str | Path) -> bool:
     """Check whether a path is inside the shipped (read-only) schemas.
 
-    Shipped schemas live in the dfe-schemas submodule or the bundled
+    Shipped schemas live in the resolved dfe-schemas tree or the bundled
     profiles directory. Users should create their own files rather than
     modifying shipped ones.
 
@@ -223,7 +233,7 @@ def is_shipped_schema(path: str | Path) -> bool:
     """
     resolved = Path(path).resolve()
 
-    # Check submodule / env var root
+    # Check the resolved schemas root (env var, package, or image seed)
     schemas_root = _resolve_schemas_root()
     if schemas_root and resolved.is_relative_to(schemas_root.resolve()):
         return True
@@ -468,8 +478,9 @@ class SchemaLoader:
         Resolution order (first match wins):
         1. Explicit ``profiles_dir`` argument
         2. ``DFE_SCHEMAS_DIR`` env var → ``{dir}/common-header/``
-        3. ``schemas/common-header/`` submodule (relative to project root)
-        4. Bundled ``schema/profiles/`` inside the package
+        3. ``common-header/`` under the installed ``dfe-schemas`` package
+        4. ``common-header/`` under the image's schema seed directory
+        5. Bundled ``schema/profiles/`` inside the package
 
         Args:
             profile_name: Short profile name (e.g. ``timeseries``) or registry
