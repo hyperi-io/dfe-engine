@@ -28,17 +28,22 @@ payload:
   format: auto
   mismatch_threshold: 10
 
+# Every key here is one dfe-loader's RoutingConfig deserialises
+# (src/config/pipeline.rs) -- serde ignores anything else without complaint,
+# so an invented key routes to the loader's own default instead of failing.
 routing:
   db_fields: []
   table_fields:
-    - event_category
-    - tags.event_category
-  default_db: common
-  default_table: common
+    - _source
+  default_db: dfe
+  default_table: default
   org_id_field: org_id
-  routed_orgs: []
-  route_all_by_org: false
-  category_to_table: {}
+  org_routes: []
+  source_to_table: {}
+  topic_suffixes:
+    - _land
+    - _load
+  compat_v2_source: false
   dlq:
     enabled: true
     topic_suffix: .dlq

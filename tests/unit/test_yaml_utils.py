@@ -4,7 +4,52 @@ from __future__ import annotations
 
 import threading
 
-from dfe_engine.yaml_utils import deep_merge, yaml_dump, yaml_dump_string, yaml_load
+from dfe_engine.yaml_utils import (
+    deep_merge,
+    literal_block,
+    yaml_dump,
+    yaml_dump_string,
+    yaml_load,
+    yaml_load_string,
+)
+
+# A grok line past ruamel's 80-column default, shaped like the bundled filebeat
+# pipeline. The repeated chunk carries the escape pair a fold splits.
+_CHUNK = r"%{DATA:source.address}\(%{DATA:source.port}\) "
+_LONG_LINE = (
+    "    value, err = parse_groks(value: .message, patterns: [s'" + (_CHUNK * 2) + ".*?$'])"
+)
+_BODY = "# a transform file\n" + _LONG_LINE + "\n"
+
+
+class TestLongScalarsAreNotFolded:
+    """A stored file body must come back exactly as written.
+
+    A scalar folded at ruamel's 80-column default returns with each fold turned
+    into a space, which splits an escape pair like ``\\)`` into ``\\ )``.
+    """
+
+    def test_a_plain_string_is_never_folded(self):
+        # literal_block returns content unchanged when the block form is unsafe,
+        # so the emitter's quoted fallback has to be lossless as well.
+        body = _LONG_LINE + "   \n"  # trailing space rules out the block form
+        back = yaml_load_string(yaml_dump_string({"content": body}))
+        assert back["content"] == body
+
+    def test_a_file_set_entry_survives_a_second_write(self):
+        # A file body is stored once and re-serialised by every later commit to
+        # the same overlay, so one lossless write is not enough.
+        body = _LONG_LINE + "   \n"
+        doc = {"transformFiles": [{"name": "t.vrl", "content": literal_block(body)}]}
+        once = yaml_load_string(yaml_dump_string(doc))
+        once["replicaCount"] = 2
+        twice = yaml_load_string(yaml_dump_string(once))
+        assert twice["transformFiles"][0]["content"] == body
+
+    def test_the_block_form_still_round_trips(self):
+        doc = {"transformFiles": [{"name": "t.vrl", "content": literal_block(_BODY)}]}
+        back = yaml_load_string(yaml_dump_string(doc))
+        assert back["transformFiles"][0]["content"].rstrip("\n") == _BODY.rstrip("\n")
 
 
 class TestConcurrentYaml:
