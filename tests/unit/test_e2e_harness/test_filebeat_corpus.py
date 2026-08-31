@@ -99,10 +99,19 @@ class TestWrapping:
 
     def test_a_run_tag_is_carried_when_given(self, archive):
         body = corpus.wrap(corpus.samples(archive)[0], run="run-1")
-        assert body["tags"]["e2e_run"] == "run-1"
+        assert "e2e_run:run-1" in body["tags"]
 
     def test_no_run_tag_when_not_given(self, archive):
-        assert "e2e_run" not in corpus.wrap(corpus.samples(archive)[0])["tags"]
+        tags = corpus.wrap(corpus.samples(archive)[0])["tags"]
+        assert not any(t.startswith("e2e_run:") for t in tags)
+
+    def test_tags_is_a_list_of_strings(self, archive):
+        # The bundled VRL reads tags with includes(array!(.tags), ...); a map
+        # reaches assert!(false, "contains only works on strings and array") and
+        # aborts the program, so every corpus event would error out untransformed.
+        tags = corpus.wrap(corpus.samples(archive)[0], run="run-1")["tags"]
+        assert isinstance(tags, list)
+        assert all(isinstance(t, str) for t in tags)
 
     def test_the_body_is_json_serialisable(self, archive):
         # It is POSTed as JSON, so a shape the encoder refuses fails the run.
