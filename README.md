@@ -30,8 +30,7 @@ lives in that deployment's own private config, never in this repo.
 ```bash
 git clone https://github.com/hyperi-io/dfe-engine.git
 cd dfe-engine
-git submodule update --init schemas   # schemas -> dfe-schemas (DDL/schema seed)
-uv sync
+uv sync   # pulls dfe-schemas, which carries the schema + DDL trees
 ```
 
 Run the API server (liveness at `/livez` on port 8000):
@@ -78,9 +77,9 @@ All configuration is environment variables with the `DFE_` prefix
 | Variable | Image default | Local-dev default | Description |
 |----------|---------------|-------------------|-------------|
 | `DFE_CONFIG_DIR` | `/app/config` | `./config` | Config directory - the deployment supplies it (a mounted volume/ConfigMap in k8s; a checkout of the deployment's config repo, e.g. dfe-devex, for local dev). Auto-resolves registry subdirs (`sources/`, `fieldmaps/`, `services/`, `deployment/`, `hunts/`, `hunt-rules/`, `rules/`, `alert-destinations/`, `queries/`). |
-| `DFE_SCHEMAS_DIR` | `/app/schemas` | `./schemas` | Schema submodule root (`dfe-schemas`). |
+| `DFE_SCHEMAS_DIR` | `/app/schemas` | unset | Schema tree root. Unset, the engine reads the trees out of the installed `dfe-schemas` package. |
 
-- The Docker image bakes the `schemas/` submodule tree in as a seed at
+- The Docker image bakes the `dfe-schemas` package's trees in as a seed at
   `/app/schemas`; `/app/config` is an empty baked default. The Dockerfile sets
   `DFE_CONFIG_DIR` and `DFE_SCHEMAS_DIR` to those paths, so a container runs
   with no env set - config is supplied at deploy (a mounted volume/ConfigMap).
@@ -110,7 +109,7 @@ and DCO.
 
 - [dfe-infra](https://github.com/hyperi-io/dfe-infra) - charts, ApplicationSets, bootstrap (the deployment vehicle)
 - [dfe-ui](https://github.com/hyperi-io/dfe-ui) - web UI (consumes this API)
-- [dfe-schemas](https://github.com/hyperi-io/dfe-schemas) - schema + DDL SSoT (the `schemas/` submodule)
+- [dfe-schemas](https://github.com/hyperi-io/dfe-schemas) - schema + DDL SSoT (the `dfe-schemas` wheel)
 - [dfe-hyperdx](https://github.com/hyperi-io/dfe-hyperdx) - extended HyperDX fork (explore UI + telemetry sink)
 - [scalo-py](https://github.com/hyperi-io/scalo-py) - shared Python library (`scalo` on PyPI)
 

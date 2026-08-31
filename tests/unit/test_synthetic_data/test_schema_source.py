@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 
+from dfe_engine.schema.schema_loader import _resolve_package_schemas_root
 from dfe_engine.source.models import SchemaColumn
 from dfe_engine.synthetic_data.models import SyntheticDataError
 from dfe_engine.synthetic_data.schema_source import (
@@ -23,8 +24,8 @@ from dfe_engine.synthetic_data.schema_source import (
     set_path,
 )
 
-REPO_ROOT = Path(__file__).resolve().parents[3]
-GUARDDUTY = REPO_ROOT / "schemas" / "meta" / "aws" / "guardduty.yaml"
+_SCHEMAS_ROOT = _resolve_package_schemas_root()
+GUARDDUTY = (_SCHEMAS_ROOT / "meta" / "aws" / "guardduty.yaml") if _SCHEMAS_ROOT else None
 
 FIXED_END = datetime(2026, 8, 18, 12, 0, 0, tzinfo=UTC)
 
@@ -81,7 +82,10 @@ class TestSetPath:
         assert event["Id"] == "abc"
 
 
-@pytest.mark.skipif(not GUARDDUTY.exists(), reason="dfe-schemas submodule not checked out")
+@pytest.mark.skipif(
+    GUARDDUTY is None or not GUARDDUTY.exists(),
+    reason="dfe-schemas package not installed",
+)
 class TestFactoryFromRealSchema:
     def test_events_are_source_shaped_and_valid(self):
         factory = SchemaEventFactory.from_schema(GUARDDUTY, seed=42)

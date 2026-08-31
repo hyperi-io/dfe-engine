@@ -61,18 +61,19 @@ the original draft of this doc, which had the engine owning it):
 - Loader directive syntax examples (documented, not parsed by engine)
 
 The engine owns the **type system** (primitive -> ClickHouse mapping in
-`source/type_registry.yaml`) and the DDL generation. Both dfe-engine and
-dfe-loader consume dfe-schemas as a `schemas/` git submodule, and each
-ships bundled fallback copies (engine:
-`src/dfe_engine/schema/profiles/`) so package installs work without a
-submodule checkout.
+`source/type_registry.yaml`) and the DDL generation. dfe-engine consumes
+dfe-schemas as the version-pinned `dfe-schemas` wheel, resolved through
+`importlib.resources`; dfe-loader still consumes it as a `schemas/` git
+submodule. Each ships bundled fallback copies (engine:
+`src/dfe_engine/schema/profiles/`) for the case where neither the package
+nor `DFE_SCHEMAS_DIR` resolves.
 
 ```
 dfe-schemas (source of truth)
   |
   |  common-header/{timeseries,minimal,passthrough}.yaml
   |
-  |--> dfe-engine (submodule + bundled fallback) - generates DDL
+  |--> dfe-engine (dfe-schemas wheel + bundled fallback) - generates DDL
   |
   '--> dfe-loader (submodule + bundled fallback) - auto-init tables
 ```
@@ -176,7 +177,8 @@ startup and logs a warning if it's behind the current profile version.
 If/when the repos merge into a monorepo (see [MONOREPO-MIGRATION.md](../archive/monorepo-migration.md)),
 the sync problem disappears. Profile YAMLs live in one place, CI runs
 both the Python and Rust tests in a single pipeline, and there's no
-submodule or copy-on-release ceremony.
+package pin, submodule or copy-on-release ceremony.
 
-The submodule approach is designed to be a stepping stone — when the
-monorepo happens, the submodule reference is replaced by a direct path.
+Both consumption paths are stepping stones — when the monorepo happens,
+the package dependency and the loader's submodule reference are replaced
+by a direct path.

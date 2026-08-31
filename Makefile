@@ -19,20 +19,20 @@ build:
 check:
 	hyperi-ci check
 
-# Local dev API server. First time: `git submodule update --init` then
-# `cp .env.example .env`. Loads .env (the app does not read it itself),
-# defaults the config/schemas dirs, and serves Swagger UI at /docs.
+# Local dev API server. First time: `cp .env.example .env`. Loads .env (the app
+# does not read it itself), defaults the config dir, and serves Swagger UI at
+# /docs. DFE_SCHEMAS_DIR is left unset on purpose: the schemas then come from
+# the installed dfe-schemas package, which is the version uv.lock pins.
 dev:
 	@test -f .env || { echo "Create .env first: cp .env.example .env"; exit 1; }
 	@echo "Swagger UI -> http://localhost:$${DFE_API_PORT:-8003}/docs"
 	set -a; . ./.env; set +a; \
 	: "$${DFE_CONFIG_DIR:=./config}"; export DFE_CONFIG_DIR; \
-	: "$${DFE_SCHEMAS_DIR:=./schemas}"; export DFE_SCHEMAS_DIR; \
 	uv run dfe-engine run
 
 # Persisted host-run API for Playwright (dfe-ui `yarn test:e2e`).
 # Fresh slate on every start: YAML config, schema writes, minted secrets and
-# artifacts live under tmp/e2e (gitignored) so the schemas/ submodule and
+# artifacts live under tmp/e2e (gitignored) so the installed schema trees and
 # ./config are never touched, and every ClickHouse database the engine creates
 # is namespaced under the $(E2E_CH_PREFIX) prefix so the wipe can sweep it by
 # prefix rather than by a hand-maintained list. Wiping on START (not on stop) is
@@ -128,10 +128,8 @@ e2e-server:
 	$(e2e-port-guard); \
 	if [ -z "$(E2E_KEEP)" ]; then rm -rf "$(E2E_WORKSPACE)"; fi; \
 	mkdir -p "$(E2E_WORKSPACE)/config" "$(E2E_WORKSPACE)/schemas" "$(E2E_WORKSPACE)/secrets"; \
-	if [ -d schemas/common-header ]; then \
-		echo "Seeding schema snapshot from submodule (writes stay in tmp/e2e)"; \
-		rsync -a --exclude '.git' schemas/ "$(E2E_WORKSPACE)/schemas/"; \
-	fi; \
+	echo "Seeding schema snapshot from the dfe-schemas package (writes stay in tmp/e2e)"; \
+	uv run python -c "import dfe_schemas, shutil, sys; shutil.copytree(dfe_schemas.schemas_root(), sys.argv[1], dirs_exist_ok=True)" "$(E2E_WORKSPACE)/schemas"; \
 	if [ -z "$(E2E_KEEP)" ]; then \
 		$(e2e-ch-wipe); \
 	fi; \

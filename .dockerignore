@@ -1,15 +1,14 @@
 # Project:   dfe-engine
 # File:      .dockerignore
-# Purpose:   Trim the Docker build context and strip submodule gitlinks
+# Purpose:   Trim the Docker build context and keep git metadata out
 # Language:  Docker ignore
 #
 # License:   BUSL-1.1
 # Copyright: (c) 2026 HYPERI PTY LIMITED
 #
-# The image bakes the config/ (dfe-devex) and schemas/ (dfe-schemas) submodule
-# trees. Their .git gitlink files must not be copied in - dulwich would try to
-# open a gitdir that does not exist in the image. Excluding **/.git also keeps
-# the superproject .git out of the build context.
+# A .git gitlink file must not be copied in - dulwich would try to open a gitdir
+# that does not exist in the image. Excluding **/.git also keeps the repo .git
+# out of the build context.
 
 **/.git
 **/__pycache__
