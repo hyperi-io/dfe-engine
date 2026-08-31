@@ -3,6 +3,20 @@
 Rendered by CI and committed back at the end of a release -- do not edit by
 hand. Release notes also appear on the GitHub Releases page, one per tag.
 
+## [1.17.13](https://github.com/hyperi-io/dfe-engine/compare/v1.17.12...v1.17.13) (2026-08-31)
+
+### Bug Fixes
+
+* **e2e:** probe the filebeat table with queries that can actually match ([d19b47a](https://github.com/hyperi-io/dfe-engine/commit/d19b47ac2e4d2ac04894dd4345eb27dd654d90ae))
+* **e2e:** wrap the corpus with tags as a list, not a map ([3cf9e71](https://github.com/hyperi-io/dfe-engine/commit/3cf9e712bf9153263846e8ecb8bddbe829ae1ca9))
+* **gitcrud:** build a commit subject that fits, instead of raising ([e5d4fe9](https://github.com/hyperi-io/dfe-engine/commit/e5d4fe9088940ab7121811bcaa238f02dc626e3d))
+* gitignore the agent working dirs and the kubectl cache ([4cbbbb9](https://github.com/hyperi-io/dfe-engine/commit/4cbbbb9bd8e03a36cdc5cf0cb82d40259f746826))
+* **governance:** one storage vocabulary, and a reload verdict that knows the operator ([ec2bf58](https://github.com/hyperi-io/dfe-engine/commit/ec2bf58a284011a627a6284c8229d938c2fe10bd))
+* **loader:** emit the routing contract dfe-loader actually implements ([46974c5](https://github.com/hyperi-io/dfe-engine/commit/46974c58533c3bb60e307e44373a89918ad4e8bf))
+* **schema:** consume dfe-schemas as a version-pinned wheel, drop the submodule ([c67f2c9](https://github.com/hyperi-io/dfe-engine/commit/c67f2c9c4ec90031a9dbfa1ae1d2b8ac0211268c))
+* the app surface hands out the revision an If-Match write needs ([8ca2e91](https://github.com/hyperi-io/dfe-engine/commit/8ca2e9141ba02c21c3e4f5692114367654daa641))
+* **yaml:** never fold a scalar, so stored file bodies survive a rewrite ([077a49b](https://github.com/hyperi-io/dfe-engine/commit/077a49b9a008a641838b396a4f6e362573f9c55e))
+
 ## [1.17.12](https://github.com/hyperi-io/dfe-engine/compare/v1.17.11...v1.17.12) (2026-08-30)
 
 ### Bug Fixes
