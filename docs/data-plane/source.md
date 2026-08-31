@@ -379,23 +379,28 @@ config.
 
 ## How the Loader Routes
 
-Today the loader uses `table_fields` + `category_to_table` to determine the
-target table. With Source:
+The loader takes the target table from the first `table_fields` hit, and its
+default is `_source` — the very field the receiver stamps. So the two halves
+meet with no lookup at all:
 
 1. Loader reads `_source` from the JSON payload (set by receiver)
-2. `_source` directly maps to the target table: `{db}.{_source}`
-3. No `category_to_table` mapping needed — the source label IS the table name
+2. `_source` is the target table: `{default_db}.{_source}`
+3. `source_to_table` only carries the sources whose table name differs
 4. Schema for that table is defined in the Source definition
 
 ```yaml
-# Loader config simplifies to:
+# The compiled loader block (dfe-loader RoutingConfig):
 routing:
-  source_routing: true            # Route by the _source field directly
-  source_field: _source           # Field containing the source label
-  default_db: common              # Database (or per-org with org_id)
-  # category_to_table is still emitted (ACTIVE sources only) as a
-  # diagnostic aid - _source IS the table name, no lookup needed
+  table_fields: [_source]         # The field the receiver stamped
+  default_db: dfe                 # Database (or per-org via db_fields + org_routes)
+  default_table: default          # Where an event with no _source lands
+  source_to_table: {}             # ACTIVE sources whose table name differs
 ```
+
+Every key the engine emits must exist in dfe-loader's `RoutingConfig`
+(`src/config/pipeline.rs`): serde drops an unknown key without complaint, so an
+invented one silently leaves the loader on its own default. The engine model is
+pinned to that struct by a test that reads the Rust source.
 
 ---
 
@@ -777,7 +782,7 @@ The Source model landed incrementally, without Rust rewrites:
    lifecycle wired to source state.
 2. **Control-plane API** exposes Source CRUD; the UI is built around Sources.
 3. **Compiled routing** - the engine emits the receiver's NATIVE `routing`
-   serde (`source_rules`) and the loader's `source_routing` config from
+   serde (`source_rules`) and the loader's NATIVE `RoutingConfig` from
    Source definitions, so the Rust services deserialise what they always
    deserialised. No service-side migration.
 
