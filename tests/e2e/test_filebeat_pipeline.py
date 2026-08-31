@@ -47,6 +47,22 @@ SOURCE = "filebeat"
 # instance differs, so a divergence is the transform's and not the harness's.
 TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 
+# The filebeat table is built from meta/beats/filebeat.yaml, so ECS lands in
+# typed columns rather than in JSON to dig through. Each of these is derived by
+# the transform and absent from the corpus body, so one populated means the
+# event was transformed rather than passed through. No single column covers all
+# three corpus modules, hence the disjunction. `message` is excluded because the
+# raw body carries it.
+_ECS_POPULATED = " OR ".join(
+    (
+        "toUnixTimestamp(timestamp) > 0",
+        "host_name != ''",
+        "event_module != ''",
+        "event_dataset != ''",
+        "log_file_path != ''",
+    )
+)
+
 
 def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
     if not corpus.available():
@@ -67,16 +83,36 @@ def _post(cfg: E2EConfig, bodies: list[dict]) -> None:
             assert response.status_code < 300, f"receiver rejected the event: {response.text}"
 
 
-def _count(ch_client, table: str, run: str) -> int:
-    """Rows this run put in a table, or 0 while the table does not exist yet."""
+# ClickHouse says one of these when the table or database is simply not there
+# yet, which is the only absence a poll should read as "no rows".
+_NOT_THERE_YET = ("UNKNOWN_TABLE", "UNKNOWN_DATABASE", "does not exist", "doesn't exist")
+
+
+def _rows(ch_client, sql: str, run: str) -> int:
+    """A counting query's answer, or 0 while its table does not exist yet.
+
+    Only a missing table or database answers 0. Every other error is raised: a
+    query that cannot run - an unknown column, a function the column's type will
+    not take - otherwise reads as an empty table forever, and a test that can
+    only report zero proves nothing.
+    """
     try:
-        result = ch_client.query(
-            f"SELECT count() FROM {table} WHERE _json LIKE %(m)s",
-            parameters={"m": f"%{run}%"},
-        )
-    except Exception:
-        return 0
+        result = ch_client.query(sql, parameters={"m": f"%{run}%"})
+    except Exception as exc:
+        if any(marker in str(exc) for marker in _NOT_THERE_YET):
+            return 0
+        raise
     return int(result.result_rows[0][0]) if result.result_rows else 0
+
+
+def _count(ch_client, table: str, run: str) -> int:
+    """Rows this run put in a table.
+
+    Matched on ``_raw``, the String (and text-indexed) copy of the payload.
+    ``_json`` holds the same bytes but as the ClickHouse JSON type, which LIKE
+    and the JSON* string functions both refuse.
+    """
+    return _rows(ch_client, f"SELECT count() FROM {table} WHERE _raw LIKE %(m)s", run)
 
 
 class TestRouting:
@@ -122,15 +158,12 @@ class TestTransform:
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
 
         def _parsed() -> int:
-            try:
-                result = ch_client.query(
-                    f"SELECT count() FROM {e2e.ch_db}.{SOURCE} "
-                    "WHERE _json LIKE %(m)s AND JSONHas(_json, 'host') ",
-                    parameters={"m": f"%{run}%"},
-                )
-            except Exception:
-                return 0
-            return int(result.result_rows[0][0]) if result.result_rows else 0
+            return _rows(
+                ch_client,
+                f"SELECT count() FROM {e2e.ch_db}.{SOURCE} "
+                f"WHERE _raw LIKE %(m)s AND ({_ECS_POPULATED})",
+                run,
+            )
 
         found = poll_until(
             _parsed,
