@@ -82,9 +82,31 @@ def _is_ascii(text: str) -> bool:
     return all(ord(c) < 128 for c in text)
 
 
+def fit_subject(ctype: str, scope: str, summary: str) -> str:
+    """A ``type(scope): summary`` subject trimmed to fit ``SUBJECT_MAX``.
+
+    The scope names the resource being changed and the summary only describes
+    the edit, so the summary gives way first and the scope survives whole; the
+    commit's file list records the change exactly either way. Only a scope that
+    would overrun the budget on its own is elided.
+
+    Long scopes are the normal case, not the exotic one: a per-instance overlay
+    is named ``{service}-{instance}-values``, which passes 31 characters as soon
+    as an app runs more than one instance.
+    """
+    head = f"{ctype}({scope})"
+    room = SUBJECT_MAX - len(head) - len(": ")
+    if room > 0:
+        return f"{head}: {summary[:room].rstrip()}"
+    if len(head) <= SUBJECT_MAX:
+        return head
+    keep = SUBJECT_MAX - len(ctype) - len("()")
+    return f"{ctype}({scope[: max(keep, 1)]})"
+
+
 def build_message(ctx: CommitContext) -> str:
     """Render the conforming commit message (subject + trailers + [skip ci])."""
-    subject = f"{ctx.ctype}({ctx.scope}): {ctx.summary}"
+    subject = fit_subject(ctx.ctype, ctx.scope, ctx.summary)
     validate_subject(subject)
 
     trailers: list[str] = [f"DFE-Actor: {ctx.actor}"]

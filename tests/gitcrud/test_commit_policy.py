@@ -49,6 +49,38 @@ def test_subject_over_50_rejected():
         validate_subject("cfg(x): " + "y" * 60)
 
 
+def test_a_per_instance_overlay_name_still_builds_a_subject():
+    # Found live on devex: this scope plus "set repository" is 53 characters, so
+    # build_message raised and the helm-var write surfaced as a 500. Every
+    # multi-instance app hits it, because its overlay is {service}-{instance}-values.
+    ctx = CommitContext(
+        ctype="cfg",
+        scope="dfe-transform-vector-filebeat-values",
+        summary="set repository",
+        actor="admin",
+        role="helmvars:write",
+    )
+    subject = build_message(ctx).splitlines()[0]
+    assert len(subject) <= 50
+    assert subject.startswith("cfg(dfe-transform-vector-filebeat-values): ")
+
+
+def test_the_scope_gives_way_only_once_it_alone_overruns():
+    ctx = CommitContext(ctype="cfg", scope="s" * 80, summary="set replicaCount", actor="admin")
+    subject = build_message(ctx).splitlines()[0]
+    assert len(subject) <= 50
+    assert subject.startswith("cfg(sss")
+    assert subject.endswith(")")
+
+
+@pytest.mark.parametrize("scope_len", range(1, 70))
+def test_build_message_never_raises_on_length(scope_len):
+    ctx = CommitContext(
+        ctype="cfg", scope="s" * scope_len, summary="set some.deeply.nested.path", actor="admin"
+    )
+    assert len(build_message(ctx).splitlines()[0]) <= 50
+
+
 def test_non_ascii_subject_rejected():
     with pytest.raises(CommitPolicyError):
         validate_subject("cfg(x): use an em—dash")
