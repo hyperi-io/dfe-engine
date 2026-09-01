@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 
+import dfe_engine.yaml_utils as yu
 from dfe_engine.api.deps import create_access_token
 
 
@@ -72,6 +75,28 @@ class TestApiKeyAuthentication:
         data = resp.json()
         # API key wins over JWT
         assert data["user_id"] == "apikey:test-ci-key"
+
+    def test_unexpired_api_key_authenticates(self, client: TestClient, app):
+        """A key with a future expiry authenticates normally."""
+        expires_at = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        _, full_key = app.state.api_key_store.create("future-key", expires_at=expires_at)
+        resp = client.get("/api/v1/auth/me", headers={"X-API-Key": full_key})
+        assert resp.status_code == 200
+
+    def test_expired_api_key_returns_401(self, client: TestClient, app):
+        """An expired key is rejected at auth time, no sweeper required."""
+        store = app.state.api_key_store
+        _, full_key = store.create("expiring-key")
+        key_file = store._keys_dir / "expiring-key.yaml"
+        data = yu.yaml_load(key_file)
+        data["expires_at"] = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        yu.yaml_dump(data, key_file)
+
+        resp = client.get("/api/v1/auth/me", headers={"X-API-Key": full_key})
+        assert resp.status_code == 401
+        body = resp.json()
+        assert body["code"] == "unauthorized"
+        assert body["message"] == "API key expired"
 
     def test_oidc_takes_precedence_over_api_key(self, client: TestClient, test_api_key: str):
         """OIDC headers take precedence over API key."""

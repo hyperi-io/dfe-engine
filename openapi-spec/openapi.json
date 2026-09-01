@@ -1570,10 +1570,10 @@
                   "type": "null"
                 }
               ],
-              "description": "Sort field (name, created_at)",
+              "description": "Sort field (name, created_at, expires_at)",
               "title": "Sort By"
             },
-            "description": "Sort field (name, created_at)"
+            "description": "Sort field (name, created_at, expires_at)"
           },
           {
             "name": "sort_order",
@@ -15664,6 +15664,24 @@
             "type": "string",
             "title": "Created At"
           },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "ISO-8601 UTC expiry, or null if never"
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True once expires_at has passed",
+            "default": false
+          },
           "full_key": {
             "type": "string",
             "title": "Full Key",
@@ -15711,6 +15729,24 @@
           "created_at": {
             "type": "string",
             "title": "Created At"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "ISO-8601 UTC expiry, or null if never"
+          },
+          "expired": {
+            "type": "boolean",
+            "title": "Expired",
+            "description": "True once expires_at has passed",
+            "default": false
           }
         },
         "type": "object",
@@ -17255,6 +17291,18 @@
             "title": "Description",
             "description": "Optional description",
             "default": ""
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At",
+            "description": "Optional ISO-8601 expiry (UTC if no offset given); omit for a key that never expires"
           }
         },
         "type": "object",
