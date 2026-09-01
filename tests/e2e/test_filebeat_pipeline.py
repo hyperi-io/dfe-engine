@@ -51,11 +51,14 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # typed columns rather than in JSON to dig through. Each of these is derived by
 # the transform and absent from the corpus body, so one populated means the
 # event was transformed rather than passed through. No single column covers all
-# three corpus modules, hence the disjunction. `message` is excluded because the
-# raw body carries it.
+# three corpus modules, hence the disjunction.
+#
+# `message` is excluded because the raw body carries it, and `timestamp` because
+# the loader fills it with the arrival time when nothing maps to it - rows with a
+# timestamp and a null message are exactly that, so including it would let an
+# untransformed row satisfy the assertion on its own.
 _ECS_POPULATED = " OR ".join(
     (
-        "toUnixTimestamp(timestamp) > 0",
         "host_name != ''",
         "event_module != ''",
         "event_dataset != ''",
@@ -97,7 +100,8 @@ def _rows(ch_client, sql: str, run: str) -> int:
     only report zero proves nothing.
     """
     try:
-        result = ch_client.query(sql, parameters={"m": f"%{run}%"})
+        params = {"m": f"%{run}%"} if run else None
+        result = ch_client.query(sql, parameters=params)
     except Exception as exc:
         if any(marker in str(exc) for marker in _NOT_THERE_YET):
             return 0
@@ -106,13 +110,49 @@ def _rows(ch_client, sql: str, run: str) -> int:
 
 
 def _count(ch_client, table: str, run: str) -> int:
-    """Rows this run put in a table.
+    """Rows this run put in a PASSTHROUGH table.
 
     Matched on ``_raw``, the String (and text-indexed) copy of the payload.
     ``_json`` holds the same bytes but as the ClickHouse JSON type, which LIKE
     and the JSON* string functions both refuse.
+
+    Only the common-header tables carry ``_raw``. A typed source table does not
+    - see ``_Delta``.
     """
     return _rows(ch_client, f"SELECT count() FROM {table} WHERE _raw LIKE %(m)s", run)
+
+
+def _total(ch_client, table: str, where: str = "") -> int:
+    """Every row in a table, optionally narrowed."""
+    clause = f" WHERE {where}" if where else ""
+    return _rows(ch_client, f"SELECT count() FROM {table}{clause}", "")
+
+
+class _Delta:
+    """How many rows a table gained while this ran.
+
+    A typed source table is built only from the columns its meta schema
+    declares, so it has no ``_raw``, no ``_tags`` and no run marker to match on:
+    the event's identity is spent producing typed columns. The corpus line does
+    not survive verbatim either, because the transform stores the PARSED message
+    body rather than the syslog line that carried it.
+
+    So the run is isolated by counting before and after instead of by tagging.
+    That measures this run's contribution exactly on a quiet deployment, and
+    over-counts if something else writes the same table at the same time - which
+    can only make the assertion easier to satisfy, never harder, so a pass here
+    is worth less than a pass matched on a marker. It is the strongest isolation
+    a typed table's own schema permits.
+    """
+
+    def __init__(self, ch_client, table: str, where: str = "") -> None:
+        self._client = ch_client
+        self._table = table
+        self._where = where
+        self.before = _total(ch_client, table, where)
+
+    def gained(self) -> int:
+        return _total(self._client, self._table, self._where) - self.before
 
 
 class TestRouting:
@@ -121,10 +161,11 @@ class TestRouting:
     def test_a_discriminated_event_lands_in_its_own_source_table(self, e2e, ch_client) -> None:
         require(e2e, "receiver_url", "ch_host")
         run = f"e2e-{uuid.uuid4().hex}"
+        source_table = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}")
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=2), run=run))
 
         landed = poll_until(
-            lambda: _count(ch_client, f"{e2e.ch_db}.{SOURCE}", run),
+            source_table.gained,
             timeout=180.0,
             desc=f"rows in {e2e.ch_db}.{SOURCE} for {run}",
         )
@@ -138,6 +179,7 @@ class TestRouting:
         sample = _corpus_or_skip(limit=1)[0]
         body = corpus.wrap(sample, run=run)
         body.pop("_source")
+        source_table = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}")
         _post(e2e, [body])
 
         poll_until(
@@ -145,7 +187,7 @@ class TestRouting:
             timeout=180.0,
             desc=f"rows in {e2e.ch_db}.default for {run}",
         )
-        assert _count(ch_client, f"{e2e.ch_db}.{SOURCE}", run) == 0
+        assert source_table.gained() == 0
 
 
 class TestTransform:
@@ -155,18 +197,11 @@ class TestTransform:
     def test_ecs_fields_appear_in_the_source_table(self, e2e, ch_client, service: str) -> None:
         require(e2e, "receiver_url", "ch_host", "engine_url")
         run = f"e2e-{uuid.uuid4().hex}"
+        parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
 
-        def _parsed() -> int:
-            return _rows(
-                ch_client,
-                f"SELECT count() FROM {e2e.ch_db}.{SOURCE} "
-                f"WHERE _raw LIKE %(m)s AND ({_ECS_POPULATED})",
-                run,
-            )
-
         found = poll_until(
-            _parsed,
+            parsed.gained,
             timeout=240.0,
             desc=f"ECS-shaped rows from {service} for {run}",
         )
