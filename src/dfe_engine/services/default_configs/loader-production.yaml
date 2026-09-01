@@ -128,12 +128,3 @@ coercion:
 schema:
   cache_ttl_secs: 300
   refresh_on_error: true
-
-auto_init:
-  enabled: true
-  create_topics: true
-  topic_partitions: 6
-  topic_replication_factor: 3
-  create_database: true
-  create_table: true
-  create_text_index: true

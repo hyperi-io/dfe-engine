@@ -336,25 +336,6 @@ class SchemaConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Auto-Initialization
-# ---------------------------------------------------------------------------
-
-
-class AutoInitConfig(BaseModel):
-    """Auto-initialization of infrastructure on startup."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = True
-    create_topics: bool = True
-    topic_partitions: int = Field(default=3, ge=1)
-    topic_replication_factor: int = Field(default=1, ge=1)
-    create_database: bool = True
-    create_table: bool = True
-    create_text_index: bool = True
-
-
-# ---------------------------------------------------------------------------
 # Top-level config
 # ---------------------------------------------------------------------------
 
@@ -387,7 +368,6 @@ class LoaderConfig(BaseServiceConfig):
         alias="schema",
         description="Schema cache config (aliased from 'schema' in YAML)",
     )
-    auto_init: AutoInitConfig = Field(default_factory=AutoInitConfig)
 
     @field_validator("transport")
     @classmethod
