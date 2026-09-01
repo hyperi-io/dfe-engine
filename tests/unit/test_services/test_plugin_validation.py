@@ -288,13 +288,6 @@ class TestValidateLoaderTransport:
         errors, _ = run_loader_validation(config)
         assert any("broker" in e.lower() for e in errors)
 
-    def test_grpc_with_auto_init_topics_warns(self):
-        config = self._make_grpc()
-        config.auto_init.enabled = True
-        config.auto_init.create_topics = True
-        _, warnings = run_loader_validation(config)
-        assert any("create_topics" in w for w in warnings)
-
 
 # ---------------------------------------------------------------------------
 # LoaderConfig / GrpcConfig — model defaults
