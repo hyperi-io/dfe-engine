@@ -540,17 +540,24 @@ async def get_current_user(request: Request) -> AuthContext:
     api_key_header = request.headers.get("X-API-Key")
     if api_key_header:
         api_key_store: APIKeyStore = request.app.state.api_key_store
-        key_meta = api_key_store.verify(api_key_header)
+        key_meta, reason = api_key_store.verify_detailed(api_key_header)
         if key_meta is None:
             audit_login_denied(
                 api_key_header[:16] + "...",
                 "api_key",
                 client_ip,
-                "invalid_key",
+                reason,
             )
+            # disabled_key/expired_key are only reported once the hash check has
+            # proven the caller holds the real key, so the specific message
+            # tells them nothing they did not already have.
+            message = {
+                "expired_key": "API key expired",
+                "disabled_key": "API key disabled",
+            }.get(reason, "Invalid API key")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail={"code": "unauthorized", "message": "Invalid API key"},
+                detail={"code": "unauthorized", "message": message},
             )
         group_store = request.app.state.group_store
         resolution = _resolve_group_grants(key_meta.groups, group_store)
