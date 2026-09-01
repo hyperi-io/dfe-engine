@@ -181,6 +181,15 @@ const helmvars_scopes = {
   helmvars_write: "helmvars:write",
 } as const;
 
+const library_scopes = {
+  library_read: "library:read",
+  library_write: "library:write",
+} as const;
+
+const dryrun_scopes = {
+  dryrun_execute: "dryrun:execute",
+} as const;
+
 const lifecycle_scopes = {
   lifecycle_read: "lifecycle:read",
 } as const;
@@ -222,6 +231,8 @@ export const scopes = {
   ...transform_scopes,
   ...governance_scopes,
   ...helmvars_scopes,
+  ...library_scopes,
+  ...dryrun_scopes,
   ...lifecycle_scopes,
   ...config_scopes,
 } as const;

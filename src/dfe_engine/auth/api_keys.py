@@ -20,6 +20,11 @@ The full key is shown exactly once — at creation time. Only the hash is
 persisted on disk; there is no way to reconstruct the full key from
 stored metadata.
 
+Keys may carry an optional ``expires_at`` (ISO-8601, normalised to UTC).
+Expiry is enforced at verify() time, so an expired key stops working the
+moment it lapses without any sweeper having to run; the file stays on disk
+until an admin revokes it, which keeps the lapse visible in list().
+
 Lookup strategy: filename is the key name; short_token is stored inside
 the YAML for cross-file lookup during verify()/revoke().
 """
@@ -45,6 +50,28 @@ _SHORT_BYTES = 4  # 4 bytes → 8 hex chars
 _LONG_BYTES = 16  # 16 bytes → 32 hex chars
 
 
+def parse_expiry(value: str) -> datetime:
+    """Parse an ISO-8601 expiry into an aware UTC datetime.
+
+    Accepts a trailing ``Z`` and date-only values (midnight UTC). A naive
+    value is read as UTC rather than local time, so the same string means the
+    same instant on every host.
+
+    Raises:
+        ValueError: If the value is not a parseable ISO-8601 timestamp.
+    """
+    text = value.strip()
+    if not text:
+        raise ValueError("Invalid expires_at: empty value")
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"Invalid expires_at: {value!r} is not ISO-8601") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
 class APIKey(BaseModel):
     """Stored metadata for an API key.
 
@@ -58,6 +85,21 @@ class APIKey(BaseModel):
     groups: list[str] = Field(default_factory=list)
     description: str = ""
     created_at: str = ""
+    expires_at: str | None = None  # ISO-8601 UTC; None = never expires
+
+    def is_expired(self, now: datetime | None = None) -> bool:
+        """True when the key carries an expiry that has already passed.
+
+        An unparseable stored expiry counts as expired — a corrupted or
+        hand-edited value must not silently grant an unbounded key.
+        """
+        if not self.expires_at:
+            return False
+        try:
+            expiry = parse_expiry(self.expires_at)
+        except ValueError:
+            return True
+        return expiry <= (now or datetime.now(UTC))
 
 
 class APIKeyStore:
@@ -81,6 +123,7 @@ class APIKeyStore:
         *,
         groups: list[str] | None = None,
         description: str = "",
+        expires_at: str | None = None,
     ) -> tuple[APIKey, str]:
         """Create a new API key.
 
@@ -88,16 +131,25 @@ class APIKeyStore:
             name: Unique human-readable key name (used as filename stem).
             groups: RBAC groups to associate with the key.
             description: Optional human-readable description.
+            expires_at: Optional ISO-8601 expiry, normalised to UTC before
+                storage. None (the default) means the key never expires.
 
         Returns:
             Tuple of (APIKey metadata, full_key_string). The full key is
             shown exactly once and cannot be recovered from metadata.
 
         Raises:
-            ValueError: If a key with this name already exists.
+            ValueError: If a key with this name already exists, or if
+                expires_at is unparseable or not in the future.
         """
         if not _VALID_NAME.match(name):
             raise ValueError(f"Invalid API key name: {name!r}")
+        expiry: str | None = None
+        if expires_at is not None:
+            parsed_expiry = parse_expiry(expires_at)
+            if parsed_expiry <= datetime.now(UTC):
+                raise ValueError(f"Invalid expires_at: {expires_at!r} is in the past")
+            expiry = parsed_expiry.isoformat()
         key_file = self._keys_dir / f"{name}.yaml"
         if key_file.exists():
             raise ValueError(f"API key '{name}' already exists")
@@ -115,6 +167,7 @@ class APIKeyStore:
             groups=groups or [],
             description=description,
             created_at=datetime.now(UTC).isoformat(),
+            expires_at=expiry,
         )
 
         # Write to disk — name is the filename stem, not in the YAML body
@@ -143,38 +196,58 @@ class APIKeyStore:
         """Verify a submitted API key.
 
         Parses the key format, locates the matching file by short_token,
-        then performs a timing-safe SHA-256 comparison of the long token.
+        then performs a timing-safe hash comparison of the long token.
 
         Args:
             submitted_key: Full key string in ``dfe_ak_{short}_{long}`` format.
 
         Returns:
-            APIKey metadata if valid and enabled, None otherwise.
+            APIKey metadata if valid, enabled and unexpired; None otherwise.
+        """
+        key_meta, _reason = self.verify_detailed(submitted_key)
+        return key_meta
+
+    def verify_detailed(self, submitted_key: str) -> tuple[APIKey | None, str]:
+        """Verify a key and report why it failed.
+
+        Same acceptance rules as :meth:`verify`; the extra reason exists so
+        callers can audit-log *why* a key was rejected. Status checks
+        (disabled/expired) run only AFTER the hash comparison proves the
+        caller holds the real key, so a reason can never confirm the
+        existence of a key the caller has not already got.
+
+        Returns:
+            ``(key_meta, "ok")`` on success, else ``(None, reason)`` where
+            reason is one of ``malformed_key``, ``unknown_key``,
+            ``invalid_key``, ``disabled_key``, ``expired_key``.
         """
         parsed = self._parse_key(submitted_key)
         if parsed is None:
-            return None
+            return None, "malformed_key"
 
         short_token, long_token = parsed
 
         # Locate key file by scanning for matching short_token
         key_meta = self._find_by_short_token(short_token)
         if key_meta is None:
-            return None
-
-        if not key_meta.enabled:
-            return None
+            return None, "unknown_key"
 
         # Timing-safe comparison. New keys are SHA-384 (CNSA); pre-existing
         # sha256: keys still verify under their stored algorithm.
         algo, _, stored_hash = key_meta.key_hash.partition(":")
         if algo not in ("sha256", "sha384"):
-            return None
+            return None, "invalid_key"
         submitted_hash = hashlib.new(algo, long_token.encode()).hexdigest()
         if not hmac.compare_digest(submitted_hash, stored_hash):
-            return None
+            return None, "invalid_key"
 
-        return key_meta
+        if not key_meta.enabled:
+            return None, "disabled_key"
+
+        if key_meta.is_expired():
+            return None, "expired_key"
+
+        return key_meta, "ok"
 
     def revoke(self, short_token: str) -> None:
         """Delete a key by its short_token.

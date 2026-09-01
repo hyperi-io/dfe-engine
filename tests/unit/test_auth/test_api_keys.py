@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import hashlib
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -23,6 +24,16 @@ from dfe_engine.auth.api_keys import APIKey, APIKeyStore
 @pytest.fixture
 def store(tmp_path: Path) -> APIKeyStore:
     return APIKeyStore(tmp_path / "api_keys")
+
+
+def _set_expiry(store: APIKeyStore, name: str, expires_at: str | None) -> None:
+    """Force a key's stored expiry, bypassing create()'s future-only rule."""
+    import dfe_engine.yaml_utils as yu
+
+    key_file = store._keys_dir / f"{name}.yaml"
+    data = yu.yaml_load(key_file)
+    data["expires_at"] = expires_at
+    yu.yaml_dump(data, key_file)
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +119,96 @@ class TestCreate:
         store.create("ci-pipeline")
         with pytest.raises(ValueError, match="already exists"):
             store.create("ci-pipeline")
+
+    def test_expires_at_none_by_default(self, store: APIKeyStore) -> None:
+        key_meta, _full_key = store.create("ci-pipeline")
+        assert key_meta.expires_at is None
+
+    def test_expires_at_stored_normalised_to_utc(self, store: APIKeyStore) -> None:
+        future = datetime.now(UTC) + timedelta(days=30)
+        aest = future.astimezone(timezone(timedelta(hours=10)))
+        key_meta, _full_key = store.create("ci-pipeline", expires_at=aest.isoformat())
+        assert key_meta.expires_at is not None
+        stored = datetime.fromisoformat(key_meta.expires_at)
+        assert stored.utcoffset() == timedelta(0)
+        assert stored == future
+
+    def test_expires_at_accepts_trailing_z(self, store: APIKeyStore) -> None:
+        future = (datetime.now(UTC) + timedelta(days=1)).replace(microsecond=0)
+        key_meta, _full_key = store.create(
+            "ci-pipeline", expires_at=future.isoformat().replace("+00:00", "Z")
+        )
+        assert key_meta.expires_at is not None
+        assert datetime.fromisoformat(key_meta.expires_at) == future
+
+    def test_naive_expires_at_read_as_utc(self, store: APIKeyStore) -> None:
+        future = (datetime.now(UTC) + timedelta(days=1)).replace(microsecond=0)
+        key_meta, _full_key = store.create(
+            "ci-pipeline", expires_at=future.replace(tzinfo=None).isoformat()
+        )
+        assert key_meta.expires_at is not None
+        assert datetime.fromisoformat(key_meta.expires_at) == future
+
+    def test_expires_at_survives_round_trip(self, store: APIKeyStore) -> None:
+        future = datetime.now(UTC) + timedelta(days=7)
+        store.create("ci-pipeline", expires_at=future.isoformat())
+        reloaded = store.get("ci-pipeline")
+        assert reloaded is not None
+        assert reloaded.expires_at is not None
+        assert datetime.fromisoformat(reloaded.expires_at) == future
+
+    def test_past_expires_at_rejected(self, store: APIKeyStore) -> None:
+        past = (datetime.now(UTC) - timedelta(seconds=1)).isoformat()
+        with pytest.raises(ValueError, match="in the past"):
+            store.create("ci-pipeline", expires_at=past)
+
+    def test_rejected_expiry_writes_no_key_file(self, store: APIKeyStore) -> None:
+        past = (datetime.now(UTC) - timedelta(days=1)).isoformat()
+        with pytest.raises(ValueError):
+            store.create("ci-pipeline", expires_at=past)
+        assert store.get("ci-pipeline") is None
+
+    def test_unparseable_expires_at_rejected(self, store: APIKeyStore) -> None:
+        for bad in ("next tuesday", "", "2026-13-45", "1789562412"):
+            with pytest.raises(ValueError, match="Invalid expires_at"):
+                store.create("ci-pipeline", expires_at=bad)
+
+
+# ---------------------------------------------------------------------------
+# Expiry
+# ---------------------------------------------------------------------------
+
+
+class TestIsExpired:
+    def test_no_expiry_never_expires(self) -> None:
+        key = APIKey(name="k", short_token="deadbeef", key_hash="sha384:x")
+        assert key.is_expired() is False
+
+    def test_future_expiry_not_expired(self) -> None:
+        future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        key = APIKey(name="k", short_token="deadbeef", key_hash="sha384:x", expires_at=future)
+        assert key.is_expired() is False
+
+    def test_past_expiry_is_expired(self) -> None:
+        past = (datetime.now(UTC) - timedelta(hours=1)).isoformat()
+        key = APIKey(name="k", short_token="deadbeef", key_hash="sha384:x", expires_at=past)
+        assert key.is_expired() is True
+
+    def test_expiry_boundary_is_exclusive(self) -> None:
+        now = datetime.now(UTC)
+        key = APIKey(
+            name="k", short_token="deadbeef", key_hash="sha384:x", expires_at=now.isoformat()
+        )
+        assert key.is_expired(now=now) is True
+
+    def test_unparseable_expiry_counts_as_expired(self) -> None:
+        key = APIKey(name="k", short_token="deadbeef", key_hash="sha384:x", expires_at="not-a-date")
+        assert key.is_expired() is True
+
+    def test_naive_stored_expiry_compared_as_utc(self) -> None:
+        past = (datetime.now(UTC) - timedelta(hours=1)).replace(tzinfo=None).isoformat()
+        key = APIKey(name="k", short_token="deadbeef", key_hash="sha384:x", expires_at=past)
+        assert key.is_expired() is True
 
 
 # ---------------------------------------------------------------------------
@@ -237,6 +338,27 @@ class TestVerify:
         result = store.verify(full_key)
         assert result is None
 
+    def test_unexpired_key_verifies(self, store: APIKeyStore) -> None:
+        future = (datetime.now(UTC) + timedelta(days=1)).isoformat()
+        _meta, full_key = store.create("ci-pipeline", expires_at=future)
+        assert store.verify(full_key) is not None
+
+    def test_expired_key_returns_none(self, store: APIKeyStore) -> None:
+        _meta, full_key = store.create("ci-pipeline")
+        _set_expiry(store, "ci-pipeline", (datetime.now(UTC) - timedelta(seconds=1)).isoformat())
+        assert store.verify(full_key) is None
+
+    def test_expired_key_still_listed(self, store: APIKeyStore) -> None:
+        """Expiry blocks auth but leaves the key visible until it is revoked."""
+        store.create("ci-pipeline")
+        _set_expiry(store, "ci-pipeline", (datetime.now(UTC) - timedelta(days=1)).isoformat())
+        assert [k.name for k in store.list()] == ["ci-pipeline"]
+
+    def test_corrupt_stored_expiry_denies(self, store: APIKeyStore) -> None:
+        _meta, full_key = store.create("ci-pipeline")
+        _set_expiry(store, "ci-pipeline", "whenever")
+        assert store.verify(full_key) is None
+
     def test_verify_uses_timing_safe_comparison(self, store: APIKeyStore) -> None:
         """Verify returns None for wrong long token regardless of short-token match."""
         _meta, full_key = store.create("ci-pipeline")
@@ -245,6 +367,53 @@ class TestVerify:
         crafted = f"dfe_ak_{parts[2]}_{'0' * len(parts[3])}"
         result = store.verify(crafted)
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# Verify (detailed reasons)
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyDetailed:
+    def test_valid_key_reason_ok(self, store: APIKeyStore) -> None:
+        _meta, full_key = store.create("ci-pipeline")
+        key_meta, reason = store.verify_detailed(full_key)
+        assert key_meta is not None
+        assert reason == "ok"
+
+    def test_malformed_key_reason(self, store: APIKeyStore) -> None:
+        assert store.verify_detailed("not-a-valid-key") == (None, "malformed_key")
+
+    def test_unknown_short_token_reason(self, store: APIKeyStore) -> None:
+        store.create("ci-pipeline")
+        assert store.verify_detailed("dfe_ak_00000000_" + "a" * 32) == (None, "unknown_key")
+
+    def test_wrong_long_token_reason(self, store: APIKeyStore) -> None:
+        meta, _full_key = store.create("ci-pipeline")
+        bad = f"dfe_ak_{meta.short_token}_{'f' * 32}"
+        assert store.verify_detailed(bad) == (None, "invalid_key")
+
+    def test_expired_key_reason(self, store: APIKeyStore) -> None:
+        _meta, full_key = store.create("ci-pipeline")
+        _set_expiry(store, "ci-pipeline", (datetime.now(UTC) - timedelta(days=1)).isoformat())
+        assert store.verify_detailed(full_key) == (None, "expired_key")
+
+    def test_disabled_key_reason(self, store: APIKeyStore) -> None:
+        import dfe_engine.yaml_utils as yu
+
+        _meta, full_key = store.create("ci-pipeline")
+        key_file = store._keys_dir / "ci-pipeline.yaml"
+        data = yu.yaml_load(key_file)
+        data["enabled"] = False
+        yu.yaml_dump(data, key_file)
+        assert store.verify_detailed(full_key) == (None, "disabled_key")
+
+    def test_status_reasons_need_proof_of_possession(self, store: APIKeyStore) -> None:
+        """A wrong long token must not reveal that the key is expired/disabled."""
+        meta, _full_key = store.create("ci-pipeline")
+        _set_expiry(store, "ci-pipeline", (datetime.now(UTC) - timedelta(days=1)).isoformat())
+        bad = f"dfe_ak_{meta.short_token}_{'f' * 32}"
+        assert store.verify_detailed(bad) == (None, "invalid_key")
 
 
 # ---------------------------------------------------------------------------
