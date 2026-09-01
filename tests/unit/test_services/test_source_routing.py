@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from dfe_engine.services.models.loader import LoaderRoutingConfig
+from dfe_engine.services.models.loader import LoaderConfig, LoaderRoutingConfig
 from dfe_engine.services.models.receiver import (
     ReceiverRoutingConfig,
     SourceRule,
@@ -80,6 +80,7 @@ class FakeSourceRegistry:
 
 _LOADER_DIR_ENV = "DFE_LOADER_DIR"
 _PIPELINE_RS = Path("src") / "config" / "pipeline.rs"
+_LOADER_RS = Path("src") / "config" / "loader.rs"
 
 _UNPARSED = object()
 
@@ -92,18 +93,22 @@ class RustStruct:
     defaults: dict[str, object]
 
 
-def _loader_pipeline_rs() -> Path | None:
-    """dfe-loader's pipeline.rs, from the env override or a sibling checkout."""
+def _loader_source(relative: Path) -> Path | None:
+    """A file inside dfe-loader, from the env override or a sibling checkout."""
     roots: list[Path] = []
     override = os.environ.get(_LOADER_DIR_ENV)
     if override:
         roots.append(Path(override))
     roots.append(Path(__file__).resolve().parents[3].parent / "dfe-loader")
     for root in roots:
-        candidate = root / _PIPELINE_RS
+        candidate = root / relative
         if candidate.is_file():
             return candidate
     return None
+
+
+def _loader_pipeline_rs() -> Path | None:
+    return _loader_source(_PIPELINE_RS)
 
 
 def _rust_block(text: str, header: str) -> str:
@@ -190,6 +195,13 @@ def _rust_literal(expr: str) -> object:
     return _UNPARSED
 
 
+def _parse_rust_fields(path: Path, name: str) -> set[str]:
+    """A Rust struct's field names, for a struct that derives Default."""
+    text = path.read_text(encoding="utf-8")
+    struct_body = _strip_comments(_rust_block(text, f"pub struct {name} {{"))
+    return set(re.findall(r"^\s*pub (\w+)\s*:", struct_body, re.MULTILINE))
+
+
 def _parse_rust_struct(path: Path, name: str) -> RustStruct:
     text = path.read_text(encoding="utf-8")
 
@@ -231,6 +243,20 @@ def rust_routing() -> RustStruct:
     # than pass every assertion against an empty field set.
     assert "default_db" in parsed.fields, f"could not parse RoutingConfig out of {path}"
     return parsed
+
+
+@pytest.fixture(scope="module")
+def rust_loader_fields() -> set[str]:
+    """dfe-loader's top-level Config field names, as the Rust source declares them."""
+    path = _loader_source(_LOADER_RS)
+    if path is None:
+        pytest.skip(
+            f"no dfe-loader checkout alongside this one - point {_LOADER_DIR_ENV} at "
+            "one to check the engine model against the real loader contract"
+        )
+    fields = _parse_rust_fields(path, "Config")
+    assert "clickhouse" in fields, f"could not parse Config out of {path}"
+    return fields
 
 
 @pytest.fixture
@@ -469,6 +495,17 @@ class TestLoaderRoutingAgainstRustContract:
                 f"routing.{name} defaults to {ours[name]!r} here and {expected!r} in "
                 "the loader - the loader's value is the one that ships"
             )
+
+    def test_every_top_level_key_exists_in_the_rust_config(self, rust_loader_fields):
+        # Scoped to RoutingConfig alone, this pin missed an entire emitted block
+        # the loader had no field for.
+        emitted = set(LoaderConfig().model_dump(mode="json", by_alias=True))
+        unknown = emitted - rust_loader_fields
+        assert not unknown, (
+            f"the loader's Config has no {sorted(unknown)} - serde would drop "
+            f"{'them' if len(unknown) > 1 else 'it'} without a word, so the knob "
+            "would read as live while doing nothing"
+        )
 
     def test_the_compiled_block_is_serde_compatible(self, registry, rust_routing):
         # What actually reaches a deployed loader is the compiled block, so the

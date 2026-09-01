@@ -77,12 +77,6 @@ def _validate_loader(config: Any, errors: list[str], warnings: list[str]) -> Non
         if not config.grpc.listen:
             errors.append("grpc.listen is required when transport is 'grpc'")
 
-        if config.auto_init.enabled and config.auto_init.create_topics:
-            warnings.append(
-                "auto_init.create_topics is true but transport is 'grpc' -- no Kafka topics "
-                "are consumed, so topic creation has no effect"
-            )
-
     if not config.clickhouse.hosts:
         errors.append("At least one ClickHouse host must be configured")
 

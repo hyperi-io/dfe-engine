@@ -29,7 +29,6 @@ from dfe_engine.services.models.fetcher import (
     FetcherSourceConfig,
 )
 from dfe_engine.services.models.loader import (
-    AutoInitConfig,
     ClickHouseConfig,
     CoercionConfig,
     FieldSanitizationConfig,
@@ -144,7 +143,6 @@ __all__ = [
     "TlsConfig",
     "ValidationConfig",
     # Loader
-    "AutoInitConfig",
     "ClickHouseConfig",
     "CoercionConfig",
     "FieldSanitizationConfig",
