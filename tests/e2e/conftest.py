@@ -107,8 +107,12 @@ def must[T](value: T | None) -> T:
 
     ``require`` skips the test when the attr is unset, but a type checker cannot
     see that across the call, so every use site reads as ``str | None``.
+
+    The message matters: several call sites sit inside ``poll_until`` predicates,
+    which swallow every exception and retry, so a bare AssertionError would
+    surface as an empty ``(last error: )`` after the full timeout.
     """
-    assert value is not None
+    assert value is not None, "require() should have skipped this test before now"
     return value
 
 

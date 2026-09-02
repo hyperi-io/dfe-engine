@@ -2,8 +2,9 @@
 
 Tests that run against a REAL deployed DFE rather than the in-process TestClient
 suite. Marked `@pytest.mark.live` and EXCLUDED from the default run
-(`-m 'not integration and not live'`); they SKIP unless the `DFE_E2E_*` env vars
-point at a deployment. No mocks -- every step hits a real endpoint.
+(`-m 'not integration and not live and not upstream'`); they SKIP unless the
+`DFE_E2E_*` env vars point at a deployment. No mocks -- every step hits a real
+endpoint.
 
 Three files. `test_live_pipeline.py` proves the deployment works at all;
 `test_filebeat_pipeline.py` proves the transform layer works on real data; and
@@ -57,12 +58,12 @@ repo. The filebeat file additionally needs a transform app deployed for the
     export DFE_E2E_ENGINE_URL=https://dfe.<domain>            # + _ENGINE_TOKEN
     export DFE_E2E_DEPLOY_REPO_URL=https://.../deploy.git     # + _DEPLOY_REPO_TOKEN/_USER
     export DFE_E2E_TRANSFORM=dfe-transform-vrl                # which transform is deployed
-    export DFE_E2E_VERIFY=1                                   # enforce TLS (default off)
     uv run pytest tests/e2e -m live -o addopts=""
 
-Each var that is missing skips only the tests that need it. `DFE_E2E_VERIFY`
-defaults OFF because a deployment usually fronts these with its own CA and the
-tests assert the data path, not the cert chain.
+Each var that is missing skips only the tests that need it. `DFE_E2E_VERIFY=1`
+enforces TLS verification; it is left OFF above because a deployment usually
+fronts these with its own CA and the tests assert the data path, not the cert
+chain. Set it when the endpoints carry a publicly-rooted certificate.
 
 ## Status
 

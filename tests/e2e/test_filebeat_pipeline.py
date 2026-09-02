@@ -39,7 +39,7 @@ import httpx
 import pytest
 
 from tests.e2e import filebeat_corpus as corpus
-from tests.e2e.conftest import E2EConfig, poll_until, require
+from tests.e2e.conftest import E2EConfig, must, poll_until, require
 
 pytestmark = pytest.mark.live
 
@@ -54,11 +54,12 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # the transform and absent from the corpus body, so a populated one means the
 # event was transformed rather than passed through.
 #
-# It is the only column of that table this corpus can populate. The bundled VRL
-# sets log.file.path once (filebeat.vrl:3020), first thing in the cisco_umbrella
-# branch; host.name is set later in that SAME branch (:4095) and so can never
-# match a row log_file_path does not, and event.module and event.dataset appear
-# nowhere in the file. `message` is excluded because the raw body carries it, and
+# It is the strongest column of that table this corpus can assert on. The bundled
+# VRL sets log.file.path once (filebeat.vrl:3020), UNCONDITIONALLY at the head of
+# the cisco_umbrella branch. host.name (:4095) and user.name (:3763, :4066) are
+# populatable too, but each sits in that SAME branch behind a condition, so none
+# of them can match a row log_file_path does not; event.module and event.dataset
+# appear nowhere in the file. `message` is excluded because the raw body carries it, and
 # `timestamp` because the loader fills it with the arrival time when nothing maps
 # to it - a timestamp with a null message is exactly an untransformed row.
 #
@@ -67,11 +68,11 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 # could regress to nothing without failing this. Covering them needs the VRL to
 # stamp event.module, which the meta schema already declares a column for.
 #
-# source_ip is the column that SHOULD carry this - the VRL sets source.ip in 39
-# places spanning meraki, ios and umbrella. It cannot be used yet because the
-# loader rejects an IPv4 literal for an IPv6 column (dfe-loader#127), so every
-# row carrying one is dropped before it lands. Switch to it once that is fixed:
-# it covers all three modules where log_file_path covers one.
+# source_ip is the column that SHOULD carry this - the VRL assigns source.ip in
+# every module branch (meraki :374, ios :2647, umbrella :5051), so it covers all
+# three where log_file_path covers one. It cannot be used yet because the loader
+# rejects an IPv4 literal for an IPv6 column (dfe-loader#127), so every row
+# carrying one is dropped before it lands. Switch to it once that is fixed.
 _ECS_POPULATED = "log_file_path != ''"
 
 
@@ -85,15 +86,14 @@ def _corpus_or_skip(limit: int = 5) -> list[corpus.Sample]:
 
 
 def _post(cfg: E2EConfig, bodies: list[dict]) -> None:
-    # Every caller gates on require(cfg, "receiver_url"), which skips when it is
-    # unset; assert so the type reflects that rather than staying str | None.
-    assert cfg.receiver_url is not None
+    # Every caller gates on require(cfg, "receiver_url"), which skips when it is unset.
+    url = must(cfg.receiver_url)
     headers = {"Content-Type": "application/json"}
     if cfg.receiver_token:
         headers["Authorization"] = f"Bearer {cfg.receiver_token}"
     with httpx.Client(verify=cfg.verify, timeout=30.0) as client:
         for body in bodies:
-            response = client.post(cfg.receiver_url, json=body, headers=headers)
+            response = client.post(url, json=body, headers=headers)
             assert response.status_code < 300, f"receiver rejected the event: {response.text}"
 
 
@@ -214,7 +214,7 @@ class TestTransform:
         DFE_E2E_TRANSFORM only NAMES the app for the failure message.
         """
         require(e2e, "receiver_url", "ch_host", "engine_url")
-        if e2e.transform is not None and e2e.transform not in TRANSFORMS:
+        if e2e.transform and e2e.transform not in TRANSFORMS:
             pytest.fail(
                 f"DFE_E2E_TRANSFORM is {e2e.transform!r}, which is not one of "
                 f"{', '.join(TRANSFORMS)}"
@@ -225,15 +225,22 @@ class TestTransform:
         parsed = _Delta(ch_client, f"{e2e.ch_db}.{SOURCE}", where=_ECS_POPULATED)
         _post(e2e, corpus.wrap_all(_corpus_or_skip(limit=5), run=run))
 
+        # The pass-through failure this test exists to catch shows up as gained()
+        # staying 0, so poll_until TIMES OUT rather than returning - which is why
+        # the explanation belongs in desc and not in an assert message below.
         found = poll_until(
             parsed.gained,
             timeout=240.0,
-            desc=f"ECS-shaped rows from {deployed} for {run}",
+            desc=(
+                f"a row with log_file_path set from {deployed} for {run} - without one, "
+                "the cisco_umbrella events reached the table untransformed"
+            ),
         )
+        # poll_until only returns truthy, so this catches the one case it lets
+        # through: a negative delta, meaning rows LEFT the table while we polled.
         assert found > 0, (
-            f"{deployed} produced no row with log_file_path set - the cisco_umbrella "
-            "events reached the table untransformed, which is the pass-through failure "
-            "this test exists to catch"
+            f"{e2e.ch_db}.{SOURCE} lost {-found} row(s) while polling - something else "
+            "is writing or expiring this table, so the count says nothing about the transform"
         )
 
 
