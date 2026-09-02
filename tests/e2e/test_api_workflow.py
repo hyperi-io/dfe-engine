@@ -159,7 +159,7 @@ class TestSourceCRUDWorkflow:
             "description": "Created by E2E test",
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": "e2e-test-source"},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
         resp = e2e_client.post("/api/v1/sources", json=source, headers=headers)
@@ -203,7 +203,7 @@ class TestSourceCRUDWorkflow:
             "display_name": "Dup",
             "enabled": True,
             "match": {"field": "tags.collector.type", "value": "dup-test"},
-            "header": {"type": "time_series", "version": "1.0.0"},
+            "header": {"type": "timeseries", "version": "1.0.0"},
             "schema_config": {"engine": "MergeTree"},
         }
         e2e_client.post("/api/v1/sources", json=source, headers=headers)

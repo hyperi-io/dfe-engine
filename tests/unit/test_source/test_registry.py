@@ -289,7 +289,7 @@ class TestRoundTrip:
                 "display_name": "CrowdStrike EDR",
                 "description": "CrowdStrike Falcon EDR telemetry",
                 "enabled": True,
-                "header": {"type": "time_series", "version": "1.0.0"},
+                "header": {"type": "timeseries", "version": "1.0.0"},
                 "match": {"field": "tags.vendor", "value": "crowdstrike"},
                 "schema": {
                     "meta_schema": "security_edr_crowdstrike",

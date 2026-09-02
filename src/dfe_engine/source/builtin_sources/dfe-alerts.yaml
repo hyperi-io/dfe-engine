@@ -21,7 +21,7 @@ versions:
   "1.0.0":
     date_time: "2026-01-15"
     header:
-      type: time_series
+      type: timeseries
       version: "1.0.0"
     match:
       field: _source
