@@ -1,3 +1,10 @@
+#  Project:      dfe-engine
+#  File:         tests/e2e/conftest.py
+#  Purpose:      Shared fixtures and config for the live full-stack e2e suite
+#  Language:     Python
+#
+#  License:      BUSL-1.1
+#  Copyright:    (c) 2026 HYPERI PTY LIMITED
 """Shared fixtures for the LIVE full-stack e2e suite.
 
 These tests run against a REAL deployed DFE (receiver, ClickHouse, HyperDX,

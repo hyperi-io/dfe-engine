@@ -5,8 +5,12 @@ suite. Marked `@pytest.mark.live` and EXCLUDED from the default run
 (`-m 'not integration and not live'`); they SKIP unless the `DFE_E2E_*` env vars
 point at a deployment. No mocks -- every step hits a real endpoint.
 
-Two files. `test_live_pipeline.py` proves the deployment works at all;
-`test_filebeat_pipeline.py` proves the transform layer works on real data.
+Three files. `test_live_pipeline.py` proves the deployment works at all;
+`test_filebeat_pipeline.py` proves the transform layer works on real data; and
+`test_governed_ops_live.py` drives `POST /api/v1/governance/ch-rbac/reconcile`
+and asserts the seeded quota-tier and service roles actually materialise as
+ClickHouse objects -- the two-axis RBAC model end to end. It needs
+`DFE_E2E_ENGINE_URL`/`_TOKEN`, plus the `_CH_*` vars for its CH assertions.
 
 ## test_live_pipeline.py -- the 4 critical tests
 
