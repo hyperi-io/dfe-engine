@@ -65,8 +65,13 @@ TRANSFORMS = ("dfe-transform-vrl", "dfe-transform-vector")
 #
 # So a pass proves the cisco_umbrella branch ran, and says nothing about
 # cisco_ios or cisco_meraki: neither sets any column this table has, and both
-# could regress to nothing without failing this. Covering them needs the VRL to
-# stamp event.module, which the meta schema already declares a column for.
+# could regress to nothing without failing this.
+#
+# Stamping event.module in the VRL to widen that is the WRONG fix, measured
+# rather than assumed: 0 of the 377 Elastic goldens for this corpus carry
+# event.module or event.dataset, so emitting it would be a fifth departure from
+# Elastic in a pipeline whose point is Elastic compatibility, taken on to make a
+# test easier.
 #
 # source_ip is the column that SHOULD carry this - the VRL assigns source.ip in
 # every module branch (meraki :374, ios :2647, umbrella :5051), so it covers all
